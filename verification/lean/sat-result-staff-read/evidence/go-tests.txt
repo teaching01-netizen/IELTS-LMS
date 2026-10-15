@@ -1,0 +1,5 @@
+command: cd backend/go && go test ./internal/results/... ./internal/assessscore/... ./internal/satscoring/...
+ok  	example.com/ielts-proctoring/internal/results	(cached)
+ok  	example.com/ielts-proctoring/internal/assessscore	(cached)
+ok  	example.com/ielts-proctoring/internal/satscoring	(cached)
+exit_status=0

@@ -1,8 +1,8 @@
 import { RefreshCw } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useSatAttemptAnswersQuery } from '../../../features/results/api/satResultsQueries';
-import { QuestionRawTable } from '../../../components/results/QuestionRawTable';
 import { SatButton, SatPageError, SatPageLoading, SatSectionCard, type SatStatusTone } from '../ui/SatPage';
+import { SatQuestionResponseTable } from '../ui/SatQuestionResponseTable';
 import { SatAttemptDetailHeader } from '../ui/SatAttemptDetailHeader';
 import { isExamResponsesPath } from './satReturnPath';
 import { formatTestClock } from './satTestTime';
@@ -31,6 +31,13 @@ function sectionTitle(key: string): string {
   if (normalized.includes('reading') || normalized.includes('writing')) return 'Reading & Writing';
   if (normalized.includes('math')) return 'Math';
   return normalized.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function sectionOrder(key: string): number {
+  const normalized = key.toLocaleLowerCase();
+  if (normalized === 'reading-writing') return 0;
+  if (normalized === 'math') return 1;
+  return 2;
 }
 
 export function SatAttemptAnswersRoute() {
@@ -95,28 +102,22 @@ export function SatAttemptAnswersContent({ attemptId, onBack, embedded = false }
         <h2 id="saved-answers-heading" className="text-[20px] font-semibold leading-7 tracking-[-0.015em]">Question-level responses ({detail.questions.length})</h2>
         {detail.questions.length === 0 ? <p className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">No administered questions are available for this attempt.</p> : (
           <div className="mt-4 space-y-6">
-            {Array.from(questionsBySection, ([sectionKey, questions]) => {
+            {Array.from(questionsBySection)
+              .sort(([a], [b]) => sectionOrder(a) - sectionOrder(b))
+              .map(([sectionKey, questions]) => {
               const title = sectionTitle(sectionKey);
-              const rows = questions.map((question, index) => ({
-                key: `${question.sectionKey}:${question.moduleKey}:${question.questionId}`,
-                index: index + 1,
-                question: `${question.questionId} · ${question.moduleKey}`,
-                section: title,
-                studentAnswer: question.response === '' ? null : question.response,
-                correctAnswer: null,
+              const rows = questions.map((question) => ({
+                ...question,
                 isCorrect: null,
-                badges: [
-                  ...(question.response === null || question.response === undefined || question.response === '' ? ['Unanswered'] : []),
-                  ...(question.markedForReview ? ['Marked for review'] : []),
-                ],
+                isPretest: false,
               }));
               return (
                 <SatSectionCard key={sectionKey}>
                   <h3 className="mb-3 text-[16px] font-semibold leading-6 text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h3>
-                  <QuestionRawTable rows={rows} caption={`${title} question responses`} showVerdictFilters={false} />
+                  <SatQuestionResponseTable rows={rows} caption={`${title} question responses`} hideKeyAndResult />
                 </SatSectionCard>
               );
-            })}
+              })}
           </div>
         )}
       </section>

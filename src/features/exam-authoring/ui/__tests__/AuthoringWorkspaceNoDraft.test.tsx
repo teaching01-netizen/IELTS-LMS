@@ -46,6 +46,7 @@ vi.mock("../../api/assessmentQueries", () => ({
   useBulkAssessmentQuestions: (...args: unknown[]) => (harness.useBulk as (...a: unknown[]) => unknown)(...args),
   useAssessmentValidation: (...args: unknown[]) => (harness.useValidation as (...a: unknown[]) => unknown)(...args),
   useAssessmentReleaseReadiness: (...args: unknown[]) => (harness.useReleaseReadiness as (...a: unknown[]) => unknown)(...args),
+  useClassroomPlan: () => ({ data: { plan: null }, isSuccess: true }),
   useLoadSatSampleExam: (...args: unknown[]) => (harness.useLoadSample as (...a: unknown[]) => unknown)(...args),
   useEnsureDraftShell: (...args: unknown[]) => (harness.useEnsureDraft as (...a: unknown[]) => unknown)(...args),
 }));

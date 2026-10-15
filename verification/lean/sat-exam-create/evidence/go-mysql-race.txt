@@ -1,0 +1,4 @@
+=== RUN   TestSATExamCreateIdempotencyRaceMySQL
+--- PASS: TestSATExamCreateIdempotencyRaceMySQL (0.26s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/api	0.666s

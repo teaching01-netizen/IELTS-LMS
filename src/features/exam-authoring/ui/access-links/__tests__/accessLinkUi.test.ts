@@ -66,14 +66,14 @@ describe("accessLinkStatusTone", () => {
 
 describe("studentJoinUrl", () => {
   it("encodes the link id", () => {
-    expect(studentJoinUrl("a/b?c")).toContain(encodeURIComponent("a/b?c"));
+    expect(studentJoinUrl("a/b?c")).toBe(`${window.location.origin}/join/${encodeURIComponent("a/b?c")}?openExternalBrowser=1`);
   });
 });
 
 describe("roomEntryUrl", () => {
   it("uses the access link when the room has one, else the schedule entry", () => {
-    expect(roomEntryUrl({ accessLinkId: "link 1", scheduleId: "sched-1" })).toBe(`${window.location.origin}/join/link%201`);
-    expect(roomEntryUrl({ accessLinkId: null, scheduleId: "sched 1" })).toBe(`${window.location.origin}/student/sched%201`);
+    expect(roomEntryUrl({ accessLinkId: "link 1", scheduleId: "sched-1" })).toBe(`${window.location.origin}/join/link%201?openExternalBrowser=1`);
+    expect(roomEntryUrl({ accessLinkId: null, scheduleId: "sched 1" })).toBe(`${window.location.origin}/student/sched%201?openExternalBrowser=1`);
   });
 });
 

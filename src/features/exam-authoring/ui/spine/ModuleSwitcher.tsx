@@ -1,9 +1,11 @@
 import { useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { AssessmentModuleShell, AssessmentSectionShell } from "../../contracts/assessment";
+import type { AssessmentModuleShell, AssessmentSectionShell, SatClassroomPlan } from "../../contracts/assessment";
+import { SHAPE_MODULE_ROLES } from "../../contracts/satExamConfig";
 import { moduleReadyCount } from "./queueModel";
 
 export interface ModuleSwitcherProps {
   sections: AssessmentSectionShell[];
+  classroomPlan?: SatClassroomPlan | null | undefined;
   selectedModuleId: string;
   disabled?: boolean;
   onSelectModule: (moduleId: string) => void;
@@ -17,10 +19,12 @@ interface TabItem {
   value: number;
   target: number;
   selected: boolean;
+  notice?: string | undefined;
 }
 
 export function ModuleSwitcher({
   sections,
+  classroomPlan,
   selectedModuleId,
   disabled = false,
   onSelectModule,
@@ -36,14 +40,22 @@ export function ModuleSwitcher({
     target: countTarget(section.modules),
     selected: section.id === selected.section.id,
   }));
-  const moduleTabs: TabItem[] = selected.section.modules.map((module) => ({
-    id: module.id,
-    title: module.title,
-    meta: `${moduleReadyCount(module)} of ${module.targetQuestionCount} ready`,
-    value: moduleReadyCount(module),
-    target: module.targetQuestionCount,
-    selected: module.id === selected.module.id,
-  }));
+  const moduleTabs: TabItem[] = selected.section.modules.map((module) => {
+    const shape = classroomPlan?.[selected.section.sectionKey];
+    const role = module.adaptiveRole === "base" ? "module1" : module.adaptiveRole === "lower_branch" ? "lower" : module.adaptiveRole === "higher_branch" ? "higher" : null;
+    const notice = shape && role && !SHAPE_MODULE_ROLES[shape].includes(role)
+      ? "Not used — this exam's module set skips it"
+      : undefined;
+    return {
+      id: module.id,
+      title: module.title,
+      meta: `${moduleReadyCount(module)} of ${module.targetQuestionCount} ready`,
+      value: moduleReadyCount(module),
+      target: module.targetQuestionCount,
+      selected: module.id === selected.module.id,
+      notice,
+    };
+  });
   return (
     <div className="sat-spine__nav">
       {sectionTabs.length > 1 ? (
@@ -129,7 +141,7 @@ function TabStrip({
             onClick={() => onSelect(item.id)}
             aria-label={`${item.title}, ${item.value} of ${item.target} ${
               variant === "module" ? "questions ready" : "authored"
-            }${item.selected ? ", selected" : ""}`}
+            }${item.selected ? ", selected" : ""}${item.notice ? `, ${item.notice}` : ""}`}
             className={`sat-spine__tab sat-spine__tab--${variant}${item.selected ? " is-selected" : ""}${ready && variant === "module" ? " is-complete" : ""}`}
           >
             <span className="sat-spine__tab-text">
@@ -140,6 +152,7 @@ function TabStrip({
                 ) : null}
                 {item.meta}
               </span>
+              {item.notice ? <span className="text-[10px] leading-3 text-amber-700">{item.notice}</span> : null}
             </span>
             {variant === "module" ? (
               <span className="sat-spine__tab-bar" aria-hidden="true">

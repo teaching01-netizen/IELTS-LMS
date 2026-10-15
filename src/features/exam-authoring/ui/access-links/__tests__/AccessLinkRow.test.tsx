@@ -32,28 +32,42 @@ const link: AssessmentAccessLink = {
 };
 
 describe("AccessLinkRow", () => {
-  it("renders a two-line summary with pill status and funnel counts", () => {
+  it("renders name, version, exam phase and counts, and mentions check-in only when it is not open", () => {
     render(
       <AccessLinkRow
         link={link}
-        selected={false}
-        isStaleRelease={false}
-        onSelect={vi.fn()}
+        phase={null}
+        onOpen={vi.fn()}
         menuItems={[{ id: "edit", label: "Edit Link", onSelect: vi.fn() }]}
       />,
     );
     expect(screen.getByText("Saturday Class")).toBeInTheDocument();
-    expect(screen.getByText("Check-in open")).toBeInTheDocument();
-    expect(screen.getByText(/10 registered/)).toBeInTheDocument();
+    expect(screen.getByText("Version 5")).toBeInTheDocument();
+    expect(screen.queryByText(/Check-in/)).not.toBeInTheDocument();
+    expect(screen.getByText("10 registered · 4 submitted")).toBeInTheDocument();
+  });
+
+  it("shows the exam phase as a pill, and no pill rather than a guess when it is unknown", () => {
+    const { rerender } = render(<AccessLinkRow link={link} phase="live" onOpen={vi.fn()} menuItems={[]} />);
+    expect(screen.getByText("Running")).toBeInTheDocument();
+    rerender(<AccessLinkRow link={{ ...link, status: "paused", lifecycleState: "paused" }} phase="unknown" onOpen={vi.fn()} menuItems={[]} />);
+    expect(screen.queryByText("Running")).not.toBeInTheDocument();
+    expect(screen.queryByText("Status unavailable")).not.toBeInTheDocument();
+    expect(screen.getByText(/Check-in paused/)).toBeInTheDocument();
+  });
+
+  it("tags the last-opened room", () => {
+    render(<AccessLinkRow link={link} phase={null} highlighted onOpen={vi.fn()} menuItems={[]} />);
+    expect(screen.getByText("Last opened")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Saturday Class (last opened)" })).toHaveClass("bg-au-accent-tint");
   });
 
   it("badges a narrowed link so it is not shared with the wrong class", () => {
     const { rerender } = render(
       <AccessLinkRow
         link={{ ...link, enabledSections: ["reading-writing"] }}
-        selected={false}
-        isStaleRelease={false}
-        onSelect={vi.fn()}
+        phase={null}
+        onOpen={vi.fn()}
         menuItems={[]}
       />,
     );
@@ -62,9 +76,8 @@ describe("AccessLinkRow", () => {
     rerender(
       <AccessLinkRow
         link={{ ...link, enabledSections: ["math"] }}
-        selected={false}
-        isStaleRelease={false}
-        onSelect={vi.fn()}
+        phase={null}
+        onOpen={vi.fn()}
         menuItems={[]}
       />,
     );
@@ -73,29 +86,27 @@ describe("AccessLinkRow", () => {
     rerender(
       <AccessLinkRow
         link={{ ...link, enabledSections: null }}
-        selected={false}
-        isStaleRelease={false}
-        onSelect={vi.fn()}
+        phase={null}
+        onOpen={vi.fn()}
         menuItems={[]}
       />,
     );
     expect(screen.queryByText(/only/)).not.toBeInTheDocument();
   });
 
-  it("selects the row and exposes overflow actions without nesting buttons", () => {
-    const onSelect = vi.fn();
+  it("opens the room from the row and exposes overflow actions without nesting buttons", () => {
+    const onOpen = vi.fn();
     const { container } = render(
       <AccessLinkRow
         link={link}
-        selected
-        isStaleRelease
-        onSelect={onSelect}
+        phase={null}
+        onOpen={onOpen}
         menuItems={[{ id: "edit", label: "Edit Link", onSelect: vi.fn() }]}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Open Saturday Class" }));
-    expect(onSelect).toHaveBeenCalledOnce();
+    expect(onOpen).toHaveBeenCalledOnce();
     expect(container.querySelector("button button")).toBeNull();
-    expect(screen.getByText("Version 5")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Actions for Saturday Class" })).toBeInTheDocument();
   });
 });

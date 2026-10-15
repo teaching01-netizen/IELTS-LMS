@@ -15,7 +15,7 @@ import { StudentLinksDashboard } from "../StudentLinksDashboard";
  *     that is not mounted),
  *   - failures surface once, with the stale-revision path intact,
  *   - typing echoes in the same keystroke for a normal-size link library,
- *   - keyboard selection follows the eye, and Escape hands focus back.
+ *   - returning from a room puts its row back under the eye and the focus ring.
  */
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -236,18 +236,18 @@ describe("StudentLinksDashboard interaction contract", () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 
-  it("AT-10: copying confirms at the control, at the row, and once for assistive tech", async () => {
+  it("AT-10: copying confirms at the row and once for assistive tech", async () => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
     });
     render(<DashboardHarness onRefresh={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    fireEvent.click(screen.getByLabelText("Actions for Saturday Class"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy student link" }));
 
-    expect(await screen.findByText("Copied")).toBeInTheDocument();
+    expect(await screen.findAllByText("Link copied")).not.toHaveLength(0);
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(expect.stringContaining("/join/link-current"));
-    expect(screen.getAllByText("Link copied").length).toBeGreaterThan(0);
     const announcement = screen.getAllByRole("status").find((node) => node.textContent === "Link copied");
     expect(announcement).toBeDefined();
   });
@@ -263,28 +263,11 @@ describe("StudentLinksDashboard interaction contract", () => {
     expect(screen.getAllByText("Monday Class").length).toBeGreaterThan(0);
   });
 
-  it("AT-06: arrow-key selection brings the newly selected row into view", async () => {
+  it("AT-06: returning from a room brings its row into view and under the focus ring", () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView as unknown as typeof Element.prototype.scrollIntoView;
-    render(<DashboardHarness onRefresh={vi.fn()} />);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Open Saturday Class" })).toHaveAttribute("aria-current", "true"),
-    );
-
-    fireEvent.keyDown(screen.getByRole("button", { name: "Open Saturday Class" }), { key: "ArrowDown" });
-
-    const mondayRow = screen.getByRole("button", { name: "Open Monday Class" });
-    expect(mondayRow).toHaveAttribute("aria-current", "true");
+    render(<StudentLinksDashboard exam={exam} overview={overview} isLoading={false} error={null} onRefresh={vi.fn()} canCreate onFixIssue={vi.fn()} shell={shellNav} highlightLinkId="link-monday" />);
+    expect(screen.getByRole("button", { name: "Open Monday Class (last opened)" })).toHaveFocus();
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
-  });
-
-  it("AT-17: Escape in the detail pane hands focus back to the selected row", async () => {
-    render(<DashboardHarness onRefresh={vi.fn()} />);
-    const saturdayRow = await screen.findByRole("button", { name: "Open Saturday Class" });
-    expect(saturdayRow).toHaveAttribute("aria-current", "true");
-
-    fireEvent.keyDown(screen.getByTestId("access-link-detail"), { key: "Escape" });
-
-    expect(document.activeElement).toBe(saturdayRow);
   });
 });

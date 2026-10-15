@@ -42,7 +42,7 @@ function module(id: string, title: string, questions: ReturnType<typeof summary>
 const mathModule = module("math-m1", "Module 1", [summary("m-1", 0)]);
 const rwModules = [
   module("rw-m1", "Module 1", [summary("q-1", 0), summary("q-2", 1, "error")]),
-  module("rw-m2", "Module 2", [summary("q-3", 0)]),
+  { ...module("rw-m2", "Module 2", [summary("q-3", 0)]), adaptiveRole: "lower_branch" as const },
 ];
 const sections: AssessmentSectionShell[] = [
   {
@@ -131,6 +131,12 @@ describe("Navigator architecture", () => {
     render(rail());
     expect(screen.getByText(/of \d+ authored/i)).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Module 1, 1 of 3 questions ready/i })).toBeInTheDocument();
+  });
+
+  it("marks modules skipped by the exam's classroom plan", () => {
+    render(rail({ classroomPlan: { "reading-writing": "m2_easy" } }));
+    expect(screen.getByRole("tab", { name: /Module 1.*Not used — this exam's module set skips it/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Module 2.*ready/i })).not.toHaveAccessibleName(/Not used/);
   });
 
   it("never writes the selection itself when the module changes", () => {

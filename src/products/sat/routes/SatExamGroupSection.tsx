@@ -106,10 +106,18 @@ function attemptOutcome(attempt: SatAttemptRow): { label: string; tone: SatStatu
  * ended without a score.
  */
 function totalScoreLabel(attempt: SatAttemptRow): string {
+	if (attempt.estimatedTotal) {
+		return attempt.estimatedTotal.low === attempt.estimatedTotal.high
+			? String(attempt.estimatedTotal.low)
+			: `${attempt.estimatedTotal.low}–${attempt.estimatedTotal.high}`;
+	}
+	if (attempt.outcomeStatus === 'scored' && attempt.rawCorrect != null && attempt.rawTotal != null) {
+		return `${attempt.rawCorrect}/${attempt.rawTotal}`;
+	}
   if (attempt.totalScore != null) return String(attempt.totalScore);
   if (attempt.outcomeStatus.startsWith('invalidated_')) return 'Not scored';
   if (attempt.attemptStatus === 'running' || attempt.attemptStatus === 'paused') return 'Not submitted';
-  if (attempt.outcomeStatus === 'pending' || attempt.attemptStatus === 'submitted') return 'Score pending';
+	if (attempt.outcomeStatus === 'pending') return 'Score pending';
   return 'Not scored';
 }
 

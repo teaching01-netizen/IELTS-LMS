@@ -33,7 +33,6 @@ export function isSatCreationDirty(fields: { title: string; cohort?: string; exa
 // outside SatRoot's DOM subtree but follow the same staff contract.
 const OVERLAY_CLASS = 'sat-dialog-overlay sat-product sat-staff-root';
 const CONFIRM_CLASS = 'sat-dialog sat-dialog-center sat-product sat-staff-root w-[calc(100vw-40px)] max-w-[420px] p-6';
-const FORM_CLASS = 'sat-dialog sat-dialog-center sat-product sat-staff-root w-[calc(100vw-40px)] max-w-[520px] overflow-hidden';
 
 const CANCEL_BUTTON_CLASS = 'sat-btn sat-btn--quiet sat-press';
 const CONFIRM_BUTTON_CLASS = 'sat-btn sat-btn--primary sat-press';
@@ -178,11 +177,17 @@ type SatFormDialogProps = {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  size?: "default" | "wide";
+  footer?: ReactNode;
 };
 
 const CLOSE_BUTTON_CLASS = 'sat-btn sat-btn--quiet sat-btn--icon sat-press -mr-2 -mt-2 rounded-full';
 
-function StaticFormDialog({ eyebrow, title, onClose, children }: Omit<SatFormDialogProps, 'open'>) {
+function formClass(size: SatFormDialogProps["size"]): string {
+  return `sat-dialog sat-dialog-center sat-product sat-staff-root w-[calc(100vw-40px)] ${size === "wide" ? "max-w-[640px]" : "max-w-[520px]"} overflow-hidden`;
+}
+
+function StaticFormDialog({ eyebrow, title, onClose, children, size, footer }: Omit<SatFormDialogProps, 'open'>) {
   // useId-scoped title id: two stacked form sheets never collide.
   const titleId = useId();
   useEffect(() => {
@@ -195,7 +200,7 @@ function StaticFormDialog({ eyebrow, title, onClose, children }: Omit<SatFormDia
 
   return (
     <div className={OVERLAY_CLASS}>
-      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className={FORM_CLASS}>
+      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className={formClass(size)}>
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
           <div>
             <p className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{eyebrow}</p>
@@ -206,21 +211,22 @@ function StaticFormDialog({ eyebrow, title, onClose, children }: Omit<SatFormDia
           </button>
         </div>
         {children}
+        {footer ? <div className="shrink-0 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))]">{footer}</div> : null}
       </div>
     </div>
   );
 }
 
-export function SatFormDialog({ open, eyebrow, title, onClose, children }: SatFormDialogProps) {
+export function SatFormDialog({ open, eyebrow, title, onClose, children, size, footer }: SatFormDialogProps) {
   if (!open) return null;
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-    return <StaticFormDialog eyebrow={eyebrow} title={title} onClose={onClose}>{children}</StaticFormDialog>;
+    return <StaticFormDialog eyebrow={eyebrow} title={title} onClose={onClose} {...(size ? { size } : {})} footer={footer}>{children}</StaticFormDialog>;
   }
   return (
     <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className={OVERLAY_CLASS} />
-        <Dialog.Content className={FORM_CLASS}>
+        <Dialog.Content className={formClass(size)}>
           <div className="flex items-center justify-between px-5 pb-2 pt-4">
             <div>
               <p className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{eyebrow}</p>
@@ -235,6 +241,7 @@ export function SatFormDialog({ open, eyebrow, title, onClose, children }: SatFo
             </Dialog.Close>
           </div>
           {children}
+          {footer ? <div className="shrink-0 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))]">{footer}</div> : null}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

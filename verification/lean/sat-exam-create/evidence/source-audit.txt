@@ -1,0 +1,6 @@
+Lean proof source checks:
+
+- `rg -n '\b(sorry|admit)\b' proof` exited 1 with no matches.
+- `rg -n '^axiom\b' proof` exited 1 with no matches.
+
+The `#print axioms` dependency audit is in `axioms.txt`.

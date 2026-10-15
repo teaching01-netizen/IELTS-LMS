@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AssessmentDeliverySection } from "../../../../contracts/assessmentDelivery";
 import type { ClassroomReport } from "../../SatScoreReport";
-import { buildStudentScoreReportView } from "../scoreReportViewModel";
+import { buildStudentScoreReportView, fallbackModuleLabel } from "../scoreReportViewModel";
 
 type Section = ClassroomReport["sections"][number];
 
@@ -16,6 +16,12 @@ const report = (sections: Section[], extra: Partial<ClassroomReport> = {}): Clas
 });
 
 describe("buildStudentScoreReportView", () => {
+  it("labels SAT module keys with their module number", () => {
+    expect(fallbackModuleLabel("rw-m1")).toBe("Module 1");
+    expect(fallbackModuleLabel("math-m2-higher")).toBe("Module 2");
+    expect(fallbackModuleLabel("math-m2-lower")).toBe("Module 2");
+  });
+
   it("R01 full SAT, both converted: total primary, both sections", () => {
     const view = buildStudentScoreReportView(
       report([rw(converted(580)), math(converted(630))], { totalScaled: { low: 1210, high: 1210 }, conversion: { converterVersion: "v1" } }),

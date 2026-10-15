@@ -45,9 +45,8 @@ function renderRow(props: Partial<React.ComponentProps<typeof AccessLinkRow>> = 
   return render(
     <AccessLinkRow
       link={link}
-      selected={false}
-      isStaleRelease={false}
-      onSelect={vi.fn()}
+      phase={null}
+      onOpen={vi.fn()}
       menuItems={[{ id: "edit", label: "Edit Link", onSelect: vi.fn() }]}
       {...props}
     />,
@@ -56,14 +55,14 @@ function renderRow(props: Partial<React.ComponentProps<typeof AccessLinkRow>> = 
 
 describe("AccessLinkRow interaction contract", () => {
   it("AT-01/05: the row uses the shared row vocabulary and a stable element id", () => {
-    renderRow({ selected: true });
+    renderRow();
     const row = screen.getByRole("button", { name: "Open Saturday Class" });
     expect(row).toHaveClass("sat-list-row", "sat-press-row");
     expect(row).toHaveAttribute("id", "access-link-row-link-1");
-    expect(row).toHaveAttribute("aria-current", "true");
-    // Geometry contract: the pressed state may not change the row's box.
-    expect(row.className).toContain("min-h-[76px]");
-    expect(row.className).toContain("pr-14");
+    // Geometry contract: the pressed state may not change the row's box, and
+    // the padding reserves room for the menu and chevron.
+    expect(row.className).toContain("min-h-[80px]");
+    expect(row.className).toContain("pr-24");
   });
 
   it("AT-07: a pending write is announced on the row, keeps its geometry, and hides the menu", () => {
@@ -75,7 +74,7 @@ describe("AccessLinkRow interaction contract", () => {
     // The pressed control replaces the overflow trigger rather than adding one:
     // no second control, no width change, no nested buttons.
     expect(screen.queryByLabelText("Actions for Saturday Class")).not.toBeInTheDocument();
-    expect(row.className).toContain("min-h-[76px]");
+    expect(row.className).toContain("min-h-[80px]");
     expect(document.querySelector("button button")).toBeNull();
   });
 
@@ -84,9 +83,8 @@ describe("AccessLinkRow interaction contract", () => {
     rerender(
       <AccessLinkRow
         link={{ ...link, status: "paused", lifecycleState: "paused", revision: 4 }}
-        selected={false}
-        isStaleRelease={false}
-        onSelect={vi.fn()}
+        phase={null}
+        onOpen={vi.fn()}
         menuItems={[{ id: "edit", label: "Edit Link", onSelect: vi.fn() }]}
       />,
     );
@@ -94,7 +92,7 @@ describe("AccessLinkRow interaction contract", () => {
     expect(row).not.toHaveAttribute("aria-busy");
     expect(screen.queryByText("Pausing…")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Actions for Saturday Class")).toBeInTheDocument();
-    expect(screen.getByText("10 registered · 8 started · 4 submitted")).toBeInTheDocument();
+    expect(screen.getByText("10 registered · 4 submitted")).toBeInTheDocument();
   });
 
   it("AT-11: the confirmation replaces the funnel line instead of pushing new rows", () => {
@@ -106,13 +104,13 @@ describe("AccessLinkRow interaction contract", () => {
     expect(row.querySelectorAll("span.mt-1").length).toBe(2);
   });
 
-  it("keeps the row selectable while idle", () => {
-    const onSelect = vi.fn();
-    renderRow({ onSelect });
+  it("opens the room from the row while idle", () => {
+    const onOpen = vi.fn();
+    renderRow({ onOpen });
     const row = screen.getByRole("button", { name: "Open Saturday Class" });
     expect(row).not.toHaveAttribute("aria-busy");
     fireEvent.click(row);
-    expect(onSelect).toHaveBeenCalledOnce();
-    expect(screen.getByText("10 registered · 8 started · 4 submitted")).toBeInTheDocument();
+    expect(onOpen).toHaveBeenCalledOnce();
+    expect(screen.getByText("10 registered · 4 submitted")).toBeInTheDocument();
   });
 });

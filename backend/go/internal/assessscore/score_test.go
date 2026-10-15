@@ -46,6 +46,19 @@ func TestSATCorrectAnswerExtraction(t *testing.T) {
 	}
 }
 
+func TestSATChoiceLabelsFollowAuthoredOptionOrder(t *testing.T) {
+	labels := SATChoiceLabels(`{"kind":"single_choice","options":[{"id":"choice-x"},{"id":"choice-y"},{"id":"choice-z"}]}`)
+	if len(labels) != 3 || labels["choice-x"] != "A" || labels["choice-y"] != "B" || labels["choice-z"] != "C" {
+		t.Fatalf("unexpected choice labels: %#v", labels)
+	}
+	if got := SATChoiceLabels(`{"kind":"student_produced_response","options":[{"id":"ignored"}]}`); len(got) != 0 {
+		t.Fatalf("SPR answers should not receive option labels: %#v", got)
+	}
+	if got := SATChoiceLabels(`not json`); len(got) != 0 {
+		t.Fatalf("malformed answer definition should return empty labels: %#v", got)
+	}
+}
+
 func TestACTAnswersEqual(t *testing.T) {
 	if !ACTAnswersEqual("a", "A") {
 		t.Fatal("expected case-insensitive science match")

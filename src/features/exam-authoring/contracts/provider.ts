@@ -15,6 +15,8 @@ export type CreateExamInput =
       providerExamType: 'SAT';
       /** Exam-level configuration saved in the creation transaction; omitted = server defaults. */
       configuration?: SatExamConfig;
+      /** Reused for retries of the same create payload; sent as an HTTP header only. */
+      operationKey?: string;
     }
   | {
       providerKey: 'act';

@@ -1,0 +1,18 @@
+command: mysql -N < verification/lean/sat-result-staff-read/evidence/mysql-score-filter.sql
+server: 9.6.0
+fractional	0	1	1
+integral-decimal	0	1	1
+json-null	0	1	1
+legacy-score	1	0	1
+missing-total	0	1	1
+negative	0	1	1
+no-result	0	1	1
+over-total	0	1	1
+pending	0	1	1
+signed-int64-max	1	0	1
+signed-int64-overflow	0	1	1
+string-count	0	1	1
+valid	1	0	1
+zero-total	0	1	1
+0
+exit_status=0

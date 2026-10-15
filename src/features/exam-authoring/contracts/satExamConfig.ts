@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { SatClassroomPlan, SatClassroomShape } from "./assessment";
 
 /** Section keys that carry exam-level configuration. */
 export const SAT_CONFIG_SECTION_KEYS = ["reading-writing", "math"] as const;
@@ -24,6 +25,40 @@ export interface SatSectionConfig {
 export interface SatExamConfig {
   sections: Record<SatConfigSectionKey, SatSectionConfig>;
   showClassroomScoreReport: boolean;
+  classroomPlan?: SatClassroomPlan;
+  scoreConverter?: unknown;
+}
+
+/** The section shapes staff can choose, plus the standard full adaptive path. */
+export const SHAPE_LABELS: Record<SatClassroomShape | "full", string> = {
+  full: "Full adaptive",
+  m1_easy: "Module 1, then Easy Module 2",
+  m1_hard: "Module 1, then Hard Module 2",
+  m2_easy: "Easy Module 2 only",
+  m2_hard: "Hard Module 2 only",
+};
+
+/** Module roles and timings used by each shape. Keep this aligned with Go Shape.Roles(). */
+export const SHAPE_MODULE_ROLES: Record<SatClassroomShape | "full", readonly ("module1" | "lower" | "higher")[]> = {
+  full: ["module1", "lower", "higher"],
+  m1_easy: ["module1", "lower"],
+  m1_hard: ["module1", "higher"],
+  m2_easy: ["lower"],
+  m2_hard: ["higher"],
+};
+
+/** Plain-language route and timing summary for SAT configuration forms. */
+export function satSectionPath(shape: SatClassroomShape | "full", section: SatSectionConfig): string {
+  const module1 = `Module 1 · ${section.module1Minutes} min`;
+  const easy = `Easy Module 2 · ${section.module2LowerMinutes} min`;
+  const hard = `Hard Module 2 · ${section.module2HigherMinutes} min`;
+  switch (shape) {
+    case "m1_easy": return `${module1} → ${easy}`;
+    case "m1_hard": return `${module1} → ${hard}`;
+    case "m2_easy": return easy;
+    case "m2_hard": return hard;
+    default: return `${module1} → ${easy} or ${hard}`;
+  }
 }
 
 /** Bounds published by the server alongside the defaults; the client never hardcodes them. */
@@ -94,6 +129,8 @@ export function validateSatExamConfig(config: SatExamConfig, limits: SatConfigLi
 export function satExamConfigDiffers(config: SatExamConfig, defaults: SatExamConfig): boolean {
   return (
     config.showClassroomScoreReport !== defaults.showClassroomScoreReport ||
+    Object.keys(config.classroomPlan ?? {}).length > 0 ||
+    (config.scoreConverter !== undefined && config.scoreConverter !== null) ||
     SAT_CONFIG_SECTION_KEYS.some((section) =>
       (Object.keys(config.sections[section]) as Array<keyof SatSectionConfig>).some(
         (field) => config.sections[section][field] !== defaults.sections[section][field],

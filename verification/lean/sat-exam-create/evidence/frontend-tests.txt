@@ -1,0 +1,1971 @@
+
+ RUN  v2.1.9 /Users/rd-cream/Downloads/remix_-ielts-proctoring-system
+
+ ✓ src/products/sat/ui/__tests__/sessionRunSheet.test.ts (39 tests) 146ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/releaseSelectors.test.ts (50 tests) 18ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/workspaceProjection.test.ts (31 tests) 466ms
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > starts a prestart room through the existing controller action
+[2026-10-15T02:50:57.239Z] [INFO] sat.session.action {
+  action: 'start',
+  scheduleId: 'sched-1',
+  latencyMs: 33,
+  outcome: 'success'
+}
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > keeps per-action pending isolated: one student action never freezes room controls
+[2026-10-15T02:51:00.194Z] [INFO] sat.session.action {
+  action: 'student-extend-5',
+  scheduleId: 'sched-1',
+  latencyMs: 74,
+  outcome: 'success'
+}
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps the open create-room flow mounted while the draft shell is sealed away
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+[2026-10-15T02:51:00.186Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/assessment-authoring/exam-questions/eq-1/coedit-token',
+  requestId: 'req-1792032659168-xc5dlgc80',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)\n' +
+    '    at Module.requestCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:102:22)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/usePromptCoediting.ts:96:23'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)
+    at Module.requestCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:102:22)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/usePromptCoediting.ts:96:23
+
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > tones error banners as alerts and success banners as status
+[2026-10-15T02:51:00.570Z] [ERROR] reload failed (Error) {
+  scope: 'sat.session.action.reload',
+  action: 'pause',
+  scheduleId: 'sched-1',
+  latencyMs: 86,
+  code: 'Error',
+  stack: 'Error: reload failed\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx:468:41\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:146:14\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:533:11\n' +
+    '    at runWithTimeout (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:39:7)\n' +
+    '    at runTest (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1056:17)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at processTimers (node:internal/timers:538:9)\n' +
+    '    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)\n' +
+    '    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)\n' +
+    '    at runFiles (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1262:5)'
+} Error: reload failed
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx:468:41
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:146:14
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:533:11
+    at runWithTimeout (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:39:7)
+    at runTest (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1056:17)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at processTimers (node:internal/timers:538:9)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runFiles (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1262:5)
+
+ ✓ src/products/sat/routes/__tests__/SatResultsRoutes.test.tsx (28 tests) 6642ms
+   ✓ SAT Results hierarchy > groups exams, then Student Access schedules, without exposing students at either level 883ms
+   ✓ SAT Results hierarchy > surfaces a failed RAWDATA export and offers the button again 565ms
+   ✓ SAT Results hierarchy > blocks a second RAWDATA export while the first is still running 684ms
+   ✓ SAT Results hierarchy > keeps attempts inside their schedule and opens a result beside the list, with the full page one link away 450ms
+   ✓ SAT Results hierarchy > opens server-saved answers for an attempt without a score 607ms
+   ✓ SAT Results hierarchy > paginates through older attempts rather than truncating the schedule 349ms
+   ✓ SAT Responses tab (exam-scoped results content) > opens a student response beside the list without leaving the tab, then closes back to the same filters 350ms
+stderr | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > moves through the roster with an arrow key from its single tab stop
+An update to SatSessionRoomRoster inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps unsaved work exportable when publication removes the draft shell
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > previews a warning with exact copy before sending
+[2026-10-15T02:51:01.694Z] [INFO] sat.session.action {
+  action: 'student-warn',
+  scheduleId: 'sched-1',
+  latencyMs: 45,
+  outcome: 'success'
+}
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > renders the shared exam header, tabs, and the module's question cards
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > previews a time extension with remaining context before applying
+[2026-10-15T02:51:02.089Z] [INFO] sat.session.action {
+  action: 'student-extend-5',
+  scheduleId: 'sched-1',
+  latencyMs: 22,
+  outcome: 'success'
+}
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps the outline closed until asked, then shows the queue beside the cards
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens another question by choosing its card
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/import/__tests__/SatWorkbookImportSheet.test.tsx (16 tests) 4370ms
+   ✓ SAT workbook import sheet > describes the authoring guidance included in the template 563ms
+   ✓ SAT workbook import sheet > keeps the sheet retryable when commit fails 572ms
+   ✓ SAT workbook import sheet > checks an xlsx before enabling the atomic import 307ms
+   ✓ SAT workbook import sheet > retries only the failed visual-staging step without re-checking the workbook 334ms
+   ✓ SAT workbook import sheet > detects the module in the sheet with no scope or module choice, and imports only it 361ms
+   ✓ SAT workbook import sheet > freezes the complete request for a lost-response retry across a shell revision change 381ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens another question by choosing its card
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-1"]
+
+ ✓ src/features/exam-authoring/ui/__tests__/useWorkspaceProjectionWrites.test.tsx (17 tests) 51ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > offers one Import menu with both import paths for authors
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+[2026-10-15T02:51:03.168Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/assessment-authoring/exam-questions/eq-1/coedit-token',
+  requestId: 'req-1792032662923-cxy4f687p',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)\n' +
+    '    at Module.requestCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:102:22)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/usePromptCoediting.ts:96:23'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)
+    at Module.requestCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:102:22)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/usePromptCoediting.ts:96:23
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > binds the terminate confirm to the student captured at open, even if selection moves
+[2026-10-15T02:51:03.486Z] [INFO] sat.session.action {
+  action: 'student-terminate',
+  scheduleId: 'sched-1',
+  latencyMs: 45,
+  outcome: 'success'
+}
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > hides Import from roles that cannot edit
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > adds a question after the active one with an order-protected placement
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/products/sat/routes/__tests__/SatExamLibraryRoute.test.tsx (26 tests) 4684ms
+   ✓ SatExamLibraryRoute > arms the edit gesture when a row is opened, and only then 566ms
+   ✓ SatExamLibraryRoute > creates a SAT directly without exposing a provider selector 359ms
+   ✓ SatExamLibraryRoute > reuses the create operation key after an ambiguous failure with the same payload 306ms
+   ✓ SatExamLibraryRoute > keeps standard settings out of the payload and sends a changed configuration once 522ms
+   ✓ SatExamLibraryRoute > resets hidden timing values when a custom module set skips them 426ms
+   ✓ SatExamLibraryRoute > reopens the discard alert from X and Escape, then discards both 332ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkEditorSheet.test.tsx (21 tests) 10134ms
+   ✓ AccessLinkEditorSheet > offers section toggles for a SAT link only 1231ms
+   ✓ AccessLinkEditorSheet > creates a SAT room from one form: essentials visible, the rest summarized under More options 757ms
+   ✓ AccessLinkEditorSheet > validates the whole form on Create, focuses the first problem, then submits once fixed 1273ms
+   ✓ AccessLinkEditorSheet > treats a session-type-only change as unsaved work and resets the mode on reopen 713ms
+   ✓ AccessLinkEditorSheet > reveals Module 2 routing only for Classroom and sends the chosen route 542ms
+   ✓ AccessLinkEditorSheet > restricts room choices to the in-scope custom module plan 560ms
+   ✓ AccessLinkEditorSheet > offers no section choice for a one-section release and pins the room to it 483ms
+   ✓ AccessLinkEditorSheet > refuses to save a link with no section selected 492ms
+   ✓ AccessLinkEditorSheet > sends the narrowed scope on create and leaves it out of an unchanged update 697ms
+   ✓ AccessLinkEditorSheet > marks the sheet dirty and silently autosaves a section change 1033ms
+   ✓ who can join vs. a group label > restricts admission only for listed students, and then needs a roster but no group name 438ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps the exam-level actions reachable in the header
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > edits settings in place from Quick settings, while the Settings tab is a real page
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stdout | src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx > SatSessionRoomRoute > keeps banners on the entrance hook and confirms extend-room success copy
+[2026-10-15T02:51:04.604Z] [INFO] sat.session.action {
+  action: 'extend-5',
+  scheduleId: 'sched-1',
+  latencyMs: 33,
+  outcome: 'success'
+}
+
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/imageValidation.test.ts (42 tests) 210ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > duplicates the explicit noncurrent row after exactly one dirty-draft flush
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx (45 tests) 11972ms
+   ✓ SatSessionRoomRoute > returns Back to the originating test and selected room 641ms
+   ✓ SatSessionRoomRoute > opens the controller explicitly in the SAT provider boundary 805ms
+   ✓ SatSessionRoomRoute > uses the prestart presentation with the complete projected run sheet 570ms
+   ✓ SatSessionRoomRoute > gives staff the student link and QR before the room starts 852ms
+   ✓ SatSessionRoomRoute > keeps sharing available while live and drops it in review 819ms
+   ✓ SatSessionRoomRoute > starts a prestart room through the existing controller action 325ms
+   ✓ SatSessionRoomRoute > does not submit an already-open room confirmation after the room becomes stale 385ms
+   ✓ SatSessionRoomRoute > waiting room and status line > states check-in and exam run state separately, and puts the start review in the waiting room with its facts 363ms
+   ✓ SatSessionRoomRoute > waiting room and status line > automatically retrieves the shared start code in code-start rooms 523ms
+   ✓ SatSessionRoomRoute > waiting room and status line > hands a finished room to results the viewer can open 369ms
+   ✓ SatSessionRoomRoute > keeps per-action pending isolated: one student action never freezes room controls 412ms
+   ✓ SatSessionRoomRoute > tones error banners as alerts and success banners as status 328ms
+   ✓ SatSessionRoomRoute > opens the inspector as a modal when the room is too narrow to dock it, and restores focus to its roster trigger 370ms
+   ✓ SatSessionRoomRoute > previews a warning with exact copy before sending 401ms
+   ✓ SatSessionRoomRoute > previews a time extension with remaining context before applying 365ms
+   ✓ SatSessionRoomRoute > binds the terminate confirm to the student captured at open, even if selection moves 347ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > confirms deletion of another row without changing the active draft
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > stops row mutations when the dirty draft cannot flush
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/ingestClipboard.test.ts (27 tests) 180ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > keeps save inside editors and gives Shift+S precedence outside editors
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > guards settings shortcut in text and exposes command actions with Ctrl+K
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace (spine-only) > opens the student preview sheet from the spine question view
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace conflict routing without a socket > never replaces a DIRTY editor from a refetch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/ui/collaboration/__tests__/calmSurfaces.test.tsx (30 tests) 378ms
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace conflict routing without a socket > still replaces a CLEAN editor from a refetch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace conflict routing without a socket > reports a recovered device draft as a device fact, never as a conflict
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace question load state machine > renders the editor from a successful question response
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace question load state machine > renders the skeleton only while the question query has not answered
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace question load state machine > surfaces a failed request as a retryable load error
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx > AuthoringWorkspace question load state machine > never leaves a successful response in the skeleton, even when it cannot be adopted
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringWorkspace.test.tsx (26 tests) 8254ms
+   ✓ AuthoringWorkspace (spine-only) > keeps the open create-room flow mounted while the draft shell is sealed away 1678ms
+   ✓ AuthoringWorkspace (spine-only) > keeps unsaved work exportable when publication removes the draft shell 416ms
+   ✓ AuthoringWorkspace (spine-only) > renders the shared exam header, tabs, and the module's question cards 548ms
+   ✓ AuthoringWorkspace (spine-only) > keeps the outline closed until asked, then shows the queue beside the cards 555ms
+   ✓ AuthoringWorkspace (spine-only) > opens another question by choosing its card 498ms
+   ✓ AuthoringWorkspace (spine-only) > offers one Import menu with both import paths for authors 368ms
+   ✓ AuthoringWorkspace (spine-only) > hides Import from roles that cannot edit 309ms
+   ✓ AuthoringWorkspace (spine-only) > adds a question after the active one with an order-protected placement 413ms
+   ✓ AuthoringWorkspace (spine-only) > edits settings in place from Quick settings, while the Settings tab is a real page 474ms
+   ✓ AuthoringWorkspace (spine-only) > duplicates the explicit noncurrent row after exactly one dirty-draft flush 416ms
+   ✓ AuthoringWorkspace (spine-only) > confirms deletion of another row without changing the active draft 311ms
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > offers any active SAT exam, published or not, and never IELTS or archived exams
+[2026-10-15T02:51:07.172Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667052-cdx52utd9'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > creates the room on the exam chosen last, keeping the room name typed before the switch
+[2026-10-15T02:51:07.338Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667201-krdsahe9v'
+}
+
+stderr | src/features/exam-authoring/editor/ingestion/testing/baselinePaste.behavior.test.tsx > baseline paste behavior (B1-B12, observed) > B5a: TipTap-native math markup pastes to inlineMath/blockMath nodes
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/editor/ingestion/testing/baselinePaste.behavior.test.tsx > baseline paste behavior (B1-B12, observed) > B6a: https image pastes to an image node with src+alt
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/editor/ingestion/testing/baselinePaste.behavior.test.tsx > baseline paste behavior (B1-B12, observed) > B6c: blob: image is NOT filtered — broken node persists (phase-06 must stage-upload instead)
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > focuses the first sheet field on open
+[2026-10-15T02:51:07.471Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667444-fddcddijg'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > creates from the unpublished exam in one request with no version pin, then lands in the new room
+[2026-10-15T02:51:08.066Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667509-fti4ftcjf'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > keeps the form and stays on the list when creation is refused, so a retry cannot be lost
+[2026-10-15T02:51:08.225Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032668105-nwg0ceag8'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > keeps the form and stays on the list when creation is refused, so a retry cannot be lost
+[2026-10-15T02:51:08.250Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667052-cdx52utd9'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > sends an exam-content finding to the question that needs fixing and restores the form on return
+[2026-10-15T02:51:08.596Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032668289-56lkq0xa6'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > sends an exam-content finding to the question that needs fixing and restores the form on return
+[2026-10-15T02:51:08.634Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667201-krdsahe9v'
+}
+[2026-10-15T02:51:08.635Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667444-fddcddijg'
+}
+
+ ✓ src/products/sat/ui/__tests__/SatRunSheet.test.tsx (11 tests) 417ms
+stderr | src/features/exam-authoring/editor/ingestion/testing/baselinePaste.behavior.test.tsx > baseline paste behavior (B1-B12, observed) > B11: broken latex node mounts without throwing (throwOnError:false runtime; dialog gate is throwOnError:true)
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/editor/ingestion/testing/baselinePaste.behavior.test.tsx (19 tests) 2129ms
+   ✓ baseline paste behavior (B1-B12, observed) > B5b: LaTeX delimiters stay literal text; MathML content vanishes (phase-03 rescue cases) 344ms
+   ✓ baseline paste behavior (B1-B12, observed) > B10: choice composer paste is UNFILTERED — headings/lists land despite blockStyles:false lists:false (phase-07 gap) 1040ms
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > explains an invalid check-in window without clearing the form
+[2026-10-15T02:51:09.094Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032668757-lmf7wgexv'
+}
+[2026-10-15T02:51:09.095Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667509-fti4ftcjf'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > rejects a past opening time for a new room (D2 policy)
+[2026-10-15T02:51:09.343Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032669119-4cvurogmi'
+}
+[2026-10-15T02:51:09.344Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032668105-nwg0ceag8'
+}
+
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/coeditSession.test.ts (31 tests) 184ms
+ ✓ src/features/exam-authoring/editor/__tests__/RichQuestionComposer.test.tsx (20 tests) 4280ms
+   ✓ SAT rich question composer capabilities > keeps rich SAT choice tools available in compact presentation 683ms
+   ✓ SAT rich question composer capabilities > rejects unsupported dialog files before calling the upload API 451ms
+   ✓ SAT rich question composer capabilities > uploads a valid dialog file and never persists its preview URL 567ms
+   ✓ SAT rich question composer capabilities > imports an HTTPS dialog source before inserting a managed asset 391ms
+   ✓ SAT rich question composer capabilities > inserts an equation in place instead of opening a LaTeX dialog 400ms
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > rejects a check-in window shorter than 15 minutes (D2 policy)
+[2026-10-15T02:51:09.873Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032669371-liogmt7mq'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > offers an earlier room’s setup as a starting point
+[2026-10-15T02:51:10.204Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032669960-iwwp7717f'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > confirms before discarding a dirty setup, closes quietly when pristine
+[2026-10-15T02:51:10.950Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032670398-aay1rfkn7'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > closes a pristine setup on Escape with no alertdialog
+[2026-10-15T02:51:11.208Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032671126-f7ripnvc2'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > keeps the setup open while creation is pending
+[2026-10-15T02:51:11.358Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032671227-xc6nl6p9g'
+}
+[2026-10-15T02:51:11.361Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032668289-56lkq0xa6'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > keeps the setup open while creation is pending
+[2026-10-15T02:51:11.381Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032668757-lmf7wgexv'
+}
+[2026-10-15T02:51:11.382Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032669119-4cvurogmi'
+}
+[2026-10-15T02:51:11.382Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032669371-liogmt7mq'
+}
+[2026-10-15T02:51:11.382Z] [WARN] Retrying request 2/3 after 2000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032669960-iwwp7717f'
+}
+[2026-10-15T02:51:11.384Z] [WARN] Retrying request 3/3 after 4000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667052-cdx52utd9'
+}
+[2026-10-15T02:51:11.384Z] [WARN] Retrying request 3/3 after 4000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667201-krdsahe9v'
+}
+[2026-10-15T02:51:11.384Z] [WARN] Retrying request 3/3 after 4000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667444-fddcddijg'
+}
+[2026-10-15T02:51:11.384Z] [WARN] Retrying request 3/3 after 4000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032667509-fti4ftcjf'
+}
+[2026-10-15T02:51:11.384Z] [WARN] Retrying request 3/3 after 4000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032668105-nwg0ceag8'
+}
+
+stderr | src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx > SatSessionsRoute > returns focus to the Create room trigger after pristine Cancel
+[2026-10-15T02:51:11.619Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032671564-7wg2110gk'
+}
+
+ ✓ src/products/sat/routes/__tests__/SatSessionsRoute.test.tsx (21 tests) 4783ms
+   ✓ SatSessionsRoute > creates from the unpublished exam in one request with no version pin, then lands in the new room 611ms
+   ✓ SatSessionsRoute > sends an exam-content finding to the question that needs fixing and restores the form on return 434ms
+   ✓ SatSessionsRoute > explains an invalid check-in window without clearing the form 404ms
+   ✓ SatSessionsRoute > rejects a check-in window shorter than 15 minutes (D2 policy) 546ms
+   ✓ SatSessionsRoute > offers an earlier room’s setup as a starting point 314ms
+   ✓ SatSessionsRoute > confirms before discarding a dirty setup, closes quietly when pristine 745ms
+ ✓ src/features/exam-authoring/editor/__tests__/ComposerToolbar.test.tsx (20 tests) 4655ms
+   ✓ stable composer toolbar > puts table structure on its own row inside the same toolbar 647ms
+   ✓ stable composer toolbar > centers only the current table and restores its alignment through Undo and the toggle 339ms
+   ✓ stable composer toolbar > keeps every cell centered after adding rows and columns and reopening saved content 335ms
+   ✓ stable composer toolbar > states every text format on the row and toggles it in place 306ms
+   ✓ stable composer toolbar > aligns the paragraph from the Align menu and shows the current alignment 441ms
+   ✓ stable composer toolbar > inserts symbols and the SAT blank at the cursor from the Insert menu 367ms
+ ✓ src/features/exam-authoring/realtime/__tests__/divergenceStore.test.ts (23 tests) 24ms
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > copies the whole current table and pastes its values, math, marks, spans, widths, and alignment
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > stages an image through the real paste path, resolves it, and supports one undo
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > stages an image through the real paste path, resolves it, and supports one undo
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > stages an image through the real drop path, resolves it, and supports one undo
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/clipboardImageDedupe.test.ts (14 tests) 24ms
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringWorkspaceNoDraft.test.tsx (16 tests) 414ms
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > stages an image through the real drop path, resolves it, and supports one undo
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/contracts/__tests__/actContracts.test.ts (17 tests) 17ms
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > keeps text and images from the same paste and undoes them together
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > keeps text and images from the same paste and undoes them together
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > stages ONE image when the paste repeats the same bytes as a file and a https HTML img
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > stages ONE image when the paste repeats the same bytes as a file and a https HTML img
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/products/sat/routes/__tests__/SatPhase02Copy.test.tsx > SAT Phase 02 copy contracts > rooms and room placeholders name their filter scope
+[2026-10-15T02:51:13.756Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/proctor/sessions/sched-1/device-transfers',
+  requestId: 'req-1792032673699-hymwk6r4c',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n' +
+    '    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)\n' +
+    '    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:48:20'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at Module.backendGet (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:347:20)
+    at Module.listDeviceTransfers (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/proctor/infrastructure/deviceTransferGateway.ts:23:15)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/products/sat/ui/SatDeviceTransferRequests.tsx:48:20
+
+stderr | src/products/sat/routes/__tests__/SatPhase02Copy.test.tsx > SAT Phase 02 copy contracts > opens the create-exam wizard from the Create exam action
+[2026-10-15T02:51:13.855Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/sat/exam-config/defaults',
+  requestId: 'req-1792032673846-r4evn1l2m'
+}
+
+ ✓ src/products/sat/routes/__tests__/SatPhase02Copy.test.tsx (6 tests) 417ms
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > stages ONE image when the paste repeats the same bytes as a file and a data HTML img
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > stages ONE image when the paste repeats the same bytes as a file and a data HTML img
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > keeps two images when the HTML representation is not byte-identical
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+
+stderr | src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx > SAT production composer clipboard integration > keeps two images when the HTML representation is not byte-identical
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/editor/__tests__/clipboardIntegration.test.tsx (11 tests) 3760ms
+   ✓ SAT production composer clipboard integration > copies the whole current table and pastes its values, math, marks, spans, widths, and alignment 1576ms
+   ✓ SAT production composer clipboard integration > renders retry and remove actions for a failed staged image 415ms
+ ✓ src/features/exam-authoring/editor/__tests__/ingestionImagePipe.test.ts (13 tests) 274ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/DeliveryFlow.test.tsx (17 tests) 1083ms
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens the jump palette with Ctrl+K in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+stderr | src/features/exam-authoring/ui/__tests__/useAuthoringConflictRecovery.test.tsx > conflict and recovery surface > never renders a partial compare
+[2026-10-15T02:51:15.492Z] [WARN] Retrying request 1/3 after 1000ms {
+  endpoint: '/v1/assessment-authoring/exam-questions/eq-1',
+  requestId: 'req-1792032675487-0fsrt0s7c'
+}
+
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens shortcut help with ? in the spine branch
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+Encountered two children with the same key, `Ctrl/⌘ Shift S`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringConflictRecovery.test.tsx (15 tests) 170ms
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens shortcut help with Ctrl+/ from inside a field, but leaves ? to the text
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+Encountered two children with the same key, `Ctrl/⌘ Shift S`. Keys should be unique so that components maintain their identity across updates. Non-unique keys may cause children to be duplicated and/or omitted — the behavior is unsupported and could change in a future version.
+
+ ✓ src/features/exam-authoring/editor/ingestion/testing/baselineContracts.test.ts (22 tests) 118ms
+stderr | src/features/exam-authoring/realtime/__tests__/authoringRealtime.integration.test.tsx > useAuthoringRealtime > an unknown but valid kind advances the cursor and refetches once per kind
+[authoring-realtime] unknown event kind; scheduling safe refetch { kind: 'question.pinned', eventId: 'evt-1' }
+[authoring-realtime] unknown event kind; cursor consumed { rawKind: 'question.pinned', cursor: 20 }
+[authoring-realtime] unknown event kind; scheduling safe refetch { kind: 'question.pinned', eventId: 'evt-1' }
+[authoring-realtime] unknown event kind; cursor consumed { rawKind: 'question.pinned', cursor: 21 }
+
+ ✓ src/features/exam-authoring/realtime/__tests__/authoringRealtime.integration.test.tsx (13 tests) 183ms
+stderr | src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx > SpineOverlays (Phase 9.1+9.4 parity) > opens the student preview sheet from the spine question view
+Query data cannot be undefined. Please make sure to return a value other than undefined from your query function. Affected query key: ["assessment-question","eq-2"]
+
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineOverlays.test.tsx (4 tests) 1145ms
+   ✓ SpineOverlays (Phase 9.1+9.4 parity) > opens the jump palette with Ctrl+K in the spine branch 386ms
+ ✓ src/features/exam-authoring/api/__tests__/authoringQueryEffects.test.ts (14 tests) 14ms
+ ✓ src/features/exam-authoring/editor/__tests__/imageReplaceFlow.test.tsx (7 tests) 3169ms
+   ✓ replacing an image that publish rejected > repairs a missing asset behind empty alt text and commits the new finalized asset 578ms
+   ✓ replacing an image that publish rejected > leaves the original image and its asset ID untouched when the upload fails 340ms
+   ✓ replacing an image that publish rejected > never overwrites a stored description or caption when replacing the visual 436ms
+   ✓ replacing an image that publish rejected > refuses an image that left the question instead of reporting a replacement 321ms
+   ✓ replacing an image that publish rejected > never overwrites a description the author wrote 984ms
+ ✓ src/products/sat/ui/__tests__/SatSessionRoomStudents.test.tsx (10 tests) 959ms
+stderr | src/features/exam-authoring/editor/ingestion/__tests__/satImageLifecycle.test.tsx > SAT public image lifecycle matrix > accepts the clipboard file at the byte, side, and pixel boundaries
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/editor/ingestion/__tests__/satImageLifecycle.test.tsx > SAT public image lifecycle matrix > describes a pasted file from its name so nothing is left to the author
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomFlow.test.tsx (10 tests) 3310ms
+   ✓ SatCreateRoomFlow > locks Classroom after a definitive POST refusal while preserving the selected form for Practice 1105ms
+   ✓ SatCreateRoomFlow > resends the SAME operation key after an unconfirmed outcome instead of minting a second room 699ms
+stderr | src/products/sat/__tests__/SatRoot.test.tsx > SatRoot > hides all shell chrome on exam authoring pages
+[2026-10-15T02:51:19.391Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/assessment-authoring/exams/ex-1/coedit-token',
+  requestId: 'req-1792032679373-wqgujzb83',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)\n' +
+    '    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)
+    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23
+
+stderr | src/products/sat/__tests__/SatRoot.test.tsx > SatRoot shell polish > detail-regex matrix: /sat/exams/ex-1 shows chrome=false
+[2026-10-15T02:51:19.581Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/assessment-authoring/exams/ex-1/coedit-token',
+  requestId: 'req-1792032679578-4uqt9rro7',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)\n' +
+    '    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)
+    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23
+
+stderr | src/products/sat/__tests__/SatRoot.test.tsx > SatRoot shell polish > detail-regex matrix: /sat/exams/ex-1/release shows chrome=false
+[2026-10-15T02:51:19.591Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/assessment-authoring/exams/ex-1/coedit-token',
+  requestId: 'req-1792032679587-qklqzgtjl',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)\n' +
+    '    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)
+    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23
+
+stderr | src/products/sat/__tests__/SatRoot.test.tsx > SatRoot shell polish > detail-regex matrix: /sat/exams/ex-1/preview/ shows chrome=false
+[2026-10-15T02:51:19.594Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/assessment-authoring/exams/ex-1/coedit-token',
+  requestId: 'req-1792032679594-8qmnoahfr',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)\n' +
+    '    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)
+    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23
+
+stderr | src/products/sat/__tests__/SatRoot.test.tsx > SatRoot shell polish > detail-regex matrix: /sat/exams/ex-1/access shows chrome=false
+[2026-10-15T02:51:19.598Z] [ERROR] Unable to connect. (ApiClientError) {
+  endpoint: '/v1/assessment-authoring/exams/ex-1/coedit-token',
+  requestId: 'req-1792032679597-30fna6b8r',
+  attempts: 1,
+  code: 'ApiClientError',
+  stack: 'ApiClientError: Unable to connect.\n' +
+    '    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)\n' +
+    '    at runNextTicks (node:internal/process/task_queues:65:5)\n' +
+    '    at listOnTimeout (node:internal/timers:567:9)\n' +
+    '    at processTimers (node:internal/timers:541:7)\n' +
+    '    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)\n' +
+    '    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23'
+} ApiClientError: Unable to connect.
+    at ApiClient.request (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/shared/api/apiClient.ts:358:23)
+    at runNextTicks (node:internal/process/task_queues:65:5)
+    at listOnTimeout (node:internal/timers:567:9)
+    at processTimers (node:internal/timers:541:7)
+    at Module.backendPost (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/services/backendBridge.ts:356:20)
+    at Module.requestWorkspaceCoeditToken (/Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/tokenApi.ts:133:22)
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/realtime/coedit/useSatAuthoringCollaboration.tsx:145:23
+
+stderr | src/products/sat/__tests__/SatRoot.test.tsx > SatRoot shell polish > detail-regex matrix: /sat/exams/ex-1/settings shows chrome=false
+No routes matched location "/sat/exams/ex-1/settings" 
+
+stderr | src/products/sat/__tests__/SatRoot.test.tsx > SatRoot shell polish > detail-regex matrix: /sat/exams/ex-1/responses shows chrome=false
+No routes matched location "/sat/exams/ex-1/responses" 
+
+ ✓ src/products/sat/__tests__/SatRoot.test.tsx (24 tests) 2399ms
+   ✓ SatRoot > keeps the SAT workspace to the admin destinations: three primary ones plus the global Score Conversion policy 570ms
+   ✓ SatRoot > hides all shell chrome on exam authoring pages 499ms
+stderr | src/features/exam-authoring/editor/ingestion/__tests__/satImageLifecycle.test.tsx > SAT public image lifecycle matrix > keeps a valid HTTPS HTML image in place and stages the fetched bytes
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/editor/ingestion/__tests__/satImageLifecycle.test.tsx > SAT public image lifecycle matrix > drops a valid JPEG through one managed upload request
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.test.tsx > StudentLinksDashboard > keeps a link and offers refresh when deletion loses the revision race
+[2026-10-15T02:51:21.334Z] [ERROR] 409 revision conflict: Student Link changed while you were editing it (Error) {
+  feature: 'student-access',
+  action: 'delete',
+  linkId: 'link-current',
+  code: 'Error',
+  stack: 'Error: 409 revision conflict: Student Link changed while you were editing it\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.test.tsx:194:36\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:146:14\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:533:11\n' +
+    '    at runWithTimeout (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:39:7)\n' +
+    '    at runTest (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1056:17)\n' +
+    '    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)\n' +
+    '    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)\n' +
+    '    at runFiles (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1262:5)\n' +
+    '    at startTests (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1271:3)\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/vitest/dist/chunks/runBaseTests.3qpJUEJM.js:126:11'
+} Error: 409 revision conflict: Student Link changed while you were editing it
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.test.tsx:194:36
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:146:14
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:533:11
+    at runWithTimeout (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:39:7)
+    at runTest (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1056:17)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runFiles (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1262:5)
+    at startTests (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1271:3)
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/vitest/dist/chunks/runBaseTests.3qpJUEJM.js:126:11
+
+ ✓ src/features/exam-authoring/realtime/__tests__/authoringRealtimeClient.test.ts (14 tests) 16ms
+stderr | src/features/exam-authoring/editor/ingestion/__tests__/satImageLifecycle.test.tsx > SAT public image lifecycle matrix > drops a valid WebP through one managed upload request
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.test.tsx (10 tests) 1790ms
+   ✓ StudentLinksDashboard > keeps older-release links visible by default after a newer release is created 501ms
+   ✓ StudentLinksDashboard > confirms permanent deletion, sends the displayed revision, and removes the link 518ms
+stderr | src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.test.tsx > StudentLinksDashboard > passes the exam issue a create-room check named up to the host
+An update to StudentLinksDashboard inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to StudentLinksDashboard inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/editor/plugins/__tests__/smartPastePlugin.test.ts (10 tests) 497ms
+stderr | src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.interaction.test.tsx > StudentLinksDashboard interaction contract > AT-12/13: a failed action surfaces one banner and keeps the stale-revision recovery
+[2026-10-15T02:51:21.878Z] [ERROR] revision conflict (409): this link changed elsewhere (Error) {
+  feature: 'student-access',
+  action: 'set-lifecycle',
+  linkId: 'link-current',
+  state: 'paused',
+  code: 'Error',
+  stack: 'Error: revision conflict (409): this link changed elsewhere\n' +
+    '    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.interaction.test.tsx:220:39\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:146:14\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:533:11\n' +
+    '    at runWithTimeout (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:39:7)\n' +
+    '    at runTest (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1056:17)\n' +
+    '    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)\n' +
+    '    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)\n' +
+    '    at runFiles (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1262:5)\n' +
+    '    at startTests (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1271:3)\n' +
+    '    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/vitest/dist/chunks/runBaseTests.3qpJUEJM.js:126:11'
+} Error: revision conflict (409): this link changed elsewhere
+    at /Users/rd-cream/Downloads/remix_-ielts-proctoring-system/src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.interaction.test.tsx:220:39
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:146:14
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:533:11
+    at runWithTimeout (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:39:7)
+    at runTest (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1056:17)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runSuite (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1205:15)
+    at runFiles (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1262:5)
+    at startTests (file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/@vitest/runner/dist/index.js:1271:3)
+    at file:///Users/rd-cream/Downloads/remix_-ielts-proctoring-system/node_modules/vitest/dist/chunks/runBaseTests.3qpJUEJM.js:126:11
+
+stderr | src/features/exam-authoring/editor/ingestion/__tests__/satImageLifecycle.test.tsx > SAT public image lifecycle matrix > drops a valid GIF through one managed upload request
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/StudentLinksDashboard.interaction.test.tsx (6 tests) 1065ms
+   ✓ StudentLinksDashboard interaction contract > AT-12/13: a failed action surfaces one banner and keeps the stale-revision recovery 325ms
+stderr | src/features/exam-authoring/editor/ingestion/__tests__/satImageLifecycle.test.tsx > SAT public image lifecycle matrix > releases a pending upload after undo before a late rejection
+An update to Portals inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/satImageLifecycle.test.tsx (14 tests) 4617ms
+   ✓ SAT public image lifecycle matrix > accepts the clipboard file at the byte, side, and pixel boundaries 1148ms
+   ✓ SAT public image lifecycle matrix > keeps a valid HTTPS HTML image in place and stages the fetched bytes 407ms
+   ✓ SAT public image lifecycle matrix > keeps text when an HTML image is rejected for body over the cap 324ms
+   ✓ SAT public image lifecycle matrix > drops a valid JPEG through one managed upload request 483ms
+   ✓ SAT public image lifecycle matrix > drops a valid GIF through one managed upload request 453ms
+   ✓ SAT public image lifecycle matrix > exposes Retry and Remove for a failed upload 462ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/spineTokens.test.ts (20 tests) 11ms
+ ✓ src/products/sat/ui/__tests__/SatPage.test.tsx (24 tests) 249ms
+stderr | src/features/exam-authoring/editor/__tests__/ObjectControls.test.tsx > the controls of the object you touched > deletes the image, lands the caret after it, and offers the way back
+An update to ObjectControls inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Tooltip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Presence inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Tooltip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Tooltip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Presence inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Tooltip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Popper inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Popper inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Tooltip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Tooltip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Tooltip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to Tooltip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/features/exam-authoring/editor/__tests__/ObjectControls.test.tsx (12 tests) 805ms
+ ✓ src/features/exam-authoring/realtime/__tests__/presenceChannel.test.ts (26 tests) 8ms
+ ✓ src/products/sat/ui/__tests__/Dialogs.test.tsx (20 tests) 243ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringQuestionCommands.test.tsx (10 tests) 58ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/indexedDbPersistence.test.ts (6 tests) 1031ms
+   ✓ IndexedDB prompt recovery > deletes local state only on an explicit discard 340ms
+ ✓ src/features/exam-authoring/realtime/__tests__/eventContract.test.ts (18 tests) 8ms
+ ✓ src/features/exam-authoring/api/__tests__/authoringShellLifecycle.test.tsx (8 tests) 535ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/fieldPatch.test.ts (15 tests) 11ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringDraft.test.tsx (12 tests) 21ms
+ ✓ src/features/exam-authoring/realtime/__tests__/authoringCacheReconciler.test.ts (14 tests) 9ms
+ ✓ src/features/exam-authoring/ui/publish/__tests__/SatCreateRoomRecoveryVerification.test.tsx (8 tests) 81ms
+ ✓ src/features/exam-authoring/ui/settings/__tests__/ExamSettingsPage.test.tsx (11 tests) 795ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringSelection.test.tsx (6 tests) 96ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/satProvider.test.ts (11 tests) 6ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionCardStack.test.tsx (14 tests) 459ms
+ ✓ src/features/exam-authoring/application/__tests__/authoringShellLifecycle.integration.test.tsx (6 tests) 433ms
+ ✓ src/features/exam-authoring/realtime/__tests__/authoringEventReducer.test.ts (16 tests) 11ms
+ ✓ src/products/sat/ui/__tests__/Menu.test.tsx (11 tests) 321ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/staleCacheRecovery.test.ts (2 tests) 564ms
+   ✓ pre-compaction local copy > is cleared silently when it holds nothing the room lacks 384ms
+ ✓ src/features/exam-authoring/editor/__tests__/EditableMathExtension.test.tsx (7 tests) 630ms
+ ✓ src/features/exam-authoring/editor/__tests__/editorSurfacesCss.test.ts (12 tests) 146ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringEdits.test.tsx (10 tests) 32ms
+ ✓ src/features/exam-authoring/editor/ingestion/adapters/__tests__/fetchHtmlImagesAsFiles.test.ts (14 tests) 22ms
+ ✓ src/features/exam-authoring/api/__tests__/assessmentMediaApi.test.ts (7 tests) 39ms
+stdout | src/features/exam-authoring/realtime/coedit/__tests__/noEditableDraftRoom.test.tsx > SAT collaboration boundary with an editable draft > asks for the exam room once the exam says there is a draft
+[2026-10-15T02:51:30.392Z] [INFO] API POST /v1/assessment-authoring/exams/exam-1/coedit-token { requestId: 'req-1792032690382-u6fdnsn3h', attempt: 1, status: 404 }
+
+stdout | src/features/exam-authoring/realtime/coedit/__tests__/noEditableDraftRoom.test.tsx > SAT collaboration boundary with an editable draft > reads a 404 from the room as the no-room posture, not as a failure
+[2026-10-15T02:51:30.421Z] [INFO] API POST /v1/assessment-authoring/exams/exam-1/coedit-token { requestId: 'req-1792032690419-fixatubju', attempt: 1, status: 404 }
+
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/noEditableDraftRoom.test.tsx (5 tests) 104ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ClassificationFieldset.test.tsx (7 tests) 205ms
+ ✓ src/features/exam-authoring/editor/__tests__/editorContextualSurfaces.test.tsx (4 tests) 638ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/NavigatorArchitecture.test.tsx (7 tests) 324ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ImportSuggestion.test.tsx (4 tests) 2005ms
+   ✓ ImportSuggestion wiring > no auto-apply: no card and no onChange without a paste 851ms
+   ✓ ImportSuggestion wiring > refuses the whole-question split while prompt co-editing is active 1095ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkEditorSheet.interaction.test.tsx (4 tests) 785ms
+   ✓ AccessLinkEditorSheet interaction contract > sends classroom mode and a forced Module 2 route on create, and nothing for standard practice 604ms
+ ✓ src/products/sat/ui/__tests__/satPressCss.test.ts (13 tests) 15ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionQueueRail.test.tsx (8 tests) 334ms
+ ✓ src/features/exam-authoring/hooks/__tests__/useQuestionAutosave.networkPause.test.tsx (6 tests) 181ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/coeditSaveTruth.test.ts (12 tests) 4ms
+ ✓ src/features/exam-authoring/realtime/__tests__/threeWayCompare.test.ts (14 tests) 4ms
+ ✓ src/features/exam-authoring/ui/__tests__/authoringDraftLifecycle.test.ts (13 tests) 9ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkDetail.interaction.test.tsx (7 tests) 432ms
+ ✓ src/features/exam-authoring/realtime/__tests__/recovery.test.ts (7 tests) 5ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/workspaceSeed.test.ts (7 tests) 10ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathIngest.test.ts (12 tests) 14ms
+ ✓ src/features/exam-authoring/editor/__tests__/tableClipboard.test.ts (8 tests) 294ms
+ ✓ src/features/exam-authoring/editor/ingestion/exam/applyWholeQuestionSplit.test.ts (5 tests) 14ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/editorBinding.test.ts (11 tests) 40ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringSaveRouting.test.tsx (3 tests) 28ms
+ ✓ src/features/exam-authoring/ui/__tests__/moduleQuestionMemory.test.tsx (10 tests) 15ms
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringWorkspaceCoedit.test.tsx (34 tests) 34611ms
+   ✓ AuthoringWorkspace × prompt co-editing > threads the room binding into the spine when every gate is on 3747ms
+   ✓ AuthoringWorkspace × prompt co-editing > the partial, prompt-free save > sends exactly the changed allow-listed fields and never the prompt 1663ms
+   ✓ AuthoringWorkspace × prompt co-editing > the partial, prompt-free save > writes nothing at all for a prompt-only change 599ms
+   ✓ AuthoringWorkspace × prompt co-editing > the partial, prompt-free save > keeps the author's newer prompt projection after a partial save 884ms
+   ✓ AuthoringWorkspace × prompt co-editing > autosave ownership > suppresses the legacy autosave for a prompt-only edit 1252ms
+   ✓ AuthoringWorkspace × prompt co-editing > autosave ownership > still schedules the legacy autosave for a non-prompt field edit 1473ms
+   ✓ AuthoringWorkspace × prompt co-editing > single ownership while the exam room is active > performs no HTTP field write for the question the room owns 642ms
+   ✓ AuthoringWorkspace × prompt co-editing > single ownership while the exam room is active > still writes through the partial endpoint when only the prompt room is open 1690ms
+   ✓ AuthoringWorkspace × prompt co-editing > one save truth > does not report Saved while the collaborative prompt is unacknowledged 981ms
+   ✓ AuthoringWorkspace × prompt co-editing > one save truth > does not report Saved while the legacy field save is pending 921ms
+   ✓ AuthoringWorkspace × prompt co-editing > one save truth > reports Saved only once both writers are saved 707ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > explains a rejected session and re-mints on Retry 1038ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > does not present a plain disconnect as a lifecycle failure 654ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > uses human offline and reconnecting copy without generic connection labels 2129ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > projects a retryable persistence failure as an inline retry action 1913ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > offers the prompt export when the service closes a replaced room 1408ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > offers the export when the room refused a write 848ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > explains a room too large to save as one document 726ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > stops offering the recovery once the refused work is committed 1173ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > offers the export for a room closed by any other lifecycle reason 945ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > applies the durable draft.replaced signal when the socket close is lost 999ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > keeps a close with no lifecycle reason on the offline path 1043ms
+   ✓ AuthoringWorkspace × prompt co-editing > recovery surface > freezes the mounted editor through the private publish lifecycle and restores it on active 1888ms
+   ✓ AuthoringWorkspace × prompt co-editing > shows a collaborator's edit in the live editor and the projection 963ms
+   ✓ AuthoringWorkspace × prompt co-editing > refetch guard while the room owns the prompt > does not let a refetch replace the newer local prompt 1181ms
+   ✓ AuthoringWorkspace × prompt co-editing > leaving the workspace > clears a stalled-navigation banner after the room confirms the work 642ms
+   ✓ AuthoringWorkspace × prompt co-editing > leaving the workspace > navigates once this tab's exact room state is durable 390ms
+   ✓ AuthoringWorkspace × prompt co-editing > leaving the workspace > refuses to leave while the room cannot reach the service 485ms
+   ✓ AuthoringWorkspace × prompt co-editing > field-scoped collaboration readiness > renders the fields the room holds while one root is still unseeded 645ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/pdfCopy.test.ts (29 tests) 38ms
+ ✓ src/features/exam-authoring/editor/__tests__/imagePresentationContract.test.tsx (4 tests) 256ms
+ ✓ src/features/exam-authoring/ui/__tests__/useDraftOpenOnEntry.test.tsx (8 tests) 73ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/spreadsheet.test.ts (14 tests) 8ms
+ ✓ src/features/exam-authoring/editor/__tests__/richContent.test.ts (9 tests) 12ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SaveCluster.test.tsx (23 tests) 213ms
+ ✓ src/features/exam-authoring/api/__tests__/assessmentAuthoringApi.test.ts (8 tests) 4ms
+ ✓ src/features/exam-authoring/api/__tests__/examQueries.test.tsx (5 tests) 273ms
+ ✓ src/features/exam-authoring/ui/collaboration/__tests__/coeditNavigationGate.test.ts (13 tests) 15ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/workspaceCommands.test.ts (8 tests) 11ms
+ ✓ src/features/exam-authoring/realtime/__tests__/raceRecovery.test.ts (15 tests) 4ms
+ ✓ src/features/exam-authoring/editor/plugins/__tests__/insertIngestResult.test.ts (3 tests) 117ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkRow.interaction.test.tsx (5 tests) 166ms
+ ✓ src/features/exam-authoring/editor/ingestion/adapters/__tests__/clipboardImageFingerprint.test.ts (4 tests) 13ms
+ ✓ src/features/exam-authoring/ui/shell/__tests__/ExamWorkspaceHeader.test.tsx (8 tests) 352ms
+ ✓ src/features/exam-authoring/editor/__tests__/EditorFeedback.test.tsx (7 tests) 135ms
+ ✓ src/features/exam-authoring/ui/__tests__/useAuthoringDraftLifecycle.test.tsx (5 tests) 20ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/textHtml.test.ts (9 tests) 91ms
+ ✓ src/features/exam-authoring/api/__tests__/publishMutationReceipt.test.tsx (2 tests) 196ms
+ ✓ src/features/exam-authoring/hooks/__tests__/useQuestionAutosave.durability.test.tsx (4 tests) 162ms
+ ✓ src/features/exam-authoring/editor/plugins/__tests__/smartDropPlugin.test.ts (4 tests) 700ms
+   ✓ SmartDropPlugin > drops html at the drop position in one undo 496ms
+ ✓ src/products/sat/__tests__/SatRootCollaboration.test.tsx (7 tests) 1063ms
+   ✓ SatRoot collaboration boundary > opens the exam room for the authoring surface 381ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/textHtmlProperties.test.ts (4 tests) 318ms
+ ✓ src/features/exam-authoring/realtime/__tests__/schemas.test.ts (7 tests) 9ms
+ ✓ src/features/exam-authoring/realtime/__tests__/capabilityDependencies.test.ts (4 tests) 4ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathInputRules.test.ts (6 tests) 166ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/queueModel.test.ts (5 tests) 3ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ExamOverviewPane.test.tsx (4 tests) 118ms
+ ✓ src/features/exam-authoring/ui/delivery/__tests__/sessionState.test.ts (17 tests) 4ms
+ ✓ src/features/exam-authoring/ui/__tests__/ModuleScopePicker.test.tsx (4 tests) 199ms
+ ✓ src/features/exam-authoring/editor/ingestion/application/pipeline.test.ts (4 tests) 9ms
+ ✓ src/features/exam-authoring/contracts/__tests__/accessLinkSections.test.ts (8 tests) 3ms
+ ✓ src/features/exam-authoring/editor/__tests__/composerContext.test.ts (5 tests) 95ms
+ ✓ src/features/exam-authoring/editor/ingestion/security/guards.test.ts (6 tests) 8ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/accessLinkUi.test.ts (8 tests) 4ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/AnswerKeyField.test.tsx (4 tests) 169ms
+ ✓ src/products/sat/routes/__tests__/SatAccessRoute.test.tsx (4 tests) 142ms
+ ✓ src/features/exam-authoring/editor/ingestion/exam/analyzeWholeQuestion.test.ts (10 tests) 14ms
+ ✓ src/features/exam-authoring/import/__tests__/questionImportParser.test.ts (7 tests) 6ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/protocol.test.ts (6 tests) 3ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/imageImport.test.ts (5 tests) 7ms
+ ✓ src/features/exam-authoring/ui/settings/__tests__/ExamSettingsSheet.test.tsx (4 tests) 473ms
+ ✓ src/features/exam-authoring/import/__tests__/QuestionImportSheet.test.tsx (5 tests) 571ms
+ ✓ src/features/exam-authoring/application/__tests__/authoringShellLifecycle.test.ts (8 tests) 5ms
+ ✓ src/features/exam-authoring/editor/ingestion/normalization/__tests__/markdownInline.test.ts (6 tests) 3ms
+ ✓ src/products/sat/ui/__tests__/SegmentedControl.test.tsx (7 tests) 177ms
+ ✓ src/features/exam-authoring/routes/__tests__/ProviderPreviewRoute.test.tsx (4 tests) 63ms
+ ✓ src/products/sat/ui/__tests__/satContrastTokens.test.ts (5 tests) 4ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/AnswerKeyIdentity.test.tsx (2 tests) 1464ms
+   ✓ AnswerKeyField identity-safe reorder > moves a choice by stable id and keeps the key on the same content 814ms
+   ✓ AnswerKeyField identity-safe reorder > asks before replacing existing supporting material 649ms
+ ✓ src/features/exam-authoring/editor/ingestion/architecture.test.ts (3 tests) 22ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/sampleExam.test.ts (3 tests) 25ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkShareSheet.test.tsx (5 tests) 238ms
+ ✓ src/products/sat/ui/__tests__/satSessionRoomCss.test.ts (3 tests) 7ms
+ ✓ src/features/exam-authoring/ui/shell/__tests__/examLifecycle.test.ts (6 tests) 8ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QueueWorklist.test.tsx (2 tests) 150ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/spreadsheetFixtures.test.ts (7 tests) 12ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkRow.test.tsx (3 tests) 128ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/storeRequest.test.ts (4 tests) 3ms
+ ✓ src/features/exam-authoring/ui/collaboration/__tests__/collaborationParticipants.test.ts (3 tests) 6ms
+ ✓ src/features/exam-authoring/editor/__tests__/objectOps.test.ts (2 tests) 55ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ReadinessControl.test.tsx (4 tests) 171ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatMenu.test.tsx (2 tests) 155ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ScoreConverterPanel.test.tsx (3 tests) 170ms
+ ✓ src/features/exam-authoring/routes/__tests__/ProviderReviewRoute.test.tsx (3 tests) 45ms
+ ✓ src/features/exam-authoring/editor/__tests__/satImagePresentation.test.ts (4 tests) 8ms
+ ✓ src/products/sat/routes/__tests__/scheduleValidation.test.ts (11 tests) 5ms
+ ✓ src/products/sat/ui/__tests__/SatStaffRoutePanel.test.tsx (4 tests) 124ms
+ ✓ src/features/exam-authoring/editor/__tests__/editorTooltip.test.tsx (3 tests) 197ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathGolden.test.ts (2 tests) 17ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineCard.test.tsx (4 tests) 108ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ScoreReportSettingPanel.test.tsx (3 tests) 94ms
+ ✓ src/products/sat/ui/__tests__/useSatListParams.test.tsx (5 tests) 32ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/conversion.test.ts (4 tests) 45ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/fieldWriter.test.ts (3 tests) 7ms
+ ✓ src/features/exam-authoring/realtime/coedit/__tests__/presence.test.ts (3 tests) 2ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/Inspector.test.tsx (4 tests) 792ms
+   ✓ Inspector > is a nonmodal region on wide screens, a real dialog on narrow screens 440ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/htmlSanitizePolicy.test.ts (7 tests) 137ms
+ ✓ src/features/exam-authoring/editor/__tests__/anchoredSurfaces.test.ts (4 tests) 238ms
+ ✓ src/features/exam-authoring/ui/collaboration/__tests__/CoeditRecoverySurface.test.tsx (3 tests) 307ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/AccessLinkDetail.test.tsx (3 tests) 527ms
+   ✓ AccessLinkDetail > keeps the immutable-version banner and replacement action on Overview 429ms
+ ✓ src/features/exam-authoring/contracts/__tests__/satExamConfig.test.ts (3 tests) 11ms
+ ✓ src/features/exam-authoring/editor/ingestion/domain/importDocument.test.ts (4 tests) 4ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/altTextSuggestion.test.ts (4 tests) 11ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathProperties.test.ts (4 tests) 71ms
+ ✓ src/features/exam-authoring/ui/delivery/__tests__/useAccessSessionBindings.test.tsx (3 tests) 28ms
+ ✓ src/features/exam-authoring/editor/ingestion/security/policy.test.ts (4 tests) 3ms
+ ✓ src/features/exam-authoring/application/__tests__/authoringEntryIntent.test.ts (6 tests) 2ms
+ ✓ src/products/sat/ui/__tests__/useSatListReturn.test.tsx (2 tests) 277ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/OverlayStack.test.ts (4 tests) 65ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionJumpPalette.test.tsx (2 tests) 1133ms
+   ✓ QuestionJumpPalette > filters with shared queue search semantics and selects flush-guarded 799ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathmlConvert.test.ts (5 tests) 25ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ReleaseGateCard.test.tsx (3 tests) 307ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/rosterValidation.test.ts (5 tests) 32ms
+ ✓ src/features/exam-authoring/hooks/__tests__/useQuestionAutosave.offline.test.tsx (1 test) 310ms
+   ✓ useQuestionAutosave offline behavior > keeps edits local while offline and retries the newest draft after reconnecting 308ms
+ ✓ src/features/exam-authoring/ui/__tests__/AuthoringDialog.test.tsx (2 tests) 2357ms
+   ✓ AuthoringDialog > provides a labelled dialog and closes through Radix dismissal semantics 1471ms
+   ✓ AuthoringDialog > keeps destructive confirmation open until the controlled action succeeds 631ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/goldenFixtures.test.ts (3 tests) 310ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineStages.test.tsx (2 tests) 3853ms
+   ✓ Question canvas > uses content sections instead of stages and numbered cards 2989ms
+   ✓ Question canvas > shows existing blockers in readiness and routes their real field 861ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/ValidationChecklist.test.tsx (3 tests) 888ms
+   ✓ ValidationChecklist > orders blocking issues first with a role=status summary 611ms
+ ✓ src/products/sat/ui/__tests__/satContractsCss.test.ts (5 tests) 11ms
+ ✓ src/features/exam-authoring/editor/__tests__/imageObjectActions.test.ts (3 tests) 42ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/LinksToolbar.interaction.test.tsx (2 tests) 1235ms
+   ✓ LinksToolbar interaction contract > AT-18: the selection thumb marks the active pill only 993ms
+ ✓ src/features/exam-authoring/editor/ingestion/telemetry/events.test.ts (1 test) 40ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpinePreviewSheet.test.tsx (2 tests) 782ms
+   ✓ SpinePreviewSheet > renders the delivery renderer when open with a question 780ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/CoachingLayer.test.tsx (3 tests) 704ms
+   ✓ CoachingLayer — one coaching pattern > speaks as release guidance with the blocking count 425ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/StageJumpExpands.test.tsx (1 test) 3820ms
+   ✓ StageJumpExpands — collapse never strands a focus target > reveals empty explanation and keeps it mounted after one-shot focus clears 3817ms
+ ✓ src/features/exam-authoring/editor/__tests__/oneTimeHints.test.ts (3 tests) 3ms
+ ✓ src/features/exam-authoring/ui/__tests__/QuestionPaper.test.tsx (1 test) 189ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/mathConfidence.test.ts (13 tests) 20ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/vendorNormalize.test.ts (6 tests) 193ms
+ ✓ src/features/exam-authoring/api/assessmentAccessLinkQueries.test.tsx (1 test) 66ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/imagePolicy.test.ts (17 tests) 5ms
+ ✓ src/products/sat/ui/__tests__/satTypeFloor.test.ts (3 tests) 27ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ClassroomPlanField.test.tsx (2 tests) 2595ms
+   ✓ ClassroomPlanField > shows the section's shape and replaces only that section on change 1899ms
+   ✓ ClassroomPlanField > is read-only without edit rights 618ms
+ ✓ src/products/sat/ui/__tests__/SatStudentLink.test.tsx (2 tests) 3575ms
+   ✓ SatStudentLinkCard > copies the room entry URL it is given and confirms it 2961ms
+   ✓ SatStudentLinkCard > shows the copy failure instead of claiming success 607ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SaveTruth.test.tsx (1 test) 7737ms
+   ✓ SaveTruth — one save vocabulary per question > renders exactly one save status region per question view 7716ms
+ ✓ src/features/exam-authoring/editor/ingestion/__tests__/screenshotCase.test.ts (7 tests) 366ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatStudentResponseEditor.test.tsx (2 tests) 1585ms
+   ✓ SAT student response authoring > shows invalid staff input instead of silently rewriting the answer key 1021ms
+   ✓ SAT student response authoring > adds and removes validated equivalent responses 544ms
+ ✓ src/features/exam-authoring/ui/__tests__/SampleExamLoadDialog.test.tsx (2 tests) 717ms
+   ✓ SampleExamLoadDialog > explains the complete replacement and invokes confirmation 484ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/contentTemplates.test.ts (3 tests) 27ms
+ ✓ src/features/exam-authoring/ui/__tests__/SatAuthoringStateSurfaces.test.tsx (2 tests) 735ms
+   ✓ SAT authoring state surfaces > renders a SAT-specific loading landmark 428ms
+   ✓ SAT authoring state surfaces > renders a recoverable SAT-specific error landmark 301ms
+ ✓ src/features/exam-authoring/providers/sat/__tests__/studentResponse.test.ts (14 tests) 59ms
+ ✓ src/features/exam-authoring/ui/access-links/__tests__/LinksToolbar.test.tsx (2 tests) 1425ms
+   ✓ LinksToolbar > announces the result count and toggles the status filter 1358ms
+ ✓ src/features/exam-authoring/editor/__tests__/RichContentIdentityExtension.test.ts (1 test) 636ms
+   ✓ rich content editing identities > gives a split paragraph a distinct ID that survives subsequent typing 632ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ReleaseReadinessParity.test.tsx (1 test) 1822ms
+   ✓ ReleaseReadinessParity — gate card never drifts from selectors > release_readiness_matches_authoring_blockers 1816ms
+ ✓ src/features/exam-authoring/routes/__tests__/ProviderBuilderRoute.split.test.tsx (1 test) 1598ms
+   ✓ ProviderBuilderRoute branch loading > loads only the selected provider authoring branch 1596ms
+ ✓ src/features/exam-authoring/ui/__tests__/WorkbookImportUndoBanner.test.tsx (2 tests) 195ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/SpineQueueSheet.test.tsx (2 tests) 651ms
+   ✓ SpineQueueSheet > labels the sheet for the queue in build mode 504ms
+ ✓ src/features/exam-authoring/ui/spine/__tests__/QuestionFilterMenu.test.tsx (1 test) 387ms
+   ✓ QuestionFilterMenu > shows real counts only and forwards stable filter IDs 384ms
+ ✓ src/products/sat/routes/satTestTime.test.ts (1 test) 20ms
+
+ Test Files  218 passed (218)
+      Tests  1971 passed (1971)
+   Start at  09:50:47
+   Duration  116.57s (transform 20.95s, setup 98.35s, collect 151.01s, tests 188.87s, environment 202.03s, prepare 32.00s)
+

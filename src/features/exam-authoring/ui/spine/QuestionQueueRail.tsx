@@ -13,6 +13,7 @@ import type {
   AssessmentModuleShell,
   AssessmentQuestionSummary,
   AssessmentSectionShell,
+  SatClassroomPlan,
   BulkMetadataPatch,
   BulkQuestionAction,
   Difficulty,
@@ -35,6 +36,7 @@ export type { SpineQueueFilter };
 export interface QuestionQueueRailProps {
   module: AssessmentModuleShell;
   sections: AssessmentSectionShell[];
+  classroomPlan?: SatClassroomPlan | null;
   sectionKey: string;
   sectionTitle?: string | undefined;
   moveTargets: AssessmentModuleShell[];
@@ -165,6 +167,7 @@ export function QuestionQueueRail(props: QuestionQueueRailProps) {
         </div>
         <ModuleSwitcher
           sections={props.sections}
+          classroomPlan={props.classroomPlan}
           selectedModuleId={props.module.id}
           disabled={props.isMutating}
           onSelectModule={props.onSelectModule}

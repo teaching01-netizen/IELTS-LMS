@@ -122,6 +122,58 @@ describe('ExamLifecycleService backend mode', () => {
     );
   });
 
+  it('sends SAT create idempotency in the header without adding it to the request body', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_BUILDER', 'true');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, data: { id: 'sat-idem-1', revision: 0 } }), {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          success: true,
+          data: {
+            id: 'sat-idem-1',
+            slug: 'retryable-sat',
+            title: 'Retryable SAT',
+            providerKey: 'sat',
+            providerExamType: 'SAT',
+            examType: 'Academic',
+            status: 'draft',
+            visibility: 'organization',
+            ownerId: 'owner-1',
+            currentDraftVersionId: 'draft-1',
+            schemaVersion: 4,
+            revision: 0,
+          },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    global.fetch = fetchMock as typeof fetch;
+
+    const result = await new ExamLifecycleService(examRepository).createProviderExam({
+      providerKey: 'sat',
+      providerExamType: 'SAT',
+      title: 'Retryable SAT',
+      operationKey: 'same-operation-key',
+      configuration: { showClassroomScoreReport: true },
+    }, 'owner-1');
+
+    expect(result.success).toBe(true);
+    expect(result.exam?.id).toBe('sat-idem-1');
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/v1/exams');
+    expect(new Headers(options.headers).get('Idempotency-Key')).toBe('same-operation-key');
+    const body = JSON.parse(String(options.body));
+    expect(body.configuration).toEqual({ showClassroomScoreReport: true });
+    expect(body).not.toHaveProperty('operationKey');
+  });
+
   it('updates the exam title metadata when saving a draft', async () => {
     vi.stubEnv('VITE_FEATURE_USE_BACKEND_BUILDER', 'true');
     const state = buildState();

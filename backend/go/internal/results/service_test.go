@@ -3,6 +3,7 @@ package results
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strconv"
@@ -162,8 +163,8 @@ func TestListSATAttemptsPagesAndIncludesAttemptWithoutResult(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM student_attempts a")).WithArgs("exam-1", "schedule-1", "running").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(51))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored')")).WithArgs("exam-1", "schedule-1", "running", 50, 50).WillReturnRows(sqlmock.NewRows([]string{
-		"result_id", "attempt_id", "attempt_status", "outcome_status", "release_status", "total_score", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at", "test_started_at",
-	}).AddRow(nil, "attempt-51", "running", "unscored", "", nil, "schedule-1", "exam-1", "SAT", 20, "student-51", "Student 51", nil, "Cohort", nil, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 7, 2, 3, 0, 0, time.UTC)))
+		"result_id", "attempt_id", "attempt_status", "outcome_status", "release_status", "total_score", "classroom_raw", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at", "test_started_at",
+	}).AddRow(nil, "attempt-51", "running", "unscored", "", nil, nil, "schedule-1", "exam-1", "SAT", 20, "student-51", "Student 51", nil, "Cohort", nil, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 10, 7, 2, 3, 0, 0, time.UTC)))
 	page, err := NewService(db).ListSATAttempts(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1", 50, 50, "", "all", SATAttemptOptions{Status: "running"})
 	if err != nil {
 		t.Fatal(err)
@@ -176,6 +177,111 @@ func TestListSATAttemptsPagesAndIncludesAttemptWithoutResult(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestListSATAttemptsIncludesClassroomRawSummaryAndFiltersItAsAvailable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("(?s)"+regexp.QuoteMeta("SELECT COUNT(*) FROM student_attempts a")+".*"+regexp.QuoteMeta("JSON_TYPE(JSON_EXTRACT(ar.score_payload, '$.classroomRaw.rawCorrect')) IN ('INTEGER', 'UNSIGNED INTEGER')")+".*"+regexp.QuoteMeta("<= 9223372036854775807")).WithArgs("exam-1", "schedule-1").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored')")).WithArgs("exam-1", "schedule-1", 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"result_id", "attempt_id", "attempt_status", "outcome_status", "release_status", "total_score", "classroom_raw", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at", "test_started_at",
+		}).AddRow("result-1", "attempt-1", "submitted", OutcomeScored, ReleaseReady, nil,
+			`{"rawCorrect":42,"total":54,"totalScaled":{"low":1300,"high":1320}}`,
+			"schedule-1", "exam-1", "SAT", 20, "student-1", "Student 1", nil, "Cohort", nil,
+			time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), nil))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT revision_id FROM sat_score_conversion_active WHERE id = 1")).
+		WillReturnRows(sqlmock.NewRows([]string{"revision_id"}))
+
+	page, err := NewService(db).ListSATAttempts(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1", 50, 0, "", "available", SATAttemptOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].RawCorrect == nil || *page.Items[0].RawCorrect != 42 || page.Items[0].RawTotal == nil || *page.Items[0].RawTotal != 54 {
+		t.Fatalf("expected classroom raw score in attempt row, got %#v", page.Items)
+	}
+	if page.Items[0].EstimatedTotal == nil || *page.Items[0].EstimatedTotal != (SATEstimatedTotal{Low: 1300, High: 1320}) {
+		t.Fatalf("expected persisted estimate range in attempt row, got %#v", page.Items[0].EstimatedTotal)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListSATAttemptsDoesNotReturnStaleEstimateWhenActiveRevisionLookupFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM student_attempts a")).
+		WithArgs("exam-1", "schedule-1").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored')")).
+		WithArgs("exam-1", "schedule-1", 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"result_id", "attempt_id", "attempt_status", "outcome_status", "release_status", "total_score", "classroom_raw", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at", "test_started_at",
+		}).AddRow("result-1", "attempt-1", "submitted", OutcomeScored, ReleaseReady, nil,
+			`{"rawCorrect":42,"total":54,"totalScaled":{"low":1300,"high":1320}}`,
+			"schedule-1", "exam-1", "SAT", 20, "student-1", "Student 1", nil, "Cohort", nil,
+			time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), nil))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT revision_id FROM sat_score_conversion_active WHERE id = 1")).
+		WillReturnError(errors.New("active policy lookup failed"))
+
+	page, err := NewService(db).ListSATAttempts(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1", 50, 0, "", "all", SATAttemptOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].RawCorrect == nil || *page.Items[0].RawCorrect != 42 || page.Items[0].RawTotal == nil || *page.Items[0].RawTotal != 54 {
+		t.Fatalf("raw classroom score should remain available, got %#v", page.Items)
+	}
+	if page.Items[0].EstimatedTotal != nil {
+		t.Fatalf("must not show a stale score after active policy lookup failure, got %#v", page.Items[0].EstimatedTotal)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClassroomRawScoreAvailabilityRejectsMalformedCounts(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  map[string]any
+		want bool
+	}{
+		{name: "valid zero correct", raw: map[string]any{"rawCorrect": json.Number("0"), "total": json.Number("54")}, want: true},
+		{name: "null object", raw: nil},
+		{name: "missing total", raw: map[string]any{"rawCorrect": json.Number("2")}},
+		{name: "fractional count", raw: map[string]any{"rawCorrect": json.Number("1.5"), "total": json.Number("54")}},
+		{name: "integral decimal count", raw: map[string]any{"rawCorrect": json.Number("42.0"), "total": json.Number("54")}},
+		{name: "negative count", raw: map[string]any{"rawCorrect": json.Number("-1"), "total": json.Number("54")}},
+		{name: "zero total", raw: map[string]any{"rawCorrect": json.Number("0"), "total": json.Number("0")}},
+		{name: "correct exceeds total", raw: map[string]any{"rawCorrect": json.Number("55"), "total": json.Number("54")}},
+		{name: "signed 64-bit maximum", raw: map[string]any{"rawCorrect": json.Number("9223372036854775807"), "total": json.Number("9223372036854775807")}, want: true},
+		{name: "count exceeds signed 64-bit", raw: map[string]any{"rawCorrect": json.Number("9223372036854775808"), "total": json.Number("9223372036854775808")}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classroomRawScoreAvailable(tt.raw); got != tt.want {
+				t.Fatalf("classroomRawScoreAvailable(%v) = %v, want %v", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDecodeClassroomRawPreservesJSONNumberKinds(t *testing.T) {
+	valid := decodeClassroomRaw(sql.NullString{String: `{"rawCorrect":42,"total":54}`, Valid: true})
+	if !classroomRawScoreAvailable(valid) {
+		t.Fatalf("integer JSON counts should remain available: %#v", valid)
+	}
+	decimal := decodeClassroomRaw(sql.NullString{String: `{"rawCorrect":42.0,"total":54}`, Valid: true})
+	if classroomRawScoreAvailable(decimal) {
+		t.Fatalf("integral decimal JSON must not be coerced into an integer score: %#v", decimal)
 	}
 }
 
@@ -333,6 +439,82 @@ func TestAttachSATModulesKeepsSharedModuleKeysInTheirSections(t *testing.T) {
 	}
 }
 
+func TestSATSectionsFromModulesSynthesizesSubjectsAndAdaptiveRoutes(t *testing.T) {
+	modules := []SATModule{
+		{ModuleKey: "rw-m1", AdaptiveRole: "base", RawCorrect: 20, Operational: 27},
+		{ModuleKey: "rw-m2-higher", AdaptiveRole: "higher_branch", RawCorrect: 18, Operational: 27},
+		{ModuleKey: "math-m1", AdaptiveRole: "base", RawCorrect: 17, Operational: 22},
+		{ModuleKey: "math-m2-lower", AdaptiveRole: "lower_branch", RawCorrect: 16, Operational: 22},
+	}
+	sections := satSectionsFromModules(modules, []string{"reading-writing", "reading-writing", "math", "math"})
+	if len(sections) != 2 || sections[0].SectionKey != "reading-writing" || sections[0].RawCorrect != 38 || sections[0].Operational != 54 || sections[0].Route == nil || *sections[0].Route != "higher" || len(sections[0].Modules) != 2 {
+		t.Fatalf("unexpected Reading & Writing section: %#v", sections)
+	}
+	if sections[1].SectionKey != "math" || sections[1].RawCorrect != 33 || sections[1].Operational != 44 || sections[1].Route == nil || *sections[1].Route != "lower" || len(sections[1].Modules) != 2 {
+		t.Fatalf("unexpected Math section: %#v", sections[1])
+	}
+	single := satSectionsFromModules(modules[:1], []string{"math"})
+	if len(single) != 1 || single[0].Route != nil || single[0].RawCorrect != 20 {
+		t.Fatalf("unexpected single-module section: %#v", single)
+	}
+	conflict := satSectionsFromModules([]SATModule{
+		{ModuleKey: "rw-m2-higher", AdaptiveRole: "higher_branch", RawCorrect: 18, Operational: 27},
+		{ModuleKey: "rw-m2-lower", AdaptiveRole: "lower_branch", RawCorrect: 16, Operational: 27},
+		{ModuleKey: "rw-m2-higher-copy", AdaptiveRole: "higher_branch", RawCorrect: 18, Operational: 27},
+	}, []string{"reading-writing", "reading-writing", "reading-writing"})
+	if len(conflict) != 1 || conflict[0].Route != nil {
+		t.Fatalf("conflicting branch modules must not advertise one route: %#v", conflict)
+	}
+	interleaved := satSectionsFromModules([]SATModule{
+		{ModuleKey: "rw-m1", AdaptiveRole: "base", RawCorrect: 20, Operational: 27},
+		{ModuleKey: "math-m1", AdaptiveRole: "base", RawCorrect: 17, Operational: 22},
+		{ModuleKey: "rw-m2-higher", AdaptiveRole: "higher_branch", RawCorrect: 18, Operational: 27},
+		{ModuleKey: "math-m2-lower", AdaptiveRole: "lower_branch", RawCorrect: 16, Operational: 22},
+	}, []string{"reading-writing", "math", "reading-writing", "math"})
+	if len(interleaved) != 2 || interleaved[0].SectionKey != "reading-writing" || interleaved[1].SectionKey != "math" ||
+		interleaved[0].Modules[0].ModuleKey != "rw-m1" || interleaved[0].Modules[1].ModuleKey != "rw-m2-higher" ||
+		interleaved[1].Modules[0].ModuleKey != "math-m1" || interleaved[1].Modules[1].ModuleKey != "math-m2-lower" {
+		t.Fatalf("interleaved module rows must remain grouped and ordered: %#v", interleaved)
+	}
+	if got := satSectionsFromModules([]SATModule{{ModuleKey: "bad", RawCorrect: 0, Operational: 0}}, []string{"math"}); len(got) != 0 {
+		t.Fatalf("invalid module counts must not synthesize a zero section: %#v", got)
+	}
+	if got := satSectionsFromModules(modules[:1], nil); len(got) != 0 {
+		t.Fatalf("a module without its paired section key must not be dropped into a partial result: %#v", got)
+	}
+}
+
+func TestSATSectionsFromModulesRejectsAggregateOverflow(t *testing.T) {
+	halfMax := int64(1) << 62
+	tests := []struct {
+		name    string
+		modules []SATModule
+	}{
+		{
+			name: "raw correct sum",
+			modules: []SATModule{
+				{ModuleKey: "m1", RawCorrect: halfMax, Operational: halfMax},
+				{ModuleKey: "m2", RawCorrect: halfMax, Operational: halfMax},
+			},
+		},
+		{
+			name: "operational sum",
+			modules: []SATModule{
+				{ModuleKey: "m1", RawCorrect: 0, Operational: halfMax},
+				{ModuleKey: "m2", RawCorrect: 0, Operational: halfMax},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sections := satSectionsFromModules(tt.modules, []string{"math", "math"})
+			if sections != nil {
+				t.Fatalf("aggregate overflow must fail closed, got %+v", sections)
+			}
+		})
+	}
+}
+
 func TestSATModulesQueryOrdersBySectionThenModule(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -359,6 +541,42 @@ func TestSATModulesQueryOrdersBySectionThenModule(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSATModulesRejectsInvalidScoredCounts(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  any
+		ops  any
+	}{
+		{name: "missing raw", raw: nil, ops: int64(27)},
+		{name: "missing operational", raw: int64(10), ops: nil},
+		{name: "negative raw", raw: int64(-1), ops: int64(27)},
+		{name: "zero total", raw: int64(0), ops: int64(0)},
+		{name: "raw exceeds total", raw: int64(28), ops: int64(27)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).
+				WithArgs("attempt-1").
+				WillReturnRows(sqlmock.NewRows([]string{
+					"section_key", "module_key", "adaptive_role", "display_order", "state", "raw_correct", "operational_question_count",
+				}).AddRow("reading-writing", "rw-m1", "base", 1, "submitted", tt.raw, tt.ops))
+
+			modules, keys, err := NewService(db).satModules(context.Background(), "attempt-1")
+			if err == nil || modules != nil || keys != nil {
+				t.Fatalf("invalid scored counts must fail closed, got modules=%+v keys=%v err=%v", modules, keys, err)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExamEntity } from '../../../../../types/domain';
 import type { AccessDistributionOverview, AssessmentAccessLink } from '../../../contracts/accessLinks';
 import { StudentLinksDashboard } from '../StudentLinksDashboard';
+import type { AccessSessionBindings, SessionPhase } from '../../delivery/sessionState';
 
 const mocks = vi.hoisted(() => ({
   update: vi.fn(),
@@ -45,10 +46,24 @@ vi.mock('../../publish/SatCreateRoomFlow', () => ({
     return <div data-testid="create-room-flow">flow</div>;
   },
 }));
+const shareSheet = vi.hoisted(() => vi.fn((_props: { open: boolean; link: unknown }) => null));
 vi.mock('../AccessLinkShareSheet', () => ({
-  AccessLinkShareSheet: () => null,
+  AccessLinkShareSheet: shareSheet,
   AccessLinkPresentView: () => null,
 }));
+
+function sessionBindings(overrides: Partial<AccessSessionBindings> = {}): AccessSessionBindings {
+  return {
+    canRun: true,
+    infoFor: () => null,
+    stale: false,
+    refreshing: false,
+    onRefresh: vi.fn(),
+    onOpenRoom: vi.fn(),
+    onOpenResults: vi.fn(),
+    ...overrides,
+  };
+}
 
 const exam: ExamEntity = {
   id: 'exam-1', slug: 'sat', title: 'Digital SAT', providerKey: 'sat', providerExamType: 'sat',
@@ -90,6 +105,8 @@ beforeEach(() => {
   mocks.publishCommand.mockReset();
   mocks.setPresence.mockReset();
   mocks.flowProps.length = 0;
+  shareSheet.mockClear();
+  window.localStorage.clear();
   mocks.lifecycle.mockResolvedValue(overview.links[0]);
   mocks.duplicate.mockResolvedValue({ ...overview.links[0], id: 'link-copy', name: 'Saturday Class Copy' });
 });
@@ -113,26 +130,108 @@ function renderDashboard(props: Partial<Parameters<typeof StudentLinksDashboard>
 }
 
 describe('StudentLinksDashboard', () => {
-  it('keeps older-release links visible by default after a newer release is created', () => {
+  it('keeps older-release rooms visible and labels every row with its version', () => {
     renderDashboard();
 
-    expect(screen.getAllByText('Saturday Class').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Monday Class').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Old Scholarship').length).toBeGreaterThan(0);
-    expect(screen.queryByText('No matching links')).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByText('Old Scholarship')[0]!);
-    expect(screen.getByText('Uses Version 4')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Use setup for Version 5' })).toBeInTheDocument();
+    expect(screen.getByText('Saturday Class')).toBeInTheDocument();
+    expect(screen.getByText('Monday Class')).toBeInTheDocument();
+    expect(screen.getByText('Old Scholarship')).toBeInTheDocument();
+    expect(screen.getByText('Version 4')).toBeInTheDocument();
+    expect(screen.getAllByText('Version 5')).toHaveLength(2);
   });
 
-  it('reconciles detail selection with the visible search result', async () => {
+  it('narrows the list by search and offers Clear search when nothing matches', async () => {
     renderDashboard();
     fireEvent.change(screen.getByLabelText('Search rooms'), { target: { value: 'Monday' } });
-
-    // Search is debounced (150ms) to avoid re-sorting on every keystroke.
     await waitFor(() => expect(screen.queryByText('Old Scholarship')).not.toBeInTheDocument());
-    expect(screen.getAllByText('Monday Class').length).toBeGreaterThan(0);
-    expect(screen.queryByText('No matching links')).not.toBeInTheDocument();
+    expect(screen.getByText('Monday Class')).toBeInTheDocument();
+    expect(screen.getByText('1 of 3 rooms')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Search rooms'), { target: { value: 'zzz' } });
+    expect(await screen.findByText('No rooms match “zzz”')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(screen.getByText('Old Scholarship')).toBeInTheDocument();
+  });
+
+  it('groups rooms by exam phase and keeps closed rooms collapsed', () => {
+    const phases: Record<string, SessionPhase> = { 'schedule-link-current': 'live', 'schedule-link-upcoming': 'ready', 'schedule-link-old': 'finished' };
+    const revoked = { ...link('link-gone', 'Revoked Class', 'version-5', 5, 'revoked') };
+    renderDashboard({
+      overview: { ...overview, links: [...overview.links, revoked] },
+      session: sessionBindings({ infoFor: (scheduleId) => phases[scheduleId] ? { phase: phases[scheduleId]!, joined: 3, timingModel: null } : null }),
+    });
+    const live = screen.getByRole('region', { name: /Live now/ });
+    expect(within(live).getByText('Saturday Class')).toBeInTheDocument();
+    expect(within(live).getByText('Running')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: /Ready to start/ })).getByText('Monday Class')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: /Finished/ })).getByText('Old Scholarship')).toBeInTheDocument();
+    const closed = screen.getByText('Closed rooms (1)').closest('details')!;
+    expect(closed).not.toHaveAttribute('open');
+    expect(within(closed).getByText('Revoked Class')).toBeInTheDocument();
+  });
+
+  it('opens the room from the row, and offers View results for a finished room', () => {
+    const session = sessionBindings({ infoFor: (scheduleId) => ({ phase: scheduleId === 'schedule-link-old' ? 'finished' : 'ready', joined: 0, timingModel: null }) });
+    renderDashboard({ session });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Monday Class' }));
+    expect(session.onOpenRoom).toHaveBeenCalledWith('schedule-link-upcoming');
+
+    fireEvent.click(screen.getByLabelText('Actions for Old Scholarship'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'View results' }));
+    expect(session.onOpenResults).toHaveBeenCalledWith('schedule-link-old');
+  });
+
+  it('opens Share instead of the room for staff who cannot run rooms', () => {
+    const session = sessionBindings({ canRun: false });
+    renderDashboard({ session });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Monday Class' }));
+    expect(session.onOpenRoom).not.toHaveBeenCalled();
+    expect(shareSheet.mock.lastCall?.[0]).toMatchObject({ open: true, link: { id: 'link-upcoming' } });
+  });
+
+  it('shows Jump back in for this exam only, newest first', () => {
+    window.localStorage.setItem('sat-recent-rooms', JSON.stringify([
+      { scheduleId: 'schedule-link-old', examId: 'exam-1', at: Date.now() - 5 * 60_000 },
+      { scheduleId: 'schedule-other', examId: 'exam-2', at: Date.now() - 60_000 },
+      { scheduleId: 'schedule-link-upcoming', examId: 'exam-1', at: Date.now() - 2 * 3_600_000 },
+    ]));
+    const session = sessionBindings();
+    renderDashboard({ session });
+    const recent = screen.getByRole('region', { name: 'Jump back in' });
+    const cards = within(recent).getAllByRole('button');
+    expect(cards.map((card) => card.textContent)).toEqual([
+      expect.stringContaining('Old Scholarship'),
+      expect.stringContaining('Monday Class'),
+    ]);
+    expect(cards[0]).toHaveTextContent('Opened 5 minutes ago');
+    fireEvent.click(cards[0]!);
+    expect(session.onOpenRoom).toHaveBeenCalledWith('schedule-link-old');
+  });
+
+  it('hides Jump back in when this browser opened no room of the exam', () => {
+    renderDashboard();
+    expect(screen.queryByRole('region', { name: 'Jump back in' })).not.toBeInTheDocument();
+  });
+
+  it('marks and focuses the room the viewer came back from', () => {
+    renderDashboard({ highlightLinkId: 'link-upcoming' });
+    const row = screen.getByRole('button', { name: 'Open Monday Class (last opened)' });
+    expect(row).toHaveFocus();
+    expect(screen.getByText('Last opened')).toBeInTheDocument();
+  });
+
+  it('opens the edit sheet once for ?edit=1 and reports it handled', () => {
+    const onEditHandled = vi.fn();
+    renderDashboard({ editLinkId: 'link-upcoming', onEditHandled });
+    expect(screen.getByTestId('link-editor')).toBeInTheDocument();
+    expect(onEditHandled).toHaveBeenCalledOnce();
+  });
+
+  it('links to the global Rooms list for this exam', () => {
+    const onOpenAllRooms = vi.fn();
+    renderDashboard({ onOpenAllRooms });
+    fireEvent.click(screen.getByRole('button', { name: 'All rooms' }));
+    expect(onOpenAllRooms).toHaveBeenCalledOnce();
   });
 
   it('runs lifecycle and duplicate actions without mutating a release, opening the one-action form for a duplicate', async () => {
@@ -153,8 +252,8 @@ describe('StudentLinksDashboard', () => {
 
   it('reviews a replacement setup in the create form instead of creating a group directly', () => {
     renderDashboard();
-    fireEvent.click(screen.getByText('Old Scholarship'));
-    fireEvent.click(screen.getByRole('button', { name: 'Use setup for Version 5' }));
+    fireEvent.click(screen.getByLabelText('Actions for Old Scholarship'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate setup' }));
 
     expect(screen.getByTestId('create-room-flow')).toBeInTheDocument();
     expect(mocks.flowProps.at(-1)).toMatchObject({ prefill: expect.objectContaining({ id: 'link-old' }) });
@@ -187,7 +286,7 @@ describe('StudentLinksDashboard', () => {
     expect(mocks.sharedSetValue).toHaveBeenCalledWith("access/link-current", undefined);
     expect(mocks.publishCommand).toHaveBeenCalledWith("access.deleted", { linkId: "link-current" });
     await waitFor(() => expect(screen.queryByText("Saturday Class")).not.toBeInTheDocument());
-    expect(screen.getAllByText("Monday Class").length).toBeGreaterThan(0);
+    expect(screen.getByText("Monday Class")).toBeInTheDocument();
   });
 
   it("keeps a link and offers refresh when deletion loses the revision race", async () => {
@@ -208,8 +307,8 @@ describe('StudentLinksDashboard', () => {
   it('makes room creation the primary empty-state action', () => {
     renderDashboard({ overview: { ...overview, links: [] } });
     expect(screen.queryByRole('button', { name: 'New access group' })).not.toBeInTheDocument();
-    // The header offers the same action, so the first-time guide's button is scoped to its own region.
-    fireEvent.click(within(screen.getByRole('region', { name: 'Set up a room' })).getByRole('button', { name: 'Create room' }));
+    // The header offers the same action, so the empty state's button is scoped to the Rooms region.
+    fireEvent.click(within(screen.getByRole('region', { name: 'Rooms' })).getByRole('button', { name: 'Create room' }));
     expect(screen.getByTestId('create-room-flow')).toBeInTheDocument();
   });
 

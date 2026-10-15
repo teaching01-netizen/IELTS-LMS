@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -243,6 +244,9 @@ type ValidationReport struct {
 
 // CreateRequest mirrors CreateExamRequest (wire camelCase).
 type CreateRequest struct {
+	// OperationKey makes create retries replay the committed exam instead of
+	// minting a second exam after a lost response. Empty preserves legacy calls.
+	OperationKey     string
 	Slug             string
 	Title            string
 	ExamType         string
@@ -297,9 +301,10 @@ func conflictError(msg string) *apperrors.Error {
 	return apperrors.New(apperrors.CodeConflict, msg)
 }
 
-// claimPublishOperationKey mirrors authoring.claimOperationKey for the
-// publish path so a lost-response retry replays the sealed version.
-func claimPublishOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, fingerprint string) (replay []byte, claimed bool, err error) {
+// claimExamOperationKey stores an actor-scoped operation claim in the same
+// transaction as its effect. A duplicate key replays the stored result when
+// the request fingerprint matches and conflicts otherwise.
+func claimExamOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, fingerprint string) (replay []byte, claimed bool, err error) {
 	res, err := q.ExecContext(ctx, "INSERT IGNORE INTO authoring_operation_keys (actor_id, scope, operation_key, request_hash, created_at, expires_at) VALUES (?, ?, ?, ?, NOW(6), DATE_ADD(NOW(6), INTERVAL 7 DAY))", actor, scope, key, fingerprint)
 	if err != nil {
 		return nil, false, err
@@ -359,6 +364,9 @@ func scanExam(row interface {
 }
 
 func validateCreate(req CreateRequest) error {
+	if len(strings.TrimSpace(req.OperationKey)) > 128 {
+		return validationError("operationKey must contain between 1 and 128 characters.")
+	}
 	if strings.TrimSpace(req.Slug) == "" {
 		return validationError("Exam slug is required.")
 	}
@@ -388,6 +396,16 @@ func validateCreate(req CreateRequest) error {
 		}
 	}
 	return nil
+}
+
+func createRequestFingerprint(req CreateRequest) (string, error) {
+	req.OperationKey = ""
+	raw, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("%x", sum[:]), nil
 }
 
 func requireReadActor(actor auth.ActorContext) error {
@@ -633,6 +651,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Exam, error) {
 	if err := validateCreate(req); err != nil {
 		return Exam{}, err
 	}
+	normalizedKey := strings.TrimSpace(req.OperationKey)
+	var fingerprint string
+	if normalizedKey != "" {
+		var err error
+		fingerprint, err = createRequestFingerprint(req)
+		if err != nil {
+			return Exam{}, err
+		}
+	}
 	providerKey := NormalizeProviderKey(firstNonEmpty(req.ProviderKey))
 	id := uuid.NewString()
 	orgID := sql.NullString{}
@@ -652,6 +679,26 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Exam, error) {
 	}
 	var created Exam
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		if normalizedKey != "" {
+			replay, claimed, err := claimExamOperationKey(ctx, q, strings.TrimSpace(req.OwnerID), "exam-create", normalizedKey, fingerprint)
+			if err != nil {
+				return err
+			}
+			if !claimed {
+				if len(replay) == 0 {
+					return conflictError("This exam creation is still being processed; retry with the same operation key.")
+				}
+				var replayed Exam
+				if err := json.Unmarshal(replay, &replayed); err != nil {
+					return fmt.Errorf("decode replayed exam creation result: %w", err)
+				}
+				if strings.TrimSpace(replayed.ID) == "" {
+					return errors.New("stored exam creation result has no exam id")
+				}
+				created = replayed
+				return nil
+			}
+		}
 		res, err := q.ExecContext(ctx, "INSERT INTO exam_entities (id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, created_at, updated_at, schema_version, revision) VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, NOW(), NOW(), ?, 0)", id, strings.TrimSpace(req.Slug), strings.TrimSpace(req.Title), providerKey, nullableString(providerExamType), req.ExamType, req.Visibility, nullableString(orgID), strings.TrimSpace(req.OwnerID), schemaVersion)
 		if err != nil {
 			if isDuplicateKey(err) {
@@ -695,6 +742,15 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Exam, error) {
 			return err
 		}
 		created = e
+		if normalizedKey != "" {
+			raw, err := json.Marshal(created)
+			if err != nil {
+				return err
+			}
+			if _, err := q.ExecContext(ctx, "UPDATE authoring_operation_keys SET result_json = ? WHERE actor_id = ? AND scope = ? AND operation_key = ?", string(raw), strings.TrimSpace(req.OwnerID), "exam-create", normalizedKey); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return created, err
@@ -877,7 +933,7 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 	}
 	err = s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		if normalizedKey != "" {
-			replay, claimed, err := claimPublishOperationKey(ctx, q, actorID, publishScope, normalizedKey, publishFingerprint)
+			replay, claimed, err := claimExamOperationKey(ctx, q, actorID, publishScope, normalizedKey, publishFingerprint)
 			if err != nil {
 				return err
 			}

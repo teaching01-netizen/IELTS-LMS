@@ -73,6 +73,7 @@ func examsCreateHandler(app *App) http.HandlerFunc {
 			ProviderKey:      req.ProviderKey,
 			ProviderExamType: req.ProviderExamType,
 			SATConfig:        req.Configuration,
+			OperationKey:     strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 		})
 		if err != nil {
 			httpx.WriteError(w, r, err)

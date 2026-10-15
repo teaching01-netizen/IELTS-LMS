@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { SatPageError, SatPageLoading } from '../ui/SatPage';
 import { useAccessDistributionOverview } from '../../../features/exam-authoring/api/assessmentAccessLinkQueries';
@@ -49,6 +49,14 @@ export function SatAccessRoute() {
     // Run once on arrival: later changes to the query string are not requests.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // "?edit=1" (Room settings on the room page) opens that room's editor once.
+  const clearEditRequest = useCallback(() => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete('edit');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   const canRunSessions = canViewExamResponses(role);
   const session = useAccessSessionBindings({
     canRun: canRunSessions,
@@ -92,13 +100,10 @@ export function SatAccessRoute() {
         canCreate={chrome.canCreateSession}
         onFixIssue={openIssue}
         createRequest={createRequest}
-        selectedLinkId={searchParams.get('link')}
-        onSelectionChange={(linkId) => setSearchParams((current) => {
-          const next = new URLSearchParams(current);
-          if (linkId) next.set('link', linkId);
-          else next.delete('link');
-          return next;
-        }, { replace: true })}
+        highlightLinkId={searchParams.get('link')}
+        editLinkId={searchParams.get('edit') === '1' ? searchParams.get('link') : null}
+        onEditHandled={clearEditRequest}
+        onOpenAllRooms={() => navigate(`/sat/sessions?${new URLSearchParams({ exam: exam.id })}`)}
         session={session}
         shell={{
           lifecycle: chrome.lifecycle,

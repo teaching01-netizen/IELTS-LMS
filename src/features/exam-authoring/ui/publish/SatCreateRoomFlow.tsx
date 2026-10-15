@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useExamQuery } from "../../api/examQueries";
+import { useClassroomPlan } from "../../api/assessmentQueries";
 import { useSatExamConfigDefaults } from "../../api/satExamConfigApi";
 import { clearSatRoomDraft, peekSatRoomDraft, stashSatRoomDraft } from "../../application/satRoomDraftStore";
 import { useCreateSatRoom } from "./useCreateSatRoom";
@@ -7,7 +8,7 @@ import type {
   AccessLinkMemberInput,
   AssessmentAccessLink,
 } from "../../contracts/accessLinks";
-import type { AssessmentValidationIssue } from "../../contracts/assessment";
+import type { AssessmentValidationIssue, SatClassroomPlan } from "../../contracts/assessment";
 import type { CreateRoomState, SatRoomFields, SatRoomIssue, SatRoomReceipt } from "../../contracts/satCreateRoom";
 import { AccessLinkEditorSheet } from "../access-links/AccessLinkEditorSheet";
 import { publishIssueDestinationLabel, resolvePublishIssueDestination } from "../release/releaseSelectors";
@@ -43,6 +44,7 @@ interface SatCreateRoomFlowProps {
 export function SatCreateRoomFlow(props: SatCreateRoomFlowProps) {
   const room = useCreateSatRoom(props.examId);
   const examQuery = useExamQuery(props.examId);
+  const classroomPlanQuery = useClassroomPlan(props.examId);
   const satDefaultsQuery = useSatExamConfigDefaults();
   const online = useReleaseOnline();
   // Read once per mount: an author who left to fix an exam issue returns to the
@@ -91,7 +93,7 @@ export function SatCreateRoomFlow(props: SatCreateRoomFlowProps) {
   };
 
   const pendingLabel = state.status === "syncing" ? "Saving changes…" : "Creating room…";
-  const submitDisabled = !online || !canEdit || state.status === "unknown";
+  const submitDisabled = !online || !canEdit || state.status === "unknown" || !classroomPlanQuery.isSuccess;
 
   const status = (
     <section
@@ -122,6 +124,9 @@ export function SatCreateRoomFlow(props: SatCreateRoomFlowProps) {
       prefill={props.prefill ?? null}
       restoreDraft={restoreDraft}
       providerKey="sat"
+      classroomPlan={(classroomPlanQuery.data?.plan ?? null) as SatClassroomPlan | null}
+      classroomPlanStatus={classroomPlanQuery.isSuccess ? "ready" : classroomPlanQuery.error ? "error" : "loading"}
+      onRetryClassroomPlan={() => void classroomPlanQuery.refetch()}
       classroomAvailability={classroomAvailability}
       examTitle={props.examTitle}
       publishScope="full"
@@ -131,7 +136,7 @@ export function SatCreateRoomFlow(props: SatCreateRoomFlowProps) {
       membersError={props.membersError ?? null}
       {...(props.onRetryMembers ? { onRetryMembers: props.onRetryMembers } : {})}
       isSaving={room.isBusy}
-      inputsDisabled={state.status === "unknown"}
+      inputsDisabled={state.status === "unknown" || !classroomPlanQuery.isSuccess}
       submitDisabled={submitDisabled}
       submitLabel="Create room"
       pendingLabel={pendingLabel}

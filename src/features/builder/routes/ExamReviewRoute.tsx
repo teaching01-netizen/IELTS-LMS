@@ -123,9 +123,9 @@ export function ExamReviewRoute() {
   const scheduledTime = latestSchedule ? new Date(latestSchedule.startTime).toLocaleString() : '';
   const publishedLink =
     latestSchedule && typeof window !== 'undefined'
-      ? window.location.origin + '/student/' + latestSchedule.id + '/register'
+      ? window.location.origin + '/student/' + latestSchedule.id + '/register?openExternalBrowser=1'
       : latestSchedule
-        ? '/student/' + latestSchedule.id + '/register'
+        ? '/student/' + latestSchedule.id + '/register?openExternalBrowser=1'
         : undefined;
   const publishSuccess =
     controller.exam?.status === 'published' && currentPublishedVersion

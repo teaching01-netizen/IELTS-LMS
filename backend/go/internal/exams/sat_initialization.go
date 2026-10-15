@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satconvert"
 )
 
 type satInitialModule struct {
@@ -127,6 +129,15 @@ func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string, 
 	if _, err := q.ExecContext(ctx, "INSERT INTO exam_versions (id, exam_id, version_number, content_snapshot, config_snapshot, created_by, is_draft, is_published, revision) VALUES (?, ?, ?, ?, ?, ?, TRUE, FALSE, 0)", versionID, examID, versionNumber, satInitialContent, config, actorID); err != nil {
 		return "", err
 	}
+	if cfg != nil && len(cfg.ClassroomPlan) > 0 {
+		plan, err := json.Marshal(cfg.ClassroomPlan)
+		if err != nil {
+			return "", fmt.Errorf("encode SAT classroom plan: %w", err)
+		}
+		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET sat_classroom_plan = ? WHERE id = ?", string(plan), versionID); err != nil {
+			return "", err
+		}
+	}
 
 	blueprint, thresholds := cfg.apply(satInitialBlueprint)
 	for sectionIndex, section := range blueprint {
@@ -176,11 +187,18 @@ func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string, 
 		}
 	}
 
-	scoringPolicy, err := satInitialScoringPolicy()
-	if err != nil {
-		return "", err
+	policyKey := "practice"
+	var scoringPolicy string
+	if cfg != nil && len(cfg.ScoreConverter) > 0 && strings.TrimSpace(string(cfg.ScoreConverter)) != "" && strings.TrimSpace(string(cfg.ScoreConverter)) != "null" {
+		policyKey = satconvert.ScoreType
+		scoringPolicy = string(cfg.ScoreConverter)
+	} else {
+		scoringPolicy, err = satInitialScoringPolicy()
+		if err != nil {
+			return "", err
+		}
 	}
-	if _, err := q.ExecContext(ctx, "INSERT INTO assessment_scoring_policies (id, exam_version_id, policy_key, policy_config) VALUES (?, ?, 'practice', ?)", uuid.NewString(), versionID, scoringPolicy); err != nil {
+	if _, err := q.ExecContext(ctx, "INSERT INTO assessment_scoring_policies (id, exam_version_id, policy_key, policy_config) VALUES (?, ?, ?, ?)", uuid.NewString(), versionID, policyKey, scoringPolicy); err != nil {
 		return "", err
 	}
 	if _, err := q.ExecContext(ctx, "UPDATE exam_entities SET current_draft_version_id = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ?", versionID, examID); err != nil {

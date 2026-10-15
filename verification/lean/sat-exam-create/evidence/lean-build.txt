@@ -1,0 +1,66 @@
+✔ [2/7] Built Model
+✔ [3/7] Built Safety
+✔ [4/7] Built Counterexamples
+ℹ [5/7] Built AxiomAudit
+info: ./././proof/AxiomAudit.lean:7:0: SatExamCreate.initiate (s : State) (h : Init s) : Invariant s
+info: ./././proof/AxiomAudit.lean:8:0: SatExamCreate.commit_preserves {s : State} {r : Request} (hinv : Invariant s) (hvalid : r.payload.valid)
+  (havailable : keyAvailable s r) : Invariant (commitState s r)
+info: ./././proof/AxiomAudit.lean:9:0: SatExamCreate.clearOperation_preserves {s : State} {op : Operation} (hinv : Invariant s) :
+  Invariant (clearOperation s op)
+info: ./././proof/AxiomAudit.lean:10:0: SatExamCreate.step_preserves {s s' : State} {a : Action} (hinv : Invariant s) (hstep : Step s a s') : Invariant s'
+info: ./././proof/AxiomAudit.lean:11:0: SatExamCreate.reachable_invariant {s : State} (h : Reachable s) : Invariant s
+info: ./././proof/AxiomAudit.lean:12:0: SatExamCreate.same_key_retry_replays {s : State} {r : Request} {key : OperationKey} {entry : LedgerEntry}
+  (hvalid : r.payload.valid) (hkey : r.operationKey = some key) (hentry : s.ledger (r.actor, key) = some entry)
+  (hsame : entry.fingerprint = r.payload) : Step s (Action.submit r) s
+info: ./././proof/AxiomAudit.lean:13:0: SatExamCreate.mismatched_key_payload_conflicts {s : State} {r : Request} {key : OperationKey} {entry : LedgerEntry}
+  (hvalid : r.payload.valid) (hkey : r.operationKey = some key) (hentry : s.ledger (r.actor, key) = some entry)
+  (hdifferent : entry.fingerprint ≠ r.payload) : Step s (Action.submit r) s
+info: ./././proof/AxiomAudit.lean:14:0: SatExamCreate.abort_is_stutter (s : State) (r : Request) : Step s (Action.abort r) s
+info: ./././proof/AxiomAudit.lean:15:0: SatExamCreate.lost_ack_is_stutter {s : State} {id : ExamId} {b : ExamBundle} (h : s.bundles id = some b) :
+  Step s (Action.ackLost id) s
+info: ./././proof/AxiomAudit.lean:16:0: SatExamCreate.receipt_points_to_complete_exam {s : State} (hinv : Invariant s) {op : Operation} {entry : LedgerEntry}
+  (hentry : s.ledger op = some entry) :
+  ∃ b,
+    s.bundles entry.resultId = some b ∧
+      bundleWellFormed entry.resultId b ∧ b.owner = op.fst ∧ b.payload = entry.fingerprint
+info: ./././proof/AxiomAudit.lean:17:0: SatExamCreate.emptyState_invariant : Invariant emptyState
+info: ./././proof/AxiomAudit.lean:18:0: SatExamCreate.valid_create_is_reachable {r : Request} (hvalid : r.payload.valid) : Reachable (commitState emptyState r)
+info: ./././proof/AxiomAudit.lean:19:0: SatExamCreate.old_client_lost_ack_can_duplicate :
+  ∃ s1 s2,
+    Step emptyState (Action.submit legacyRequest) s1 ∧
+      Step s1 (Action.ackLost 0) s1 ∧
+        Step s1 (Action.submit legacyRequest) s2 ∧
+          ∃ b0 b1,
+            s2.bundles 0 = some b0 ∧ s2.bundles 1 = some b1 ∧ b0.payload = samplePayload ∧ b1.payload = samplePayload
+info: ./././proof/AxiomAudit.lean:20:0: SatExamCreate.keyed_lost_ack_then_retry_replays :
+  ∃ s1 entry,
+    Step emptyState (Action.submit keyedRequest) s1 ∧
+      Step s1 (Action.ackLost 0) s1 ∧
+        Step s1 (Action.submit keyedRequest) s1 ∧
+          s1.nextExamId = 1 ∧ s1.ledger (1, 7) = some entry ∧ entry.resultId = 0 ∧ entry.fingerprint = samplePayload
+info: ./././proof/AxiomAudit.lean:21:0: SatExamCreate.expired_key_allows_late_duplicate :
+  ∃ s1 s2,
+    Step emptyState (Action.submit keyedRequest) s1 ∧
+      Step s1 (Action.expireKey (1, 7)) s2 ∧
+        Step s2 (Action.submit keyedRequest) (commitState s2 keyedRequest) ∧
+          ∃ b0 b1,
+            (commitState s2 keyedRequest).bundles 0 = some b0 ∧
+              (commitState s2 keyedRequest).bundles 1 = some b1 ∧
+                b0.payload = samplePayload ∧ b1.payload = samplePayload
+info: ./././proof/AxiomAudit.lean:23:0: 'SatExamCreate.initiate' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:24:0: 'SatExamCreate.commit_preserves' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:25:0: 'SatExamCreate.clearOperation_preserves' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:26:0: 'SatExamCreate.step_preserves' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:27:0: 'SatExamCreate.reachable_invariant' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:28:0: 'SatExamCreate.same_key_retry_replays' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:29:0: 'SatExamCreate.mismatched_key_payload_conflicts' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:30:0: 'SatExamCreate.abort_is_stutter' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:31:0: 'SatExamCreate.lost_ack_is_stutter' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:32:0: 'SatExamCreate.receipt_points_to_complete_exam' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:33:0: 'SatExamCreate.emptyState_invariant' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:34:0: 'SatExamCreate.valid_create_is_reachable' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:35:0: 'SatExamCreate.old_client_lost_ack_can_duplicate' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:36:0: 'SatExamCreate.keyed_lost_ack_then_retry_replays' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:37:0: 'SatExamCreate.expired_key_allows_late_duplicate' depends on axioms: [propext]
+✔ [6/7] Built SatExamCreate
+Build completed successfully.

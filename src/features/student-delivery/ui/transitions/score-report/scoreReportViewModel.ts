@@ -99,6 +99,8 @@ function unavailableEstimate(reason: string): ScoreDisplay {
 
 /** Readable fallback when the delivered assessment does not title a module. */
 export function fallbackModuleLabel(moduleKey: string): string {
+  const satModule = /(?:^|[-_\s])m([12])(?:-(?:lower|higher))?$/i.exec(moduleKey);
+  if (satModule) return `Module ${satModule[1]}`;
   const numbered = /(?:^|[-_\s])(\d+)$/.exec(moduleKey);
   if (numbered) return `Module ${numbered[1]}`;
   const spaced = moduleKey.replace(/[-_]+/g, " ").trim();

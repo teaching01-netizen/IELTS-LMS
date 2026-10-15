@@ -38,7 +38,7 @@ const pageTwo = {
   total: 51, offset: 50, limit: 50, hasMore: false,
 };
 const savedAnswers = { attemptId: 'attempt-2', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S2', studentName: 'Student X', cohortName: 'Morning', status: 'running', protocolVersion: 2, responseRevision: 4, savedAnswerCount: 1, lastSavedAt: '2026-09-01T08:05:00Z', questions: [
-  { questionId: 'q1', sectionKey: 'reading-writing', moduleKey: 'module-1', displayOrder: 1, response: 'B', markedForReview: false },
+  { questionId: 'q1', sectionKey: 'reading-writing', moduleKey: 'module-1', displayOrder: 1, response: 'choice-b', responseLabel: 'B', markedForReview: false },
   { questionId: 'q2', sectionKey: 'reading-writing', moduleKey: 'module-1', displayOrder: 2, response: null, markedForReview: false },
 ] };
 
@@ -132,27 +132,73 @@ describe('SAT Results hierarchy', () => {
     expect(screen.getByTestId('test-location')).toHaveTextContent('/sat/results?exam=sat-1&access=schedule-1');
   });
 
-  it('shows pinned estimated scores on the staff detail and says when a section has none', () => {
+  it('builds score and performance cards from classroomRaw and keeps questions when stored sections are empty', () => {
     useSatResultQueryMock.mockReturnValue({
       data: {
         summary: { id: 'result-1', attemptId: 'attempt-1', outcomeStatus: 'scored', releaseStatus: 'released', totalScore: null, scheduleId: 'schedule-1', examId: 'sat-1', examTitle: 'Practice Test 06', versionNumber: 12, studentId: 'S1', studentName: 'John Smith', studentEmail: null, cohortName: 'Morning', submittedAt: '2026-09-01T08:00:00Z' },
-        scorePayload: { classroomRaw: { conversion: { converterVersion: 'classroom-v1' }, sections: [
-          { sectionKey: 'reading-writing', conversionStatus: 'converted', scaled: { low: 600, high: 620 } },
-          { sectionKey: 'math', conversionStatus: 'unavailable' },
-        ] } },
-        sections: [
-          { sectionKey: 'reading-writing', rawCorrect: 40, operationalQuestionCount: 54, modules: [] },
-          { sectionKey: 'math', rawCorrect: 9, operationalQuestionCount: 22, modules: [] },
+        scorePayload: { classroomRaw: {
+          rawCorrect: 49,
+          total: 76,
+          conversion: { converterVersion: 'sat-global-v3' },
+          sections: [
+            { sectionKey: 'reading-writing', rawCorrect: 40, total: 54, conversionStatus: 'converted', scaled: { low: 600, high: 620 }, modules: [
+              { moduleKey: 'rw-m1', rawCorrect: 21, total: 27 },
+              { moduleKey: 'rw-m2-higher', rawCorrect: 19, total: 27 },
+            ] },
+            { sectionKey: 'math', rawCorrect: 9, total: 22, conversionStatus: 'unavailable', modules: [
+              { moduleKey: 'math-m1', rawCorrect: 9, total: 22 },
+            ] },
+          ],
+          domains: [{ sectionKey: 'reading-writing', domain: 'Information and Ideas', correct: 6, total: 8 }],
+        } },
+        sections: [],
+        questions: [
+          { questionId: 'q-rw', displayOrder: 1, sectionKey: 'reading-writing', moduleKey: 'rw-m1', kind: 'single_choice', response: 'choice-b', responseLabel: 'B', correctAnswer: 'choice-a', correctLabel: 'A', isCorrect: false, isPretest: false, markedForReview: true },
+          { questionId: 'q-math', displayOrder: 1, sectionKey: 'math', moduleKey: 'math-m1', kind: 'single_choice', response: 'choice-a', responseLabel: 'A', correctAnswer: 'choice-a', correctLabel: 'A', isCorrect: true, isPretest: false, markedForReview: false },
+          { questionId: 'q-pretest', displayOrder: 2, sectionKey: 'math', moduleKey: 'math-m1', kind: 'student_produced_response', response: null, responseLabel: '', correctAnswer: '42', correctLabel: '42', isCorrect: null, isPretest: true, markedForReview: false },
         ],
-        questions: [],
       },
       isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
     });
     renderResultsRoute('/sat/results/result-1');
-    expect(screen.getByText(/Estimated total/)).toHaveTextContent('Estimated total unavailable');
+    const scoreCard = screen.getByText('Estimated total SAT score').parentElement?.parentElement;
+    expect(scoreCard).not.toBeNull();
+    expect(within(scoreCard as HTMLElement).getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText('No conversion table for M1 22 questions in sat-global-v3.')).toBeInTheDocument();
+    expect(screen.getByText(/Converter sat-global-v3/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Score Conversion' })).toHaveAttribute('href', '/sat/score-conversion');
     expect(screen.getByText('600–620')).toBeInTheDocument();
-    expect(screen.getByText('Estimated score unavailable')).toBeInTheDocument();
-    expect(screen.getByText(/Converter classroom-v1/)).toBeInTheDocument();
+    expect(screen.getAllByText('Module 1 · Base')).toHaveLength(2);
+    expect(screen.getByText('Module 2 · Higher')).toBeInTheDocument();
+    expect(screen.getByText('Adaptive route · Higher')).toBeInTheDocument();
+    expect(screen.getByText('Information and Ideas')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Question-level responses (3)' })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Reading & Writing question responses' })).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: 'Math question responses' })).toBeInTheDocument();
+    const rwTable = screen.getByRole('table', { name: 'Reading & Writing question responses' });
+    expect(within(rwTable).getByText('B')).toBeInTheDocument();
+    expect(within(rwTable).getByText('A')).toBeInTheDocument();
+    expect(within(rwTable).getAllByTitle(/choice-/)).toHaveLength(2);
+    expect(within(rwTable).getByText('Incorrect')).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: 'Incorrect' })[0]!);
+    expect(screen.getByText('1 of 1 shown')).toBeInTheDocument();
+    expect(within(screen.getByRole('table', { name: 'Math question responses' })).getByText('Pretest')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Unanswered' })).toHaveLength(2);
+  });
+
+  it('shows raw score for scored attempts without totalScore and reserves Score pending for pending outcomes', () => {
+    useSatAttemptsQueryMock.mockReturnValue({
+      data: { items: [
+        { ...pageOne.items[0], totalScore: null, rawCorrect: 42, rawTotal: 54 },
+        { ...pageOne.items[1], attemptId: 'attempt-pending', studentName: 'Pending Student', attemptStatus: 'submitted', outcomeStatus: 'pending' },
+        { ...pageOne.items[1], attemptId: 'attempt-unscored', studentName: 'Unscored Student', attemptStatus: 'submitted', outcomeStatus: 'unscored' },
+      ], total: 3, offset: 0, limit: 50, hasMore: false },
+      isLoading: false, error: null, isFetching: false, refetch: vi.fn(),
+    });
+    renderResultsRoute('/sat/results?exam=sat-1&access=schedule-1');
+    expect(within(screen.getByRole('row', { name: /John Smith/ })).getByText('42/54')).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /Pending Student/ })).getByText('Score pending')).toBeInTheDocument();
+    expect(within(screen.getByRole('row', { name: /Unscored Student/ })).getByText('Not scored')).toBeInTheDocument();
   });
 
   // PDF-08: staff print the same server projection the student does.
@@ -231,13 +277,14 @@ describe('SAT Results hierarchy', () => {
     expect(screen.getByRole('heading', { name: 'Question-level responses (2)' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Reading & Writing' })).toBeInTheDocument();
     expect(screen.getByRole('table', { name: 'Reading & Writing question responses' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Student raw' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Key' })).toBeInTheDocument();
-    expect(screen.getAllByText('Not scored')).toHaveLength(2);
+    expect(screen.getByRole('columnheader', { name: 'Student answer' })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Key' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Result' })).not.toBeInTheDocument();
     expect(screen.getByText('B')).toBeInTheDocument();
-    expect(screen.getByText('Unanswered')).toBeInTheDocument();
+    expect(screen.getByTitle('choice-b')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unanswered' })).toBeInTheDocument();
     expect(screen.queryByText('Correct answer')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Only incorrect')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Incorrect' })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search questions' }), { target: { value: 'q1' } });
     expect(screen.getByText('1 of 2 shown')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Back to Responses' }));
@@ -271,7 +318,7 @@ describe('SAT Results hierarchy', () => {
     renderResultsRoute('/sat/results/attempts/attempt-2');
     expect(screen.getByText('0 answers')).toBeInTheDocument();
     expect(screen.getByText(/No server save yet/)).toBeInTheDocument();
-    expect(screen.getByText('Unanswered')).toBeInTheDocument();
+    expect(within(screen.getByRole('table', { name: 'Math question responses' })).getByText('Unanswered')).toBeInTheDocument();
   });
 
   it('offers retry when saved answers cannot be loaded', () => {

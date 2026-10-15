@@ -17,6 +17,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../api/satCreateRoomApi", () => ({
   satCreateRoomApi: { create: mocks.create, operation: mocks.operation },
 }));
+vi.mock("../../../api/assessmentQueries", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useClassroomPlan: () => ({ data: { plan: null }, isSuccess: true, isError: false, refetch: vi.fn() }),
+  };
+});
 vi.mock("../../../api/examQueries", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
   return {

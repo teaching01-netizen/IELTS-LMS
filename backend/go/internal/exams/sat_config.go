@@ -1,9 +1,13 @@
 package exams
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
+
+	"example.com/ielts-proctoring/internal/satconvert"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // SATSectionConfig is the exam-level delivery configuration of one SAT section,
@@ -27,6 +31,11 @@ type SATExamConfig struct {
 	Sections map[string]SATSectionConfig `json:"sections"`
 	// ShowClassroomScoreReport releases the score report on Classroom completion.
 	ShowClassroomScoreReport *bool `json:"showClassroomScoreReport,omitempty"`
+	// ClassroomPlan fixes the modules students receive in selected sections.
+	ClassroomPlan map[string]string `json:"classroomPlan,omitempty"`
+	// ScoreConverter is an optional, versioned estimated-score table. Absent or
+	// null keeps the raw-score-only policy.
+	ScoreConverter json.RawMessage `json:"scoreConverter,omitempty"`
 }
 
 // SATConfigLimits are the bounds the server enforces, published with the
@@ -108,6 +117,20 @@ func satDefaultThreshold(section satInitialSection) int {
 // per offending field, so a form can show every problem at once.
 func (c SATExamConfig) Validate() error {
 	var problems []string
+	if len(c.ClassroomPlan) > 0 {
+		rawPlan, err := json.Marshal(c.ClassroomPlan)
+		if err != nil {
+			return validationError("SAT classroom plan is invalid.")
+		}
+		if _, err := satpublish.ParsePlan(string(rawPlan)); err != nil {
+			return validationError(err.Error())
+		}
+	}
+	if converter := strings.TrimSpace(string(c.ScoreConverter)); converter != "" && converter != "null" {
+		if _, err := satconvert.Parse(c.ScoreConverter); err != nil {
+			return validationError(err.Error())
+		}
+	}
 	known := make(map[string]satInitialSection, len(satInitialBlueprint))
 	for _, section := range satInitialBlueprint {
 		known[section.key] = section

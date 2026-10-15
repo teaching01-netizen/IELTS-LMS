@@ -82,7 +82,7 @@ function session(infos: Record<string, AccessSessionInfo>, over: Partial<AccessS
   };
 }
 
-function dashboard(links: AssessmentAccessLink[], extra: { createRequest?: CreateRequest | null; session?: AccessSessionBindings; selectedLinkId?: string; onSelectionChange?: (id: string | null) => void; overview?: AccessDistributionOverview } = {}) {
+function dashboard(links: AssessmentAccessLink[], extra: { createRequest?: CreateRequest | null; session?: AccessSessionBindings; highlightLinkId?: string; overview?: AccessDistributionOverview } = {}) {
   return (
     <StudentLinksDashboard
       exam={exam}
@@ -95,8 +95,7 @@ function dashboard(links: AssessmentAccessLink[], extra: { createRequest?: Creat
       shell={shell}
       {...(extra.createRequest !== undefined ? { createRequest: extra.createRequest } : {})}
       {...(extra.session ? { session: extra.session } : {})}
-      {...(extra.selectedLinkId ? { selectedLinkId: extra.selectedLinkId } : {})}
-      {...(extra.onSelectionChange ? { onSelectionChange: extra.onSelectionChange } : {})}
+      {...(extra.highlightLinkId ? { highlightLinkId: extra.highlightLinkId } : {})}
     />
   );
 }
@@ -113,21 +112,13 @@ beforeEach(() => {
 });
 
 describe("Delivery: first-time setup", () => {
-  it("leads a new exam with a two-step guide, no publish step, and a single obvious next action", () => {
+  it("makes Create room the one next action for an exam with no rooms, with no publish step", () => {
     renderDashboard([]);
-    const steps = within(screen.getByRole("list", { name: "Room settings steps" }));
-    expect(steps.queryByText("Publish")).not.toBeInTheDocument();
-    expect(steps.getByText("Create room").closest("li")).toHaveAttribute("aria-current", "step");
-    fireEvent.click(within(screen.getByRole("region", { name: "Set up a room" })).getByRole("button", { name: "Create room" }));
+    expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("region", { name: "Rooms" })).getByRole("button", { name: "Create room" }));
     expect(screen.getByRole("dialog", { name: "Create room" })).toBeInTheDocument();
   });
 
-  it("collapses the guide once access exists, but keeps it reopenable", () => {
-    renderDashboard([link("a", "Morning class")]);
-    expect(screen.queryByRole("region", { name: "Set up a room" })).not.toBeInTheDocument();
-    const guide = screen.getByText("How rooms work").closest("details");
-    expect(guide).not.toHaveAttribute("open");
-  });
 
   it("opens the create form straight away for a request from another page", async () => {
     renderDashboard([link("a", "Morning class")], { createRequest: { id: 1 } });
@@ -144,20 +135,14 @@ describe("Delivery: first-time setup", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Create room" })).not.toBeInTheDocument());
   });
 
-  it("continues from creation into Share and run, and lets the author finish later", async () => {
+  it("takes staff who run rooms from creation straight to the new room", async () => {
     mocks.created = link("new", "New group");
     const bindings = session({ "sched-new": READY });
     renderDashboard([link("new", "New group")], { createRequest: { id: 1 }, session: bindings });
     fireEvent.click(await screen.findByRole("button", { name: "Finish create" }));
-    const panel = within(await screen.findByRole("region", { name: "Room" }));
-    const next = await panel.findByText("Room created");
-    expect(next.closest("[role=status]")).toHaveTextContent("Copying is optional");
-    // Staff who can run sessions are taken straight to the new session's waiting room.
     expect(bindings.onOpenRoom).toHaveBeenCalledWith("sched-new");
-    // The panel leads back to the room, where starting happens; copying is not a prerequisite.
-    expect(screen.getByRole("button", { name: "Open room" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(within(screen.getByRole("region", { name: "Room" })).queryByText("Room created")).not.toBeInTheDocument();
+    // The row confirms in place, should the host keep the viewer here.
+    expect(within(screen.getByRole("button", { name: "Open New group" })).getByText("Room created")).toBeInTheDocument();
   });
 
   it("keeps staff who cannot run rooms on the page after creating one", async () => {
@@ -171,49 +156,51 @@ describe("Delivery: first-time setup", () => {
 });
 
 describe("Delivery: running a group", () => {
-  it("shows entry and room separately on the row and in the panel", () => {
-    renderDashboard([link("a", "Morning class", { status: "paused" })], { session: session({ "sched-a": { phase: "live", timingModel: null, joined: 12 } }) });
-    expect(screen.getByRole("button", { name: "Open Morning class" })).toHaveTextContent("Exam: Running");
-    const panel = within(screen.getByRole("region", { name: "Room" }));
+  it("shows the exam phase and a non-open check-in separately on the row", () => {
+    renderDashboard([link("a", "Morning class", { status: "paused", lifecycleState: "paused" })], { session: session({ "sched-a": { phase: "live", timingModel: null, joined: 12 } }) });
+    const row = screen.getByRole("button", { name: "Open Morning class" });
     // Pausing check-in must not read as pausing the running exam.
-    expect(panel.getByText("Check-in").nextElementSibling).toHaveTextContent("Paused");
-    expect(panel.getByText("Exam").nextElementSibling).toHaveTextContent("Running");
-    expect(panel.getByRole("button", { name: "Open live room" })).toBeInTheDocument();
+    expect(row).toHaveTextContent("Running");
+    expect(row).toHaveTextContent("Check-in paused");
+    expect(within(screen.getByRole("region", { name: /Live now/ })).getByText("Morning class")).toBeInTheDocument();
   });
 
   it("sends a not-started room to its room, where the start is reviewed", () => {
     const bindings = session({ "sched-a": READY });
     renderDashboard([link("a", "Morning class"), link("b", "Evening class")], { session: bindings });
     expect(screen.queryByRole("button", { name: "Start exam" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open room" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Morning class" }));
     expect(bindings.onOpenRoom).toHaveBeenCalledWith("sched-a");
   });
 
-  it("offers Refresh status instead of guessing when room state is stale", () => {
+  it("offers Retry instead of guessing when room state is stale", () => {
     const bindings = session({}, { stale: true });
     renderDashboard([link("a", "Morning class")], { session: bindings });
-    expect(screen.queryByRole("button", { name: "Start exam" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh status" }));
+    expect(screen.getByRole("button", { name: "Open Morning class" })).not.toHaveTextContent("Running");
+    expect(screen.getByText(/Room status could not refresh/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(bindings.onRefresh).toHaveBeenCalledOnce();
-    expect(screen.getByText(/could not be refreshed/i)).toBeInTheDocument();
   });
 
-  it("hides room actions for roles that cannot open the room", () => {
-    renderDashboard([link("a", "Morning class")], { session: session({ "sched-a": READY }, { canRun: false }) });
-    expect(screen.queryByRole("button", { name: "Start exam" })).not.toBeInTheDocument();
-    expect(screen.getByText(/available to administrators/i)).toBeInTheDocument();
-    // Sharing still works for them.
-    expect(screen.getByRole("button", { name: "Copy student link" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open Morning class" })).not.toHaveTextContent("Room:");
+  it("keeps sharing for roles that cannot open the room", () => {
+    const bindings = session({ "sched-a": READY }, { canRun: false });
+    renderDashboard([link("a", "Morning class")], { session: bindings });
+    fireEvent.click(screen.getByRole("button", { name: "Open Morning class" }));
+    expect(bindings.onOpenRoom).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("Actions for Morning class"));
+    expect(screen.getByRole("menuitem", { name: "Copy student link" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "View results" })).not.toBeInTheDocument();
   });
 
-  it("turns a finished room into View results with Duplicate setup, opening a prefilled create form", () => {
+  it("offers View results and Duplicate setup for a finished room, opening a prefilled create form", () => {
     const bindings = session({ "sched-a": { phase: "finished", timingModel: null, joined: 12 } });
     renderDashboard([link("a", "Morning class")], { session: bindings });
-    fireEvent.click(screen.getByRole("button", { name: "View results" }));
+    fireEvent.click(screen.getByLabelText("Actions for Morning class"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "View results" }));
     expect(bindings.onOpenResults).toHaveBeenCalledWith("sched-a");
 
-    fireEvent.click(screen.getByRole("button", { name: "Duplicate setup" }));
+    fireEvent.click(screen.getByLabelText("Actions for Morning class"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Duplicate setup" }));
     expect(screen.getByRole("dialog", { name: "Create room" })).toBeInTheDocument();
     expect(screen.getByTestId("flow-prefill")).toHaveTextContent("Morning class");
   });
@@ -222,17 +209,17 @@ describe("Delivery: running a group", () => {
     const bindings = session({ "sched-a": { phase: "paused", timingModel: null, joined: 12 } });
     renderDashboard([link("a", "Morning class")], { session: bindings });
     expect(screen.queryByRole("button", { name: "Resume exam" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open room" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Morning class" }));
     expect(bindings.onOpenRoom).toHaveBeenCalledWith("sched-a");
   });
 
   it("keeps a cancelled room distinct from a finished one", () => {
-    const bindings = session({ "sched-a": { phase: "cancelled", timingModel: null, joined: 12 } });
-    renderDashboard([link("a", "Morning class")], { session: bindings });
-    expect(screen.getByRole("button", { name: "Open Morning class" })).toHaveTextContent("Exam: Cancelled");
-    fireEvent.click(screen.getByRole("button", { name: "Review room" }));
-    expect(bindings.onOpenRoom).toHaveBeenCalledWith("sched-a");
+    renderDashboard([link("a", "Morning class")], { session: session({ "sched-a": { phase: "cancelled", timingModel: null, joined: 12 } }) });
+    const closed = screen.getByText("Closed rooms (1)").closest("details")!;
+    expect(within(closed).getByRole("button", { name: "Open Morning class" })).toHaveTextContent("Cancelled");
+    expect(screen.queryByRole("region", { name: /Finished/ })).not.toBeInTheDocument();
   });
+
 });
 
 describe("Delivery continuity and action safety", () => {
@@ -244,9 +231,9 @@ describe("Delivery continuity and action safety", () => {
     expect(screen.getByRole("dialog", { name: "Create room" })).toBeInTheDocument();
   });
 
-  it("counts rooms from earlier releases toward configured setup", () => {
+  it("lists rooms from earlier releases with their version", () => {
     renderDashboard([link("old", "Old class", { publishedVersionId: "v-2", versionNumber: 2 })]);
-    expect(screen.queryByRole("region", { name: "Set up a room" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Old class" })).toHaveTextContent("Version 2");
   });
 
   it("offers earlier rooms inside the create form and reopens it prefilled", async () => {
@@ -257,11 +244,10 @@ describe("Delivery continuity and action safety", () => {
     expect(screen.getByTestId("flow-prefill")).toHaveTextContent("Morning class");
   });
 
-  it("restores the requested access group and reports a newly selected group", () => {
-    const onSelectionChange = vi.fn();
-    renderDashboard([link("a", "Morning class"), link("b", "Evening class")], { selectedLinkId: "b", onSelectionChange });
-    expect(screen.getByRole("button", { name: "Open Evening class" })).toHaveAttribute("aria-current", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Open Morning class" }));
-    expect(onSelectionChange).toHaveBeenCalledWith("a");
+  it("marks the room the viewer came back from as last opened", () => {
+    renderDashboard([link("a", "Morning class"), link("b", "Evening class")], { highlightLinkId: "b" });
+    expect(screen.getByRole("button", { name: "Open Evening class (last opened)" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Morning class" })).not.toHaveTextContent("Last opened");
   });
+
 });

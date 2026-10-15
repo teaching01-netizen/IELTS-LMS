@@ -134,6 +134,39 @@ func SATCorrectAnswer(answerJSON string) (correct any, ok bool) {
 	}
 }
 
+// SATChoiceLabels maps each single-choice option id to its display letter in
+// authored option order. Student-produced responses have no option labels.
+func SATChoiceLabels(answerJSON string) map[string]string {
+	var def struct {
+		Kind    string `json:"kind"`
+		Options []struct {
+			ID string `json:"id"`
+		} `json:"options"`
+	}
+	if strings.TrimSpace(answerJSON) == "" || json.Unmarshal([]byte(answerJSON), &def) != nil || def.Kind != "single_choice" {
+		return map[string]string{}
+	}
+	labels := make(map[string]string, len(def.Options))
+	for i, option := range def.Options {
+		if option.ID == "" {
+			continue
+		}
+		labels[option.ID] = choiceLetter(i)
+	}
+	return labels
+}
+
+func choiceLetter(index int) string {
+	// Excel-style labels keep the helper correct if a future item has more
+	// than 26 choices, while the normal SAT options remain A through D.
+	var label []byte
+	for index >= 0 {
+		label = append([]byte{byte('A' + index%26)}, label...)
+		index = index/26 - 1
+	}
+	return string(label)
+}
+
 // SATHasKey reports whether a sealed SAT answer definition carries a usable
 // key (a single-choice option id or at least one accepted response).
 func SATHasKey(answerJSON string) bool {

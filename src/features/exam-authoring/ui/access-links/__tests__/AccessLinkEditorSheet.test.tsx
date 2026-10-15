@@ -238,6 +238,63 @@ describe("AccessLinkEditorSheet", () => {
     expect(onCreate.mock.calls[0]![0]).toMatchObject({ satSessionMode: "classroom", satRoutePolicy: "force_higher" });
   });
 
+  it("restricts room choices to the in-scope custom module plan", async () => {
+    const onCreate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AccessLinkEditorSheet
+        open
+        link={null}
+        providerKey="sat"
+        classroomPlan={{ "reading-writing": "m1_easy", math: "m2_hard" }}
+        classroomPlanStatus="ready"
+        members={[]}
+        isSaving={false}
+        onClose={vi.fn()}
+        onCreate={onCreate}
+      />,
+    );
+
+    const practice = screen.getByRole("button", { name: /^Practice/ });
+    expect(practice).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Classroom/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Reading & Writing · Module 2 is set by the exam: Easy Module 2.")).toBeInTheDocument();
+    expect(screen.getByText("Math · Module 2 is set by the exam: Hard Module 2.")).toBeInTheDocument();
+
+    const routing = screen.getByLabelText("Module 2 routing");
+    expect(within(routing).getByRole("option", { name: "Classroom (adaptive Module 2)" })).toBeInTheDocument();
+    expect(within(routing).queryByRole("option", { name: "Classroom (everyone gets easier Module 2)" })).not.toBeInTheDocument();
+    expect(within(routing).queryByRole("option", { name: "Classroom (everyone gets harder Module 2)" })).not.toBeInTheDocument();
+    expect(within(routing).queryByRole("option", { name: "Classroom (teacher picks Module 2 per student)" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Room name"), { target: { value: "Custom module room" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create room" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledOnce());
+    expect(onCreate.mock.calls[0]![0]).toMatchObject({ satSessionMode: "classroom" });
+    expect(onCreate.mock.calls[0]![0].satRoutePolicy).toBeUndefined();
+  });
+
+  it("keeps the module-plan retry available while the room form is disabled", () => {
+    const onRetryClassroomPlan = vi.fn();
+    render(
+      <AccessLinkEditorSheet
+        open
+        link={null}
+        providerKey="sat"
+        classroomPlanStatus="error"
+        onRetryClassroomPlan={onRetryClassroomPlan}
+        members={[]}
+        isSaving={false}
+        inputsDisabled
+        submitDisabled
+        onClose={vi.fn()}
+        onCreate={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry module plan" }));
+    expect(onRetryClassroomPlan).toHaveBeenCalledOnce();
+    expect(screen.getByLabelText("Room name")).toBeDisabled();
+  });
+
   it("offers no section choice for a one-section release and pins the room to it", async () => {
     const onCreate = vi.fn().mockResolvedValue(undefined);
     render(

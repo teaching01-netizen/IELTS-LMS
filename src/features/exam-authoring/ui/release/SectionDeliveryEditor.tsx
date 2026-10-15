@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Clock3, GitBranch, Save } from "lucide-react";
-import { useUpdateSectionDeliverySettings } from "../../api/assessmentQueries";
+import { useClassroomPlan, useUpdateSectionDeliverySettings } from "../../api/assessmentQueries";
 import type { AssessmentSectionShell } from "../../contracts/assessment";
+import { SHAPE_MODULE_ROLES } from "../../contracts/satExamConfig";
 import { operationalCountForSection, secondsToMinutes, toUserFacingReleaseError } from "./releaseSelectors";
 import { NumericField } from "./NumericField";
 import { ClassroomPlanField } from "./ClassroomPlanField";
@@ -32,6 +33,10 @@ function SectionDeliveryEditorInner({
   );
   const effectiveCanEdit = canEdit && !collaborationReadOnly;
   const update = useUpdateSectionDeliverySettings(examId);
+  const classroomPlanQuery = useClassroomPlan(examId);
+  const planReady = classroomPlanQuery.isSuccess;
+  const shape = classroomPlanQuery.data?.plan?.[section.sectionKey] ?? "full";
+  const shapeRoles = SHAPE_MODULE_ROLES[shape];
   const base = useMemo(
     () => section.modules.find((module) => module.adaptiveRole === "base"),
     [section.modules],
@@ -167,7 +172,7 @@ function SectionDeliveryEditorInner({
   const save = useCallback(async () => {
     if (!base || !lower || !higher || !routing || !effectiveCanEdit || update.isPending) return;
     setLocalError(null);
-    if (!Number.isInteger(threshold) || threshold < 1 || threshold > operationalCount) {
+    if (shape === "full" && (!Number.isInteger(threshold) || threshold < 1 || threshold > operationalCount)) {
       setLocalError(`Higher-route threshold must be between 1 and ${operationalCount}.`);
       return;
     }
@@ -205,7 +210,7 @@ function SectionDeliveryEditorInner({
     } catch (error) {
       setLocalError(toUserFacingReleaseError(error));
     }
-  }, [base, baseMinutes, breakMinutes, collaboration, effectiveCanEdit, higher, higherMinutes, lower, lowerMinutes, operationalCount, routing, section, threshold, update]);
+  }, [base, baseMinutes, breakMinutes, collaboration, effectiveCanEdit, higher, higherMinutes, lower, lowerMinutes, operationalCount, routing, section, shape, threshold, update]);
 
   // Keep this effect above the incomplete-structure return. A remote
   // structural update can temporarily remove or restore a module; hooks must
@@ -246,8 +251,16 @@ function SectionDeliveryEditorInner({
   const changeBreakMinutes = (value: number) => { setBreakMinutes(value); publishShared("breakMinutes", value); };
   const changeThreshold = (value: number) => { setThreshold(value); publishShared("threshold", value); };
 
-  const candidateMinutes = baseMinutes + Math.max(lowerMinutes, higherMinutes);
-  const saveDisabled = !dirty || update.isPending || !effectiveCanEdit;
+  const candidateMinutes = shape === "m2_easy"
+    ? lowerMinutes
+    : shape === "m2_hard"
+      ? higherMinutes
+      : shape === "m1_easy"
+        ? baseMinutes + lowerMinutes
+        : shape === "m1_hard"
+          ? baseMinutes + higherMinutes
+          : baseMinutes + Math.max(lowerMinutes, higherMinutes);
+  const saveDisabled = !dirty || update.isPending || !effectiveCanEdit || !planReady;
   const saveReasonId = `section-${section.id}-save-reason`;
   const saveReason = !effectiveCanEdit
     ? (saveDisabledReason ?? "You do not have permission to edit delivery settings.")
@@ -270,14 +283,32 @@ function SectionDeliveryEditorInner({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <NumericField label="Module 1" value={baseMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit} onChange={changeBaseMinutes} />
-        <NumericField label="Module 2 · Lower" value={lowerMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit} onChange={changeLowerMinutes} />
-        <NumericField label="Module 2 · Higher" value={higherMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit} onChange={changeHigherMinutes} />
+      <div className="mt-5">
+        <ClassroomPlanField
+          examId={examId}
+          sectionKey={section.sectionKey}
+          sectionLabel={section.title}
+          plan={classroomPlanQuery.data?.plan ?? null}
+          loading={!classroomPlanQuery.isSuccess}
+          canEdit={effectiveCanEdit}
+        />
       </div>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_200px]">
-        <div className="rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4">
+      {!planReady ? (
+        <p role={classroomPlanQuery.error ? "alert" : "status"} className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          {classroomPlanQuery.error ? "The module plan could not load. Retry before editing delivery settings." : "Loading module plan…"}
+          {classroomPlanQuery.error ? <button type="button" onClick={() => void classroomPlanQuery.refetch()} className="ml-1 min-h-11 px-1 font-semibold text-[var(--sat-staff-accent,#0071e3)] underline">Retry</button> : null}
+        </p>
+      ) : null}
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        {shapeRoles.includes("module1") ? <NumericField label="Module 1" value={baseMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit || !planReady} onChange={changeBaseMinutes} /> : null}
+        {shapeRoles.includes("lower") ? <NumericField label="Easy Module 2" value={lowerMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit || !planReady} onChange={changeLowerMinutes} /> : null}
+        {shapeRoles.includes("higher") ? <NumericField label="Hard Module 2" value={higherMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit || !planReady} onChange={changeHigherMinutes} /> : null}
+      </div>
+
+      <div className={`mt-4 grid gap-3 ${shape === "full" ? "lg:grid-cols-[minmax(0,1fr)_200px]" : ""}`}>
+        {shape === "full" ? <div className="rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4">
           <div className="flex items-center gap-2 text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">
             <GitBranch size={16} className="text-[var(--sat-staff-text-tertiary,#6e6e73)]" aria-hidden="true" /> Adaptive routing
           </div>
@@ -288,7 +319,7 @@ function SectionDeliveryEditorInner({
               min={1}
               max={operationalCount}
               suffix="correct"
-              disabled={!effectiveCanEdit}
+              disabled={!effectiveCanEdit || !planReady}
               onChange={changeThreshold}
             />
             <div className="rounded-[var(--sat-staff-radius-control,10px)] bg-white px-3 py-2.5 text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">
@@ -303,7 +334,7 @@ function SectionDeliveryEditorInner({
               </div>
             </div>
           </div>
-        </div>
+        </div> : null}
         <div className="rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4">
           <NumericField
             label="Break after section"
@@ -312,7 +343,7 @@ function SectionDeliveryEditorInner({
             max={600}
             suffix="min"
             allowZero
-            disabled={!effectiveCanEdit}
+            disabled={!effectiveCanEdit || !planReady}
             onChange={changeBreakMinutes}
           />
           <p className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
@@ -320,8 +351,6 @@ function SectionDeliveryEditorInner({
           </p>
         </div>
       </div>
-
-      <ClassroomPlanField examId={examId} sectionKey={section.sectionKey} canEdit={effectiveCanEdit} />
 
       {localError ? (
         <p role="alert" className="mt-3 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">

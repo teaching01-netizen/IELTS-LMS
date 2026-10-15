@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 )
@@ -36,6 +37,7 @@ type SATAttemptAnswer struct {
 	ModuleKey       string `json:"moduleKey"`
 	DisplayOrder    int    `json:"displayOrder"`
 	Response        any    `json:"response"`
+	ResponseLabel   string `json:"responseLabel,omitempty"`
 	MarkedForReview bool   `json:"markedForReview"`
 }
 
@@ -102,12 +104,13 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 	}
 
 	rows, err := tx.QueryContext(ctx, `SELECT s.section_key, m.module_key, eq.display_order,
-		eq.id, eq.question_id, ar.response, ar.marked_for_review, ar.updated_at,
+		eq.id, eq.question_id, CAST(qr.answer_definition AS CHAR), ar.response, ar.marked_for_review, ar.updated_at,
 		CAST(v.response AS CHAR), v.updated_at
 		FROM assessment_module_attempts ma
 		JOIN assessment_modules m ON m.id = ma.module_id
 		JOIN assessment_sections s ON s.id = m.section_id
 		JOIN assessment_exam_questions eq ON eq.module_id = m.id
+		JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id
 		LEFT JOIN assessment_question_responses ar
 			ON ar.module_attempt_id = ma.id AND ar.exam_question_id = eq.id
 		LEFT JOIN attempt_responses_v2 v
@@ -125,11 +128,11 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 	for rows.Next() {
 		var question SATAttemptAnswer
 		var examQuestionID string
-		var legacy, canonical sql.NullString
+		var answerDef, legacy, canonical sql.NullString
 		var marked sql.NullBool
 		var legacySaved, v2Saved sql.NullTime
 		if err := rows.Scan(&question.SectionKey, &question.ModuleKey, &question.DisplayOrder,
-			&examQuestionID, &question.QuestionID, &legacy, &marked, &legacySaved,
+			&examQuestionID, &question.QuestionID, &answerDef, &legacy, &marked, &legacySaved,
 			&canonical, &v2Saved); err != nil {
 			return nil, err
 		}
@@ -159,6 +162,23 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 				return nil, err
 			}
 			savedAt = legacySaved
+		}
+		if answerDef.Valid {
+			var answerShape struct {
+				Kind string `json:"kind"`
+			}
+			_ = json.Unmarshal([]byte(answerDef.String), &answerShape)
+			if response, ok := question.Response.(string); ok {
+				switch answerShape.Kind {
+				case "single_choice":
+					question.ResponseLabel = assessscore.SATChoiceLabels(answerDef.String)[response]
+					if question.ResponseLabel == "" {
+						question.ResponseLabel = response
+					}
+				case "student_produced_response":
+					question.ResponseLabel = response
+				}
+			}
 		}
 		switch answer := question.Response.(type) {
 		case nil:

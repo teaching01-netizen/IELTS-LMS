@@ -1,0 +1,110 @@
+command: lake env lean SatResultStaffRead/AxiomAudit.lean
+SatResultStaffRead.scoreFiltersPartition (row : SatResultStaffRead.AttemptRow) :
+  SatResultStaffRead.scoreAvailable row = !SatResultStaffRead.scoreUnavailable row
+SatResultStaffRead.failedPolicyClearsStoredEstimate (stored : Option SatResultStaffRead.ScoreRange) :
+  SatResultStaffRead.estimateAfterRead true stored SatResultStaffRead.PolicyRead.failed = none
+SatResultStaffRead.noActivePolicyPreservesValidStoredEstimate (stored : SatResultStaffRead.ScoreRange)
+  (valid : stored.valid = true) :
+  SatResultStaffRead.estimateAfterRead true (some stored) SatResultStaffRead.PolicyRead.noActiveRevision = some stored
+SatResultStaffRead.activePolicyReplacesStoredEstimate (stored active : SatResultStaffRead.ScoreRange)
+  (activeValid : active.valid = true) :
+  SatResultStaffRead.estimateAfterRead true (some stored) (SatResultStaffRead.PolicyRead.activeRevision (some active)) =
+    some active
+SatResultStaffRead.invalidRawSummaryHasNoEstimate (stored : Option SatResultStaffRead.ScoreRange)
+  (policy : SatResultStaffRead.PolicyRead) : SatResultStaffRead.estimateAfterRead false stored policy = none
+SatResultStaffRead.integralDecimalCountIsRejected :
+  SatResultStaffRead.parseRawSummary (SatResultStaffRead.JSONCount.integralDecimalToken 42)
+      (SatResultStaffRead.JSONCount.integerToken 54) =
+    none
+SatResultStaffRead.integerCountPairIsPreserved :
+  SatResultStaffRead.parseRawSummary (SatResultStaffRead.JSONCount.integerToken 42)
+      (SatResultStaffRead.JSONCount.integerToken 54) =
+    some { correct := 42, total := 54 }
+SatResultStaffRead.signedInt64MaximumCountIsPreserved :
+  SatResultStaffRead.parseRawSummary (SatResultStaffRead.JSONCount.integerToken 9223372036854775807)
+      (SatResultStaffRead.JSONCount.integerToken 9223372036854775807) =
+    some { correct := 9223372036854775807, total := 9223372036854775807 }
+SatResultStaffRead.aboveSignedInt64CountIsRejected :
+  SatResultStaffRead.parseRawSummary (SatResultStaffRead.JSONCount.integerToken 9223372036854775808)
+      (SatResultStaffRead.JSONCount.integerToken 9223372036854775808) =
+    none
+SatResultStaffRead.sectionRowsHaveRequestedKey (rows : List SatResultStaffRead.ModuleRow) (key : String)
+  (row : SatResultStaffRead.ModuleRow) (member : row ∈ SatResultStaffRead.rowsForSection rows key) :
+  row.sectionKey = key
+SatResultStaffRead.sectionSumsMatchFilteredModules (rows : List SatResultStaffRead.ModuleRow) (key : String) :
+  (SatResultStaffRead.summarizeSection key rows).rawCorrect =
+      SatResultStaffRead.sumCorrect (SatResultStaffRead.rowsForSection rows key) ∧
+    (SatResultStaffRead.summarizeSection key rows).operational =
+      SatResultStaffRead.sumOperational (SatResultStaffRead.rowsForSection rows key)
+SatResultStaffRead.invalidModuleRowsFailClosed (rows : List SatResultStaffRead.ModuleRow)
+  (invalid : rows.all SatResultStaffRead.ModuleRow.scoreValid = false) : SatResultStaffRead.synthesizeSections rows = []
+SatResultStaffRead.sectionSumOverflowFailsClosed (rows : List SatResultStaffRead.ModuleRow)
+  (notFit : SatResultStaffRead.sectionSumsFit rows = false) : SatResultStaffRead.synthesizeSections rows = []
+SatResultStaffRead.synthesizedSectionOrder (rows : List SatResultStaffRead.ModuleRow)
+  (valid : rows.all SatResultStaffRead.ModuleRow.scoreValid = true)
+  (sumsFit : SatResultStaffRead.sectionSumsFit rows = true) :
+  List.map SatResultStaffRead.SectionSummary.sectionKey (SatResultStaffRead.synthesizeSections rows) =
+    SatResultStaffRead.firstSeenKeys rows
+SatResultStaffRead.zeroOperationalModuleIsOmitted :
+  SatResultStaffRead.synthesizeSections [SatResultStaffRead.zeroOperationalModule✝] = []
+SatResultStaffRead.negativeModuleRowFailsClosed :
+  SatResultStaffRead.synthesizeSections [SatResultStaffRead.negativeRawModule✝] = []
+SatResultStaffRead.aggregateOverflowFailsClosed :
+  SatResultStaffRead.synthesizeSections SatResultStaffRead.overflowingSectionModules✝ = []
+SatResultStaffRead.contradictoryBranchHasNoRoute :
+  SatResultStaffRead.consistentRoute [SatResultStaffRead.BranchRoute.higher, SatResultStaffRead.BranchRoute.lower] =
+    none
+SatResultStaffRead.labelsPreserveAuthoredOptionOrder (index : Nat) (ids : List String) :
+  List.map Prod.fst (SatResultStaffRead.labelOptions index ids) = ids
+SatResultStaffRead.satChoiceLettersAreABCD :
+  [SatResultStaffRead.optionLetter 0, SatResultStaffRead.optionLetter 1, SatResultStaffRead.optionLetter 2,
+      SatResultStaffRead.optionLetter 3] =
+    ["A", "B", "C", "D"]
+SatResultStaffRead.nullRawWasFalsePositive :
+  SatResultStaffRead.naivePresenceAvailable true SatResultStaffRead.Outcome.scored false true = true ∧
+    SatResultStaffRead.scoreAvailable
+        { resultExists := true, outcome := SatResultStaffRead.Outcome.scored, hasLegacyScore := false,
+          classroomRaw := none } =
+      false
+SatResultStaffRead.integralDecimalCounterexample :
+  SatResultStaffRead.naiveParseRawSummary (SatResultStaffRead.JSONCount.integralDecimalToken 42)
+        (SatResultStaffRead.JSONCount.integerToken 54) =
+      some { correct := 42, total := 54 } ∧
+    SatResultStaffRead.parseRawSummary (SatResultStaffRead.JSONCount.integralDecimalToken 42)
+        (SatResultStaffRead.JSONCount.integerToken 54) =
+      none
+SatResultStaffRead.staleEstimateCounterexample :
+  SatResultStaffRead.normalizeEstimate (some { low := 1300, high := 1320 }) = some { low := 1300, high := 1320 } ∧
+    SatResultStaffRead.estimateAfterRead true (some { low := 1300, high := 1320 })
+        SatResultStaffRead.PolicyRead.failed =
+      none
+SatResultStaffRead.conflictingBranchCounterexample :
+  SatResultStaffRead.naiveLastBranch [SatResultStaffRead.BranchRoute.higher, SatResultStaffRead.BranchRoute.lower] =
+      some SatResultStaffRead.BranchRoute.lower ∧
+    SatResultStaffRead.consistentRoute [SatResultStaffRead.BranchRoute.higher, SatResultStaffRead.BranchRoute.lower] =
+      none
+'SatResultStaffRead.scoreFiltersPartition' depends on axioms: [propext]
+'SatResultStaffRead.failedPolicyClearsStoredEstimate' depends on axioms: [propext]
+'SatResultStaffRead.noActivePolicyPreservesValidStoredEstimate' depends on axioms: [propext]
+'SatResultStaffRead.activePolicyReplacesStoredEstimate' depends on axioms: [propext]
+'SatResultStaffRead.invalidRawSummaryHasNoEstimate' depends on axioms: [propext]
+'SatResultStaffRead.integralDecimalCountIsRejected' does not depend on any axioms
+'SatResultStaffRead.integerCountPairIsPreserved' does not depend on any axioms
+'SatResultStaffRead.signedInt64MaximumCountIsPreserved' does not depend on any axioms
+'SatResultStaffRead.aboveSignedInt64CountIsRejected' does not depend on any axioms
+'SatResultStaffRead.sectionRowsHaveRequestedKey' depends on axioms: [propext]
+'SatResultStaffRead.sectionSumsMatchFilteredModules' does not depend on any axioms
+'SatResultStaffRead.invalidModuleRowsFailClosed' depends on axioms: [propext]
+'SatResultStaffRead.sectionSumOverflowFailsClosed' depends on axioms: [propext]
+'SatResultStaffRead.synthesizedSectionOrder' depends on axioms: [propext, Quot.sound]
+'SatResultStaffRead.zeroOperationalModuleIsOmitted' does not depend on any axioms
+'SatResultStaffRead.negativeModuleRowFailsClosed' does not depend on any axioms
+'SatResultStaffRead.aggregateOverflowFailsClosed' does not depend on any axioms
+'SatResultStaffRead.contradictoryBranchHasNoRoute' does not depend on any axioms
+'SatResultStaffRead.labelsPreserveAuthoredOptionOrder' depends on axioms: [propext]
+'SatResultStaffRead.satChoiceLettersAreABCD' does not depend on any axioms
+'SatResultStaffRead.nullRawWasFalsePositive' does not depend on any axioms
+'SatResultStaffRead.integralDecimalCounterexample' does not depend on any axioms
+'SatResultStaffRead.staleEstimateCounterexample' does not depend on any axioms
+'SatResultStaffRead.conflictingBranchCounterexample' does not depend on any axioms
+exit_status=0

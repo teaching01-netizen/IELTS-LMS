@@ -1,0 +1,6 @@
+=== RUN   TestExamsCreateHandlerPassesIdempotencyHeaderToActorScopedClaim
+--- PASS: TestExamsCreateHandlerPassesIdempotencyHeaderToActorScopedClaim (0.00s)
+=== RUN   TestSATExamCreateIdempotencyRaceMySQL
+--- PASS: TestSATExamCreateIdempotencyRaceMySQL (0.28s)
+PASS
+ok  	example.com/ielts-proctoring/cmd/api	0.811s

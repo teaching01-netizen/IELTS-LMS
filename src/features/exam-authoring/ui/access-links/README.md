@@ -32,8 +32,8 @@ first problem lives there. Editing an existing room keeps the grouped layout
   a label saves as `cohort` only so older readers keep working.
 - **Check-in** (link status: open / opens later / paused / closed) is separate from
   the **exam run state** (not started / running / paused / finished). The room
-  panel shows them as two labelled values ("Check-in · Open", "Exam · Not
-  started"); `sessionStatusLine` renders the one-line form used in the live-room
+  row shows the exam phase as a pill and mentions check-in only when it is not
+  open; `sessionStatusLine` renders the one-line form used in the live-room
   header ("Check-in open · Exam not started"). Opening check-in never starts the
   exam; pausing it never stops attempts in progress.
 
@@ -52,18 +52,21 @@ first problem lives there. Editing an existing room keeps the grouped layout
 
 ## Layout
 
-- `StudentLinksDashboard` — orchestration only (filters, selection, mutations,
-  dialogs, toasts via `useNotificationStore`). Chrome: `SatContainer`,
-  `SatPageHeader`, `SatStatStrip` (Joined/Started/Submitted funnel).
-- `LinksToolbar` — `SatSearchField` (debounced 150ms in dashboard) + status
-  pills with counts + `role="status"` result count.
-- `AccessLinkRow` — memoized two-line row + `SatStatusPill` + overflow
-  `SatMenu` (Copy/Share/Present/Edit/Duplicate/Pause-Resume/Revoke).
-- `AccessLinkDetail` — tabbed `Overview | Activity | Settings`. Overview keeps
-  the stale-version banner + `Create Version N Link`. With session bindings the
-  room panel states check-in and exam state, so the header omits its own
-  check-in pill; the student link has one copy action (Settings shows the link
-  ID as text).
+- `StudentLinksDashboard` — the exam's **room finder**, orchestration only
+  (search, grouping, mutations, dialogs). Sections: **Jump back in** (up to 3
+  rooms of this exam this browser opened, from `products/sat/ui/recentRooms.ts`,
+  recorded by the room page) → search + result count → rooms grouped by exam
+  phase (Live now · Ready to start · Finished · Other rooms) with **Closed
+  rooms** (revoked or cancelled) in a collapsed disclosure; newest first in each
+  group. Header action **All rooms** opens `/sat/sessions?exam=<id>`.
+- `AccessLinkRow` — the whole row opens the room (`session.onOpenRoom`; staff
+  who cannot run rooms get the Share sheet instead). Three lines: name · version
+  · sections, exam-phase pill · audience · date (check-in noted only when not
+  open), registered/submitted. The room from `?link=` is tinted, tagged **Last
+  opened** and focused. Overflow `SatMenu`: Copy/Share/Present/Edit/Duplicate/
+  View results (finished)/Pause-Resume/Revoke/Delete.
+- Deep links: `?link=<id>` highlights a row; `?link=<id>&edit=1` (the room
+  page's **Room settings**) opens that room's `AccessLinkEditorSheet` once.
 - `AccessLinkEditorSheet` — inline per-field errors + progressive roster
   validation (`rosterValidation.ts`: per-row issues, live count, template).
 - `AccessLinkShareSheet` — QR (lazy `qrcode` import), break-all URL, 44px
@@ -71,10 +74,8 @@ first problem lives there. Editing an existing room keeps the grouped layout
 
 ## Keyboard
 
-- `/` focuses search (outside inputs/dialogs); `ArrowUp/Down` moves selection and
-  scrolls the selected row into view; detail tabs implement the ARIA tab pattern
-  (roving tabindex, `ArrowLeft/Right`, `Home/End`, focus follows selection);
-  `Escape` in the detail pane returns focus to the selected row; menus keep Radix
+- `/` focuses search (outside inputs/dialogs); `Escape` clears it; rows and
+  recent cards are plain buttons in tab order; menus keep Radix
   typeahead/Escape.
 
 ## Press and feedback (interaction contract)
@@ -101,6 +102,5 @@ first problem lives there. Editing an existing room keeps the grouped layout
   `role="status"` region.
 - **No entrance motion on poll refresh.** Row entrance (`sat-row-enter`) is
   mount-only; the 30–35s overview/activity polls update numbers in place.
-- Selection, filter, and tab changes use the shared thumbs (`sat-selection-thumb`,
-  `sat-tab-indicator`, `layoutId` springs) and the opacity-only `sat-panel-enter`
-  panel reveal; reduced motion collapses all of it to instant state changes.
+- Reduced motion collapses row entrance and press motion to instant state
+  changes.

@@ -11,16 +11,16 @@ vi.mock("../../../api/assessmentQueries", () => ({
 describe("ClassroomPlanField", () => {
   it("shows the section's shape and replaces only that section on change", () => {
     render(<ClassroomPlanField examId="e1" sectionKey="math" canEdit />);
-    const select = screen.getByLabelText("Classroom modules") as HTMLSelectElement;
-    expect(select.value).toBe("m2_hard");
-    fireEvent.change(select, { target: { value: "m1_easy" } });
+    const hardOnly = screen.getByRole("radio", { name: "math: Hard Module 2 only" });
+    expect(hardOnly).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "math: Module 1, then Easy Module 2" }));
     expect(mocks.mutate).toHaveBeenLastCalledWith({ "reading-writing": "m1_easy", math: "m1_easy" });
-    fireEvent.change(select, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("radio", { name: "math: Full adaptive" }));
     expect(mocks.mutate).toHaveBeenLastCalledWith({ "reading-writing": "m1_easy" });
   });
 
   it("is read-only without edit rights", () => {
     render(<ClassroomPlanField examId="e1" sectionKey="math" canEdit={false} />);
-    expect(screen.getByLabelText("Classroom modules")).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "math: Full adaptive" })).toBeDisabled();
   });
 });

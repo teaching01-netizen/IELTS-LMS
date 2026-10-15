@@ -169,7 +169,7 @@ describe("ExamSettingsPage", () => {
   it("maps save conflicts to a user-safe alert", async () => {
     mocks.update.mutateAsync.mockRejectedValueOnce(new Error("revision conflict 409"));
     renderPage();
-    fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Module 1" }), { target: { value: "33" } });
     fireEvent.click(screen.getByRole("button", { name: "Save section" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/draft changed/i);
   });
@@ -184,7 +184,7 @@ describe("ExamSettingsPage", () => {
 
   it("protects unsaved timing when changing tabs, and leaves on confirmation", () => {
     renderPage();
-    fireEvent.change(screen.getByLabelText(/Module 1/), { target: { value: "33" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Module 1" }), { target: { value: "33" } });
     // A pending edit never blocks starting a room: the room captures saved content only.
     expect(screen.getByRole("button", { name: "Create room" })).toBeEnabled();
 

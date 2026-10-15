@@ -4,6 +4,7 @@ import type {
   AssessmentModuleShell,
   AssessmentQuestionSummary,
   AssessmentSectionShell,
+  SatClassroomPlan,
 } from "../../contracts/assessment";
 import { ModuleSwitcher } from "./ModuleSwitcher";
 import { moduleReadyCount } from "./queueModel";
@@ -51,6 +52,7 @@ const STATUS_ICON = { ready: CheckCircle2, incomplete: CircleDashed, error: Aler
 export interface QuestionCardStackProps {
   module: AssessmentModuleShell;
   sections: AssessmentSectionShell[];
+  classroomPlan?: SatClassroomPlan | null;
   sectionTitle: string;
   selectedQuestionId: string | null;
   isMutating: boolean;
@@ -79,6 +81,7 @@ export interface QuestionCardStackProps {
 export function QuestionCardStack({
   module,
   sections,
+  classroomPlan,
   sectionTitle,
   selectedQuestionId,
   isMutating,
@@ -144,6 +147,7 @@ export function QuestionCardStack({
       {showModuleSwitcher ? (
         <ModuleSwitcher
           sections={sections}
+          classroomPlan={classroomPlan}
           selectedModuleId={module.id}
           disabled={isMutating}
           onSelectModule={onSelectModule}

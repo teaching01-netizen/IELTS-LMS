@@ -3,6 +3,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../../shared/api-client/errors';
+vi.mock('../../../../features/exam-authoring/api/assessmentQueries', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    useClassroomPlan: () => ({ data: { plan: null }, isSuccess: true, isError: false, refetch: vi.fn() }),
+  };
+});
 import { clearSatRoomDraft } from '../../../../features/exam-authoring/application/satRoomDraftStore';
 import { SatSessionsRoute } from '../SatSessionsRoute';
 
@@ -82,10 +89,10 @@ function LocationProbe() {
   return <p data-testid="location">{useLocation().pathname}</p>;
 }
 
-function routeElement(client: QueryClient) {
+function routeElement(client: QueryClient, path = '/sat/sessions') {
   return (
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={['/sat/sessions']}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/sat/sessions" element={<SatSessionsRoute />} />
           <Route path="/sat/sessions/:scheduleId" element={<LocationProbe />} />
@@ -100,8 +107,8 @@ function newClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
-function renderRoute() {
-  return render(routeElement(newClient()));
+function renderRoute(path?: string) {
+  return render(routeElement(newClient(), path));
 }
 
 /** Opens the one room setup sheet; the exam is its first field. */
@@ -297,6 +304,22 @@ describe('SatSessionsRoute', () => {
     expect(screen.getByText(/No rooms match/)).toHaveTextContent('zzz-no-match');
     expect(screen.getByRole('status')).toHaveTextContent('0 of 1 rooms');
     fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(screen.getByText(/SAT Published ·/)).toBeInTheDocument();
+  });
+
+  it('narrows to one exam from ?exam= and clears back to every room', () => {
+    const other = { ...summary, schedule: { ...summary.schedule, id: 'sched-2', examId: 'sat-2', examTitle: 'SAT Other' }, runtime: { ...summary.runtime, scheduleId: 'sched-2', examId: 'sat-2' } };
+    useSummariesMock.mockReturnValue({ data: [summary, other], isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute('/sat/sessions?exam=sat-1');
+    expect(screen.getByRole('status')).toHaveTextContent('1 room');
+    expect(screen.queryByText(/SAT Other ·/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Show rooms from all exams/ }));
+    expect(screen.getByText(/SAT Other ·/)).toBeInTheDocument();
+  });
+
+  it('offers Show all exams when the filtered exam has no rooms', () => {
+    renderRoute('/sat/sessions?exam=sat-empty');
+    fireEvent.click(screen.getByRole('button', { name: 'Show all exams' }));
     expect(screen.getByText(/SAT Published ·/)).toBeInTheDocument();
   });
 

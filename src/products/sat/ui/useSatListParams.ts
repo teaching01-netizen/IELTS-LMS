@@ -21,6 +21,8 @@ export type SatListParams = {
   student?: string;
   tab?: SatLibraryTab;
   sort?: SatListSort;
+  /** Narrows a list to one exam (Rooms opened from an exam's Rooms tab). */
+  exam?: string;
 };
 
 type SatListParamsPatch = { [K in keyof SatListParams]?: SatListParams[K] | '' };
@@ -45,6 +47,8 @@ function parseParams(searchParams: URLSearchParams): SatListParams {
   if (tab && has(TABS, tab)) params.tab = tab as SatLibraryTab;
   const sort = searchParams.get('sort');
   if (sort && has(SORTS, sort)) params.sort = sort as SatListSort;
+  const exam = searchParams.get('exam');
+  if (exam) params.exam = exam;
   return params;
 }
 
@@ -67,6 +71,7 @@ export function useSatListParams(): { params: SatListParams; setParams: (patch: 
           apply('student', patch.student, () => true);
           apply('tab', patch.tab, (v) => has(TABS, v));
           apply('sort', patch.sort, (v) => has(SORTS, v));
+          apply('exam', patch.exam, () => true);
           return next;
         },
         { replace: true },

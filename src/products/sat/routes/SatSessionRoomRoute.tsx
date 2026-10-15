@@ -18,6 +18,7 @@ import { SatSessionRoomRoster, type SatRosterSort } from '../ui/SatSessionRoomRo
 import { SatSessionRoomTimeline } from '../ui/SatSessionRoomTimeline';
 import { StudentDetail, studentAttentionReason } from '../ui/SatSessionRoomStudents';
 import { satListReturnTarget } from '../ui/useSatListReturn';
+import { rememberRoom } from '../ui/recentRooms';
 import { SatStudentLinkPresent } from '../ui/SatStudentLink';
 import { SatRoomNeedsAttention } from '../ui/SatRoomNeedsAttention';
 import { StudentShareDialog } from '../../../features/exam-authoring/ui/access-links/AccessLinkShareSheet';
@@ -72,6 +73,10 @@ export function SatSessionRoomRoute() {
 
   const schedule = controller.schedules.find((item) => item.id === scheduleId) ?? null;
   const runtime = controller.runtimeSnapshots.find((item) => item.scheduleId === scheduleId) ?? null;
+  const rememberedExamId = schedule?.examId ?? null;
+  useEffect(() => {
+    if (scheduleId && rememberedExamId) rememberRoom(scheduleId, rememberedExamId);
+  }, [rememberedExamId, scheduleId]);
   const runtimeStatus = runtime?.status ?? 'not_started';
   const students = useMemo(() => controller.sessions.filter((item) => item.scheduleId === scheduleId), [controller.sessions, scheduleId]);
   const isAdmin = session?.user.role === 'admin';
@@ -348,8 +353,8 @@ export function SatSessionRoomRoute() {
   if (controller.error && !schedule) return <SatPageError title="SAT room could not load" description={controller.error} retryLabel="Retry" onRetry={() => void controller.reload()} />;
   if (!schedule || !runtime) return <SatPageError title="SAT room not found" description="This room is not part of the Digital SAT workspace." retryLabel="Back to Rooms" onRetry={() => navigate('/sat/sessions')} />;
 
-  // The test's Sessions tab reopens with this session selected.
-  const testSessionsPath = `${examWorkspacePath(schedule.examId, 'delivery')}${accessLink ? `?${new URLSearchParams({ link: accessLink.id })}` : ''}`;
+  // The exam's Rooms tab reopens with this room highlighted and its settings open.
+  const roomSettingsPath = `${examWorkspacePath(schedule.examId, 'delivery')}${accessLink ? `?${new URLSearchParams({ link: accessLink.id, edit: '1' })}` : ''}`;
   // Admins review inside the test workspace; proctors use the global Results list, filtered to this session.
   const resultsPath = isAdmin
     ? `${examWorkspacePath(schedule.examId, 'responses')}?${new URLSearchParams({ access: schedule.id })}`
@@ -433,7 +438,7 @@ export function SatSessionRoomRoute() {
             actions={(
               <>
                 {controller.error ? <span role="status" className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[var(--sat-staff-warning-text,#92400e)]"><AlertTriangle size={16} aria-hidden="true" />Reconnecting</span> : null}
-                {isAdmin && !deliveryReturn ? <SatButton variant="quiet" onClick={() => navigate(testSessionsPath)}>Room settings</SatButton> : null}
+                {isAdmin ? <SatButton variant="quiet" onClick={() => navigate(roomSettingsPath)}>Room settings</SatButton> : null}
                 <SatSessionControls runtimeStatus={runtime.status} pendingActions={pendingActions} blocked={isStale} onViewResponses={roomMode === 'review' ? () => navigate(resultsPath) : undefined} onPause={() => void run('pause', () => controller.handlePauseCohort(scheduleId), 'Exam paused.')} onResume={() => void run('resume', () => controller.handleResumeCohort(scheduleId), 'Exam resumed.')} onExtend={(minutes) => {
                   if (isStale) return;
                   const revision = runtime.revision;

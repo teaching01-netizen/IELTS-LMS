@@ -1,0 +1,55 @@
+command: cd backend/go && go test ./...
+ok  	example.com/ielts-proctoring/cmd/api	3.797s
+?   	example.com/ielts-proctoring/cmd/e2e_provision_staff	[no test files]
+ok  	example.com/ielts-proctoring/cmd/e2e_seed	(cached)
+ok  	example.com/ielts-proctoring/cmd/migrate	(cached)
+?   	example.com/ielts-proctoring/cmd/preprovision	[no test files]
+ok  	example.com/ielts-proctoring/cmd/worker	(cached)
+ok  	example.com/ielts-proctoring/integration	1.854s
+ok  	example.com/ielts-proctoring/internal/accesslinks	(cached)
+ok  	example.com/ielts-proctoring/internal/act	(cached)
+ok  	example.com/ielts-proctoring/internal/answerhistory	(cached)
+ok  	example.com/ielts-proctoring/internal/app	2.726s
+ok  	example.com/ielts-proctoring/internal/assessscore	(cached)
+ok  	example.com/ielts-proctoring/internal/attempts	(cached)
+ok  	example.com/ielts-proctoring/internal/auth	(cached)
+ok  	example.com/ielts-proctoring/internal/authoring	(cached)
+ok  	example.com/ielts-proctoring/internal/authoringcoedit	(cached)
+ok  	example.com/ielts-proctoring/internal/authoringrealtime	(cached)
+ok  	example.com/ielts-proctoring/internal/authz	(cached)
+ok  	example.com/ielts-proctoring/internal/background	2.770s
+ok  	example.com/ielts-proctoring/internal/delivery	(cached)
+ok  	example.com/ielts-proctoring/internal/exams	(cached)
+ok  	example.com/ielts-proctoring/internal/grading	(cached)
+ok  	example.com/ielts-proctoring/internal/library	(cached)
+?   	example.com/ielts-proctoring/internal/lifecycle	[no test files]
+ok  	example.com/ielts-proctoring/internal/liveupdates	(cached)
+ok  	example.com/ielts-proctoring/internal/maintenance	(cached)
+ok  	example.com/ielts-proctoring/internal/media	(cached)
+ok  	example.com/ielts-proctoring/internal/outbox	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/answerblobs	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/apperrors	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/clock	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/config	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/crypto	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/db	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/httpx	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/objectstore	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/pagination	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/shutdown	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/telemetry	(cached)
+ok  	example.com/ielts-proctoring/internal/platform/tx	(cached)
+ok  	example.com/ielts-proctoring/internal/proctor	(cached)
+ok  	example.com/ielts-proctoring/internal/release	(cached)
+ok  	example.com/ielts-proctoring/internal/results	5.963s
+ok  	example.com/ielts-proctoring/internal/runtime	(cached)
+ok  	example.com/ielts-proctoring/internal/sat	1.515s
+ok  	example.com/ielts-proctoring/internal/satconvert	(cached)
+ok  	example.com/ielts-proctoring/internal/satpublish	(cached)
+?   	example.com/ielts-proctoring/internal/satrooms	[no test files]
+ok  	example.com/ielts-proctoring/internal/satscoring	(cached)
+ok  	example.com/ielts-proctoring/internal/satstartcode	(cached)
+ok  	example.com/ielts-proctoring/internal/schedules	(cached)
+ok  	example.com/ielts-proctoring/internal/student	(cached)
+ok  	example.com/ielts-proctoring/internal/terminalization	2.126s
+exit_status=0

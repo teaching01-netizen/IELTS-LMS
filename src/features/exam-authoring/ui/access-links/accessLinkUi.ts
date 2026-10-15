@@ -1,8 +1,13 @@
 import type { AccessLinkMemberInput, AccessLinkStatus, AssessmentAccessLink } from "../../contracts/accessLinks";
 
+// LINE's in-app browser hands URLs carrying this param to the system browser.
+function shareUrl(path: string): string {
+  const withParam = `${path}?openExternalBrowser=1`;
+  return typeof window === "undefined" ? withParam : `${window.location.origin}${withParam}`;
+}
+
 export function studentJoinUrl(linkId: string): string {
-  const path = `/join/${encodeURIComponent(linkId)}`;
-  return typeof window === "undefined" ? path : `${window.location.origin}${path}`;
+  return shareUrl(`/join/${encodeURIComponent(linkId)}`);
 }
 
 /**
@@ -12,8 +17,7 @@ export function studentJoinUrl(linkId: string): string {
  */
 export function roomEntryUrl(room: { accessLinkId?: string | null; scheduleId: string }): string {
   if (room.accessLinkId) return studentJoinUrl(room.accessLinkId);
-  const path = `/student/${encodeURIComponent(room.scheduleId)}`;
-  return typeof window === "undefined" ? path : `${window.location.origin}${path}`;
+  return shareUrl(`/student/${encodeURIComponent(room.scheduleId)}`);
 }
 
 export async function copyText(text: string): Promise<void> {

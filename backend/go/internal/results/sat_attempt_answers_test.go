@@ -11,7 +11,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
-var satAnswerColumns = []string{"section_key", "module_key", "display_order", "exam_question_id", "question_id", "legacy_response", "marked_for_review", "legacy_updated_at", "v2_response", "v2_updated_at"}
+var satAnswerColumns = []string{"section_key", "module_key", "display_order", "exam_question_id", "question_id", "answer_definition", "legacy_response", "marked_for_review", "legacy_updated_at", "v2_response", "v2_updated_at"}
 
 func TestSATAttemptAnswersReturnsLastAcknowledgedV2Save(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -26,8 +26,8 @@ func TestSATAttemptAnswersReturnsLastAcknowledgedV2Save(t *testing.T) {
 			AddRow("attempt-1", "SAT", 14, "S1", "Student", "Morning", "running", 2, 8, nil, stamp, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WithArgs("attempt-1").WillReturnRows(
 		sqlmock.NewRows(satAnswerColumns).
-			AddRow("reading-writing", "module-1", 1, "eq-1", "q-1", `"old"`, false, stamp.Add(-time.Minute), `{"answer":"B","markedForReview":true}`, stamp).
-			AddRow("reading-writing", "module-1", 2, "eq-2", "q-2", nil, false, nil, nil, nil))
+			AddRow("reading-writing", "module-1", 1, "eq-1", "q-1", `{"kind":"single_choice","options":[{"id":"choice-a"},{"id":"choice-b"}],"correctOptionId":"choice-a"}`, `"old"`, false, stamp.Add(-time.Minute), `{"answer":"choice-b","markedForReview":true}`, stamp).
+			AddRow("reading-writing", "module-1", 2, "eq-2", "q-2", `{"kind":"student_produced_response"}`, nil, false, nil, nil, nil))
 	mock.ExpectCommit()
 	out, err := NewService(db).GetSATAttemptAnswers(context.Background(), auth.NewActorContext("admin", auth.RoleAdmin), "attempt-1")
 	if err != nil {
@@ -36,7 +36,7 @@ func TestSATAttemptAnswersReturnsLastAcknowledgedV2Save(t *testing.T) {
 	if out.SavedAnswerCount != 1 || out.ResponseRevision == nil || *out.ResponseRevision != 8 || out.LastSavedAt == nil || !out.LastSavedAt.Equal(stamp) {
 		t.Fatalf("incorrect saved snapshot: %#v", out)
 	}
-	if len(out.Questions) != 2 || out.Questions[0].Response != "B" || !out.Questions[0].MarkedForReview || out.Questions[1].Response != nil {
+	if len(out.Questions) != 2 || out.Questions[0].Response != "choice-b" || out.Questions[0].ResponseLabel != "B" || !out.Questions[0].MarkedForReview || out.Questions[1].Response != nil {
 		t.Fatalf("V2 must win over legacy and unanswered questions stay visible: %#v", out.Questions)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -70,7 +70,7 @@ func TestSATAttemptAnswersEmptyAndInvalidatedLegacy(t *testing.T) {
 				sqlmock.NewRows([]string{"id", "exam_title", "version_number", "candidate_id", "candidate_name", "cohort_name", "delivery_status", "protocol_version", "response_revision", "outcome_status", "test_started_at", "submitted_at"}).
 					AddRow("attempt-1", "SAT", 14, "S1", "Student", "Morning", tc.status, tc.protocol, 0, tc.outcome, nil, nil))
 			mock.ExpectQuery("FROM assessment_module_attempts ma").WithArgs("attempt-1").WillReturnRows(
-				sqlmock.NewRows(satAnswerColumns).AddRow("math", "module-1", 1, "eq-1", "q-1", tc.legacy, false, stamp, tc.canonical, stamp))
+				sqlmock.NewRows(satAnswerColumns).AddRow("math", "module-1", 1, "eq-1", "q-1", nil, tc.legacy, false, stamp, tc.canonical, stamp))
 			mock.ExpectCommit()
 			out, err := NewService(db).GetSATAttemptAnswers(context.Background(), auth.NewActorContext("admin", auth.RoleAdmin), "attempt-1")
 			if err != nil {

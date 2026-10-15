@@ -33,6 +33,9 @@ export interface SatAttemptRow extends Omit<SatResultSummary, 'id' | 'submission
   attemptId: string;
   attemptStatus?: string;
   testStartedAt?: string | null;
+  rawCorrect?: number;
+  rawTotal?: number;
+  estimatedTotal?: { low: number; high: number } | null;
 }
 
 export interface SatAttemptPage {
@@ -78,8 +81,11 @@ export interface SatQuestionResult {
   displayOrder: number;
   moduleKey: string;
   sectionKey: string;
+  kind?: string;
   response: unknown;
+  responseLabel?: string;
   correctAnswer: unknown;
+  correctLabel?: string;
   /** Null verdict = pretest, unanswered, missing key, or unscored outcome. Never render null as incorrect. */
   isCorrect: boolean | null;
   isPretest: boolean;
@@ -110,6 +116,7 @@ export interface SatAttemptAnswer {
   moduleKey: string;
   displayOrder: number;
   response: unknown;
+  responseLabel?: string;
   markedForReview: boolean;
 }
 

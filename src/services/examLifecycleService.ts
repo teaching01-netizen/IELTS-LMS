@@ -335,9 +335,11 @@ export class ExamLifecycleService {
 
     try {
       const slug = generateSlug(input.title);
+      const operationKey = input.providerKey === 'sat' ? input.operationKey?.trim() : undefined;
       const createdExam = await backendPost<{ id: string; revision: number }>(
         '/v1/exams',
         buildCreateAssessmentExamPayload({ ...input, slug }),
+        operationKey ? { headers: { 'Idempotency-Key': operationKey } } : undefined,
       );
       rememberExamRevision(createdExam.id, createdExam.revision);
       if (input.providerKey === 'act') {

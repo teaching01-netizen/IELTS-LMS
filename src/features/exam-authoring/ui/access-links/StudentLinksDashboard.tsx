@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link2, RefreshCw, XCircle } from "lucide-react";
+import { ArrowUpRight, Link2, RefreshCw, XCircle } from "lucide-react";
 import type { ExamEntity } from "../../../../types/domain";
 import {
-  useAccessLinkActivity,
   useAccessLinkMembers,
   useDeleteAccessLink,
   useSetAccessLinkLifecycle,
@@ -11,7 +10,6 @@ import {
 import type {
   AccessDistributionOverview,
   AccessLinkMemberInput,
-  AccessLinkStatus,
   AssessmentAccessLink,
   UpdateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
@@ -20,26 +18,28 @@ import { AccessLinkEditorSheet } from "./AccessLinkEditorSheet";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
 import type { SatMenuItem } from "../../../../products/sat/ui/Menu";
 import { AccessLinkPresentView, AccessLinkShareSheet } from "./AccessLinkShareSheet";
-import { AccessLinkDetail } from "./AccessLinkDetail";
-import { AccessLinkRow, rowElementId } from "./AccessLinkRow";
-import { LinksToolbar, type StatusFilter } from "./LinksToolbar";
+import { AccessLinkRow, PHASE_TONE, rowElementId } from "./AccessLinkRow";
 import { useTransientValue } from "./useTransientValue";
 import {
+  SatButton,
   SatContainer,
   SatEmptyState,
   SatList,
   SatListSkeleton,
   SatPageHeader,
   SatPrimaryButton,
+  SatResultCount,
+  SatSearchField,
+  SatStatusPill,
 } from "../../../../products/sat/ui/SatPage";
 import { ExamWorkspaceHeader, type ExamShellNavigation } from "../shell/ExamWorkspaceHeader";
-import { DeliverySetupGuide } from "../delivery/DeliverySetupGuide";
-import { SESSION_PHASE_LABEL, type AccessSessionBindings, type AccessSessionInfo } from "../delivery/sessionState";
+import { SESSION_PHASE_LABEL, type AccessSessionBindings, type SessionPhase } from "../delivery/sessionState";
 import type { AssessmentValidationIssue } from "../../contracts/assessment";
 import { SatCreateRoomFlow } from "../publish/SatCreateRoomFlow";
 import { copyText, studentJoinUrl } from "./accessLinkUi";
 import { CollaborationHeaderCluster } from "../collaboration/CollaborationHeaderCluster";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
+import { readRecentRooms } from "../../../../products/sat/ui/recentRooms";
 
 interface StudentLinksDashboardProps {
   exam: ExamEntity;
@@ -55,9 +55,15 @@ interface StudentLinksDashboardProps {
   shell: ExamShellNavigation;
   /** Opens the create form immediately when `id` changes. */
   createRequest?: CreateRequest | null;
-  selectedLinkId?: string | null;
-  onSelectionChange?: (linkId: string | null) => void;
-  /** Session status and actions per access group; omit to show configuration only. */
+  /** The room the viewer came back from: tinted, tagged "Last opened" and focused. */
+  highlightLinkId?: string | null;
+  /** Opens this room's edit sheet once its row is loaded (the room page's "Room settings"). */
+  editLinkId?: string | null;
+  /** Called once `editLinkId` has been acted on, so the host can drop it from the URL. */
+  onEditHandled?: () => void;
+  /** Opens the global Rooms list filtered to this exam. */
+  onOpenAllRooms?: () => void;
+  /** Session status and actions per room; omit to show configuration only. */
   session?: AccessSessionBindings;
 }
 
@@ -67,7 +73,7 @@ export interface CreateRequest {
 
 const EMPTY_ACCESS_LINKS: AssessmentAccessLink[] = [];
 const EMPTY_MEMBERS: AccessLinkMemberInput[] = [];
-const STATUS_RANK: Record<AccessLinkStatus, number> = { live: 0, upcoming: 1, paused: 2, ended: 3, revoked: 4 };
+const RECENT_LIMIT = 3;
 /**
  * Search echo budget: filtering this list is a linear scan of a handful of
  * rows, so a small workspace filters on the committed keystroke (the count and
@@ -80,17 +86,56 @@ const SEARCH_FAST_PATH_MAX = 150;
  * mirrored into state, so the pending look can never outlive the request.
  */
 type PendingWrite = { linkId: string; label: string };
-/**
- * Transient acknowledgement rendered where the action happened. `kind` lets the
- * detail pane reuse the copy confirmation without re-deriving it from copy text.
- */
+/** Transient acknowledgement rendered on the row where the action happened. */
 type Confirmation = { linkId: string; kind: "copy" | "action"; text: string };
 
 type LinkUpdateOptions = { silent?: boolean };
 
-/** "Exam: Running" for the row; null while the status is unknown so a guess is never shown. */
-function sessionRowLabel(info: AccessSessionInfo | null): string | null {
-  return info && info.phase !== "unknown" ? `Exam: ${SESSION_PHASE_LABEL[info.phase]}` : null;
+type GroupKey = "live" | "ready" | "finished" | "other" | "closed";
+const GROUPS: Array<{ key: GroupKey; title: string }> = [
+  { key: "live", title: "Live now" },
+  { key: "ready", title: "Ready to start" },
+  { key: "finished", title: "Finished" },
+  // Rooms whose exam status is unknown are listed, never guessed into a phase.
+  { key: "other", title: "Other rooms" },
+];
+
+function groupFor(link: AssessmentAccessLink, phase: SessionPhase | null): GroupKey {
+  if (link.lifecycleState === "revoked" || phase === "cancelled") return "closed";
+  if (phase === "live" || phase === "paused") return "live";
+  if (phase === "ready") return "ready";
+  if (phase === "finished") return "finished";
+  return "other";
+}
+
+function createdTime(link: AssessmentAccessLink): number {
+  const time = new Date(link.createdAt).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+/** "Opened 12 minutes ago" for the Jump back in cards. */
+function openedAgo(at: number, now = Date.now()): string {
+  const minutes = Math.round((now - at) / 60_000);
+  if (minutes < 1) return "Opened just now";
+  const format = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  if (minutes < 60) return `Opened ${format.format(-minutes, "minute")}`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `Opened ${format.format(-hours, "hour")}`;
+  return `Opened ${format.format(-Math.round(hours / 24), "day")}`;
+}
+
+/** Scrolls a row into view (and focuses it). A just-created row may land a frame later. */
+function revealRow(linkId: string, focus: boolean) {
+  const reveal = (attempt: number) => {
+    const element = document.getElementById(rowElementId(linkId));
+    if (!element) {
+      if (attempt === 0 && typeof window !== "undefined") window.requestAnimationFrame(() => reveal(1));
+      return;
+    }
+    element.scrollIntoView?.({ block: "nearest" });
+    if (focus) element.focus({ preventScroll: true });
+  };
+  reveal(0);
 }
 
 /** Present-tense label for an in-flight lifecycle write. */
@@ -133,7 +178,7 @@ function isRevisionConflict(error: unknown): boolean {
   return /revision|stale|conflict|changed (?:elsewhere|while)|409/i.test(error.message);
 }
 
-export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefresh, canCreate, onFixIssue, shell, createRequest = null, session, selectedLinkId = null, onSelectionChange }: StudentLinksDashboardProps) {
+export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefresh, canCreate, onFixIssue, shell, createRequest = null, session, highlightLinkId = null, editLinkId = null, onEditHandled, onOpenAllRooms }: StudentLinksDashboardProps) {
   const version = overview?.currentPublishedVersion ?? null;
   const collaboration = useSatAuthoringCollaboration();
   const announceWorkspaceCommand = useCallback(
@@ -180,13 +225,10 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   ]);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [selectedId, setSelectedId] = useState<string | null>(selectedLinkId);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingLink, setEditingLink] = useState<AssessmentAccessLink | null>(null);
   const [prefillLink, setPrefillLink] = useState<AssessmentAccessLink | null>(null);
   const [createTarget, setCreateTarget] = useState<CreateRequest | null>(null);
-  const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
   const [shareLink, setShareLink] = useState<AssessmentAccessLink | null>(null);
   const [presentLink, setPresentLink] = useState<AssessmentAccessLink | null>(null);
   const [confirm, setConfirm] = useState<{ link: AssessmentAccessLink; action: "revoke" | "delete" } | null>(null);
@@ -194,6 +236,8 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const [staleConflict, setStaleConflict] = useState(false);
   const notifySuccess = useNotificationStore((state) => state.addSuccess);
   const searchTimer = useRef<number | null>(null);
+  // Read once per visit: the list is this browser's history, not live data.
+  const [recentRooms] = useState(() => readRecentRooms(exam.id));
 
   const updateMutation = useUpdateAccessLink(exam.id);
   const lifecycleMutation = useSetAccessLinkLifecycle(exam.id);
@@ -238,90 +282,60 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     };
   }, [search]);
 
-  const counts = useMemo(() => {
-    const result: Record<AccessLinkStatus, number> = { live: 0, upcoming: 0, ended: 0, paused: 0, revoked: 0 };
-    for (const link of links) result[link.status] += 1;
-    return result;
-  }, [links]);
-
   // Small workspaces echo the keystroke immediately; a large library keeps the
   // debounced term so re-sorting stays off the typing path.
   const effectiveSearch = links.length <= SEARCH_FAST_PATH_MAX ? search : debouncedSearch;
+  const query = effectiveSearch.trim().toLocaleLowerCase();
 
-  const visibleLinks = useMemo(() => {
-    const query = effectiveSearch.trim().toLocaleLowerCase();
-    return links
-      .filter((link) => {
-        if (statusFilter !== "all" && link.status !== statusFilter) return false;
-        if (!query) return true;
-        return [link.name, link.audienceLabel ?? "", link.examTitle, `version ${link.versionNumber}`]
-          .some((value) => value.toLocaleLowerCase().includes(query));
+  const phaseOf = useCallback(
+    (link: AssessmentAccessLink): SessionPhase | null => (session?.canRun ? session.infoFor(link.scheduleId)?.phase ?? null : null),
+    [session],
+  );
+
+  const visibleLinks = useMemo(() => links
+    .filter((link) => !query || [link.name, link.audienceLabel ?? "", link.examTitle, `version ${link.versionNumber}`]
+      .some((value) => value.toLocaleLowerCase().includes(query)))
+    .sort((left, right) => createdTime(right) - createdTime(left)), [links, query]);
+
+  const groups = useMemo(() => {
+    const result: Record<GroupKey, AssessmentAccessLink[]> = { live: [], ready: [], finished: [], other: [], closed: [] };
+    for (const link of visibleLinks) result[groupFor(link, phaseOf(link))].push(link);
+    return result;
+  }, [phaseOf, visibleLinks]);
+
+  const recentLinks = useMemo(() => {
+    const byScheduleId = new Map(links.map((link) => [link.scheduleId, link]));
+    return recentRooms
+      .flatMap((entry) => {
+        const link = byScheduleId.get(entry.scheduleId);
+        return link ? [{ link, at: entry.at }] : [];
       })
-      .sort((left, right) => STATUS_RANK[left.status] - STATUS_RANK[right.status] || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
-  }, [links, effectiveSearch, statusFilter]);
+      .slice(0, RECENT_LIMIT);
+  }, [links, recentRooms]);
 
-  useEffect(() => { setSelectedId(selectedLinkId); }, [selectedLinkId]);
-
-  const selectedLink = visibleLinks.find((link) => link.id === selectedId) ?? null;
-  const activityQuery = useAccessLinkActivity(selectedLink?.id ?? null);
-
+  // Coming back from a room: bring its row under the eye and the focus ring once.
+  const revealedHighlight = useRef<string | null>(null);
   useEffect(() => {
-    if (selectedId && visibleLinks.some((link) => link.id === selectedId)) return;
-    if (isLoading || error) return;
-    const nextId = visibleLinks[0]?.id ?? null;
-    setSelectedId(nextId);
-    if (nextId !== selectedLinkId) onSelectionChange?.(nextId);
-  }, [selectedId, visibleLinks, isLoading, error, selectedLinkId, onSelectionChange]);
+    if (!highlightLinkId || revealedHighlight.current === highlightLinkId) return;
+    if (!links.some((link) => link.id === highlightLinkId)) return;
+    revealedHighlight.current = highlightLinkId;
+    revealRow(highlightLinkId, true);
+  }, [highlightLinkId, links]);
 
-  /**
-   * Selecting a link always keeps it under the eye and (optionally) under the
-   * focus ring: arrow-key navigation otherwise moves the right pane while the
-   * selected row stays off-screen.
-   */
-  const selectLink = useCallback((linkId: string, options?: { focus?: boolean }) => {
-    setSelectedId(linkId);
-    onSelectionChange?.(linkId);
-    // A freshly created/duplicated row does not exist yet in this commit: retry
-    // once on the next frame rather than scrolling nothing.
-    const reveal = (attempt: number) => {
-      const element = document.getElementById(rowElementId(linkId));
-      if (!element) {
-        if (attempt === 0 && typeof window !== "undefined") window.requestAnimationFrame(() => reveal(1));
-        return;
-      }
-      element.scrollIntoView?.({ block: "nearest" });
-      if (options?.focus) element.focus();
-    };
-    reveal(0);
-  }, [onSelectionChange]);
-
-  const focusSelectedRow = useCallback(() => {
-    if (selectedId) document.getElementById(rowElementId(selectedId))?.focus();
-  }, [selectedId]);
-
-  // Global "/" focuses search; list arrows move selection. Skipped inside inputs.
+  // Global "/" focuses search. Skipped inside inputs and over dialogs.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
       if (event.defaultPrevented || !(target instanceof HTMLElement) || target.closest('[role="dialog"], [role="alertdialog"], [role="menu"]')) return;
-      const inField = target instanceof HTMLElement &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
+      const inField = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable;
       if (event.key === "/" && !inField && !editorOpen && !shareLink && !presentLink && !confirm) {
         event.preventDefault();
         document.getElementById("student-links-search")?.focus();
-        return;
-      }
-      if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !inField && target.closest('[aria-label="Rooms"]') && visibleLinks.length > 1) {
-        const index = visibleLinks.findIndex((link) => link.id === selectedId);
-        if (index < 0) return;
-        event.preventDefault();
-        const next = visibleLinks[(index + (event.key === "ArrowDown" ? 1 : -1) + visibleLinks.length) % visibleLinks.length];
-        if (next) selectLink(next.id);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [confirm, editorOpen, presentLink, selectLink, selectedId, shareLink, visibleLinks]);
+  }, [confirm, editorOpen, presentLink, shareLink]);
 
   const showToast = useCallback((message: string) => {
     notifySuccess(message);
@@ -337,7 +351,6 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     const updated = await updateMutation.mutateAsync({ linkId, request });
     collaboration?.setValue(`access/${linkId}`, updated);
     announceWorkspaceCommand("access.updated", { linkId });
-    selectLink(updated.id);
     if (!options?.silent) {
       showConfirmation({ linkId: updated.id, kind: "action", text: "Changes saved" });
       showToast("Room updated");
@@ -423,6 +436,25 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     setEditorOpen(true);
   }, []);
 
+  // The room page's "Room settings" lands here with ?edit=1: open that room's
+  // editor once its row exists, then let the host clear the request.
+  const handledEdit = useRef<string | null>(null);
+  useEffect(() => {
+    if (!editLinkId || handledEdit.current === editLinkId) return;
+    if (isLoading) return;
+    const target = links.find((link) => link.id === editLinkId);
+    if (!target && !error && !overview) return;
+    handledEdit.current = editLinkId;
+    if (target) openEditor(target);
+    onEditHandled?.();
+  }, [editLinkId, error, isLoading, links, onEditHandled, openEditor, overview]);
+
+  /** The row's one action: open the room, or share it for staff who cannot run rooms. */
+  const openRoom = (link: AssessmentAccessLink) => {
+    if (session?.canRun) session.onOpenRoom(link.scheduleId);
+    else setShareLink(link);
+  };
+
   // A host (publish-less now) can ask for the create form with a request id; each new id opens it once.
   const handledCreateRequest = useRef<number | null>(null);
   useEffect(() => {
@@ -437,19 +469,17 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   const onRoomCreated = (created: AssessmentAccessLink) => {
     setEditorOpen(false);
     setPrefillLink(null);
-    setJustCreatedId(created.id);
     collaboration?.setValue(`access/${created.id}`, created);
     announceWorkspaceCommand("access.created", { linkId: created.id });
     setSearch("");
     setDebouncedSearch("");
-    setStatusFilter("all");
-    selectLink(created.id);
+    revealRow(created.id, true);
     // The new row lands already confirmed: the page never relies on a global
     // channel to say the write was accepted.
     showConfirmation({ linkId: created.id, kind: "action", text: "Room created" });
     showToast("Room created");
     // The session is the object staff work with next: take runners straight to its waiting room.
-    // Staff who cannot run sessions stay here, where the new row is selected and shareable.
+    // Staff who cannot run sessions stay here, on the new row, which they can share.
     if (session?.canRun) session.onOpenRoom(created.scheduleId);
   };
 
@@ -484,6 +514,9 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     { id: "present", label: "Present to Students", disabled: busy, onSelect: () => setPresentLink(link) },
     { id: "edit", label: "Edit room", disabled: busy, onSelect: () => openEditor(link) },
     { id: "duplicate", label: "Duplicate setup", disabled: busy, onSelect: () => openDuplicateSetup(link) },
+    ...(session?.canRun && phaseOf(link) === "finished"
+      ? [{ id: "results", label: "View results", onSelect: () => session.onOpenResults(link.scheduleId) } as SatMenuItem]
+      : []),
     ...(link.lifecycleState !== "revoked"
       ? [{ id: "pause", label: link.lifecycleState === "paused" ? "Resume check-in" : "Pause check-in", disabled: busy, onSelect: () => { void setLifecycle(link, link.lifecycleState === "paused" ? "active" : "paused"); } } as SatMenuItem]
       : []),
@@ -512,7 +545,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
       <div className="sat-product min-h-screen bg-au-fill">
         {workspaceHeader}
         <SatContainer>
-          <SatPageHeader eyebrow="Digital SAT" title="Rooms" description="Prepare, share and run sittings of this exam." />
+          <SatPageHeader eyebrow="Digital SAT" title="Rooms" description="Find a room for this exam and open it to share, start and monitor." />
           <SatListSkeleton rows={3} label="Loading Rooms" />
         </SatContainer>
       </div>
@@ -553,6 +586,24 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
   }
 
   const saving = updateMutation.isPending;
+  let rowIndex = 0;
+  const renderRow = (link: AssessmentAccessLink) => {
+    const busy = pendingWrite?.linkId === link.id;
+    return (
+      <AccessLinkRow
+        key={link.id}
+        link={link}
+        phase={phaseOf(link)}
+        highlighted={link.id === highlightLinkId}
+        onOpen={() => openRoom(link)}
+        menuItems={menuItemsFor(link, busy)}
+        resultIndex={rowIndex++}
+        busy={busy}
+        pendingLabel={busy ? pendingWrite.label : null}
+        confirmation={confirmation?.linkId === link.id ? confirmation.text : null}
+      />
+    );
+  };
 
   return (
     <div className="sat-product min-h-screen bg-au-fill text-slate-950">
@@ -562,12 +613,21 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
         <SatPageHeader
           eyebrow={`${exam.title} · Version ${version.versionNumber}`}
           title="Rooms"
-          description="Prepare, share and run sittings of this exam. Each room stays on the version it was created for."
+          description="Find a room for this exam and open it to share, start and monitor."
+          {...(onOpenAllRooms ? {
+            actions: <SatButton variant="quiet" icon={<ArrowUpRight size={16} aria-hidden="true" />} onClick={onOpenAllRooms}>All rooms</SatButton>,
+          } : {})}
         />
         {/* One polite region for in-place confirmations: the visual copy lives
             at the control, and screen readers hear it once. */}
         <p role="status" aria-live="polite" className="sr-only">{confirmation?.text ?? ""}</p>
         {error ? <div role="alert" className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">Access details could not refresh. Displayed entry information may be out of date. <button type="button" onClick={() => void onRefresh()} className="min-h-11 px-3 font-semibold underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Retry</button></div> : null}
+        {session?.canRun && session.stale && links.length ? (
+          <div role="status" className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-black/[0.06] bg-white px-4 py-2 text-[14px] text-slate-600">
+            <span>Room status could not refresh, so some rooms are listed without it.</span>
+            <SatButton variant="quiet" pending={session.refreshing} icon={<RefreshCw size={16} aria-hidden="true" />} onClick={session.onRefresh}>Retry</SatButton>
+          </div>
+        ) : null}
         {actionError ? (
           <div role="alert" className="sat-banner-enter mt-4 flex items-center justify-between gap-3 rounded-2xl border border-red-700/20 bg-red-50 px-4 py-3 text-[14px] font-medium text-red-700">
             <span>{actionError}</span>
@@ -580,91 +640,91 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
           </div>
         ) : null}
 
-        <DeliverySetupGuide groupCount={links.filter((link) => link.lifecycleState !== "revoked").length} runningCount={links.filter((link) => session?.infoFor(link.scheduleId)?.phase === "live").length} finishedCount={links.filter((link) => session?.infoFor(link.scheduleId)?.phase === "finished").length} onCreate={() => openEditor(null)} />
+        {recentLinks.length ? (
+          <section aria-labelledby="rooms-recent-heading" className="mt-6">
+            <h2 id="rooms-recent-heading" className="text-[13px] font-semibold uppercase tracking-wide text-slate-500">Jump back in</h2>
+            <ul className="mt-2 grid gap-2 sm:grid-cols-3">
+              {recentLinks.map(({ link, at }) => {
+                const phase = phaseOf(link);
+                const tone = phase ? PHASE_TONE[phase] : undefined;
+                const joined = session?.canRun ? session.infoFor(link.scheduleId)?.joined ?? null : null;
+                return (
+                  <li key={link.id} className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => openRoom(link)}
+                      aria-label={`Open ${link.name}, ${openedAgo(at).toLocaleLowerCase()}`}
+                      className="sat-list-row sat-press-row flex min-h-[88px] w-full flex-col items-start justify-between gap-2 rounded-2xl border border-black/[0.06] bg-white p-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40"
+                    >
+                      <span className="flex w-full min-w-0 items-center gap-2">
+                        <span className="truncate text-[15px] font-semibold text-slate-900">{link.name}</span>
+                        {phase && tone ? <SatStatusPill tone={tone} pulse={phase === "live"}>{SESSION_PHASE_LABEL[phase]}</SatStatusPill> : null}
+                      </span>
+                      <span className="text-[14px] tabular-nums text-slate-500">
+                        {openedAgo(at)}{joined !== null ? ` · ${joined} joined` : ""}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
 
-        <div className="mt-4 overflow-hidden rounded-2xl border border-black/[0.06] bg-white lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
-          <section aria-label="Rooms" className="flex min-w-0 flex-col border-black/[0.06] max-lg:border-b lg:border-r">
-            <LinksToolbar
-              search={search}
-              onSearchChange={setSearch}
-              statusFilter={statusFilter}
-              onStatusFilterChange={setStatusFilter}
-              counts={counts}
-              total={links.length}
-              resultCount={visibleLinks.length}
+        <section aria-label="Rooms" className="mt-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <SatSearchField
+              id="student-links-search"
+              label="Search rooms"
+              value={search}
+              onChange={setSearch}
+              placeholder="Search by name, audience or version"
+              widthClassName="sm:max-w-sm"
             />
-            <div className="p-2 sm:p-3">
-              {visibleLinks.length ? (
-                <SatList variant="cards">
-                  {visibleLinks.map((link, index) => (
-                    <AccessLinkRow
-                      key={link.id}
-                      link={link}
-                      selected={selectedId === link.id}
-                      isStaleRelease={link.publishedVersionId !== version.id}
-                      onSelect={() => selectLink(link.id)}
-                      menuItems={menuItemsFor(link, pendingWrite?.linkId === link.id)}
-                      resultIndex={index}
-                      busy={pendingWrite?.linkId === link.id}
-                      pendingLabel={pendingWrite?.linkId === link.id ? pendingWrite.label : null}
-                      confirmation={confirmation?.linkId === link.id ? confirmation.text : null}
-                      sessionLabel={session?.canRun ? sessionRowLabel(session.infoFor(link.scheduleId)) : null}
-                      {...(session?.canRun && !session.stale && session.infoFor(link.scheduleId)?.phase === "live" ? {
-                        quickAction: { label: "Open live room", onSelect: () => session.onOpenRoom(link.scheduleId) },
-                      } : {})}
-                    />
-                  ))}
-                </SatList>
-              ) : links.length > 0 ? (
-                <SatEmptyState
-                  icon={<Link2 size={20} aria-hidden="true" />}
-                  title="No matching links"
-                  hint="Change the search or status filter."
-                />
-              ) : (
-                <SatEmptyState
-                  icon={<Link2 size={20} aria-hidden="true" />}
-                  title="No rooms yet"
-                  hint="Create a room when you are ready to run this exam. Each room keeps the exam content it was created with."
-                />
-              )}
+          </div>
+          <SatResultCount total={links.length} visible={visibleLinks.length} itemLabel={links.length === 1 ? "room" : "rooms"} />
+
+          {links.length === 0 ? (
+            <SatEmptyState
+              icon={<Link2 size={20} aria-hidden="true" />}
+              title="No rooms yet"
+              hint="Create a room when you are ready to run this exam. Each room keeps the exam content it was created with."
+              action={canCreate ? <SatPrimaryButton onClick={() => openEditor(null)}>Create room</SatPrimaryButton> : undefined}
+            />
+          ) : visibleLinks.length === 0 ? (
+            <SatEmptyState
+              icon={<Link2 size={20} aria-hidden="true" />}
+              title={`No rooms match “${search.trim()}”`}
+              hint="Try a room name, audience or version number."
+              action={<SatButton variant="secondary" onClick={() => setSearch("")}>Clear search</SatButton>}
+            />
+          ) : (
+            <div className="mt-4 space-y-6">
+              {GROUPS.filter((group) => groups[group.key].length).map((group) => (
+                <section key={group.key} aria-labelledby={`rooms-group-${group.key}`}>
+                  <h2 id={`rooms-group-${group.key}`} className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-slate-500">
+                    {group.title} <span className="tabular-nums text-slate-400">{groups[group.key].length}</span>
+                  </h2>
+                  <SatList variant="cards">{groups[group.key].map(renderRow)}</SatList>
+                </section>
+              ))}
+              {groups.closed.length ? (
+                <details
+                  className="group"
+                  open={Boolean(query) || groups.closed.some((link) => link.id === highlightLinkId) || undefined}
+                >
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-xl px-1 text-[14px] font-semibold text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 [&::-webkit-details-marker]:hidden">
+                    <span aria-hidden="true" className="transition-transform group-open:rotate-90">›</span>
+                    Closed rooms ({groups.closed.length})
+                  </summary>
+                  <div className="mt-2">
+                    <SatList variant="cards">{groups.closed.map(renderRow)}</SatList>
+                  </div>
+                </details>
+              ) : null}
             </div>
-          </section>
-          <section aria-label="Room details" className="min-w-0 bg-au-fill max-lg:min-h-[420px]">
-            {selectedLink ? (
-              <AccessLinkDetail
-                key={selectedLink.id}
-                link={selectedLink}
-                isStaleRelease={selectedLink.publishedVersionId !== version.id}
-                currentVersionNumber={version.versionNumber}
-                url={studentJoinUrl(selectedLink.id)}
-                activity={activityQuery.data ?? []}
-                activityLoading={activityQuery.isLoading}
-                activityError={activityQuery.error instanceof Error ? activityQuery.error.message : null}
-                onRetryActivity={() => { void activityQuery.refetch(); }}
-                onCopy={() => { void copy(selectedLink); }}
-                onShare={() => setShareLink(selectedLink)}
-                onEdit={() => openEditor(selectedLink)}
-                onPresent={() => setPresentLink(selectedLink)}
-                onCreateForCurrent={() => openDuplicateSetup(selectedLink)}
-                copyConfirmed={confirmation?.linkId === selectedLink.id && confirmation.kind === "copy"}
-                onEscapeToRow={focusSelectedRow}
-                {...(session ? { session } : {})}
-                justCreated={justCreatedId === selectedLink.id}
-                onDismissNextSteps={() => setJustCreatedId(null)}
-                onDuplicateSetup={() => openDuplicateSetup(selectedLink)}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center p-8 text-center">
-                <div>
-                  <Link2 size={28} className="mx-auto text-slate-300" aria-hidden="true" />
-                  <p className="mt-3 text-[14px] font-semibold text-slate-700">Select a room</p>
-                  <p className="mt-1 text-[14px] leading-5 text-slate-500">Details, activity, sharing, and check-in controls appear here.</p>
-                </div>
-              </div>
-            )}
-          </section>
-        </div>
+          )}
+        </section>
       </SatContainer>
 
       {createFlow}

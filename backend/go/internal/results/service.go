@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -45,6 +46,20 @@ const (
 // is open: the exam's report switch is on and the attempt sat a classroom
 // session. Standard Practice sittings never get a report, whatever the switch.
 const SATScoreReportOpenSQL = "SELECT COALESCE(e.sat_score_report_enabled, FALSE) AND COALESCE(sch.sat_session_mode, 'practice') = 'classroom' FROM student_attempts sa JOIN exam_schedules sch ON sch.id = sa.schedule_id JOIN exam_entities e ON e.id = sch.exam_id WHERE sa.id = ?"
+
+// satClassroomRawScoreAvailableSQL matches the raw score shape the list API
+// can display. A merely present classroomRaw key (including JSON null or an
+// incomplete/corrupt object) is not a score.
+const satClassroomRawScoreAvailableSQL = `COALESCE((
+	JSON_TYPE(JSON_EXTRACT(ar.score_payload, '$.classroomRaw')) = 'OBJECT'
+	AND JSON_TYPE(JSON_EXTRACT(ar.score_payload, '$.classroomRaw.rawCorrect')) IN ('INTEGER', 'UNSIGNED INTEGER')
+	AND JSON_TYPE(JSON_EXTRACT(ar.score_payload, '$.classroomRaw.total')) IN ('INTEGER', 'UNSIGNED INTEGER')
+	AND JSON_EXTRACT(ar.score_payload, '$.classroomRaw.rawCorrect') >= 0
+	AND JSON_EXTRACT(ar.score_payload, '$.classroomRaw.total') > 0
+	AND JSON_EXTRACT(ar.score_payload, '$.classroomRaw.rawCorrect') <= 9223372036854775807
+	AND JSON_EXTRACT(ar.score_payload, '$.classroomRaw.total') <= 9223372036854775807
+	AND JSON_EXTRACT(ar.score_payload, '$.classroomRaw.rawCorrect') <= JSON_EXTRACT(ar.score_payload, '$.classroomRaw.total')
+), FALSE)`
 
 // Analytics aggregates release counters over the latest student_results
 // versions (mirrors ResultsAnalytics: total_results, released_results,
@@ -124,22 +139,31 @@ type SATAccessGroup struct {
 
 // SATAttemptRow includes attempts before an assessment result has been made.
 type SATAttemptRow struct {
-	ResultID      *string    `json:"resultId"`
-	AttemptID     string     `json:"attemptId"`
-	AttemptStatus string     `json:"attemptStatus"`
-	Outcome       string     `json:"outcomeStatus"`
-	ReleaseState  string     `json:"releaseStatus"`
-	TotalScore    *int       `json:"totalScore"`
-	ScheduleID    string     `json:"scheduleId"`
-	ExamID        string     `json:"examId"`
-	ExamTitle     string     `json:"examTitle"`
-	VersionNumber int        `json:"versionNumber"`
-	StudentID     string     `json:"studentId"`
-	StudentName   string     `json:"studentName"`
-	StudentEmail  *string    `json:"studentEmail"`
-	CohortName    string     `json:"cohortName"`
-	SubmittedAt   *time.Time `json:"submittedAt"`
-	TestStartedAt *time.Time `json:"testStartedAt"`
+	ResultID       *string            `json:"resultId"`
+	AttemptID      string             `json:"attemptId"`
+	AttemptStatus  string             `json:"attemptStatus"`
+	Outcome        string             `json:"outcomeStatus"`
+	ReleaseState   string             `json:"releaseStatus"`
+	TotalScore     *int               `json:"totalScore"`
+	RawCorrect     *int64             `json:"rawCorrect,omitempty"`
+	RawTotal       *int64             `json:"rawTotal,omitempty"`
+	EstimatedTotal *SATEstimatedTotal `json:"estimatedTotal,omitempty"`
+	ScheduleID     string             `json:"scheduleId"`
+	ExamID         string             `json:"examId"`
+	ExamTitle      string             `json:"examTitle"`
+	VersionNumber  int                `json:"versionNumber"`
+	StudentID      string             `json:"studentId"`
+	StudentName    string             `json:"studentName"`
+	StudentEmail   *string            `json:"studentEmail"`
+	CohortName     string             `json:"cohortName"`
+	SubmittedAt    *time.Time         `json:"submittedAt"`
+	TestStartedAt  *time.Time         `json:"testStartedAt"`
+}
+
+// SATEstimatedTotal is the active global converter's total-score range.
+type SATEstimatedTotal struct {
+	Low  int `json:"low"`
+	High int `json:"high"`
 }
 
 // SATAttemptOptions narrows ListSATAttempts. Status is one of "", "all",
@@ -209,8 +233,11 @@ type SATQuestion struct {
 	DisplayOrder    int    `json:"displayOrder"`
 	ModuleKey       string `json:"moduleKey"`
 	SectionKey      string `json:"sectionKey"`
+	Kind            string `json:"kind,omitempty"`
 	Response        any    `json:"response"`
+	ResponseLabel   string `json:"responseLabel,omitempty"`
 	CorrectAnswer   any    `json:"correctAnswer"`
+	CorrectLabel    string `json:"correctLabel,omitempty"`
 	IsCorrect       *bool  `json:"isCorrect"`
 	IsPretest       bool   `json:"isPretest"`
 	MarkedForReview bool   `json:"markedForReview"`
@@ -747,9 +774,9 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 	}
 	switch scoreFilter {
 	case "available":
-		where += ` AND ar.outcome_status = 'scored' AND ar.total_score IS NOT NULL`
+		where += ` AND COALESCE(ar.outcome_status, '') = 'scored' AND (ar.total_score IS NOT NULL OR ` + satClassroomRawScoreAvailableSQL + `)`
 	case "unavailable":
-		where += ` AND (ar.id IS NULL OR ar.outcome_status <> 'scored' OR ar.total_score IS NULL)`
+		where += ` AND (ar.id IS NULL OR COALESCE(ar.outcome_status, '') <> 'scored' OR (ar.total_score IS NULL AND NOT ` + satClassroomRawScoreAvailableSQL + `))`
 	}
 	if opts.Status != "" && opts.Status != "all" {
 		where += ` AND ` + satOutcomeBucketSQL + ` = ?`
@@ -768,7 +795,7 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 		return nil, err
 	}
 	query := `SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored'),
-		COALESCE(ar.release_status, ''), ar.total_score, a.schedule_id, a.exam_id,
+		COALESCE(ar.release_status, ''), ar.total_score, JSON_EXTRACT(ar.score_payload, '$.classroomRaw'), a.schedule_id, a.exam_id,
 		sch.exam_title, version.version_number, a.candidate_id, a.candidate_name,
 		a.candidate_email, sch.cohort_name, a.submitted_at, a.created_at, ` + satTestStartSQL + `` + from + `
 		JOIN exam_versions version ON version.id = a.published_version_id` + where + `
@@ -780,14 +807,16 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 	}
 	defer rows.Close()
 	items := make([]SATAttemptRow, 0, limit)
+	classroomRaws := make([]map[string]any, 0, limit)
 	for rows.Next() {
 		var item SATAttemptRow
 		var resultID, email sql.NullString
+		var classroomRaw sql.NullString
 		var score sql.NullInt64
 		var submitted, started sql.NullTime
 		var created time.Time
 		if err := rows.Scan(&resultID, &item.AttemptID, &item.AttemptStatus, &item.Outcome, &item.ReleaseState,
-			&score, &item.ScheduleID, &item.ExamID, &item.ExamTitle, &item.VersionNumber,
+			&score, &classroomRaw, &item.ScheduleID, &item.ExamID, &item.ExamTitle, &item.VersionNumber,
 			&item.StudentID, &item.StudentName, &email, &item.CohortName, &submitted, &created, &started); err != nil {
 			return nil, err
 		}
@@ -796,12 +825,134 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 		item.StudentEmail = nullableStringPtr(email)
 		item.SubmittedAt = nullableTimePtr(submitted)
 		item.TestStartedAt = nullableTimePtr(started)
+		raw := decodeClassroomRaw(classroomRaw)
+		if raw != nil && classroomRawScoreAvailable(raw) {
+			item.RawCorrect = int64FieldPtr(raw["rawCorrect"])
+			item.RawTotal = int64FieldPtr(raw["total"])
+			item.EstimatedTotal = estimatedTotal(raw["totalScaled"])
+		}
 		items = append(items, item)
+		classroomRaws = append(classroomRaws, raw)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if hasClassroomRaw(classroomRaws) {
+		active, err := satscoring.ActiveRevision(ctx, s.db)
+		if err != nil {
+			// The staff result detail strips stale conversions on a broken or
+			// unreadable active policy. Keep list rows consistent: a failed
+			// lookup must not present the payload's older estimate as current.
+			for i, raw := range classroomRaws {
+				if raw != nil {
+					items[i].EstimatedTotal = nil
+				}
+			}
+		} else if active != nil {
+			for i, raw := range classroomRaws {
+				if raw == nil || !classroomRawScoreAvailable(raw) {
+					items[i].EstimatedTotal = nil
+					continue
+				}
+				satscoring.ApplyRevision(active, raw)
+				items[i].EstimatedTotal = estimatedTotal(raw["totalScaled"])
+			}
+		}
+	}
 	return &SATAttemptPage{Items: items, Total: total, Offset: offset, Limit: limit, HasMore: offset+len(items) < total}, nil
+}
+
+func decodeClassroomRaw(value sql.NullString) map[string]any {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return nil
+	}
+	decoder := json.NewDecoder(strings.NewReader(value.String))
+	decoder.UseNumber()
+	var raw map[string]any
+	if decoder.Decode(&raw) != nil || raw == nil {
+		return nil
+	}
+	var trailing any
+	if decoder.Decode(&trailing) != io.EOF {
+		return nil
+	}
+	return raw
+}
+
+func intFieldPtr(value any) *int {
+	var n int64
+	switch value := value.(type) {
+	case json.Number:
+		var err error
+		n, err = value.Int64()
+		if err != nil {
+			return nil
+		}
+	case int:
+		n = int64(value)
+	case int64:
+		n = value
+	default:
+		return nil
+	}
+	if n < 0 || int64(int(n)) != n {
+		return nil
+	}
+	result := int(n)
+	return &result
+}
+
+func int64FieldPtr(value any) *int64 {
+	var n int64
+	switch value := value.(type) {
+	case json.Number:
+		var err error
+		n, err = value.Int64()
+		if err != nil {
+			return nil
+		}
+	case int:
+		n = int64(value)
+	case int64:
+		n = value
+	default:
+		return nil
+	}
+	if n < 0 {
+		return nil
+	}
+	return &n
+}
+
+func estimatedTotal(value any) *SATEstimatedTotal {
+	score, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	low := intFieldPtr(score["low"])
+	high := intFieldPtr(score["high"])
+	if low == nil || high == nil || *low < 400 || *high > 1600 || *low > *high {
+		return nil
+	}
+	return &SATEstimatedTotal{Low: *low, High: *high}
+}
+
+func classroomRawScoreAvailable(raw map[string]any) bool {
+	if raw == nil {
+		return false
+	}
+	correct := int64FieldPtr(raw["rawCorrect"])
+	total := int64FieldPtr(raw["total"])
+	return correct != nil && total != nil && *total > 0 && *correct <= *total
+}
+
+func hasClassroomRaw(raws []map[string]any) bool {
+	for _, raw := range raws {
+		if raw != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // GetSATResult loads one SAT result with its adaptive/scaled sections.
@@ -871,7 +1022,11 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 	// empty detail instead of failing the whole result.
 	if sum.Outcome == OutcomeScored {
 		if modules, sectionKeys, err := s.satModules(ctx, attemptID); err == nil {
-			attachSATModules(sections, modules, sectionKeys)
+			if len(sections) == 0 {
+				sections = satSectionsFromModules(modules, sectionKeys)
+			} else {
+				attachSATModules(sections, modules, sectionKeys)
+			}
 		}
 		questions, err := s.satQuestions(ctx, attemptID)
 		if err != nil {
@@ -1023,10 +1178,11 @@ func (s *Service) satSections(ctx context.Context, resultID string) ([]SATSectio
 }
 
 // satModules loads one row per administered module attempt for an SAT
-// attempt, ordered by section then module display order. Attempts without
-// module rows (provisional, invalidated) yield an empty slice, never an
-// error, so section aggregates stay authoritative. The second slice holds
-// each module's section key: module_key is unique only within a section.
+// attempt, ordered by section then module display order. An attempt without
+// module rows yields an empty slice. A row with missing or invalid scored
+// counts returns an error so callers cannot synthesize a fabricated zero.
+// The second slice holds each module's section key: module_key is unique only
+// within a section.
 func (s *Service) satModules(ctx context.Context, attemptID string) ([]SATModule, []string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT s.section_key, m.module_key, m.adaptive_role, m.display_order,
@@ -1048,6 +1204,9 @@ func (s *Service) satModules(ctx context.Context, attemptID string) ([]SATModule
 		var raw, operational sql.NullInt64
 		if err := rows.Scan(&sectionKey, &moduleKey, &role, &displayOrder, &state, &raw, &operational); err != nil {
 			return nil, nil, err
+		}
+		if !raw.Valid || !operational.Valid || raw.Int64 < 0 || operational.Int64 <= 0 || raw.Int64 > operational.Int64 {
+			return nil, nil, fmt.Errorf("SAT module %q has invalid scored counts", moduleKey)
 		}
 		mod := SATModule{
 			ModuleKey: moduleKey, AdaptiveRole: role,
@@ -1087,6 +1246,60 @@ func attachSATModules(sections []SATSection, modules []SATModule, sectionKeys []
 		}
 		sections[pos].Modules = append(sections[pos].Modules, mod)
 	}
+}
+
+// satSectionsFromModules builds section aggregates for classroom results,
+// whose canonical raw score lives in classroomRaw rather than the legacy
+// assessment_section_results table.
+func satSectionsFromModules(modules []SATModule, sectionKeys []string) []SATSection {
+	if len(modules) != len(sectionKeys) {
+		return nil
+	}
+	const maxInt64 = int64(1<<63 - 1)
+	for _, module := range modules {
+		if module.RawCorrect < 0 || module.Operational <= 0 || module.RawCorrect > module.Operational {
+			return nil
+		}
+	}
+	sections := make([]SATSection, 0, len(modules))
+	index := make(map[string]int, len(modules))
+	conflictingRoutes := make(map[string]bool)
+	for i, module := range modules {
+		key := sectionKeys[i]
+		pos, ok := index[key]
+		if !ok {
+			pos = len(sections)
+			index[key] = pos
+			sections = append(sections, SATSection{SectionKey: key, Modules: []SATModule{}})
+		}
+		section := &sections[pos]
+		if module.RawCorrect > maxInt64-section.RawCorrect || module.Operational > maxInt64-section.Operational {
+			return nil
+		}
+		section.RawCorrect += module.RawCorrect
+		section.Operational += module.Operational
+		section.Modules = append(section.Modules, module)
+		var route string
+		switch module.AdaptiveRole {
+		case "higher_branch":
+			route = "higher"
+		case "lower_branch":
+			route = "lower"
+		}
+		if route != "" {
+			if conflictingRoutes[key] {
+				continue
+			}
+			if section.Route == nil {
+				section.Route = &route
+			} else if *section.Route != route {
+				// Conflicting branch rows are invalid data; do not claim a route.
+				conflictingRoutes[key] = true
+				section.Route = nil
+			}
+		}
+	}
+	return sections
 }
 
 // satQuestions loads one row per administered SAT question with the sealed
@@ -1192,8 +1405,35 @@ func satQuestionsQ(ctx context.Context, db rowQuerier, attemptID string) ([]SATQ
 		if answerDef.Valid {
 			answerJSON = answerDef.String
 		}
+		var answerShape struct {
+			Kind string `json:"kind"`
+		}
+		_ = json.Unmarshal([]byte(answerJSON), &answerShape)
+		question.Kind = answerShape.Kind
 		if key, ok := assessscore.SATCorrectAnswer(answerJSON); ok {
 			question.CorrectAnswer = key
+		}
+		if answerShape.Kind == "single_choice" {
+			labels := assessscore.SATChoiceLabels(answerJSON)
+			if responseID, ok := question.Response.(string); ok {
+				question.ResponseLabel = labels[responseID]
+				if question.ResponseLabel == "" {
+					question.ResponseLabel = responseID
+				}
+			}
+			if correctID, ok := question.CorrectAnswer.(string); ok {
+				question.CorrectLabel = labels[correctID]
+				if question.CorrectLabel == "" {
+					question.CorrectLabel = correctID
+				}
+			}
+		} else if answerShape.Kind == "student_produced_response" {
+			if response, ok := question.Response.(string); ok {
+				question.ResponseLabel = response
+			}
+			if correct, ok := question.CorrectAnswer.(string); ok {
+				question.CorrectLabel = correct
+			}
 		}
 		// Null-verdict rule: pretest, unanswered, or key-less rows never
 		// claim incorrect. Only a answered, keyed, operational row gets a

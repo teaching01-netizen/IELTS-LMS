@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowRight, CalendarPlus, Radio, SearchX } from 'lucide-react';
+import { ArrowRight, CalendarPlus, Radio, SearchX, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthSession } from '../../../features/auth/authSession';
@@ -78,8 +78,15 @@ export function SatSessionsRoute() {
   const examsQuery = useExamListQuery(session?.user.role === 'admin', 'sat', false);
   const { params, setParams } = useSatListParams();
   const search = params.q ?? '';
+  const examFilter = params.exam ?? null;
   const [createOpen, setCreateOpen] = useState(false);
-  const summaries = useMemo(() => (summariesQuery.data ?? []).filter((summary) => !proctorFacade.isPreviewRuntimeCohortName(summary.schedule.cohortName)), [summariesQuery.data]);
+  const allSummaries = useMemo(() => (summariesQuery.data ?? []).filter((summary) => !proctorFacade.isPreviewRuntimeCohortName(summary.schedule.cohortName)), [summariesQuery.data]);
+  const summaries = useMemo(() => (examFilter ? allSummaries.filter((summary) => summary.schedule.examId === examFilter) : allSummaries), [allSummaries, examFilter]);
+  const examFilterTitle = examFilter
+    ? allSummaries.find((summary) => summary.schedule.examId === examFilter)?.schedule.examTitle
+      ?? examsQuery.data?.entities.find((exam) => exam.id === examFilter)?.title
+      ?? 'Selected exam'
+    : null;
   const counts = useMemo(() => summaries.reduce((result, summary) => {
     result[bucketFor(summary.schedule.status, summary.runtime.status)] += 1;
     return result;
@@ -136,6 +143,19 @@ export function SatSessionsRoute() {
           placeholder="Search rooms or exams"
           widthClassName="w-full sm:w-72 sm:flex-none"
         />
+        {examFilterTitle ? (
+          <span className="inline-flex min-h-11 max-w-full items-center gap-1 rounded-full bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.04))] pl-3.5 text-[14px] font-medium text-[var(--sat-staff-text-primary,#1d1d1f)]">
+            <span className="truncate"><span className="text-[var(--sat-staff-text-secondary,#515154)]">Exam: </span>{examFilterTitle}</span>
+            <button
+              type="button"
+              onClick={() => setParams({ exam: '' })}
+              aria-label={`Show rooms from all exams (remove filter ${examFilterTitle})`}
+              className="sat-press flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[var(--sat-staff-text-tertiary,#6e6e73)] hover:text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40"
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </span>
+        ) : null}
         <SatToolbarSelect<SessionSort>
           id="sat-session-sort"
           label="Sort"
@@ -204,7 +224,9 @@ export function SatSessionsRoute() {
           icon={search.trim() ? <SearchX size={20} aria-hidden="true" /> : <Radio size={20} aria-hidden="true" />}
           title={search.trim() ? 'No matching rooms' : 'No ' + bucket + ' rooms'}
           hint={search.trim() ? `No rooms match “${search.trim()}” in ${BUCKET_LABEL[bucket]}.` : EMPTY_HINT[bucket]}
-          action={search.trim() ? <SatButton variant="secondary" onClick={() => setParams({ q: '' })}>Clear search</SatButton> : undefined}
+          action={search.trim()
+            ? <SatButton variant="secondary" onClick={() => setParams({ q: '' })}>Clear search</SatButton>
+            : examFilter ? <SatButton variant="secondary" onClick={() => setParams({ exam: '' })}>Show all exams</SatButton> : undefined}
         />
         </>
       )}

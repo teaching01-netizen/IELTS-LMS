@@ -22,7 +22,8 @@ import {
   type CreateAssessmentAccessLinkRequest,
   type UpdateAssessmentAccessLinkRequest,
 } from "../../contracts/accessLinks";
-import type { SatPublishScope } from "../../contracts/assessment";
+import type { SatClassroomPlan, SatClassroomShape, SatPublishScope } from "../../contracts/assessment";
+import { SHAPE_MODULE_ROLES } from "../../contracts/satExamConfig";
 import { localDateTimeToIso, parseAccessLinkMembers, serializeAccessLinkMembers, toLocalDateTimeInput } from "./accessLinkUi";
 import { describeRosterResult, rosterCellsLine, rosterLineCells, rosterLinesFromPaste, validateRosterSource, type RosterRowError } from "./rosterValidation";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "../../../../components/ui/sheet";
@@ -49,6 +50,10 @@ interface AccessLinkEditorSheetProps {
   versionSummary?: string | undefined;
   /** Current server capability for the new-room Classroom choice. Omit only for legacy hosts. */
   classroomAvailability?: "checking" | "enabled" | "disabled" | "unknown";
+  /** Current draft plan; required to keep a new room compatible with its exam. */
+  classroomPlan?: SatClassroomPlan | null;
+  classroomPlanStatus?: "loading" | "ready" | "error";
+  onRetryClassroomPlan?: () => void;
   /** The test's title, shown in the SAT pre-submit summary. An existing link carries its own. */
   examTitle?: string | null;
   /**
@@ -93,6 +98,15 @@ interface AccessLinkEditorSheetProps {
 /** The Module 2 routes a Classroom room can use. Standard practice has none. */
 const CLASSROOM_ROUTING: readonly SatSessionType[] = ["classroom", "classroom_lower", "classroom_higher", "classroom_staff"];
 type ClassroomAvailability = "checking" | "enabled" | "disabled" | "unknown";
+
+function routesForPlan(shapes: readonly SatClassroomShape[]): SatSessionType[] {
+  return CLASSROOM_ROUTING.filter((route) => {
+    if (route === "classroom") return true;
+    if (route === "classroom_staff") return shapes.length === 0;
+    const branch = route === "classroom_lower" ? "lower" : "higher";
+    return shapes.every((shape) => SHAPE_MODULE_ROLES[shape].includes(branch));
+  });
+}
 
 function defaultScheduledWindow(): { opensAt: string; closesAt: string } {
   const start = new Date();
@@ -152,8 +166,25 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   // that run or silently changes the sitting a registered student expected.
   const isSat = (props.link?.providerKey ?? props.providerKey) === "sat";
   const isCreatingSat = isSat && !props.link;
+  const classroomPlanReady = props.classroomPlanStatus === undefined || props.classroomPlanStatus === "ready";
+  const inScopePlannedSections = useMemo(
+    () => isCreatingSat
+      ? sections.flatMap((section) => {
+        const shape = props.classroomPlan?.[section];
+        return shape ? [{ section, shape }] : [];
+      })
+      : [],
+    [isCreatingSat, props.classroomPlan, sections],
+  );
+  const planRequiresClassroom = inScopePlannedSections.length > 0;
+  const classroomRoutes = useMemo(() => routesForPlan(inScopePlannedSections.map(({ shape }) => shape)), [inScopePlannedSections]);
+  const effectiveSessionType = planRequiresClassroom && sessionType === "practice"
+    ? "classroom"
+    : sessionType !== "practice" && !classroomRoutes.includes(sessionType)
+      ? "classroom"
+      : sessionType;
   const classroomChoiceDisabled = props.classroomAvailability !== undefined && props.classroomAvailability !== "enabled";
-  const classroomSelectionBlocked = isCreatingSat && sessionType !== "practice" && classroomChoiceDisabled;
+  const classroomSelectionBlocked = isCreatingSat && effectiveSessionType !== "practice" && classroomChoiceDisabled;
   const audienceChoice = accessLinkAudienceChoice(audienceType);
   const pinnedPublishScope = props.link?.publishScope ?? props.publishScope ?? "full";
   const releaseSections = useMemo(() => availableAccessLinkSections(pinnedPublishScope), [pinnedPublishScope]);
@@ -172,6 +203,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     () => serializeAccessLinkMembers(props.members),
     [props.members],
   );
+
+  useEffect(() => {
+    if (!isCreatingSat || !props.open || !classroomPlanReady) return;
+    if (effectiveSessionType !== sessionType) setSatSessionType(effectiveSessionType);
+  }, [classroomPlanReady, effectiveSessionType, isCreatingSat, props.open, sessionType]);
 
   useEffect(() => {
     publishScopeRef.current = props.publishScope;
@@ -218,6 +254,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       setIsDirty(false);
       return;
     }
+    if (isCreatingSat && !classroomPlanReady) return;
     const link = props.link;
     // A draft saved when the author left to fix an exam issue; never merged
     // into an existing room or a duplicate setup.
@@ -236,7 +273,9 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     // Session type is chosen per NEW room. Reopening the form starts from the
     // default again instead of resurrecting a mode the author abandoned, and
     // it participates in the dirty comparison so a mode-only edit is protected.
-    const nextSessionType = restored ? satSessionTypeOf(restored) : "practice";
+    const restoredSessionType = restored ? satSessionTypeOf(restored) : "practice";
+    const hasPlannedSection = nextSections.some((section) => Boolean(props.classroomPlan?.[section]));
+    const nextSessionType = hasPlannedSection && restoredSessionType === "practice" ? "classroom" : restoredSessionType;
     setSatSessionType(nextSessionType);
     setName(nextName);
     setAudienceType(nextAudienceType);
@@ -267,10 +306,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     );
     hydratingRef.current = true;
     setIsDirty(false);
-  }, [defaults.closesAt, defaults.opensAt, membersSignature, props.link, props.open, props.prefill, props.restoreDraft]);
+  }, [classroomPlanReady, defaults.closesAt, defaults.opensAt, isCreatingSat, membersSignature, props.classroomPlan, props.link, props.open, props.prefill, props.restoreDraft]);
 
   useEffect(() => {
     if (!props.open) return;
+    if (isCreatingSat && !classroomPlanReady) return;
     if (hydratingRef.current) {
       hydratingRef.current = false;
       return;
@@ -286,7 +326,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
         closesAt,
         sections,
         membersSource,
-        sessionType,
+        effectiveSessionType,
       ) !== initialSnapshotRef.current,
     );
   }, [
@@ -294,6 +334,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     audienceLabel,
     audienceType,
     availabilityType,
+    classroomPlanReady,
     closesAt,
     membersSource,
     name,
@@ -301,6 +342,8 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     props.open,
     sections,
     sessionType,
+    effectiveSessionType,
+    isCreatingSat,
   ]);
 
   const validateName = (value: string): string | null => {
@@ -452,10 +495,10 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   ]);
 
   const submit = async () => {
-    if (submittingRef.current || props.isSaving || props.membersLoading || props.membersError) return;
+    if (submittingRef.current || props.isSaving || props.membersLoading || props.membersError || props.inputsDisabled || !classroomPlanReady) return;
     if (readOnly) return;
     if (classroomSelectionBlocked) {
-      setError(classroomUnavailableMessage(props.classroomAvailability));
+      setError(planRequiresClassroom ? `This exam uses custom modules. ${classroomUnavailableMessage(props.classroomAvailability)}` : classroomUnavailableMessage(props.classroomAvailability));
       return;
     }
     setError(null);
@@ -496,7 +539,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
       } else {
         await props.onCreate({
           ...shared,
-          ...(isSat ? SAT_SESSION_TYPE_REQUEST[sessionType] : {}),
+          ...(isSat ? SAT_SESSION_TYPE_REQUEST[effectiveSessionType] : {}),
           selectedStudents,
         });
       }
@@ -592,34 +635,47 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
   );
   // Two plain choices. Choosing Classroom reveals its Module 2 routing in place,
   // so the adaptive-routing vocabulary only appears to staff who need it.
-  const isClassroom = sessionType !== "practice";
+  const isClassroom = effectiveSessionType !== "practice";
   const sessionTypeField = (
-    <Field label="Session type" description="The exam's score report setting decides what students see when they finish.">
+    <Field label="Session type" description={planRequiresClassroom ? "This exam uses custom modules, so it runs in Classroom rooms only." : "The exam's score report setting decides what students see when they finish."}>
       <div role="group" aria-label="Session type" className="grid grid-cols-2 gap-2">
-        <Choice active={!isClassroom} onClick={() => setSatSessionType("practice")} icon={<Timer size={15} aria-hidden="true" />} title="Practice" subtitle="Standard SAT timing and routing" />
+        <Choice active={!isClassroom} disabled={planRequiresClassroom} onClick={() => { if (!planRequiresClassroom) setSatSessionType("practice"); }} icon={<Timer size={15} aria-hidden="true" />} title="Practice" subtitle={planRequiresClassroom ? "Unavailable for custom modules" : "Standard SAT timing and routing"} />
         <Choice
           active={isClassroom}
           disabled={classroomChoiceDisabled}
           onClick={() => { if (!isClassroom && !classroomChoiceDisabled) setSatSessionType("classroom"); }}
           icon={<GraduationCap size={15} aria-hidden="true" />}
           title="Classroom"
-          subtitle={classroomAvailabilitySubtitle(props.classroomAvailability)}
+          subtitle={planRequiresClassroom ? "Required by this exam's module set" : classroomAvailabilitySubtitle(props.classroomAvailability)}
         />
       </div>
+      {isCreatingSat && props.classroomPlanStatus === "loading" ? (
+        <p role="status" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Loading this exam's module plan…</p>
+      ) : null}
+      {isCreatingSat && props.classroomPlanStatus === "error" ? (
+        <p role="alert" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">
+          This exam's module plan could not load. Retry before creating a room.
+        </p>
+      ) : null}
       {classroomChoiceDisabled ? (
         <p role="status" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-          {classroomUnavailableMessage(props.classroomAvailability)} Practice remains available.
+          {planRequiresClassroom ? `This exam uses custom modules. ${classroomUnavailableMessage(props.classroomAvailability)}` : `${classroomUnavailableMessage(props.classroomAvailability)} Practice remains available.`}
         </p>
       ) : null}
       {isClassroom ? (
         <div className="mt-3">
           <p className="text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">Module 2 routing</p>
           <p id="access-link-module2-routing-help" className="mt-0.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Adaptive is the default. Forcing an easier or harder Module 2 skips the Module 1 score check. Teacher picks asks staff to choose each student’s Module 2.</p>
-          <select aria-label="Module 2 routing" aria-describedby="access-link-module2-routing-help" value={sessionType} onChange={(event) => setSatSessionType(event.target.value as SatSessionType)} className={`${inputClass} mt-2`}>
-            {CLASSROOM_ROUTING.map((key) => <option key={key} value={key}>{SAT_SESSION_TYPE_LABELS[key]}</option>)}
+          <select aria-label="Module 2 routing" aria-describedby="access-link-module2-routing-help" value={effectiveSessionType} onChange={(event) => setSatSessionType(event.target.value as SatSessionType)} className={`${inputClass} mt-2`}>
+            {classroomRoutes.map((key) => <option key={key} value={key}>{SAT_SESSION_TYPE_LABELS[key]}</option>)}
           </select>
         </div>
       ) : null}
+      {inScopePlannedSections.map(({ section, shape }) => (
+        <p key={section} role="note" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          {ACCESS_LINK_SECTION_LABELS[section]} · Module 2 is set by the exam: {shape.endsWith("easy") ? "Easy Module 2." : "Hard Module 2."}
+        </p>
+      ))}
     </Field>
   );
   const sectionsField = (
@@ -770,6 +826,11 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
                 ) : null}
               </div>
               </fieldset>
+              {isCreatingSat && props.classroomPlanStatus === "error" ? (
+                <button type="button" onClick={props.onRetryClassroomPlan} className="mt-3 min-h-11 px-1 font-semibold text-[var(--sat-staff-accent,#0071e3)] underline">
+                  Retry module plan
+                </button>
+              ) : null}
             </div>
             <footer className="border-t border-[var(--sat-staff-border-hairline)] bg-white px-6 py-4">
               {error ? <p role="alert" className="mb-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-danger-tint)] px-3 py-2 text-[14px] font-medium leading-5 text-[var(--sat-staff-danger,#b42318)]">{error}</p> : null}

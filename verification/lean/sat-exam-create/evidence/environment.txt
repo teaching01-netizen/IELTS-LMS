@@ -1,0 +1,6 @@
+Local disposable schema: codex_sat_exam_create_verify_20261015a
+MySQL server version, migration row count, maximum migration filename (query output):
+9.6.0
+89
+0089_sat_room_response_snapshot.sql
+This is local test evidence only; it is not a production profile.

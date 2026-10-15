@@ -1,0 +1,65 @@
+{
+  "capturedAt": "2026-10-15T03:32:46Z",
+  "repository": {
+    "baseHead": "8aa1d87ba5c8d264a0a039efda55a3c82c69a92a",
+    "branch": "feat/sat-bluebook-overlays-tools",
+    "workingTree": "dirty; 61 status entries at capture, including unrelated in-progress work; target files pinned below"
+  },
+  "toolchain": {
+    "leanToolchain": "leanprover/lean4:v4.19.0",
+    "leanVersion": "Lean (version 4.19.0, arm64-apple-darwin23.6.0, commit 6caaee842e94, Release)",
+    "lakeVersion": "Lake version 5.0.0-6caaee8 (Lean version 4.19.0)",
+    "goVersion": "go version go1.26.3 darwin/arm64",
+    "nodeVersion": "v26.0.0",
+    "bunVersion": "1.3.14",
+    "localMySQLServer": "9.6.0",
+    "leanDependencies": "none; lake-manifest.json is pinned"
+  },
+  "spec": {
+    "docs/at-score-result-wild-pretzel.md": "1ef7ce40a92e8f7e976fcae3d07decc597cc0c36bf4840b280c5f99b9f758d6a"
+  },
+  "applicationSources": {
+    "backend/go/internal/results/service.go": "9d2dc74c2eeca17032fa2c1a315e0223e05a1bf9aa568d68e173e77903b02ce5",
+    "backend/go/internal/results/service_test.go": "8fcf4c16855599ad70b1df75df1afcc0e32a271a7e4967a084fad5215b7f1206",
+    "backend/go/internal/assessscore/score.go": "ed18f9779c690a256e2bdf2170d056358e34bf0ba62444d7ae4f6f3bd321d7ba",
+    "backend/go/internal/assessscore/score_test.go": "38b58e05bc790996680ae074d7da25ecb84bdc8c4a0c8a3446846c77cc714cef",
+    "backend/go/internal/results/sat_attempt_answers.go": "283c80431301972da51bdf0400763acb13e57127d45d13c34ac4f4f0c7fc1d3a",
+    "backend/go/internal/results/sat_attempt_answers_test.go": "80b4b203689c42a687d9f44fb7f9e64687ee753d099dc681cbe83d6ff88290e6",
+    "src/features/results/api/satResultsQueries.ts": "c29a7af4223116d29d57fa489926c84dcecbc5b0dc8c0a8cf631986a00a9618c",
+    "src/products/sat/routes/SatResultDetailRoute.tsx": "e2d3549fe02d3392370fc8e74b870fb6bcb976521b5102566a917e30d99fdc2c",
+    "src/products/sat/routes/SatAttemptAnswersRoute.tsx": "cb6f5cdb423a3405acb9aeccf9584b4ff38c264124f8455960a0001c5284f2f0",
+    "src/products/sat/routes/SatExamGroupSection.tsx": "400c3cb29d3b06b3889ddcc3da366038105f680bb2d1bb6bbf62b4faf849b68f",
+    "src/products/sat/ui/SatQuestionResponseTable.tsx": "ab20a77f3282a2e748de83082eef44d46979a4ac2644b885c75f180f9bf194e6",
+    "src/products/sat/routes/__tests__/SatResultsRoutes.test.tsx": "10a950dc8fbe65409f0e6cf2a7904b0d7993b00812eb80f8be9dc762538d84c4",
+    "src/features/student-delivery/ui/transitions/score-report/scoreReportViewModel.ts": "6d3f805132d9c065fd41f2c673d4d8dd04ecd8037a8d0e49db39447e9a7e5779",
+    "src/features/student-delivery/ui/transitions/score-report/__tests__/scoreReportViewModel.test.ts": "82691ac387ac9a0841d594725c6bf365b47c37318660988047daf9c01321f57a",
+    "backend/go/internal/satscoring/service.go": "53d84079d1ac9b910adcd1937ff657614f567022dd89c23cefbc27b905b549d7",
+    "backend/go/internal/satscoring/overlay.go": "3f16c48e3d01ebcbdd5a3936ff2d71da084c758cbfc12452e307c446c6b51a1b",
+    "backend/go/internal/terminalization/service.go": "520f5f470c1c38f906badafa4fd4ec673c12d559748f8754e5dd874b5b5f4d0b",
+    "backend/go/cmd/migrate/main.go": "ab933afbb424ecaca2a036b59e7a005b9a2d3a155543bc7ce228f54fb4a82509"
+  },
+  "leanSources": {
+    "SatResultStaffRead.lean": "1c4748fd556762b21233f39bdbfd515e0b938659519ae2895c1a1dc3395f0111",
+    "SatResultStaffRead/Model.lean": "29a39845361461f5b9ee4ebefbb38ccbbcbb6e44023e3c8d1f6aaf63b8912421",
+    "SatResultStaffRead/Safety.lean": "29c295de5cfb6aabab90f587deba843f4d153de66742eaf748804dbd172b478d",
+    "SatResultStaffRead/Counterexamples.lean": "ccb6e55b69a1cb49179113a680ebe6cba39427e38e392315cf05f9c62b235613",
+    "SatResultStaffRead/AxiomAudit.lean": "653b16b09b23c05b8a84978795d13028672e7d0e6f142330d21682bf2302de23",
+    "lakefile.lean": "eb3dc281efe1c3df8ca0318cd7f0dae176ea3f975d5257c880e6a0cc0014b59a",
+    "lean-toolchain": "55e97be96000b5e9e290c9e74482e5e317861499a5540353ce845471bded8cea",
+    "lake-manifest.json": "b9cd7d1ded1650f52d5e6ddba67613ec2e8f54f7188057493f34539ac025b832"
+  },
+  "testEvidence": {
+    "goAllPackages": "evidence/go-all.txt",
+    "frontendVitest": "evidence/frontend-tests.txt",
+    "typecheck": "evidence/typecheck.txt",
+    "lint": "evidence/eslint.txt",
+    "leanBuild": "evidence/lean-build.txt",
+    "axiomAudit": "evidence/lean-axiom-audit.txt",
+    "localMySQLPredicate": "evidence/mysql-score-filter.txt"
+  },
+  "databaseSources": {
+    "backend/go/migrations/0032_provider_neutral_sat.sql": "6978df530bc7d0d2ab69933d5007a08890151fe1b2d39a9f7ff15a026b5ef2f1",
+    "backend/go/migrations/0087_sat_score_conversion.sql": "9998533df32f444b0e98c7731b8d10b308e1dea6e3835dc552c252ba025296fa",
+    "backend/go/migrations/0056_receipt_immutability.sql": "a4ab205b635c05015fe047c55587576a66136ef599fbc4053b625a04bb7b297a"
+  }
+}

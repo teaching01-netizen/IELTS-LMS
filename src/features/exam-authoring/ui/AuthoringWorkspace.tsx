@@ -12,6 +12,7 @@ import {
   useAssessmentValidation,
   useBatchCreateAssessmentQuestions,
   useBulkAssessmentQuestions,
+  useClassroomPlan,
   useCreateAssessmentQuestion,
   useDuplicateAssessmentQuestion,
   useEnsureDraftShell,
@@ -233,6 +234,8 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
   // a real shell or the lifecycle surface; no status code is inspected here.
   const shellState = shellLifecycle.state;
   const shell = shellState.kind === "ready" ? shellState.shell : undefined;
+  const classroomPlanQuery = useClassroomPlan(shell ? examId : "");
+  const classroomPlan = classroomPlanQuery.data?.plan ?? null;
   const publishedTarget = chrome.publishedTarget ?? null;
   // An author who ARRIVED here by choosing this exam in the Exam Library asked
   // to edit it, so a NO_DRAFT answer opens the draft for them instead of
@@ -1184,6 +1187,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
           <QuestionQueueRail
             module={selectedModule}
             sections={shell.sections}
+            classroomPlan={classroomPlan}
             sectionKey={selectedSection.sectionKey}
             sectionTitle={selectedSection.title}
             moveTargets={moveTargets}
@@ -1417,6 +1421,7 @@ export function AuthoringWorkspace({ examId, examTitle, chrome = DEFAULT_CHROME 
           <QuestionCardStack
             module={selectedModule}
             sections={shell.sections}
+            classroomPlan={classroomPlan}
             sectionTitle={selectedSection.title}
             selectedQuestionId={selectedExamQuestionId}
             isMutating={rowMutationBusy}
