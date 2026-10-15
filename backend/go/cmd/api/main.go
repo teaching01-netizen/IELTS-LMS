@@ -1189,7 +1189,8 @@ func authMiddleware(app *App) func(http.Handler) http.Handler {
 			if resolver == nil {
 				resolver = defaultSessionResolver
 			}
-			sess, err := resolver(ctx, app.DB, app.SessionCache, app.Config, cookie.Value, time.Now().UTC())
+			now := time.Now().UTC()
+			sess, err := resolver(ctx, app.DB, app.SessionCache, app.Config, cookie.Value, now)
 			if err != nil {
 				// DB failure must not authenticate nor masquerade as
 				// anonymous (which downstream maps to 401): report 503
@@ -1202,6 +1203,16 @@ func authMiddleware(app *App) func(http.Handler) http.Handler {
 			if sess == nil {
 				next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, httpx.CtxActorClass, "anonymous")))
 				return
+			}
+			// Re-issue the student cookie with its absolute deadline on every
+			// authenticated request. Cookies minted by an earlier release carry
+			// only the idle window, and the browser drops them mid-exam while
+			// the server-side session is still live; refreshing here extends
+			// them for students already sitting when a deploy lands. Handlers
+			// that rotate or clear cookies (entry, logout) write afterwards,
+			// and the browser applies the last Set-Cookie.
+			if sess.Role == auth.RoleStudent {
+				setCreatedSessionCookies(w, app, sess.Role, cookie.Value, sess.CSRFToken, sess.ExpiresAt, now)
 			}
 			ctx = context.WithValue(ctx, httpx.CtxActorClass, sess.Role)
 			ctx = context.WithValue(ctx, sessionCtxKey, sess)

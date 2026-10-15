@@ -296,11 +296,6 @@ func sessionHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if sess.Role == auth.RoleStudent {
-			if cookie, cookieErr := r.Cookie(app.Config.EffectiveSessionCookieName()); cookieErr == nil && cookie.Value != "" {
-				setCreatedSessionCookies(w, app, sess.Role, cookie.Value, sess.CSRFToken, sess.ExpiresAt, time.Now().UTC())
-			}
-		}
 		httpx.WriteJSON(w, http.StatusOK, payload)
 	}
 }
