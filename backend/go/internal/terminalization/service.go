@@ -39,6 +39,7 @@ import (
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/satconvert"
 	"example.com/ielts-proctoring/internal/satpublish"
+	"example.com/ielts-proctoring/internal/satscoring"
 )
 
 // materializeBlobsForSeal rebuilds the legacy answers/writing_answers/flags
@@ -1099,6 +1100,9 @@ func classroomRawScoreTx(ctx context.Context, q tx.Tx, attemptID string) (map[st
 	if len(sections) == 0 {
 		return nil, nil
 	}
+	if err := markModule1QualificationTx(ctx, q, attemptID, sectionIndex, sections); err != nil {
+		return nil, err
+	}
 	out := map[string]any{"rawCorrect": correct, "total": total, "sections": sections}
 	if err := convertClassroomScoresTx(ctx, q, attemptID, sections, out); err != nil {
 		return nil, err
@@ -1109,6 +1113,62 @@ func classroomRawScoreTx(ctx context.Context, q tx.Tx, attemptID string) (map[st
 		out["domains"] = domains
 	}
 	return out, nil
+}
+
+// markModule1QualificationTx records, for each section whose classroom plan
+// fixes the Module 2 branch (m1_hard / m1_easy), whether the student's Module 1
+// raw score would have earned that branch under the section's threshold. The
+// immutable route decision row carries both the raw score and the threshold
+// snapshot. An unqualified section is never converted (satscoring.SectionQualified).
+func markModule1QualificationTx(ctx context.Context, q tx.Tx, attemptID string, sectionIndex map[string]int, sections []map[string]any) error {
+	// Driven by the published plan, not by the decision rows: a forced section
+	// without a route decision must still be flagged (and fail closed).
+	rows, err := q.QueryContext(ctx, `
+		SELECT s.section_key, rd.raw_correct, rd.operational_question_count, CAST(rd.policy_config AS CHAR), CAST(v.sat_classroom_plan AS CHAR)
+		FROM student_attempts a
+		JOIN exam_versions v ON v.id = a.published_version_id
+		JOIN assessment_sections s ON s.exam_version_id = v.id
+		LEFT JOIN assessment_route_decisions rd ON rd.attempt_id = a.id AND rd.section_id = s.id
+		WHERE a.id = ?`, attemptID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sectionKey string
+		var rawCorrect, opsCount sql.NullInt64
+		var policyConfig, planRaw sql.NullString
+		if err := rows.Scan(&sectionKey, &rawCorrect, &opsCount, &policyConfig, &planRaw); err != nil {
+			return err
+		}
+		i, ok := sectionIndex[sectionKey]
+		if !ok {
+			continue
+		}
+		plan, err := satpublish.ParsePlan(planRaw.String)
+		if err != nil {
+			return err
+		}
+		forced := plan.ShapeFor(sectionKey).ForcedBranch()
+		if forced == "" {
+			continue
+		}
+		var policy struct {
+			MinimumCorrectForHigher int `json:"minimumCorrectForHigher"`
+		}
+		// Qualified only when routing (delivery.chooseAdaptiveRoute) would accept
+		// this decision and pick the forced branch; anything else fails closed.
+		qualified := false
+		if rawCorrect.Valid && opsCount.Valid && policyConfig.Valid &&
+			json.Unmarshal([]byte(policyConfig.String), &policy) == nil {
+			raw, ops, thr := rawCorrect.Int64, opsCount.Int64, int64(policy.MinimumCorrectForHigher)
+			if thr >= 1 && thr <= ops && raw >= 0 && raw <= ops {
+				qualified = (raw >= thr) == (forced == satpublish.RoleHigher)
+			}
+		}
+		sections[i][satscoring.Module1QualifiedKey] = qualified
+	}
+	return rows.Err()
 }
 
 func sectionRoles(section map[string]any) []string {
@@ -1149,6 +1209,9 @@ func convertClassroomScoresTx(ctx context.Context, q tx.Tx, attemptID string, se
 			continue
 		}
 		section["topology"] = string(topo)
+		if !satscoring.SectionQualified(section) {
+			continue
+		}
 		raw, _ := section["rawCorrect"].(int64)
 		op, _ := section["total"].(int64)
 		if score, ok := conv.Convert(key, topo, int(raw), int(op)); ok {

@@ -47,4 +47,19 @@ describe("SatExamConfigFields", () => {
     expect(screen.getByRole("radio", { name: "Reading & Writing: Full adaptive" })).toBeChecked();
     expect(screen.getAllByText("Harder Module 2 at")).toHaveLength(2);
   });
+
+  it("keeps the Module 1 threshold for fixed Module 2 shapes that start with Module 1", () => {
+    render(<Harness />);
+    fireEvent.change(screen.getAllByRole("spinbutton", { name: "Harder Module 2 at" })[0], { target: { value: "12" } });
+
+    fireEvent.click(screen.getByRole("radio", { name: "Reading & Writing: Module 1, then Hard Module 2" }));
+    expect(screen.getByRole("spinbutton", { name: "Converted score at" })).toHaveValue(12);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Reading & Writing: Module 1, then Easy Module 2" }));
+    expect(screen.getByRole("spinbutton", { name: "Converted score below" })).toHaveValue(12);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Reading & Writing: Hard Module 2 only" }));
+    expect(screen.queryByRole("spinbutton", { name: /Converted score/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("spinbutton", { name: "Harder Module 2 at" })).toHaveLength(1);
+  });
 });

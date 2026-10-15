@@ -1,12 +1,21 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, Clock3, GitBranch, Save } from "lucide-react";
 import { useClassroomPlan, useUpdateSectionDeliverySettings } from "../../api/assessmentQueries";
-import type { AssessmentSectionShell } from "../../contracts/assessment";
+import type { AssessmentSectionShell, SatClassroomShape } from "../../contracts/assessment";
 import { SHAPE_MODULE_ROLES } from "../../contracts/satExamConfig";
 import { operationalCountForSection, secondsToMinutes, toUserFacingReleaseError } from "./releaseSelectors";
 import { NumericField } from "./NumericField";
 import { ClassroomPlanField } from "./ClassroomPlanField";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
+
+/** Module 1 threshold copy per shape; Module 2-only shapes have no Module 1 to gate. */
+const ROUTING_COPY: Record<SatClassroomShape | "full", { title: string; label: string; below: string; atOrAbove: string } | null> = {
+  full: { title: "Adaptive routing", label: "Higher route at", below: "Lower", atOrAbove: "Higher" },
+  m1_hard: { title: "Converted score", label: "Converted score at", below: "No converted score", atOrAbove: "Converted" },
+  m1_easy: { title: "Converted score", label: "Converted score below", below: "Converted", atOrAbove: "No converted score" },
+  m2_easy: null,
+  m2_hard: null,
+};
 
 interface SectionDeliveryEditorProps {
   examId: string;
@@ -172,7 +181,7 @@ function SectionDeliveryEditorInner({
   const save = useCallback(async () => {
     if (!base || !lower || !higher || !routing || !effectiveCanEdit || update.isPending) return;
     setLocalError(null);
-    if (shape === "full" && (!Number.isInteger(threshold) || threshold < 1 || threshold > operationalCount)) {
+    if (shapeRoles.includes("module1") && (!Number.isInteger(threshold) || threshold < 1 || threshold > operationalCount)) {
       setLocalError(`Higher-route threshold must be between 1 and ${operationalCount}.`);
       return;
     }
@@ -210,7 +219,7 @@ function SectionDeliveryEditorInner({
     } catch (error) {
       setLocalError(toUserFacingReleaseError(error));
     }
-  }, [base, baseMinutes, breakMinutes, collaboration, effectiveCanEdit, higher, higherMinutes, lower, lowerMinutes, operationalCount, routing, section, shape, threshold, update]);
+  }, [base, baseMinutes, breakMinutes, collaboration, effectiveCanEdit, higher, higherMinutes, lower, lowerMinutes, operationalCount, routing, section, shapeRoles, threshold, update]);
 
   // Keep this effect above the incomplete-structure return. A remote
   // structural update can temporarily remove or restore a module; hooks must
@@ -260,6 +269,7 @@ function SectionDeliveryEditorInner({
         : shape === "m1_hard"
           ? baseMinutes + higherMinutes
           : baseMinutes + Math.max(lowerMinutes, higherMinutes);
+  const routingCopy = ROUTING_COPY[shape];
   const saveDisabled = !dirty || update.isPending || !effectiveCanEdit || !planReady;
   const saveReasonId = `section-${section.id}-save-reason`;
   const saveReason = !effectiveCanEdit
@@ -307,14 +317,14 @@ function SectionDeliveryEditorInner({
         {shapeRoles.includes("higher") ? <NumericField label="Hard Module 2" value={higherMinutes} min={1} max={600} suffix="min" disabled={!effectiveCanEdit || !planReady} onChange={changeHigherMinutes} /> : null}
       </div>
 
-      <div className={`mt-4 grid gap-3 ${shape === "full" ? "lg:grid-cols-[minmax(0,1fr)_200px]" : ""}`}>
-        {shape === "full" ? <div className="rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4">
+      <div className={`mt-4 grid gap-3 ${routingCopy ? "lg:grid-cols-[minmax(0,1fr)_200px]" : ""}`}>
+        {routingCopy ? <div className="rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] p-4">
           <div className="flex items-center gap-2 text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">
-            <GitBranch size={16} className="text-[var(--sat-staff-text-tertiary,#6e6e73)]" aria-hidden="true" /> Adaptive routing
+            <GitBranch size={16} className="text-[var(--sat-staff-text-tertiary,#6e6e73)]" aria-hidden="true" /> {routingCopy.title}
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-[160px_minmax(0,1fr)] sm:items-end">
             <NumericField
-              label="Higher route at"
+              label={routingCopy.label}
               value={threshold}
               min={1}
               max={operationalCount}
@@ -323,12 +333,12 @@ function SectionDeliveryEditorInner({
               onChange={changeThreshold}
             />
             <div className="rounded-[var(--sat-staff-radius-control,10px)] bg-white px-3 py-2.5 text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">
-              <span className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">0–{Math.max(0, threshold - 1)}</span> → Lower
+              <span className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">0–{Math.max(0, threshold - 1)}</span> → {routingCopy.below}
               <span className="mx-2" aria-hidden="true">·</span>
               <span className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
                 {threshold}–{operationalCount}
               </span>{" "}
-              → Higher
+              → {routingCopy.atOrAbove}
               <div className="mt-0.5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
                 {operationalCount} operational questions · provider-defined
               </div>

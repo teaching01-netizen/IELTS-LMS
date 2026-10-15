@@ -107,7 +107,8 @@ func (s *Service) Impact(ctx context.Context, draftID string) (*ImpactReport, er
 			for _, section := range sections {
 				key, _ := section["sectionKey"].(string)
 				mods, ok := sectionModules(section)
-				if !ok {
+				// An unqualified section never shows a converted score under any revision.
+				if !ok || !SectionQualified(section) {
 					continue
 				}
 				roles := make([]string, len(mods))

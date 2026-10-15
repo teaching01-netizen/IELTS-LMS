@@ -1,0 +1,23 @@
+# commit a42d37bf803e8f3ebd3e365ec3c18f5e8a1722e9 (+ uncommitted working tree)
+# toolchain leanprover/lean4:v4.19.0; lean Lean (version 4.19.0, arm64-apple-darwin23.6.0, commit 6caaee842e94, Release)
+# cmd: rm -rf .lake/build && lake build
+# exit=0
+✔ [2/7] Built Model
+✔ [3/7] Built Counterexamples
+✔ [4/7] Built Safety
+ℹ [5/7] Built AxiomAudit
+info: ./././proof/AxiomAudit.lean:5:0: 'SatModule1Gate.m1Hard_shown_requires_threshold' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:6:0: 'SatModule1Gate.m1Easy_shown_requires_below' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:7:0: 'SatModule1Gate.m1Hard_qualified_iff' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:8:0: 'SatModule1Gate.m1Easy_qualified_iff' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:9:0: 'SatModule1Gate.unforced_never_gated' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:10:0: 'SatModule1Gate.gate_matches_routing' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:11:0: 'SatModule1Gate.total_needs_both' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:12:0: 'SatModule1Gate.reachable_inv' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:13:0: 'SatModule1Gate.qualified_seal_shows_cell' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:14:0: 'SatModule1Gate.F1_missing_decision_converts' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:15:0: 'SatModule1Gate.F2_threshold_above_ops_converts' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:16:0: 'SatModule1Gate.F2b_raw_above_ops_converts' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:17:0: 'SatModule1Gate.m1Hard_score_reachable' does not depend on any axioms
+✔ [6/7] Built SatModule1Gate
+Build completed successfully.

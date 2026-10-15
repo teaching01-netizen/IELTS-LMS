@@ -45,6 +45,19 @@ func ResolveSection(c *satconvert.Content, section string, mods []ModuleRaw) (sa
 	return topo, score, ok
 }
 
+// Module1QualifiedKey is the classroomRaw section flag, recorded at seal for a
+// plan that fixes the Module 2 branch: false when the student's Module 1 raw
+// score did not meet the section threshold for that branch.
+const Module1QualifiedKey = "module1Qualified"
+
+// SectionQualified reports whether a section may be converted. A section
+// without the flag (full adaptive, standalone M2, or sealed before the flag
+// existed) qualifies.
+func SectionQualified(section map[string]any) bool {
+	v, ok := section[Module1QualifiedKey].(bool)
+	return !ok || v
+}
+
 func toInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case float64:
@@ -200,7 +213,7 @@ func ApplyRevision(rev *Revision, raw map[string]any) {
 		if topo != "" {
 			section["topology"] = string(topo)
 		}
-		if !ok {
+		if !ok || !SectionQualified(section) {
 			continue
 		}
 		section["conversionStatus"] = "converted"

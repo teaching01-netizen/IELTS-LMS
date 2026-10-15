@@ -27,6 +27,15 @@ const FIELDS: readonly FieldDef[] = [
   { key: "minimumCorrectForHigher", label: "Harder Module 2 at", suffix: "correct", role: "routing" },
 ];
 
+/** Threshold copy per shape; Module 2-only shapes have no Module 1 and never show it. */
+const ROUTING_COPY: Record<SatClassroomShape | "full", { label: string; help: string }> = {
+  full: { label: "Harder Module 2 at", help: "Students with at least this many correct in Module 1 get the harder Module 2." },
+  m1_hard: { label: "Converted score at", help: "Students need at least this many correct in Module 1 to get a converted score." },
+  m1_easy: { label: "Converted score below", help: "Students need fewer than this many correct in Module 1 to get a converted score." },
+  m2_easy: { label: "", help: "" },
+  m2_hard: { label: "", help: "" },
+};
+
 /** Controlled timing fields for create; hidden values are reset when a shape changes. */
 export function SatExamConfigFields({
   value,
@@ -63,7 +72,8 @@ export function SatExamConfigFields({
     if (!roles.includes("module1")) timing.module1Minutes = defaults.sections[section].module1Minutes;
     if (!roles.includes("lower")) timing.module2LowerMinutes = defaults.sections[section].module2LowerMinutes;
     if (!roles.includes("higher")) timing.module2HigherMinutes = defaults.sections[section].module2HigherMinutes;
-    if (shape !== "full") timing.minimumCorrectForHigher = defaults.sections[section].minimumCorrectForHigher;
+    // Fixed Module 2 shapes keep the threshold: it gates the converted score.
+    if (!roles.includes("module1")) timing.minimumCorrectForHigher = defaults.sections[section].minimumCorrectForHigher;
 
     // Drop the previous plan so an all-full selection doesn't keep the stale one.
     const { classroomPlan: _previousPlan, ...rest } = value;
@@ -81,7 +91,7 @@ export function SatExamConfigFields({
         const roles = SHAPE_MODULE_ROLES[shape];
         const visibleFields = FIELDS.filter((field) => {
           if (field.role === "break") return true;
-          if (field.role === "routing") return shape === "full";
+          if (field.role === "routing") return roles.includes("module1");
           return roles.includes(field.role);
         });
         const routingHint = limits.operationalQuestions[section];
@@ -108,11 +118,11 @@ export function SatExamConfigFields({
                 return (
                   <div key={field.key} className={field.role === "routing" ? "col-span-2" : undefined}>
                     <span id={`${id}-label`} className="block text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-                      {field.label}
+                      {field.role === "routing" ? ROUTING_COPY[shape].label : field.label}
                     </span>
                     {field.role === "routing" ? (
                       <p className="mt-0.5 text-[13px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
-                        Students with at least this many correct in Module 1 get the harder Module 2.
+                        {ROUTING_COPY[shape].help}
                       </p>
                     ) : null}
                     <div className="mt-1 flex items-center gap-2">

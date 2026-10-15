@@ -13,11 +13,20 @@ import (
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
-const rawScoreQuery = "FROM assessment_module_attempts ma"
+const (
+	rawScoreQuery      = "FROM assessment_module_attempts ma"
+	routeDecisionQuery = "LEFT JOIN assessment_route_decisions rd"
+)
 
 // expectNoConverter answers the converter lookup with "no scoring policy row".
 func expectNoConverter(mock sqlmock.Sqlmock, attemptID string) {
 	mock.ExpectQuery(regexp.QuoteMeta("assessment_scoring_policies")).WithArgs(attemptID).WillReturnError(sql.ErrNoRows)
+}
+
+// expectNoRouteDecisions answers the Module 1 qualification lookup with no rows.
+func expectNoRouteDecisions(mock sqlmock.Sqlmock, attemptID string) {
+	mock.ExpectQuery(regexp.QuoteMeta(routeDecisionQuery)).WithArgs(attemptID).
+		WillReturnRows(sqlmock.NewRows([]string{"section_key", "raw_correct", "ops", "policy_config", "plan"}))
 }
 
 func materializeClassroom(t *testing.T, mode string, sections *sqlmock.Rows, wantInsert []any) {
@@ -36,6 +45,7 @@ func materializeClassroom(t *testing.T, mode string, sections *sqlmock.Rows, wan
 	if sections != nil {
 		mock.ExpectQuery(regexp.QuoteMeta(rawScoreQuery)).WithArgs("att-1").WillReturnRows(sections)
 		if wantInsert[0] == "scored" {
+			expectNoRouteDecisions(mock, "att-1")
 			expectNoConverter(mock, "att-1")
 		}
 	}
@@ -125,6 +135,7 @@ func TestRepairClassroomResults(t *testing.T) {
 		WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(true))
 	mock.ExpectQuery(regexp.QuoteMeta(rawScoreQuery)).WithArgs("att-1").
 		WillReturnRows(scoreRows().AddRow("math", "m1", 15, 22, false))
+	expectNoRouteDecisions(mock, "att-1")
 	expectNoConverter(mock, "att-1")
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_results SET outcome_status = 'scored', release_status = 'released'")).
 		WithArgs(sqlmock.AnyArg(), "res-1").WillReturnResult(sqlmock.NewResult(0, 1))

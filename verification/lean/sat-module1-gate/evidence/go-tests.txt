@@ -1,0 +1,20 @@
+# cd backend/go && go test ./internal/terminalization ./internal/satscoring ./internal/satconvert ./internal/satpublish ./internal/delivery
+ok  	example.com/ielts-proctoring/internal/terminalization	0.686s
+ok  	example.com/ielts-proctoring/internal/satscoring	(cached)
+ok  	example.com/ielts-proctoring/internal/satconvert	(cached)
+ok  	example.com/ielts-proctoring/internal/satpublish	(cached)
+ok  	example.com/ielts-proctoring/internal/delivery	0.623s
+
+# Mutation check: markModule1QualificationTx reverted to pre-fix semantics
+# (skip sections without a decision row; check only thr >= 1)
+# go test ./internal/terminalization -run FixedModule2
+--- FAIL: TestFixedModule2GatesConversionOnModule1 (0.00s)
+    --- FAIL: TestFixedModule2GatesConversionOnModule1/easy_threshold_above_ops (0.00s)
+    --- FAIL: TestFixedModule2GatesConversionOnModule1/hard_raw_above_ops (0.00s)
+    --- FAIL: TestFixedModule2GatesConversionOnModule1/easy_negative_raw (0.00s)
+--- FAIL: TestFixedModule2WithoutRouteDecisionIsUnavailable (0.00s)
+FAIL
+# Restored fix: ok
+
+# bunx vitest run src/features/exam-authoring -> 191 files, 1645 tests passed
+# bun run typecheck -> tsc --noEmit clean

@@ -31,6 +31,7 @@ func TestClassroomRawScoreGroupsInterleavedSectionsOnce(t *testing.T) {
 			AddRow("math", "math-m1", int64(8), int64(22), false).
 			AddRow("reading-writing", "rw-m2", int64(12), int64(27), false).
 			AddRow("math", "math-m2", int64(9), int64(22), false))
+	expectNoRouteDecisions(mock, "attempt-1")
 	expectNoConverter(mock, "attempt-1")
 
 	raw, err := classroomRawScoreTx(context.Background(), db, "attempt-1")
@@ -86,6 +87,13 @@ type modRow struct {
 // the given stored scoring policy ("" = no policy row).
 func convertedReport(t *testing.T, policy string, mods ...modRow) map[string]any {
 	t.Helper()
+	return convertedReportRoutes(t, policy, nil, mods...)
+}
+
+// convertedReportRoutes is convertedReport with route decision rows
+// (section_key, raw_correct, ops, policy_config, plan); nil = no sections.
+func convertedReportRoutes(t *testing.T, policy string, routes *sqlmock.Rows, mods ...modRow) map[string]any {
+	t.Helper()
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +106,11 @@ func convertedReport(t *testing.T, policy string, mods ...modRow) map[string]any
 		rows.AddRow(m.section, m.key, m.raw, m.op, false)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).WithArgs("a").WillReturnRows(rows)
+	if routes == nil {
+		expectNoRouteDecisions(mock, "a")
+	} else {
+		mock.ExpectQuery(regexp.QuoteMeta(routeDecisionQuery)).WithArgs("a").WillReturnRows(routes)
+	}
 	if policy == "" {
 		expectNoConverter(mock, "a")
 	} else {
@@ -199,5 +212,72 @@ func TestConversionUnavailableFailsClosed(t *testing.T) {
 	out = convertedReport(t, `{"math":{"lower":{"0":200}}}`, mods...)
 	if s := sectionOf(t, out, "math"); s["conversionStatus"] != nil || out["conversion"] != nil {
 		t.Fatalf("legacy policy converted: %+v", out)
+	}
+}
+
+func routeRows(section string, m1Raw, m1Ops int, threshold, plan string) *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"section_key", "raw_correct", "ops", "policy_config", "plan"}).
+		AddRow(section, m1Raw, m1Ops, `{"minimumCorrectForHigher":`+threshold+`}`, plan)
+}
+
+// A fixed Module 2 plan converts only when Module 1 met its threshold: m1_hard
+// needs raw >= threshold, m1_easy needs raw < threshold; a missing threshold
+// fails closed.
+func TestFixedModule2GatesConversionOnModule1(t *testing.T) {
+	policy := linearConverter(t, fullTables, map[string]int{"rwl": 50, "rwh": 50, "ml": 40, "mh": 40})
+	hard := []modRow{{"math", "math-m1", 10, 20}, {"math", "math-m2-higher", 10, 20}}
+	easy := []modRow{{"math", "math-m1", 10, 20}, {"math", "math-m2-lower", 10, 20}}
+	for _, tc := range []struct {
+		name      string
+		mods      []modRow
+		raw       int
+		threshold string
+		plan      string
+		want      bool
+	}{
+		{"hard below", hard, 10, "11", `{"math":"m1_hard"}`, false},
+		{"hard at", hard, 10, "10", `{"math":"m1_hard"}`, true},
+		{"easy below", easy, 10, "11", `{"math":"m1_easy"}`, true},
+		{"easy at", easy, 10, "10", `{"math":"m1_easy"}`, false},
+		{"no threshold", hard, 10, "null", `{"math":"m1_hard"}`, false},
+		// Routing rejects these decisions, so the gate must not qualify them.
+		{"easy threshold above ops", easy, 10, "30", `{"math":"m1_easy"}`, false},
+		{"hard raw above ops", hard, 25, "10", `{"math":"m1_hard"}`, false},
+		{"easy negative raw", easy, -1, "10", `{"math":"m1_easy"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := convertedReportRoutes(t, policy, routeRows("math", tc.raw, 20, tc.threshold, tc.plan), tc.mods...)
+			s := sectionOf(t, out, "math")
+			if s["module1Qualified"] != tc.want {
+				t.Fatalf("module1Qualified = %v, want %v", s["module1Qualified"], tc.want)
+			}
+			if converted := s["conversionStatus"] == "converted" && s["scaled"] != nil; converted != tc.want {
+				t.Fatalf("converted = %v, want %v: %+v", converted, tc.want, s)
+			}
+		})
+	}
+}
+
+// A fixed Module 2 section with no route decision row fails closed.
+func TestFixedModule2WithoutRouteDecisionIsUnavailable(t *testing.T) {
+	policy := linearConverter(t, fullTables, map[string]int{"rwl": 50, "rwh": 50, "ml": 40, "mh": 40})
+	routes := sqlmock.NewRows([]string{"section_key", "raw_correct", "ops", "policy_config", "plan"}).
+		AddRow("math", nil, nil, nil, `{"math":"m1_hard"}`)
+	out := convertedReportRoutes(t, policy, routes,
+		modRow{"math", "math-m1", 15, 20}, modRow{"math", "math-m2-higher", 10, 20})
+	s := sectionOf(t, out, "math")
+	if s["module1Qualified"] != false || s["conversionStatus"] != "unavailable" || s["scaled"] != nil {
+		t.Fatalf("missing decision converted: %+v", s)
+	}
+}
+
+// A full adaptive section records no flag and converts as before.
+func TestFullAdaptiveRouteDecisionHasNoGate(t *testing.T) {
+	policy := linearConverter(t, fullTables, map[string]int{"rwl": 50, "rwh": 50, "ml": 40, "mh": 40})
+	out := convertedReportRoutes(t, policy, routeRows("math", 3, 20, "10", ""),
+		modRow{"math", "math-m1", 3, 20}, modRow{"math", "math-m2-lower", 10, 20})
+	s := sectionOf(t, out, "math")
+	if _, flagged := s["module1Qualified"]; flagged || s["conversionStatus"] != "converted" {
+		t.Fatalf("full adaptive gated: %+v", s)
 	}
 }
