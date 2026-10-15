@@ -23,6 +23,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 COPY src/ ./src
+COPY lib/ ./lib
 COPY public/ ./public
 COPY index.html vite.config.ts tsconfig.json postcss.config.cjs ./
 COPY services/authoring-coedit/src ./services/authoring-coedit/src
