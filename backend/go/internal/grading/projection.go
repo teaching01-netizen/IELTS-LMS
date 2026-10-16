@@ -145,9 +145,15 @@ type projectionWritingTask struct {
 }
 
 func ensureProjectionSubmission(ctx context.Context, q tx.Tx, attempt ProjectionAttempt, submittedAt time.Time) (string, error) {
+	// attempt_id alone is UNIQUE. A row for this attempt may already exist
+	// under another provider_key (legacy/stale labels); the attempt's exam is
+	// IELTS, so the row is adopted and relabelled below. Looking it up by
+	// provider would mint a second id, the upsert would update the existing
+	// row instead, and the sections would reference an id that was never
+	// stored (FK 1452 — the grading worker then stalls on this attempt).
 	var submissionID string
 	err := q.QueryRowContext(ctx,
-		"SELECT id FROM student_submissions WHERE attempt_id = ? AND provider_key = 'ielts' FOR UPDATE",
+		"SELECT id FROM student_submissions WHERE attempt_id = ? FOR UPDATE",
 		attempt.ID).Scan(&submissionID)
 	if err != nil && err != sql.ErrNoRows {
 		return "", err
@@ -174,6 +180,7 @@ func ensureProjectionSubmission(ctx context.Context, q tx.Tx, attempt Projection
 		VALUES (?, ?, ?, ?, ?, 'ielts', ?, ?, ?, ?, ?, 'submitted', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
 		ON DUPLICATE KEY UPDATE
 			schedule_id = VALUES(schedule_id),
+			provider_key = 'ielts',
 			exam_id = VALUES(exam_id),
 			published_version_id = VALUES(published_version_id),
 			student_id = VALUES(student_id),
@@ -186,6 +193,13 @@ func ensureProjectionSubmission(ctx context.Context, q tx.Tx, attempt Projection
 		submissionID, attempt.ID, attempt.ScheduleID, attempt.ExamID, attempt.PublishedVersionID,
 		attempt.StudentID, attempt.StudentName, email, attempt.CohortName, submittedAt, sectionStatuses,
 	)
+	if err != nil {
+		return "", err
+	}
+	// Return the id actually stored: a concurrent worker may have inserted
+	// the row first, in which case our generated id was never written.
+	err = q.QueryRowContext(ctx,
+		"SELECT id FROM student_submissions WHERE attempt_id = ?", attempt.ID).Scan(&submissionID)
 	return submissionID, err
 }
 
