@@ -89,6 +89,20 @@ function isScaled(value: unknown): value is ScaledScore {
 export type AnsweredExam = Pick<AssessmentAnsweredExam, "sections" | "attempt"> &
   Partial<Pick<AssessmentAnsweredExam, "examTitle" | "candidateName">>;
 
+function answeredExamPrintTitle(exam: AnsweredExam, hasScoreReport: boolean): string {
+  const filenamePart = (value: string) => value
+    .replace(/[<>:"/\\|?*]|\p{Cc}/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80)
+    .replace(/[. ]+$/g, "");
+  return [
+    filenamePart(exam.candidateName ?? ""),
+    filenamePart(exam.examTitle ?? "") || "Digital SAT",
+    hasScoreReport ? "Score report and exam review" : "Answered exam",
+  ].filter(Boolean).join(" - ");
+}
+
 export type LoadMediaUrl = (
   assetId: string,
   options?: { fresh?: boolean }
@@ -189,7 +203,15 @@ export function useAnsweredExamPrint(
         const paper = paperRef.current;
         if (paper?.dataset["generation"] === String(generation) && answeredPaperReady(paper)) {
           setDownload("idle");
-          window.print();
+          // The browser uses the document title as its suggested PDF filename.
+          // Use the authoritative projection, then restore the app's tab title.
+          const previousTitle = document.title;
+          document.title = answeredExamPrintTitle(exam, Boolean(view));
+          try {
+            window.print();
+          } finally {
+            document.title = previousTitle;
+          }
           return;
         }
       }
@@ -305,15 +327,37 @@ function PaperModuleHeading({
   );
 }
 
-/**
- * Faint institute mark behind every page; footer text carries the legal
- * weight. A single centered mark: print pipelines embed each image occurrence
- * per page, so tiling would multiply the PDF weight needlessly.
- */
+/** Stack the symbol and wordmark from the supplied, bundled colour logo.
+ * Clipping reuses the same PNG without CSS filters or extra raster assets. */
+function PaperWatermarkBrand({ large = false }: { large?: boolean }) {
+  return (
+    <div className="sat-paper-watermark-brand" data-watermark={large ? "large" : "small"}>
+      <span className="sat-paper-watermark-symbol">
+        <img src={warwickWatermark} alt="" draggable={false} loading="eager" />
+      </span>
+      <span className="sat-paper-watermark-wordmark">
+        <img src={warwickWatermark} alt="" draggable={false} loading="eager" />
+      </span>
+    </div>
+  );
+}
+
+/** Reference layout: staggered small marks on the left, one large mark on
+ * the right. Fixed positioning repeats the composition on printed pages. */
 function PaperWatermark() {
+  const slots = [[1, 1], [3, 1], [2, 2], [1, 3], [3, 3], [2, 4], [1, 5], [3, 5]];
   return (
     <div aria-hidden="true" className="sat-paper-watermark">
-      <img src={warwickWatermark} alt="" data-watermark="true" draggable={false} />
+      <div className="sat-paper-watermark-pattern">
+        {slots.map(([column, row], index) => (
+          <div key={index} style={{ gridColumn: column, gridRow: row }}>
+            <PaperWatermarkBrand />
+          </div>
+        ))}
+      </div>
+      <div className="sat-paper-watermark-feature">
+        <PaperWatermarkBrand large />
+      </div>
     </div>
   );
 }
@@ -333,6 +377,61 @@ function PaperFooter() {
         <td><PaperLegalNotice /></td>
       </tr>
     </tfoot>
+  );
+}
+
+function PaperTitlePage({
+  exam,
+  hasScoreReport,
+  subjects,
+  moduleCount,
+}: {
+  exam: AnsweredExam;
+  hasScoreReport: boolean;
+  subjects: string[];
+  moduleCount: number;
+}) {
+  return (
+    <table className="sat-paper-table sat-paper-title-sheet" role="presentation" data-cover-page="true">
+      <tbody>
+        <tr>
+          <td>
+            <header className="sat-paper-title-page">
+              <div className="sat-paper-title-brand">
+                <img src={warwickWatermark} alt="Warwick Institute" loading="eager" />
+                <p>Digital SAT<span>Personal study copy</span></p>
+              </div>
+              <div className="sat-paper-title-main">
+                <div className="sat-paper-title-exam">
+                  <h1>{exam.examTitle?.trim() || "Digital SAT"}</h1>
+                  <p>{hasScoreReport ? "Score report & exam review" : "Answer summary & exam review"}</p>
+                </div>
+                <div className="sat-paper-title-student">
+                  {exam.candidateName?.trim() ? (
+                    <>
+                      <p className="sat-paper-title-label">Prepared for</p>
+                      <p className="sat-paper-title-name">{exam.candidateName}</p>
+                    </>
+                  ) : null}
+                  <dl>
+                    <div><dt>Subjects included</dt><dd>{subjects.join(" · ") || "Digital SAT"}</dd></div>
+                    <div><dt>Modules included</dt><dd>{moduleCount}</dd></div>
+                  </dl>
+                </div>
+              </div>
+              <div className="sat-paper-title-contents">
+                {hasScoreReport ? (
+                  <div><h2>Score report</h2><p>Your results and subject breakdowns</p></div>
+                ) : null}
+                <div><h2>Answer summary</h2><p>Your saved responses at a glance</p></div>
+                <div><h2>Exam review</h2><p>Every question, with your answers marked</p></div>
+              </div>
+            </header>
+          </td>
+        </tr>
+      </tbody>
+      <PaperFooter />
+    </table>
   );
 }
 
@@ -404,7 +503,7 @@ function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
 }
 
 /**
- * Print-only paper: the score report (when one is given), a compact per-module
+ * Print-only paper: a branded cover, the score report (when one is given), a compact per-module
  * answer sheet, then — on following pages — the full exam review, so the
  * student can study from their own sitting later. In the review every choice
  * is shown with the student's selected one circled (matched by option id), a
@@ -468,6 +567,12 @@ export function AnsweredExamPaper({
       data-generation={generation}
     >
       <PaperWatermark />
+      <PaperTitlePage
+        exam={exam}
+        hasScoreReport={Boolean(view)}
+        subjects={[...new Set(printableModules.map(({ section }) => SAT_SECTION_LABEL[section.sectionKey] ?? section.title))]}
+        moduleCount={printableModules.length}
+      />
       {/* The repeating tfoot reserves the notice's height on every page. The
           visible copy is fixed at the bottom, including the final short page. */}
       <table className="sat-paper-table" role="presentation">

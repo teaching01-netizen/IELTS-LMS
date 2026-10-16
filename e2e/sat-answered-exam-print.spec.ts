@@ -66,6 +66,7 @@ async function openDetail(page: Page, figureAsset: string) {
     (window as unknown as { __prints: number }).__prints = 0;
     window.print = () => {
       (window as unknown as { __prints: number }).__prints++;
+      (window as unknown as { __printTitle: string }).__printTitle = document.title;
     };
   });
   await page.route("**/api/v1/auth/session", (route) =>
@@ -103,6 +104,9 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
   await openDetail(page, "asset-ok");
   await page.getByRole("button", { name: "Download answered exam (PDF)" }).click();
   await expect.poll(() => prints(page), { timeout: 35_000 }).toBe(1);
+  expect(await page.evaluate(() => (window as unknown as { __printTitle: string }).__printTitle))
+    .toBe("Mina Chen - SAT Practice 04 - Answered exam");
+  expect(await page.title()).not.toContain("Answered exam");
 
   await page.emulateMedia({ media: "print" });
   const layout = await page.evaluate(() => {
@@ -116,8 +120,11 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
       reviewModules: paper.querySelectorAll("[data-review-module]").length,
       runheads: paper.querySelectorAll("[data-runhead-module]").length,
       questions: paper.querySelectorAll("article").length,
+      coverCount: paper.querySelectorAll("[data-cover-page]").length,
+      coverLogoLoaded: [...paper.querySelectorAll<HTMLImageElement>('[data-cover-page] img')].every(image => image.complete && image.naturalWidth > 0),
       images: [...paper.querySelectorAll("figure img")].map((image) => ({ complete: image.complete, natural: image.naturalWidth, right: image.getBoundingClientRect().right })),
-      watermarks: paper.querySelectorAll("img[data-watermark]").length,
+      smallWatermarks: paper.querySelectorAll('[data-watermark="small"]').length,
+      largeWatermarks: paper.querySelectorAll('[data-watermark="large"]').length,
       clipped: [...paper.querySelectorAll<HTMLElement>("article, article *")].filter((element) => element.getBoundingClientRect().right > width + 0.5).length,
       overflow: paper.scrollWidth - paper.clientWidth,
       selected: paper.querySelectorAll("[data-selected]").length,
@@ -134,7 +141,10 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
   // Each review module repeats its exam · section · module runhead per page.
   expect(layout.runheads).toBe(2);
   expect(layout.questions).toBe(24);
-  expect(layout.watermarks).toBe(1);
+  expect(layout.coverCount).toBe(1);
+  expect(layout.coverLogoLoaded).toBe(true);
+  expect(layout.smallWatermarks).toBe(8);
+  expect(layout.largeWatermarks).toBe(1);
   expect(layout.footerReservation).toBe("hidden");
   expect(layout.text).toContain("LEGAL DISCLAIMER");
   expect(layout.text).toContain("THB 540,000");

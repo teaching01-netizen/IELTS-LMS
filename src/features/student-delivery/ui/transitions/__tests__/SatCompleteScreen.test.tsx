@@ -265,6 +265,10 @@ describe("SatCompleteScreen", () => {
     const paper = container.querySelector<HTMLElement>(".sat-answered-paper")!;
     expect(paper.dataset["complete"]).toBe("true");
     expect(paper.dataset["generation"]).toBe("1");
+    const cover = paper.querySelector("[data-cover-page]");
+    expect(cover).toHaveTextContent("Personal study copy");
+    expect(cover?.querySelector('img[alt="Warwick Institute"]')).toBeInTheDocument();
+    expect(cover).toHaveTextContent("Modules included1");
     expect(paper).toHaveTextContent("Module 1");
     expect(paper).not.toHaveTextContent("Module 2 skipped");
     // Numbered section mastheads and module labels keep the summary scannable.
@@ -279,7 +283,8 @@ describe("SatCompleteScreen", () => {
     // The legal footer and the watermark ride every page.
     expect(paper).toHaveTextContent("LEGAL DISCLAIMER");
     expect(paper).toHaveTextContent("THB 540,000");
-    expect(paper.querySelectorAll("img[data-watermark]")).toHaveLength(1);
+    expect(paper.querySelectorAll('[data-watermark="small"]')).toHaveLength(8);
+    expect(paper.querySelectorAll('[data-watermark="large"]')).toHaveLength(1);
     const rows = [...paper.querySelectorAll("[data-question]")].map((row) => row.textContent);
     // A recorded choice that matches no option is reported, not silently dropped.
     expect(rows).toEqual(["Q1B", "Q23/4", "Q3Unanswered", "Q4o9 (not a listed choice)"]);
@@ -464,6 +469,30 @@ describe("SatCompleteScreen", () => {
     // …and removed once it closes, so no other surface prints landscape.
     expect(document.querySelector("style[data-sat-answered-page]")).toBeNull();
     print.mockRestore();
+  });
+
+  it.each([
+    ["Mina Chen", "SAT Practice 04", "Mina Chen - SAT Practice 04 - Score report and exam review"],
+    ["  มินา  เฉิน  ", 'SAT: Practice / 04?', "มินา เฉิน - SAT Practice 04 - Score report and exam review"],
+    ["", "", "Digital SAT - Score report and exam review"],
+  ])("suggests a contextual PDF filename for %s and restores the app title", async (candidateName, examTitle, expectedTitle) => {
+    const originalTitle = document.title;
+    document.title = "IELTS Proctoring System";
+    let titleAtPrint = "";
+    const print = vi.spyOn(window, "print").mockImplementation(() => {
+      titleAtPrint = document.title;
+    });
+    try {
+      const exam = { ...answeredExam(), candidateName, examTitle };
+      render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(exam)} />);
+      fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+      await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+      expect(titleAtPrint).toBe(expectedTitle);
+      expect(document.title).toBe("IELTS Proctoring System");
+    } finally {
+      print.mockRestore();
+      document.title = originalTitle;
+    }
   });
 
   it("runs one download at a time", async () => {
