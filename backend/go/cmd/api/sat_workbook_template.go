@@ -116,9 +116,11 @@ Prompt maps to Question text: put the required question request and its own cont
 A–D become the four choices. Response Type controls whether students see those choices (Multiple Choice) or a numeric input (Student Response). Correct and Accepted Responses are grading only, not student-visible question content. Put explanations only in Rationale, which staff see as Explanation. Domain, Skill, Difficulty, and Tags are staff metadata. Use exact Domain and Skill pairs from the Guide; do not invent taxonomy values.
 
 MATH, FORMATTING, AND FIGURES
-Keep inline mathematics in the same sentence using \( ... \). Use \[ ... \] only for mathematics displayed on its own line in the source. Preserve signs, fractions, radicals, subscripts, superscripts, and inequalities.
+Keep inline mathematics in the same sentence using \( ... \). Use \[ ... \] only for mathematics displayed on its own line in the source. Preserve signs, fractions, radicals, subscripts, superscripts, and inequalities. For mathematical subscripts and superscripts, use LaTeX inside math (for example \(x_2\) and \(x^2\)); do not use Markdown sub/superscript syntax.
 
-Use supported Markdown for bold, italic, inline code, level-2 and level-3 headings, lists, blockquotes, fenced code blocks, and tables. Do not use raw HTML, Markdown links, or opaque JSON.
+Use supported inline formatting in cell text: **bold**, *italic*, ++underlined text++, `+"`inline code`"+`, and \( LaTeX \). Use supported block formatting: level-2 and level-3 headings, bulleted and numbered lists, blockquotes, fenced code blocks, display math, and Markdown tables. For example, type ++key term++ to underline it in a Prompt, Stimulus, choice, or Rationale cell. The importer reads cell text only, so Excel's visual cell formatting (bold/italic/underline buttons or font styles) alone does not preserve underlining or other formatting; type the markers in the cell.
+
+Do not use raw HTML, Markdown links, strikethrough (~~text~~), or opaque JSON: they import as plain text, not formatting.
 
 For each figure, add one actual PNG, JPEG, GIF, or WebP image to Assets column D on the same row as its metadata. Use a unique Asset Key in column A, meaningful Alt Text in B, and an optional Caption in C. Reference the key in Stimulus as ![asset_key] for a separate supporting figure; use Prompt only when the figure is part of the question itself. Check every image token against an embedded Assets row. Do not put pictures on other sheets or substitute a URL or filename for an embedded image. Crop graphs and diagrams cleanly as images; do not replace them with OCR label junk. Preserve real tables as Markdown tables, not flattened numbers. A cropped source page must not duplicate the prompt or answer choices already transcribed into their cells. If the source figure cannot be embedded, report a blocker.
 
@@ -267,9 +269,11 @@ func satWorkbookGuideSheet() string {
 		{"WORKBOOK CONTRACT", "Questions and Assets contain imported question data. Guide and AI Instructions are references.", "Keep all five sheet names and the Questions headers unchanged."},
 		{"WORKBOOK CONTRACT", "A confirmed import replaces only the completed modules included in this workbook.", "Published versions are unchanged; concurrent draft edits can cause a conflict."},
 		{"WORKBOOK CONTRACT", "Module 2 Lower and Higher are alternative adaptive branches.", "Each branch you fill must contain its own complete question set; untouched branches are ignored."},
-		{"RICH CONTENT", `Inline math: The value of \(x^2+3x\) is ...`, "Keep inline math on the same line as prose."},
+		{"RICH CONTENT", `Inline math: The value of \(x^2+3x\) is ...`, "Keep inline math on the same line as prose. For mathematical subscripts and superscripts use LaTeX inside math, for example \\(x_2\\) and \\(x^2\\)."},
 		{"RICH CONTENT", `Display math: \[x^2+3x=10\]`, "Use display math only when the source presents it separately."},
-		{"RICH CONTENT", "Supported: bold, italic, inline code, level-2 and level-3 headings, lists, blockquotes, fenced code blocks, and Markdown tables.", "Do not use raw HTML, Markdown links, or unsupported markup."},
+		{"RICH CONTENT", "Supported inline: **bold**, *italic*, ++underlined text++, `inline code`, and \\( LaTeX \\). Example: The ++key term++ is defined below.", "Type the markers in cell text. The importer reads cell text only, so Excel's visual cell formatting (bold/italic/underline buttons or font styles) alone does not preserve underlining or other formatting."},
+		{"RICH CONTENT", "Supported blocks: level-2 and level-3 headings, bulleted and numbered lists, blockquotes, fenced code blocks, display math, and Markdown tables.", "Prompt, Stimulus, choices A-D, and Rationale all support the same inline and block formatting."},
+		{"RICH CONTENT", "Supported: bold, italic, underline (++text++), inline code, level-2 and level-3 headings, lists, blockquotes, fenced code blocks, and Markdown tables.", "Do not use raw HTML, Markdown links, strikethrough (~~text~~), or unsupported markup; they import as plain text."},
 		{"ASSET RULES", "Reference a supporting visual in Stimulus as ![asset_key] and embed the actual image on the same Assets row.", "Asset Key in A, meaningful Alt Text in B, optional Caption in C, image in D."},
 		{"ASSET RULES", "Use unique keys up to 80 characters with letters, numbers, period, underscore, or hyphen.", "Supported image types: PNG, JPEG, GIF, and WebP. Do not use external URLs."},
 		{"ASSET RULES", "1. Crop graphs or diagrams from the source as a clear PNG, JPEG, GIF, or WebP image.", "Keep graphs as images, not OCR fragments. Keep tables as Markdown tables, not flattened numbers. A source page crop must not repeat the prompt or choices already in their own cells."},
@@ -372,8 +376,8 @@ func satWorkbookInstructionsSheet() string {
 		{"RULE ID", "CATEGORY", "REQUIREMENT / CHECK"},
 		{"R01", "Source fidelity", "Only source material may justify original wording; never fabricate missing content."},
 		{"R02", "Workbook integrity", "Preserve all five sheet names, 16 Questions headers, six module labels, and 147 row positions."},
-		{"R03", "Inline LaTeX", `Use \( ... \) on the same line as prose; do not insert a newline around inline equations.`},
-		{"R04", "Display math", `Use \[ ... \] only for standalone math shown separately in the source.`},
+		{"R03", "Inline formatting and LaTeX", `Use \( ... \) on the same line as prose; do not insert a newline around inline equations. Inline marks in cell text: **bold**, *italic*, ++underlined text++ (example ++key term++), `+"`code`"+`, and \\( LaTeX \\). The importer reads cell text only; Excel visual formatting alone does not preserve underlining. For math sub/superscripts use LaTeX, e.g. \\(x_2\\) and \\(x^2\\).`},
+		{"R04", "Block formatting", `Use \[ ... \] only for standalone math shown separately in the source. Blocks: level-2/3 headings, lists, blockquotes, fenced code blocks, tables. Do not use raw HTML, Markdown links, or strikethrough (~~text~~); they import as plain text.`},
 		{"R05", "Choices", "Multiple Choice uses A–D and Correct A/B/C/D from the supplied answer key."},
 		{"R06", "Student Response", "Math only; leave choices and Correct blank; list verified accepted numeric responses."},
 		{"R07", "Adaptive modules", "Fill only the requested modules. Each filled module must be complete; untouched template defaults are ignored."},

@@ -87,6 +87,43 @@ describe('claiming a gesture', () => {
     expect(effects.map((effect) => effect.type)).toContain('suppress-scroll');
   });
 
+  it('hands a vertical touch drag back to the pane scroll even when armed', () => {
+    const pressed = run(
+      [{ type: 'press', pointerId: 1, pointerType: 'touch', x: 40, y: 10, point: at(4) }],
+      idleSelectionState('drag', 8),
+    );
+    const moved = reduceSelection(pressed.state, {
+      type: 'move',
+      pointerId: 1,
+      x: 42,
+      y: 60,
+      point: at(4),
+    });
+
+    expect(moved.state.phase).toBe('idle');
+    expect(moved.effects.map((effect) => effect.type)).not.toContain('suppress-scroll');
+    expect(moved.effects.map((effect) => effect.type)).toEqual(
+      expect.arrayContaining(['release-pointer', 'allow-scroll', 'clear']),
+    );
+  });
+
+  it('still claims a vertical mouse drag immediately when armed', () => {
+    const pressed = run(
+      [{ type: 'press', pointerId: 1, pointerType: 'mouse', x: 40, y: 10, point: at(4) }],
+      idleSelectionState('drag', 8),
+    );
+    const moved = reduceSelection(pressed.state, {
+      type: 'move',
+      pointerId: 1,
+      x: 42,
+      y: 60,
+      point: at(20),
+    });
+
+    expect(moved.state.phase).toBe('extending');
+    expect(moved.effects.map((effect) => effect.type)).toContain('suppress-scroll');
+  });
+
   it('hands an unarmed drag back to the platform as a scroll', () => {
     const { state, effects } = run([press(4), move(20)]);
 

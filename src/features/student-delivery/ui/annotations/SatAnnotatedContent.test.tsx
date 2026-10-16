@@ -801,11 +801,36 @@ describe('SAT owned touch selection', () => {
     );
   });
 
-  it('captures an armed drag that never pauses for a hold', () => {
-    // The way a student actually selects on a touch screen: press and drag, no
-    // pause. The prose here has no platform selection to fall back on, so a
-    // gesture that cancels itself on the first 8 pixels of travel left nothing
-    // that could select the text at all.
+  it('captures an armed horizontal drag that never pauses for a hold', () => {
+    // Horizontal immediate drag still selects (question panes scroll
+    // vertically): press and drag along the line, no pause. Vertical immediate
+    // drag hands back to the pane scroll instead (see next test); vertical
+    // selection uses hold+drag.
+    const onSelectionCaptured = vi.fn();
+    const { container } = renderContent({}, view({ onSelectionCaptured }), { ownedTouchSelection: true });
+    const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
+    const restoreMedia = stubCoarsePointerDevice();
+    const restoreHit = stubHitTest(leaf);
+    restoreEnvironment = () => {
+      restoreHit();
+      restoreMedia();
+    };
+
+    const region = document.querySelector('[data-sat-annotation-region]')!;
+    vi.useFakeTimers();
+    fireEvent.pointerDown(region, { pointerType: 'touch', pointerId: 1, clientX: 2, clientY: 10 });
+    // Horizontal travel past the tolerance.
+    fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: 14, clientY: 10 });
+    fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
+
+    expect(onSelectionCaptured).toHaveBeenCalled();
+    expect(window.getSelection()?.rangeCount).toBe(0);
+  });
+
+  it('hands an immediate vertical touch drag back to the pane scroll', () => {
+    // iPad: a vertical swipe starting on question prose must scroll the
+    // data-sat-question-scroll pane, not select. Hold+drag still selects
+    // vertically because hold suppresses scroll before the move.
     const onSelectionCaptured = vi.fn();
     const { container } = renderContent({}, view({ onSelectionCaptured }), { ownedTouchSelection: true });
     const leaf = container.querySelector('[data-content-text-node] span span')!.firstChild as Text;
@@ -825,9 +850,7 @@ describe('SAT owned touch selection', () => {
     fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: 6, clientY: 25 });
     fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
 
-    expect(onSelectionCaptured).toHaveBeenCalledWith(
-      expect.objectContaining({ nodeId: 'stimulus:p', startOffset: 2, endOffset: 6, exact: 'tree' }),
-    );
+    expect(onSelectionCaptured).not.toHaveBeenCalled();
     expect(window.getSelection()?.rangeCount).toBe(0);
   });
 

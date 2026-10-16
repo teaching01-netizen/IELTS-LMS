@@ -1,5 +1,10 @@
+/* eslint-disable jsx-a11y/control-has-associated-label -- Presentational, aria-hidden print tables use rows and cells for native page repetition. */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
+import "./score-report/sat-answered-paper.css";
+import warwickWatermark from "../../../../assets/warwick-institute-logo.png";
+import { hasStructuredContent } from "../../../exam-authoring/api/renderingPublic";
+import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import type {
   AssessmentAnsweredExam,
   AssessmentDeliverySection,
@@ -49,6 +54,14 @@ export const SAT_SECTION_LABEL: Record<string, string> = {
 };
 const CHOICE_LETTERS = "ABCDEFGHIJ";
 
+/**
+ * Institution legal copy printed at the foot of every page of the
+ * answered-exam PDF. The table footer group reserves the exact same space
+ * as the running notice, including on short final pages.
+ */
+export const ANSWERED_EXAM_LEGAL_FOOTER =
+  'LEGAL DISCLAIMER: All contents contained herein (the "Materials") is the exclusive property of Warwick Institute and has been protected by all applicable intellectual property or copyright laws. The Materials are provided strictly and solely for the use of students who are duly enrolled at Warwick Institute for the specific academic cycle in which such Materials are issued. Under no circumstances may the Materials be reproduced, copied, distributed, transmitted, published, disclosed, or otherwise disseminated, in whole or in part, to any individual not enrolled in the same course or academic level, or to any external party outside Warwick Institute, without any prior written consent. Any student who violates these terms and conditions shall be subject to immediate and irrevocable termination of enrollment at Warwick Institute. The student\u2019s W code shall be revoked without delay, and all tuition fees and related expenses paid to Warwick Institute shall be forfeited in full, without refund under any circumstances. Furthermore, any such breaching individual shall be liable to pay compensation at the amount no less than THB 540,000, in addition to any further damages, legal actions, or remedies to which Warwick Institute is entitled under applicable laws.';
+
 /** The server only releases this key when the exam's score report is on; anything else is not rendered. */
 export function classroomReport(result: AssessmentResult | null): ClassroomReport | null {
   const raw = result?.releaseStatus === "released" ? result.scorePayload?.["classroomRaw"] : null;
@@ -76,9 +89,20 @@ function isScaled(value: unknown): value is ScaledScore {
 export type AnsweredExam = Pick<AssessmentAnsweredExam, "sections" | "attempt"> &
   Partial<Pick<AssessmentAnsweredExam, "examTitle" | "candidateName">>;
 
+export type LoadMediaUrl = (
+  assetId: string,
+  options?: { fresh?: boolean }
+) => Promise<string | null>;
+
 export interface AnsweredExamPrintSource {
   /** One authoritative read of the projection; null when it could not be loaded. */
   load: () => Promise<AnsweredExam | null>;
+  /**
+   * Resolves a protected figure to a printable URL. When omitted the paper
+   * falls back to the staff media read; the student session passes its own
+   * attempt-scoped loader.
+   */
+  loadMediaUrl?: LoadMediaUrl | undefined;
 }
 
 export interface AnsweredExamSource extends AnsweredExamPrintSource {
@@ -86,17 +110,21 @@ export interface AnsweredExamSource extends AnsweredExamPrintSource {
   sections: AssessmentDeliverySection[];
 }
 
-// offcut: readiness is polled; a paper not mounted within 30 s fails closed with a retry
+// offcut: readiness is polled; an exam whose figures need over 30 s fails closed with a retry
 const PAPER_READY_TIMEOUT_MS = 30_000;
 const PAPER_READY_POLL_MS = 100;
 
 /**
  * PDF-10: the paper may print only when every administered module is present
- * with its content. The paper prints no figures, so PDF-10's figure clause
- * holds vacuously.
+ * with its content and every figure shows a decoded image. Anything else
+ * would be an incomplete PDF.
  */
 export function answeredPaperReady(paper: HTMLElement): boolean {
-  return paper.dataset["complete"] === "true";
+  if (paper.dataset["complete"] !== "true") return false;
+  return [...paper.querySelectorAll("figure")].every((figure) => {
+    const image = figure.querySelector("img");
+    return image !== null && image.complete && image.naturalWidth > 0;
+  });
 }
 
 /**
@@ -118,14 +146,27 @@ export function useAnsweredExamPrint(
   const [loaded, setLoaded] = useState<{ exam: AnsweredExam; generation: number } | null>(null);
   const generationRef = useRef(0);
   const paperRef = useRef<HTMLDivElement | null>(null);
+  const mediaFailed = useRef(false);
   // One download in flight: a second flow would remount the paper under the
   // first one's poll and report a false failure.
   const inFlight = useRef(false);
+  // Landscape lives only for this print flow: a static @page rule would
+  // reorient every other print surface of the app, and an effect would race a
+  // figure-less paper that is ready before effects flush. The style is added
+  // synchronously with the paper mount and removed once the dialog closes
+  // (window.print blocks until then) or the flow fails, with unmount as backstop.
+  const pageStyleRef = useRef<HTMLStyleElement | null>(null);
+  const removePageStyle = () => {
+    pageStyleRef.current?.remove();
+    pageStyleRef.current = null;
+  };
+  useEffect(() => removePageStyle, []);
 
   const print = async () => {
     if (!source || inFlight.current) return;
     inFlight.current = true;
     setDownload("preparing");
+    mediaFailed.current = false;
     try {
       const exam = await source.load().catch(() => null);
       if (!exam) {
@@ -134,9 +175,17 @@ export function useAnsweredExamPrint(
       }
       const generation = ++generationRef.current;
       setLoaded({ exam, generation });
+      if (!pageStyleRef.current) {
+        const style = document.createElement("style");
+        style.dataset["satAnsweredPage"] = "true";
+        style.textContent = "@page { size: A4 landscape; margin: 10mm; }";
+        document.head.appendChild(style);
+        pageStyleRef.current = style;
+      }
       const deadline = Date.now() + PAPER_READY_TIMEOUT_MS;
       while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, PAPER_READY_POLL_MS));
+        if (mediaFailed.current) break;
         const paper = paperRef.current;
         if (paper?.dataset["generation"] === String(generation) && answeredPaperReady(paper)) {
           setDownload("idle");
@@ -146,6 +195,7 @@ export function useAnsweredExamPrint(
       }
       setDownload("failed");
     } finally {
+      removePageStyle();
       inFlight.current = false;
     }
   };
@@ -159,8 +209,12 @@ export function useAnsweredExamPrint(
               key={loaded.generation}
               exam={loaded.exam}
               view={view}
+              loadMediaUrl={source.loadMediaUrl}
               generation={loaded.generation}
               paperRef={paperRef}
+              onMediaFailure={() => {
+                mediaFailed.current = true;
+              }}
             />
           </div>,
           document.body
@@ -229,40 +283,95 @@ function printedScore(score: ScoreDisplay): string {
   return score.display === "dash" ? "-" : score.reason;
 }
 
+/**
+ * Compact wayfinding for the answer summary.
+ */
+function PaperModuleHeading({
+  sectionNo,
+  sectionLabel,
+  moduleTitle,
+}: {
+  sectionNo: number;
+  sectionLabel: string;
+  moduleTitle: string;
+}) {
+  return (
+    <div className="sat-paper-module-heading">
+      <h2>
+        Section {sectionNo}: {sectionLabel}
+      </h2>
+      <p>{moduleTitle}</p>
+    </div>
+  );
+}
+
+/**
+ * Faint institute mark behind every page; footer text carries the legal
+ * weight. A single centered mark: print pipelines embed each image occurrence
+ * per page, so tiling would multiply the PDF weight needlessly.
+ */
+function PaperWatermark() {
+  return (
+    <div aria-hidden="true" className="sat-paper-watermark">
+      <img src={warwickWatermark} alt="" data-watermark="true" draggable={false} />
+    </div>
+  );
+}
+
+function PaperLegalNotice({ fixed = false }: { fixed?: boolean }) {
+  return (
+    <div className={fixed ? "sat-paper-footer sat-paper-fixed-footer" : "sat-paper-footer"}>
+      <p>{ANSWERED_EXAM_LEGAL_FOOTER}</p>
+    </div>
+  );
+}
+
+function PaperFooter() {
+  return (
+    <tfoot>
+      <tr>
+        <td><PaperLegalNotice /></td>
+      </tr>
+    </tfoot>
+  );
+}
+
 /** The score report as printed: every count visible, nothing collapsed. */
 function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
   const correct = view.subjects.reduce((sum, subject) => sum + subject.rawCorrect, 0);
   const total = view.subjects.reduce((sum, subject) => sum + subject.rawTotal, 0);
   return (
-    <section className="mt-4">
+    <section className="sat-paper-score-summary">
+      <div className="sat-paper-score-lead">
       {view.primaryScore ? (
         <div>
-          {view.primaryLabel ? <p className="text-[12px] font-semibold">{view.primaryLabel}</p> : null}
-          <p className="text-[28px] font-semibold tabular-nums">{printedScore(view.primaryScore)}</p>
+          {view.primaryLabel ? <p className="sat-paper-score-label">{view.primaryLabel}</p> : null}
+          <p className="sat-paper-score-value" data-score-kind={view.primaryScore.kind}>{printedScore(view.primaryScore)}</p>
           {view.primaryScore.kind === "estimated" ? (
-            <p className="text-[11px]">
+            <p className="sat-paper-score-note">
               Score scale {view.primaryScore.scale.min}–{view.primaryScore.scale.max} · Estimated using a classroom
               score conversion table. Not an official SAT score.
             </p>
           ) : null}
         </div>
       ) : null}
-      {view.notice ? <p className="mt-1 text-[11px]">{view.notice}</p> : null}
-      <p className="mt-2 text-[13px] font-semibold tabular-nums">
+      {view.notice ? <p className="sat-paper-score-note">{view.notice}</p> : null}
+      <p className="sat-paper-total">
         Total correct: {correct} of {total} · {percent(correct, total)}%
       </p>
-      <div className="mt-3 grid grid-cols-2 gap-4">
+      </div>
+      <div className="sat-paper-subjects">
         {view.subjects.map((subject) => (
-          <div key={subject.key} className="break-inside-avoid border border-black p-3 text-[12px]">
-            <h3 className="text-[14px] font-semibold">{subject.label}</h3>
-            {view.subjects.length > 1 ? (
+          <div key={subject.key} className="sat-paper-subject">
+            <h3>{subject.label}</h3>
+            {view.subjects.length > 1 && subject.score.kind !== "raw" ? (
               <p className="tabular-nums">Score: {printedScore(subject.score)}</p>
             ) : null}
             <p className="tabular-nums">
               Correct: {subject.rawCorrect} of {subject.rawTotal} · {percent(subject.rawCorrect, subject.rawTotal)}%
             </p>
             {subject.modules.length ? (
-              <dl className="mt-2 border-t border-neutral-400 pt-1">
+              <dl className="sat-paper-breakdown">
                 {subject.modules.map((module) => (
                   <div key={module.key} className="flex justify-between gap-2">
                     <dt>{module.label}</dt>
@@ -274,7 +383,7 @@ function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
               </dl>
             ) : null}
             {subject.domains.length ? (
-              <dl className="mt-2 border-t border-neutral-400 pt-1">
+              <dl className="sat-paper-breakdown">
                 {subject.domains.map((domain) => (
                   <div key={domain.name} className="flex justify-between gap-2">
                     <dt>{domain.name}</dt>
@@ -295,20 +404,27 @@ function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
 }
 
 /**
- * Print-only answer sheet: the score report (when one is given) and, per
- * administered module, each question number with the student's saved answer —
- * a choice as its letter, a student-produced response as typed. No question
- * content and no correct answers are printed. `data-complete` is false when an
+ * Print-only paper: the score report (when one is given), a compact per-module
+ * answer sheet, then — on following pages — the full exam review, so the
+ * student can study from their own sitting later. In the review every choice
+ * is shown with the student's selected one circled (matched by option id), a
+ * student-produced response is boxed as typed, a recorded choice that matches
+ * no listed option is printed as such, and unanswered questions say so.
+ * Correct answers are never shown. `data-complete` is false when an
  * administered module is missing or withheld, so the paper never prints without it.
  */
 export function AnsweredExamPaper({
   exam,
   view,
+  loadMediaUrl,
+  onMediaFailure,
   generation,
   paperRef,
 }: {
   exam: AnsweredExam;
   view?: StudentScoreReportView | null | undefined;
+  loadMediaUrl?: LoadMediaUrl | undefined;
+  onMediaFailure?: (() => void) | undefined;
   generation?: number;
   paperRef?: Ref<HTMLDivElement>;
 }) {
@@ -325,6 +441,7 @@ export function AnsweredExamPaper({
   }
   const complete = printable.size === administered.size;
   const answers = new Map<string, string>();
+  const markedForReview = new Set<string>();
   for (const response of exam.attempt.responses) {
     const moduleId = moduleIdByAttempt.get(response.moduleAttemptId);
     const value =
@@ -332,7 +449,16 @@ export function AnsweredExamPaper({
         ? String(response.response).trim()
         : "";
     if (moduleId && value) answers.set(`${moduleId}:${response.examQuestionId}`, value);
+    if (moduleId && response.markedForReview) markedForReview.add(`${moduleId}:${response.examQuestionId}`);
   }
+  const printableModules: { section: (typeof exam.sections)[number]; sectionNo: number; module: AssessmentDeliverySection["modules"][number] }[] = [];
+  exam.sections.forEach((section, sectionIndex) => {
+    for (const module of [...section.modules].sort((a, b) => a.displayOrder - b.displayOrder)) {
+      if (printable.has(module.id))
+        printableModules.push({ section, sectionNo: sectionIndex + 1, module });
+    }
+  });
+  const mediaFailure = onMediaFailure ? () => onMediaFailure() : undefined;
   return (
     <div
       ref={paperRef}
@@ -341,53 +467,229 @@ export function AnsweredExamPaper({
       data-complete={complete}
       data-generation={generation}
     >
-      <header className="border-b-2 border-black pb-2">
-        <p className="text-[12px] font-semibold">Digital SAT · Score report</p>
-        {exam.examTitle ? <h1 className="text-[18px] font-semibold">{exam.examTitle}</h1> : null}
-        {exam.candidateName ? <p className="text-[13px]">{exam.candidateName}</p> : null}
+      <PaperWatermark />
+      {/* The repeating tfoot reserves the notice's height on every page. The
+          visible copy is fixed at the bottom, including the final short page. */}
+      <table className="sat-paper-table" role="presentation">
+        <tbody>
+          <tr>
+            <td>
+       <header className="sat-paper-cover">
+        <div>
+          <h1>{exam.examTitle?.trim() || "Digital SAT"}</h1>
+          <p>{view ? "Score report & exam review" : "Answer summary & exam review"}</p>
+        </div>
+        <div className="sat-paper-candidate">
+          {exam.candidateName ? <p>{exam.candidateName}</p> : null}
+          <span>Personal study copy</span>
+        </div>
       </header>
       {view ? <PaperScoreSummary view={view} /> : null}
-      {exam.sections.map((section) =>
-        [...section.modules]
-          .sort((a, b) => a.displayOrder - b.displayOrder)
-          .filter((module) => printable.has(module.id))
-          .map((module) => (
-            <section key={module.id} className="mt-5 break-inside-avoid">
-              <h2 className="border-b border-black pb-1 text-[14px] font-semibold">
-                {SAT_SECTION_LABEL[section.sectionKey] ?? section.title} · {module.title}
-              </h2>
-              <ol className="mt-2 grid grid-cols-4 gap-x-4 gap-y-1 text-[12px]">
-                {[...module.questions]
-                  .sort((a, b) => a.displayOrder - b.displayOrder)
-                  .map((question, index) => {
-                    const answer = answers.get(`${module.id}:${question.examQuestionId}`) ?? null;
-                    const choice =
-                      answer !== null && question.answer.kind === "single_choice"
-                        ? question.answer.options.findIndex((option) => option.id === answer)
-                        : null;
-                    return (
-                      <li
-                        key={question.examQuestionId}
-                        className="flex gap-2 border-b border-neutral-300 py-0.5"
-                        data-question={index + 1}
-                      >
-                        <span className="w-8 shrink-0 font-semibold tabular-nums">Q{index + 1}</span>
-                        {answer === null ? (
-                          <span className="italic">Unanswered</span>
-                        ) : choice === null ? (
-                          <span className="font-semibold [overflow-wrap:anywhere]">{answer}</span>
-                        ) : choice >= 0 ? (
-                          <span className="font-semibold">{CHOICE_LETTERS[choice] ?? choice + 1}</span>
+      <div className="sat-paper-summary-heading">
+        <h2>Answer summary</h2>
+        <p>Your saved responses, in exam order</p>
+      </div>
+      {printableModules.map(({ section, sectionNo, module }) => {
+        return (
+          <section key={module.id} className="sat-paper-answer-summary">
+            <PaperModuleHeading
+              sectionNo={sectionNo}
+              sectionLabel={SAT_SECTION_LABEL[section.sectionKey] ?? section.title}
+              moduleTitle={module.title}
+            />
+              <ol className="sat-paper-answer-grid">
+              {[...module.questions]
+                .sort((a, b) => a.displayOrder - b.displayOrder)
+                .map((question, index) => {
+                  const answer = answers.get(`${module.id}:${question.examQuestionId}`) ?? null;
+                  const choice =
+                    answer !== null && question.answer.kind === "single_choice"
+                      ? question.answer.options.findIndex((option) => option.id === answer)
+                      : null;
+                  return (
+                    <li
+                      key={question.examQuestionId}
+                      className="sat-paper-answer-cell"
+                      data-question={index + 1}
+                    >
+                      <span className="sat-paper-answer-number">Q{index + 1}</span>
+                      {answer === null ? (
+                        <span className="italic">Unanswered</span>
+                      ) : choice === null ? (
+                        <span className="font-semibold [overflow-wrap:anywhere]">{answer}</span>
+                      ) : choice >= 0 ? (
+                        <span className="font-semibold">{CHOICE_LETTERS[choice] ?? choice + 1}</span>
+                      ) : (
+                        <span className="italic [overflow-wrap:anywhere]">{answer} (not a listed choice)</span>
+                      )}
+                    </li>
+                  );
+                })}
+            </ol>
+          </section>
+        );
+      })}
+      {/* Front matter ends here: each review module is its own table so its
+          runhead (exam · section · module) repeats on every page it spans. */}
+            </td>
+          </tr>
+        </tbody>
+        <PaperFooter />
+      </table>
+      {printableModules.map(({ section, sectionNo, module }) => {
+        // Both SAT sections use the Bluebook two-pane layout when a question
+        // has supporting material; Math calls that pane "Supporting material".
+        const stimulusLabel = section.sectionKey === "math" ? "Supporting material" : "Passage";
+        const sectionLabel = SAT_SECTION_LABEL[section.sectionKey] ?? section.title;
+        return (
+          <table key={`review-${module.id}`} className="sat-paper-table sat-paper-review" role="presentation" data-review-module={module.id}>
+            <thead>
+              <tr>
+                <td>
+                  <div className="sat-paper-runhead" data-runhead-module={module.id}>
+                    <div className="sat-paper-runhead-title">
+                      <strong>{exam.examTitle?.trim() || "Digital SAT"}</strong>
+                      {exam.candidateName ? <span>{exam.candidateName} · Exam review</span> : <span>Exam review</span>}
+                    </div>
+                    <div className="sat-paper-runhead-context">
+                      <h2>Section {sectionNo}: {sectionLabel}</h2>
+                      <p>{module.title}</p>
+                    </div>
+                  </div>
+                  <p className="sat-paper-review-note">Your selected choice is circled; written answers appear in the answer box. Correct answers are not shown.</p>
+                </td>
+              </tr>
+            </thead>
+            <tbody>
+            {[...module.questions]
+              .sort((a, b) => a.displayOrder - b.displayOrder)
+              .map((question, index) => {
+                const answer = answers.get(`${module.id}:${question.examQuestionId}`) ?? null;
+                const marked = markedForReview.has(`${module.id}:${question.examQuestionId}`);
+                const unmatched =
+                  answer !== null &&
+                  question.answer.kind === "single_choice" &&
+                  !question.answer.options.some((option) => option.id === answer);
+                const split = hasStructuredContent(question.stimulus);
+                const choiceIndex =
+                  answer !== null && question.answer.kind === "single_choice"
+                    ? question.answer.options.findIndex((option) => option.id === answer)
+                    : -1;
+                const status =
+                  answer === null
+                    ? "Unanswered"
+                    : question.answer.kind === "single_choice" && choiceIndex >= 0
+                      ? `Answered · ${CHOICE_LETTERS[choiceIndex] ?? choiceIndex + 1}`
+                      : "Answered";
+                return (
+                  <tr key={question.examQuestionId} className="sat-paper-question-row">
+                  <td>
+                  <article
+                    className="sat-paper-question"
+                    data-review-question={index + 1}
+                  >
+                    {/* Keeps the exam's numbered strip and right-aligned response status. */}
+                    <div className="sat-paper-question-header">
+                      <span className="sat-paper-question-number" aria-hidden="true">
+                        {index + 1}
+                      </span>
+                      <h3>Question {index + 1}</h3>
+                      <span className="sat-paper-question-status">
+                        {status}
+                        {marked ? " · Marked for review" : null}
+                      </span>
+                    </div>
+                    <div className="sat-paper-workspace" data-split={split}>
+                      {split ? (
+                        <div className="sat-paper-stimulus">
+                          <p className="sat-paper-pane-label">
+                            {stimulusLabel}
+                          </p>
+                          <StructuredContentRenderer
+                            content={question.stimulus}
+                            loadMediaUrl={loadMediaUrl}
+                            onMediaFailure={mediaFailure}
+                            questionId={question.examQuestionId}
+                            eagerMedia
+                          />
+                        </div>
+                      ) : null}
+                      <div className="sat-paper-prompt">
+                        <StructuredContentRenderer
+                          content={question.prompt}
+                          loadMediaUrl={loadMediaUrl}
+                          onMediaFailure={mediaFailure}
+                          questionId={question.examQuestionId}
+                          eagerMedia
+                        />
+                        {question.answer.kind === "single_choice" ? (
+                          // Mirrors SatSingleChoiceAnswer: lettered cards; the
+                          // chosen card keeps the exam's accent border, with a
+                          // thicker circle and label for monochrome printing.
+                          <div className="sat-paper-choices" data-review-choices="true">
+                            {question.answer.options.map((option, optionIndex) => {
+                              const selected = answer === option.id;
+                              return (
+                                <div
+                                  key={option.id}
+                                  data-selected={selected || undefined}
+                                  className="sat-paper-choice"
+                                >
+                                  <span
+                                    className="sat-paper-choice-letter"
+                                    aria-hidden="true"
+                                  >
+                                    {CHOICE_LETTERS[optionIndex] ?? optionIndex + 1}
+                                  </span>
+                                  <div className="sat-paper-choice-content">
+                                    <StructuredContentRenderer
+                                      content={option.content}
+                                      loadMediaUrl={loadMediaUrl}
+                                      onMediaFailure={mediaFailure}
+                                      questionId={question.examQuestionId}
+                                      eagerMedia
+                                    />
+                                    {selected ? (
+                                      <span className="sat-paper-selected-label">
+                                        Your answer
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         ) : (
-                          <span className="italic [overflow-wrap:anywhere]">{answer} (not a listed choice)</span>
+                          // Mirrors SatStudentProducedAnswer: label above an
+                          // input-grade box holding the typed answer.
+                          <div className="sat-paper-written-answer" data-review-spr="true">
+                            <p>Your answer</p>
+                            <div className="sat-paper-answer-box">
+                              {answer ?? <span className="text-[13px] font-normal italic">Unanswered</span>}
+                            </div>
+                          </div>
                         )}
-                      </li>
-                    );
-                  })}
-              </ol>
-            </section>
-          ))
-      )}
+                        {unmatched ? (
+                          <p className="sat-paper-response-note">
+                            Recorded answer “{answer}” matches none of the listed choices.
+                          </p>
+                        ) : null}
+                        {answer === null && question.answer.kind === "single_choice" ? (
+                          <p className="sat-paper-response-note">Unanswered</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </article>
+                  </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <PaperFooter />
+          </table>
+        );
+      })}
+      <PaperLegalNotice fixed />
     </div>
   );
 }

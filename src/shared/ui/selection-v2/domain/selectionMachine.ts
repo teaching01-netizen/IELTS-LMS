@@ -240,6 +240,18 @@ export function reduceSelection(
           // the platform and nothing is prevented.
           return { state: idleSelectionState(state.activation, state.moveTolerancePx), effects: handBack(state) };
         }
+        // Armed touch surface with `touch-action: pan-y`: a clearly vertical
+        // drag is a pane scroll (question/passage panes scroll vertically),
+        // while a horizontal drag claims the text. Hold+drag still selects in
+        // any direction because hold already moved to selecting with scroll
+        // suppressed. Mouse/pen drags claim immediately as before.
+        if (state.pointerType === 'touch') {
+          const dx = event.x - state.origin.x;
+          const dy = event.y - state.origin.y;
+          if (Math.abs(dy) > Math.abs(dx)) {
+            return { state: idleSelectionState(state.activation, state.moveTolerancePx), effects: handBack(state) };
+          }
+        }
         // The tool is armed, so travelling means "this text", not "scroll me".
         const points = event.point ? withPoints(state, fixed, event.point) : state;
         return {

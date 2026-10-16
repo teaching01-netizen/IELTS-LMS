@@ -214,14 +214,18 @@ describe('app-owned exam selection CSS', () => {
   it('takes the drag away from the browser while the exam owns the selection', () => {
     // Removing the platform's selection is only half of it. `user-select: none`
     // stops the browser MAKING a selection; it does not stop it from reading the
-    // first pixels of a drag as a pan and cancelling the touch, which threw away
-    // the selection the exam had just built. `touch-action: none` is the only
-    // declaration that settles that before the finger lands, and it is applied to
+    // first pixels of a drag as a scroll: when it does,
+    // it takes the touch back with `pointercancel`, which threw away
+    // the selection the exam had just built. `touch-action: pan-y` keeps vertical
+    // pane scroll with the browser (question/passage panes scroll vertically)
+    // while horizontal drags stay with the exam; a vertical pending touch drag
+    // hands back to scrolling in selectionMachine, and hold+drag still selects
+    // via suppress-scroll. It is applied to
     // the marker the hook sets — so JS ownership and CSS ownership cannot
     // disagree about whether this gesture is the app's.
     const ownership = rules.filter((rule) =>
       rule.selectors.includes('[data-student-owned-touch-selection="true"]')
-      && /touch-action:\s*none/.test(rule.body),
+      && /touch-action:\s*pan-y/.test(rule.body),
     );
 
     expect(ownership).toHaveLength(1);

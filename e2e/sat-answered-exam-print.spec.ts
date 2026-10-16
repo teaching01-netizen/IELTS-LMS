@@ -112,20 +112,32 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
     return {
       paperDisplay: getComputedStyle(paper).display,
       onlyPaperShown: shown.length === 1 && shown[0]!.classList.contains("sat-answered-print"),
-      modules: paper.querySelectorAll("section").length,
+      answerSheets: paper.querySelectorAll("ol li[data-question]").length,
+      reviewModules: paper.querySelectorAll("[data-review-module]").length,
+      runheads: paper.querySelectorAll("[data-runhead-module]").length,
       questions: paper.querySelectorAll("article").length,
-      images: [...paper.querySelectorAll("img")].map((image) => ({ complete: image.complete, natural: image.naturalWidth, right: image.getBoundingClientRect().right })),
+      images: [...paper.querySelectorAll("figure img")].map((image) => ({ complete: image.complete, natural: image.naturalWidth, right: image.getBoundingClientRect().right })),
+      watermarks: paper.querySelectorAll("img[data-watermark]").length,
       clipped: [...paper.querySelectorAll<HTMLElement>("article, article *")].filter((element) => element.getBoundingClientRect().right > width + 0.5).length,
       overflow: paper.scrollWidth - paper.clientWidth,
       selected: paper.querySelectorAll("[data-selected]").length,
       text: paper.textContent ?? "",
+      footerReservation: getComputedStyle(paper.querySelector("tfoot .sat-paper-footer")!).visibility,
       width,
     };
   });
   expect(layout.paperDisplay).toBe("block");
   expect(layout.onlyPaperShown).toBe(true);
-  expect(layout.modules).toBe(2);
+  // Compact answer sheet covers every question, then each module is reviewed in full.
+  expect(layout.answerSheets).toBe(24);
+  expect(layout.reviewModules).toBe(2);
+  // Each review module repeats its exam · section · module runhead per page.
+  expect(layout.runheads).toBe(2);
   expect(layout.questions).toBe(24);
+  expect(layout.watermarks).toBe(1);
+  expect(layout.footerReservation).toBe("hidden");
+  expect(layout.text).toContain("LEGAL DISCLAIMER");
+  expect(layout.text).toContain("THB 540,000");
   expect(layout.images).toHaveLength(2);
   for (const image of layout.images) {
     expect(image.complete).toBe(true);
@@ -135,14 +147,19 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
   expect(layout.clipped).toBe(0);
   expect(layout.overflow).toBeLessThanOrEqual(0);
   expect(layout.selected).toBe(1);
-  expect(layout.text).toContain("Your answer: 3/4");
-  expect(layout.text).toContain("Your answer: -12.5");
+  expect(layout.text).toContain("Exam review");
+  expect(layout.text).toContain("Correct answers are not shown");
+  expect(layout.text).toContain("Your answer");
+  expect(layout.text).toContain("3/4");
+  expect(layout.text).toContain("-12.5");
   expect(layout.text).not.toContain("Mina Chen, In progress");
 
   if (browserName === "chromium") {
-    const pdf = await page.pdf({ format: "A4", printBackground: true });
+    // Same margins the print flow declares via @page (dialog Default honors
+    // them; page.pdf defaults to none and would hide a margin regression).
+    const pdf = await page.pdf({ format: "A4", landscape: true, printBackground: true, margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" } });
     const pages = pdf.toString("latin1").match(/\/Type\s*\/Page[^s]/g)?.length ?? 0;
-    // Each module starts on a new page and 24 questions do not fit on two.
+    // Answer sheet plus one review page per module: 24 questions do not fit on three.
     expect(pages).toBeGreaterThanOrEqual(3);
     await testInfo.attach("answered-exam.pdf", { body: pdf, contentType: "application/pdf" });
   }

@@ -227,9 +227,13 @@ describe('SAT Results hierarchy', () => {
     fireEvent.click(button);
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
     expect(fetchSatAnsweredExamMock).toHaveBeenCalledWith('attempt-1');
-    // Answers only: question number and the student's answer, no question content.
+    // Answer sheet first: question number and the student's answer.
     expect(printed).toContain('Q17');
-    expect(printed).not.toContain('P1');
+    // Then the exam review: full question content with the answer marked.
+    expect(printed).toContain('P1');
+    expect(printed).toContain('Exam review');
+    expect(printed).toContain('Your answer');
+    expect(printed).toContain('Correct answers are not shown');
     // The score report prints with it.
     expect(printed).toContain('Total correct: 1 of 1 · 100%');
     expect(printed).toContain('1 of 1 correct');

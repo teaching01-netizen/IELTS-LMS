@@ -1085,7 +1085,7 @@ func workbookInlineNodes(value string, alt, captions map[string]string) []any {
 			nodes = append(nodes, map[string]any{"type": "inlineMath", "attrs": map[string]any{"latex": token.value}})
 		case "blockMath":
 			nodes = append(nodes, map[string]any{"type": "blockMath", "attrs": map[string]any{"latex": token.value}})
-		case "bold", "italic", "code":
+		case "bold", "italic", "underline", "code":
 			nodes = append(nodes, map[string]any{"type": "text", "text": token.value, "marks": []any{map[string]any{"type": token.kind}}})
 		default:
 			nodes = append(nodes, map[string]any{"type": "text", "text": token.value})
@@ -1106,6 +1106,7 @@ func nextWorkbookInlineToken(value string) (int, workbookInlineToken) {
 	}{
 		{"![", "]", "image"},
 		{"\\(", "\\)", "inlineMath"},
+		{"++", "++", "underline"},
 		{"**", "**", "bold"},
 		{"*", "*", "italic"},
 		{"`", "`", "code"},
@@ -1130,5 +1131,9 @@ func nextWorkbookInlineToken(value string) (int, workbookInlineToken) {
 		return 0, workbookInlineToken{kind: "text", value: value, end: len(value)}
 	}
 	close += start
-	return 0, workbookInlineToken{kind: selected.kind, value: value[start:close], end: close + len(selected.suffix)}
+	inner := value[start:close]
+	if selected.kind == "underline" && strings.TrimSpace(inner) == "" {
+		return 0, workbookInlineToken{kind: "text", value: "++", end: len(selected.prefix)}
+	}
+	return 0, workbookInlineToken{kind: selected.kind, value: inner, end: close + len(selected.suffix)}
 }

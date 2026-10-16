@@ -81,8 +81,10 @@ import {
  * which point the selection is discarded, on a surface where the platform's own
  * selection does not exist either. So an armed surface marks its root
  * (`data-student-owned-touch-selection`), and the stylesheet turns that marker
- * into `touch-action: none`. The declaration has to be in place before the finger
- * lands, which is why it is a layout effect, and it is deliberately NOT set for
+ * into `touch-action: pan-y`: vertical pans stay with the browser so question
+ * panes scroll, horizontal drags stay with the exam. A vertical pending touch
+ * drag hands back to scrolling (selectionMachine); hold+drag still selects via
+ * suppress-scroll. It is deliberately NOT set for
  * the long-press contract, where a drag is meant to scroll.
  *
  * WHAT IT DELIBERATELY DOES NOT DO

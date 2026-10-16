@@ -41,7 +41,7 @@ export function HighlightableSurface({
   // `touch-action`. Both are owned by the stylesheet (index.css), which is the
   // only place that can also see whether a locked exam is active. A touch pointer
   // on an enabled student exam surface sets the app-owner marker, which suppresses
-  // native selection; an armed highlight tool also declares `touch-action: none`
+  // native selection; an armed highlight tool also declares `touch-action: pan-y`
   // before the gesture. Pointer media queries do not decide ownership. An inline
   // `auto` here would outrank the stylesheet and let the browser take the gesture
   // back with its own panning.

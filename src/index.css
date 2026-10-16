@@ -1001,23 +1001,14 @@
     user-select: text;
   }
 
-  /* THE OTHER HALF OF THAT OWNERSHIP: the browser must be told not to PAN, and
-     told before the finger lands.
-
-     `user-select: none` above stops the platform MAKING a selection. It does not
-     stop it from reading the first pixels of a drag as a scroll: when it does,
-     it takes the touch back with `pointercancel`, and the selection the exam had
-     just built is discarded. With the platform's own selection suppressed too,
-     that left a student on an iPad with nothing selecting at all — and no jsdom
-     test can catch it, because jsdom never runs a real scrolling gesture.
-
-     `touch-action: none` is the only declaration that settles touch ownership
-     in advance. The adapter marks only its enabled exam surface. Pointer type,
-     not the primary-pointer media query, decides whether a physical gesture is
-     touch-owned. `html.student-exam-active` keeps this inert in previews and
-     lobbies and outranks the reading pane's default touch action. */
+  /* THE OTHER HALF OF THAT OWNERSHIP: vertical panning stays with the
+     browser so an iPad student can scroll a question pane starting on the
+     prose; horizontal drags stay with the exam so immediate highlight drags
+     still claim. A vertical touch drag hands back to scrolling (see
+     selectionMachine pending-drag vertical handback); a hold arms
+     suppress-scroll before the move, so hold+drag still selects vertically. */
   html.student-exam-active [data-student-owned-touch-selection="true"] {
-    touch-action: none;
+    touch-action: pan-y;
   }
 
   /* Exam content is not a drag source: dragging an image or a link would carry

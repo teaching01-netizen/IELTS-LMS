@@ -28,8 +28,8 @@ export function SatReportDownload({
       ) : (
         <p role="status" className="mt-2 text-[13px] text-[var(--sat-text-secondary)]">
           {download === "preparing"
-            ? "Loading your answers."
-            : "Choose “Save as PDF” in the print dialog. It includes your score report and answers."}
+            ? "Loading your answers and exam questions."
+            : "Choose “Save as PDF” in the print dialog. It includes your score report, answer summary, and the exam questions with your answers marked for study."}
         </p>
       )}
     </div>

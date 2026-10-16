@@ -135,5 +135,23 @@
     "typescript-eslint": "^8.0.0",
     "vite": "^6.2.0",
     "vitest": "^2.0.0"
-  }
+  },
+  "description": "Frontend monolith for IELTS administration, builder, proctoring, and student delivery.",
+  "main": "eslint.config.js",
+  "directories": {
+    "doc": "docs",
+    "lib": "lib",
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/teaching01-netizen/IELTS-LMS.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/teaching01-netizen/IELTS-LMS/issues"
+  },
+  "homepage": "https://github.com/teaching01-netizen/IELTS-LMS#readme"
 }

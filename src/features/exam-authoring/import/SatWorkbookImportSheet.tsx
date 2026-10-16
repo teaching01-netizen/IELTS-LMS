@@ -598,8 +598,11 @@ export function SatWorkbookImportSheet({
                   Your SAT appears here before import
                 </p>
                 <p className="mt-1 text-xs leading-5 text-slate-600">
-                  Tables, LaTeX math, code blocks, formatting, choices, and adaptive-module
-                  placement render with the same components students use.
+                  Tables, LaTeX math, code blocks, bold/italic/underline (++underlined text++),
+                  choices, and adaptive-module placement render with the same components
+                  students use. Note that raw HTML, Markdown links, and strikethrough import
+                  as plain text; use LaTeX inside math for subscripts and superscripts (for
+                  example {"\\(x_2\\)"} and {"\\(x^2\\)"}).
                 </p>
               </div>
             </div>

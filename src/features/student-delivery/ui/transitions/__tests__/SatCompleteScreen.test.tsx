@@ -260,18 +260,71 @@ describe("SatCompleteScreen", () => {
     expect(screen.getByRole("region", { name: "Score report" })).not.toHaveTextContent(/Estimated/);
   });
 
-  it("prints each question number with the answer only: choice letter, SPR as typed, unmatched and unanswered labelled", () => {
+  it("prints the answer sheet and, after it, the full exam review with the student's answers marked", () => {
     const { container } = render(<AnsweredExamPaper exam={answeredExam()} generation={1} />);
     const paper = container.querySelector<HTMLElement>(".sat-answered-paper")!;
     expect(paper.dataset["complete"]).toBe("true");
     expect(paper.dataset["generation"]).toBe("1");
     expect(paper).toHaveTextContent("Module 1");
     expect(paper).not.toHaveTextContent("Module 2 skipped");
+    // Numbered section mastheads and module labels keep the summary scannable.
+    expect(paper).toHaveTextContent("Section 1: Math");
+    // Every review module carries a repeating runhead: exam · section · module.
+    const runheads = [...paper.querySelectorAll("[data-runhead-module]")];
+    expect(runheads).toHaveLength(1);
+    expect(runheads[0]).toHaveTextContent("Section 1: Math");
+    expect(runheads[0]).toHaveTextContent("Module 1");
+    // No exam title on the fixture: the runhead falls back to the product name.
+    expect(runheads[0]).toHaveTextContent("Digital SAT");
+    // The legal footer and the watermark ride every page.
+    expect(paper).toHaveTextContent("LEGAL DISCLAIMER");
+    expect(paper).toHaveTextContent("THB 540,000");
+    expect(paper.querySelectorAll("img[data-watermark]")).toHaveLength(1);
     const rows = [...paper.querySelectorAll("[data-question]")].map((row) => row.textContent);
     // A recorded choice that matches no option is reported, not silently dropped.
     expect(rows).toEqual(["Q1B", "Q23/4", "Q3Unanswered", "Q4o9 (not a listed choice)"]);
-    // No question content or choices.
-    expect(paper).not.toHaveTextContent(/stim|P1|first|second/);
+
+    const review = paper.querySelector<HTMLElement>("[data-review-module='m1']")!;
+    expect(review).toHaveTextContent("Exam review");
+    expect(review).toHaveTextContent("Correct answers are not shown");
+    const articles = [...review.querySelectorAll("article")];
+    expect(articles).toHaveLength(4);
+    // All choices are shown; the student's choice is circled and labelled.
+    const first = articles[0]!;
+    expect(first).toHaveTextContent("P1");
+    expect(first).toHaveTextContent("first");
+    expect(first).toHaveTextContent("second");
+    const selected = first.querySelector("[data-selected]");
+    expect(selected?.textContent).toMatch(/B/);
+    expect(selected?.textContent).toContain("Your answer");
+    expect(first.querySelectorAll("[data-selected]")).toHaveLength(1);
+    // A student-produced response sits in the answer box as typed.
+    expect(articles[1]).toHaveTextContent("Your answer");
+    expect(articles[1]).toHaveTextContent("3/4");
+    // Unanswered questions say so, in both the sheet and the review.
+    expect(articles[2]).toHaveTextContent("Unanswered");
+    // An unmatched recorded choice is reported, not silently dropped.
+    expect(articles[3]).toHaveTextContent("matches none of the listed choices");
+    // Skipped modules are not reviewed.
+    expect(paper.querySelector("[data-review-module='m2']")).toBeNull();
+    // No answer keys leak: the projection carries none.
+    expect(paper).not.toHaveTextContent(/correct answer is/i);
+    expect(answeredPaperReady(paper)).toBe(true);
+  });
+
+  it("is ready only when every review figure shows a decoded image", () => {
+    const { container } = render(<AnsweredExamPaper exam={answeredExam()} />);
+    const paper = container.querySelector<HTMLElement>(".sat-answered-paper")!;
+    paper.dataset["complete"] = "true";
+    // No figures: ready.
+    expect(answeredPaperReady(paper)).toBe(true);
+    const figure = paper.appendChild(document.createElement("figure"));
+    expect(answeredPaperReady(paper)).toBe(false);
+    const image = figure.appendChild(document.createElement("img"));
+    Object.defineProperty(image, "complete", { value: true });
+    Object.defineProperty(image, "naturalWidth", { configurable: true, value: 0 });
+    expect(answeredPaperReady(paper)).toBe(false);
+    Object.defineProperty(image, "naturalWidth", { configurable: true, value: 1 });
     expect(answeredPaperReady(paper)).toBe(true);
   });
 
@@ -338,9 +391,9 @@ describe("SatCompleteScreen", () => {
     expect(paper).toHaveTextContent("Algebra3 of 4 · 75%");
   });
 
-  it("says the PDF carries the score report and the answers", () => {
+  it("says the PDF carries the score report, the answers and the exam review", () => {
     render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam())} />);
-    expect(screen.getByRole("status")).toHaveTextContent("It includes your score report and answers.");
+    expect(screen.getByRole("status")).toHaveTextContent("It includes your score report, answer summary, and the exam questions");
   });
 
   // PDF-06, Model: verification/lean/sat-result (Paper.answer_unique).
@@ -392,6 +445,24 @@ describe("SatCompleteScreen", () => {
     expect(printedText).toContain("12");
     expect(isolated).toBe(true);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    print.mockRestore();
+  });
+
+  it("holds the landscape page rule only for the print flow", async () => {
+    let styleDuringPrint: Element | null = null;
+    const print = vi.spyOn(window, "print").mockImplementation(() => {
+      styleDuringPrint = document.querySelector("style[data-sat-answered-page]");
+    });
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam())} />);
+    expect(document.querySelector("style[data-sat-answered-page]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    // Present while the dialog is open (added synchronously with the mount,
+    // so a figure-less paper cannot print portrait before effects flush)…
+    expect(styleDuringPrint).not.toBeNull();
+    expect(styleDuringPrint?.textContent).toContain("landscape");
+    // …and removed once it closes, so no other surface prints landscape.
+    expect(document.querySelector("style[data-sat-answered-page]")).toBeNull();
     print.mockRestore();
   });
 
