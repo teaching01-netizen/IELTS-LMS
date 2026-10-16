@@ -40,6 +40,12 @@ afterEach(() => {
 });
 
 describe("painting a selection", () => {
+  it("does not open a floating layer for an unclaimed scrolling candidate", () => {
+    render(<SelectionOverlay selection={resting({ phase: "pending", selected: false })} />);
+    expect(document.querySelector("[data-selection-floating-layer]")).toBeNull();
+    expect(document.querySelector("[data-student-selection-highlight]")).toBeNull();
+  });
+
   it("paints one line per measured rect and nothing at all when idle", () => {
     const { rerender } = render(<SelectionOverlay selection={resting()} />);
 

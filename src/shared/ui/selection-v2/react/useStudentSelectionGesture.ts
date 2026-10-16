@@ -484,6 +484,7 @@ export function useStudentSelectionGesture(
   const scopeKeyRef = useRef(scopeKey);
   /** Legacy highlightable surfaces keep touch ownership only while their range rests. */
   const satTouchOwnership = useRef(false);
+  const keyboardSelectionOwnership = useRef(false);
 
   /**
    * The selection itself, created on first use and kept for the hook's life.
@@ -763,12 +764,13 @@ export function useStudentSelectionGesture(
     handleTarget.current = null;
     satTouchOwnership.current = false;
     const root = rootRef.current;
-    const precontactSatOwner =
+    const precontactOwner =
       !!root &&
-      isSatSelectionRoot(root) &&
+      isAppOwnedSelectionRoot(root) &&
       live.current.enabled &&
-      live.current.activation === "drag";
-    if (!precontactSatOwner && root?.getAttribute("data-student-selection-owner") === "app") {
+      live.current.activation === "drag" &&
+      !keyboardSelectionOwnership.current;
+    if (!precontactOwner && root?.getAttribute("data-student-selection-owner") === "app") {
       root.removeAttribute("data-student-selection-owner");
     }
   }, [clearHoldTimer, detachScrollSuppressor, ensureSession, releaseBinding, rootRef]);
@@ -1234,7 +1236,11 @@ export function useStudentSelectionGesture(
       if (!root || !isAppOwnedSelectionRoot(root)) return;
       const config = live.current;
       const targetInsideRoot = event.target instanceof Node && root.contains(event.target);
-      if (isSatSelectionRoot(root) && config.enabled && config.activation === "drag") {
+      if (config.enabled && config.activation === "drag") {
+        if (targetInsideRoot && config.isOwnedPointer(event) && !config.isExcludedTarget(event.target)) {
+          keyboardSelectionOwnership.current = false;
+          root.dataset["studentSelectionOwner"] = "app";
+        }
         config.diagnostics?.record("selection-owner", {
           ownerMarkerPresent: root.getAttribute("data-student-selection-owner") === "app",
           pointerType: event.pointerType,
@@ -1300,7 +1306,7 @@ export function useStudentSelectionGesture(
       const root = rootRef.current;
       if (
         !root ||
-        !isSatSelectionRoot(root) ||
+        !isAppOwnedSelectionRoot(root) ||
         root.getAttribute("data-student-selection-owner") !== "app"
       )
         return;
@@ -1319,7 +1325,7 @@ export function useStudentSelectionGesture(
     const root = rootRef.current;
     if (
       !root ||
-      !isSatSelectionRoot(root) ||
+      !isAppOwnedSelectionRoot(root) ||
       root.getAttribute("data-student-selection-owner") !== "app"
     )
       return;
@@ -1402,6 +1408,7 @@ export function useStudentSelectionGesture(
       if (!root || !isAppOwnedSelectionRoot(root)) return;
       if (isSatSelectionRoot(root) && live.current.enabled && live.current.activation === "drag")
         return;
+      keyboardSelectionOwnership.current = true;
       satTouchOwnership.current = false;
       if (root.getAttribute("data-student-selection-owner") === "app") {
         root.removeAttribute("data-student-selection-owner");
@@ -1503,13 +1510,13 @@ export function useStudentSelectionGesture(
   ]);
 
   /**
-   * Tell the browser, before any pointer lands, that armed SAT text belongs to
+   * Tell the browser, before any pointer lands, that armed exam text belongs to
    * the app. Pointer type changes presentation, never selection ownership.
    *
    * Set for exactly the contract where a drag means "this text": an armed tool.
    * A layout effect establishes both native-selection and touch ownership before
-   * contact. SAT's browser-selection guard stays active for the entire armed
-   * session, including mouse and pen input.
+   * contact. The browser-selection guard stays active for pointer gestures;
+   * IELTS can hand back to native keyboard selection until the next pointer.
    *
    * The long-press contract is never marked: there a drag is a scroll, and taking
    * the gesture away from the browser would break the very reading motion the mode
@@ -1520,11 +1527,12 @@ export function useStudentSelectionGesture(
     if (!root || !enabled || activation !== "drag") return;
 
     root.dataset["studentOwnedTouchSelection"] = "true";
-    const isSatRoot = isSatSelectionRoot(root);
-    if (isSatRoot) root.dataset["studentSelectionOwner"] = "app";
+    keyboardSelectionOwnership.current = false;
+    const isOwnedRoot = isAppOwnedSelectionRoot(root);
+    if (isOwnedRoot) root.dataset["studentSelectionOwner"] = "app";
     return () => {
       delete root.dataset["studentOwnedTouchSelection"];
-      if (isSatRoot && root.getAttribute("data-student-selection-owner") === "app") {
+      if (isOwnedRoot && root.getAttribute("data-student-selection-owner") === "app") {
         root.removeAttribute("data-student-selection-owner");
       }
     };

@@ -10,6 +10,7 @@ import { useStudentExamPageLock } from '../../../src/components/student/layout/u
 import { StudentExamInteractionScopeProvider } from '../../../src/shared/ui/touch-selection/StudentExamInteractionScope';
 import { StudentTouchSelectionDiagnosticsProvider } from '../../../src/shared/ui/touch-selection/StudentTouchSelectionDiagnostics';
 import { SatAccessibilityDebugRoute } from '../../../src/app/router/dev/SatAccessibilityDebugRoute';
+import { studentHighlightPalette, type StudentHighlightColor } from '../../../src/components/student/highlightPalette';
 
 const params = new URLSearchParams(location.search);
 const owned = params.get('preview') !== '1';
@@ -54,8 +55,14 @@ function IeltsReading() {
   const { state: ui, actions } = useStudentUI();
   useStudentExamPageLock(owned);
   return <main className="student-exam-shell" style={{ height: '100dvh', gridTemplateRows: 'auto minmax(0, 1fr) auto' }}>
-    <button onClick={actions.toggleHighlightMode} aria-pressed={ui.accessibilitySettings.highlightToolMode === 'highlight'}>Highlight</button>
-    <StudentReading state={state} answers={{}} onAnswerChange={() => {}} currentQuestionId={null} onNavigate={() => {}} highlightEnabled tabletMode layoutMode="wide" />
+    <div>
+      <button onClick={actions.toggleHighlightMode} aria-pressed={ui.accessibilitySettings.highlightToolMode === 'highlight'}>Highlight</button>
+      <button onClick={actions.toggleEraseMode} aria-pressed={ui.accessibilitySettings.highlightToolMode === 'erase'}>Erase</button>
+      <select aria-label="Highlight color" value={ui.accessibilitySettings.highlightColor} onChange={(event) => actions.setHighlightColor(event.target.value as StudentHighlightColor)}>
+        {studentHighlightPalette.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+      </select>
+    </div>
+    <StudentReading state={state} answers={{}} onAnswerChange={() => {}} currentQuestionId={null} onNavigate={() => {}} highlightEnabled highlightColor={ui.accessibilitySettings.highlightColor} tabletMode layoutMode="wide" />
     <input aria-label="Answer" defaultValue="Native editing" />
   </main>;
 }

@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
-  testDir: './e2e', testMatch: 'student-owned-touch-selection.spec.ts',
+  testDir: './e2e', testMatch: ['student-owned-touch-selection.spec.ts', 'ielts-highlight-selection.spec.ts'],
   reporter: 'list', workers: 1, retries: 0,
   use: { baseURL: 'http://127.0.0.1:3100', trace: 'retain-on-failure' },
   projects: [

@@ -21,6 +21,14 @@ import { createHighlight, eraseHighlight } from './highlight/highlightCommandSer
 import { renderSurfaceHighlights } from './highlight/renderAdapter';
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 
+function isHighlightSelectionPointer(event: PointerEvent): boolean {
+  return event.pointerType === 'touch' || event.pointerType === 'mouse' || event.pointerType === 'pen';
+}
+
+function isHighlightSelectionExcludedTarget(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+  return element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), button, a, [role="button"], img, [role="math"]') != null;
+}
 
 function extractCanonicalTextFromHtml(baseHtml: string): string {
   const container = document.createElement('div');
@@ -42,7 +50,7 @@ interface UseHighlightSurfaceV2Result {
   renderedHtml: string;
   hint: string | null;
   announce: string;
-  /** The owned touch selection, painted and controlled by the surface. */
+  /** The owned pointer selection, painted and controlled by the surface. */
   selection: StudentSelectionGesture;
 }
 
@@ -71,7 +79,7 @@ export function useHighlightSurfaceV2({
   const activeSurfaceId = manager?.activeSurfaceId ?? null;
   const ownsGlobalSelection = !manager || activeSurfaceId === null || activeSurfaceId === instanceIdRef.current;
   const canonicalText = useMemo(() => extractCanonicalTextFromHtml(baseHtml), [baseHtml]);
-  const { ranges, setRanges } = usePersistedHighlightRangesV2(surfaceId, canonicalText);
+  const { ranges, setRanges, sourceHash } = usePersistedHighlightRangesV2(surfaceId, canonicalText);
   const [hint, setHint] = useState<string | null>(null);
   // S1-C10: SR announcements for highlight/erase/limit outcomes; rendered by
   // HighlightableSurface in an sr-only role=status node (header pattern).
@@ -103,9 +111,10 @@ export function useHighlightSurfaceV2({
     manager?.claimSurface(instanceIdRef.current);
     setHint(null);
     if (toolMode === 'erase') {
-      setRanges(eraseHighlight(ranges, selection));
-      diagnostics?.record('mutation:erase', { mutationApplied: true });
-      setAnnounce('Highlight erased.');
+      const intersectsHighlight = ranges.some((range) => range.start < selection.end && range.end > selection.start);
+      if (intersectsHighlight) setRanges(eraseHighlight(ranges, selection));
+      diagnostics?.record('mutation:erase', { mutationApplied: intersectsHighlight });
+      setAnnounce(intersectsHighlight ? 'Highlight erased.' : 'No highlights in the selected text.');
     } else {
       const next = createHighlight(ranges, selection, resolvedHighlightColor, MAX_HIGHLIGHT_RANGES);
       if (next.limitReached) {
@@ -128,9 +137,12 @@ export function useHighlightSurfaceV2({
     if (!enabled || toolMode === 'off' || !ownsGlobalSelection) return false;
     const container = containerRef.current;
     if (!container) return false;
+    // Native ranges on pointer-owned prose are leaks, not a second command.
+    // Keyboard selection explicitly hands ownership back before reaching here.
+    if (examScope.ownedTouchSelection && container.dataset['studentSelectionOwner'] === 'app') return false;
 
     return applySelection(selectionPort.readSelection(container).selection);
-  }, [applySelection, enabled, ownsGlobalSelection, selectionPort, toolMode]);
+  }, [applySelection, enabled, examScope.ownedTouchSelection, ownsGlobalSelection, selectionPort, toolMode]);
 
   // S1-C9: Alt+H applies the highlight tool to the OS text selection inside
   // this surface (keyboard path for users who cannot drag-select). The
@@ -212,6 +224,9 @@ export function useHighlightSurfaceV2({
     enabled: enabled && examScope.ownedTouchSelection && toolMode !== 'off',
     activation: 'drag',
     rootRef: containerRef,
+    scopeKey: `${surfaceId}:${sourceHash}:${toolMode}`,
+    isOwnedPointer: isHighlightSelectionPointer,
+    isExcludedTarget: isHighlightSelectionExcludedTarget,
     diagnostics,
     resolveCaretAtPoint,
     // An armed highlight colour has already decided what a selection means: the

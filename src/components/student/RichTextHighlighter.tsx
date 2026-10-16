@@ -84,6 +84,7 @@ export function RichTextHighlighter({
       hint={hint}
       announce={announce}
       highlightSelectionColor={selectionTintColor}
+      highlightToolMode={resolvedHighlightToolMode}
       selection={selection}
     />
   );

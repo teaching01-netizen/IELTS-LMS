@@ -28,7 +28,7 @@ describe('HighlightableSurface DOM stability', () => {
 
   it('exposes a keyboard-focusable surface with an Alt+H label (S1-C9)', () => {
     const { container } = render(
-      <HighlightableSurface as="div" html="<p>Hello</p>" />,
+      <HighlightableSurface as="div" html="<p>Hello</p>" highlightToolMode="highlight" />,
     );
 
     const surface = container.querySelector('[data-student-highlightable="true"]') as HTMLElement;

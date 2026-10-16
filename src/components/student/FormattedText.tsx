@@ -110,6 +110,7 @@ export function FormattedText({
         announce={announce}
         suppressTouchCallout={suppressTouchCallout}
         highlightSelectionColor={selectionTintColor}
+        highlightToolMode={resolvedHighlightToolMode}
         selection={selection}
       />
     );

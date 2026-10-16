@@ -9,6 +9,9 @@
     "SF Pro Text", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial,
     sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sat-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sat-prose:
+    Charter, "Bitstream Charter", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
 
   /* Typography Scale - Consistent visual hierarchy */
   --font-size-xs: 0.75rem; /* 12px - Captions, labels */
@@ -930,16 +933,10 @@
         inside the prose roots themselves — answer inputs and radios are
         siblings of the protected text, not descendants.
 
-     2. An armed highlight/annotation tool. IELTS surfaces get their text back
-        through the marker the gesture sets before contact
-        (`data-student-owned-touch-selection`, present exactly while the tool
-        is armed): drag-select, Alt+H and the screen-reader path keep the
-        `user-select: text` they had, and the menu still stays away because the
-        scoped callout guard does not depend on selection. SAT surfaces are
-        owned outright by the `data-student-selection-owner` rule below:
-        Selection v2 draws the selection and the platform draws nothing. This
-        is what the gesture code has always assumed — "on these surfaces the
-        platform's selection is suppressed". */
+     2. An armed highlight/annotation tool. Selection v2 owns pointer selection
+        on IELTS and SAT before contact through `data-student-selection-owner`.
+        IELTS keyboard selection temporarily removes that marker, letting the
+        armed-surface rule below restore native text selection for Alt+H. */
   html.student-exam-active,
   html.student-exam-active * {
     -webkit-user-select: none;
@@ -974,7 +971,7 @@
     -webkit-touch-callout: none;
   }
 
-  /* Armed SAT annotation surfaces are owned before contact. This stable marker
+  /* Armed exam text surfaces are owned before contact. This stable marker
      suppresses native ranges for touch, mouse, and pen while Selection v2 owns
      the same text for every pointer type. Editable controls opt back into text. */
   html.student-exam-active [data-sat-selection-protected="true"][data-student-selection-owner="app"],
@@ -1880,12 +1877,7 @@ math-field.sat-block-mathfield::part(menu-toggle) {
    * Update together if the chrome heights change. */
   --sat-exam-header-height: 96px;
   --sat-exam-footer-height: 70px;
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--font-sat-ui);
   color: var(--sat-text);
   background: var(--sat-background);
   -webkit-text-size-adjust: 100%;
@@ -2034,8 +2026,7 @@ button:not(:disabled):active > .sat-annotation-press {
 }
 
 .sat-exam-prose {
-  font-family:
-    Charter, "Bitstream Charter", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-family: var(--font-sat-prose);
 }
 
 .sat-tabular {

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import type { RefObject } from 'react';
 import { SelectionOverlay, type SelectionOverlaySelection } from '@shared/ui/selection-v2/react/SelectionOverlay';
+import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 
 interface HighlightableSurfaceProps {
   as: 'div' | 'p' | 'span';
@@ -10,6 +11,7 @@ interface HighlightableSurfaceProps {
   hint?: string | null | undefined;
   suppressTouchCallout?: boolean | undefined;
   highlightSelectionColor?: string | undefined;
+  highlightToolMode?: StudentHighlightToolMode | undefined;
   announce?: string | null | undefined;
   /**
    * The selection this surface owns, if the session declared one.
@@ -29,6 +31,7 @@ export function HighlightableSurface({
   hint = null,
   suppressTouchCallout = false,
   highlightSelectionColor,
+  highlightToolMode = 'off',
   announce = null,
   selection = null,
 }: HighlightableSurfaceProps) {
@@ -63,7 +66,11 @@ export function HighlightableSurface({
         // S1-C9: highlightable copy is keyboard-focusable so the Alt+H
         // shortcut (see useHighlightSurfaceV2) and SR users can reach it.
         tabIndex={0}
-        aria-label="Highlightable text. Select text to highlight, or press Alt+H to highlight the current selection."
+        aria-label={highlightToolMode === 'erase'
+          ? 'Highlightable text. Select text to erase its highlights, or press Alt+H to erase highlights in the current selection.'
+          : highlightToolMode === 'highlight'
+            ? 'Highlightable text. Select text to highlight, or press Alt+H to highlight the current selection.'
+            : 'Highlightable text. Turn on Highlight or Erase to mark or clear selected text.'}
         dangerouslySetInnerHTML={innerHtml}
       />
       {/* S1-C10: polite mode announcer, mirroring the StudentHeader highlight
@@ -74,11 +81,14 @@ export function HighlightableSurface({
       </span>
       {/* An owned selection has no browser selection behind it, so the surface
           paints the lines itself — otherwise a student dragging across text would
-          see nothing at all until the mark appeared. The handles, the magnifier
-          and the contextual menu come with it. */}
+          see nothing at all until the mark appeared. Handles and the magnifier
+          come with it; IELTS applies the armed tool on release. */}
       {selection ? (
         <SelectionOverlay
           selection={selection}
+          selectionColor={highlightToolMode === 'erase'
+            ? 'rgba(100, 116, 139, 0.25)'
+            : highlightSelectionColor ? `color-mix(in srgb, ${highlightSelectionColor} 45%, transparent)` : undefined}
           loupe={containerRef ? { sourceRef: containerRef } : undefined}
         />
       ) : null}

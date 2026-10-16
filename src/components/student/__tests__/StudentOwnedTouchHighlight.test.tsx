@@ -1,8 +1,10 @@
 import { act, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { FormattedText } from '../FormattedText';
 import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
+import { studentHighlightPalette, type StudentHighlightColor } from '../highlightPalette';
+import { StudentHighlightPersistenceProvider } from '../highlightV2Persistence';
 
 /**
  * The IELTS half of the owned touch selection, end to end.
@@ -24,10 +26,21 @@ type PointCapable = Document & {
 
 let restoreEnvironment: (() => void) | null = null;
 
+beforeEach(() => {
+  vi.spyOn(Range.prototype, 'getClientRects').mockReturnValue([
+    { left: 0, top: 0, width: 160, height: 20 } as DOMRect,
+  ] as unknown as DOMRectList);
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => window.setTimeout(() => callback(performance.now()), 16));
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => window.clearTimeout(id));
+});
+
 afterEach(() => {
   restoreEnvironment?.();
   restoreEnvironment = null;
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  window.getSelection()?.removeAllRanges();
+  localStorage.clear();
 });
 
 function stubCoarsePointerDevice() {
@@ -57,23 +70,34 @@ function stubHitTest(leaf: Text) {
   };
 }
 
-function renderSurface(options: {
+interface SurfaceOptions {
   ownedTouchSelection: boolean;
   toolMode?: 'off' | 'highlight' | 'erase';
-}) {
-  const result = render(
-    <StudentExamInteractionScopeProvider ownedTouchSelection={options.ownedTouchSelection}>
-      <FormattedText
-        text="Alpha beta gamma"
-        highlightEnabled
-        highlightToolMode={options.toolMode ?? 'highlight'}
-        highlightColor="yellow"
-        highlightSurfaceId={`owned-touch:${options.ownedTouchSelection}:${options.toolMode ?? 'highlight'}`}
-      />
-    </StudentExamInteractionScopeProvider>,
+  color?: StudentHighlightColor;
+  text?: string;
+  surfaceId?: string;
+}
+
+function renderSurface(options: SurfaceOptions) {
+  const element = (props: SurfaceOptions) => (
+    <StudentExamInteractionScopeProvider ownedTouchSelection={props.ownedTouchSelection}>
+      <StudentHighlightPersistenceProvider namespace="owned-selection-test">
+        <FormattedText
+          text={props.text ?? 'Alpha beta gamma'}
+          highlightEnabled
+          highlightToolMode={props.toolMode ?? 'highlight'}
+          highlightColor={props.color ?? 'yellow'}
+          highlightSurfaceId={props.surfaceId ?? 'owned-touch'}
+        />
+      </StudentHighlightPersistenceProvider>
+    </StudentExamInteractionScopeProvider>
   );
+  const result = render(element(options));
   const surface = result.container.querySelector('[data-student-highlightable="true"]') as HTMLElement;
-  return { ...result, surface };
+  return { ...result, surface, update: (next: Partial<SurfaceOptions>) => {
+    options = { ...options, ...next };
+    result.rerender(element(options));
+  } };
 }
 
 function longPressAndDrag(from: number, to: number) {
@@ -91,19 +115,168 @@ function longPressAndDrag(from: number, to: number) {
   fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
 }
 
-/** Press and start dragging on the same breath, which is how touch selection is
- * performed almost everywhere else. The vertical travel is what exceeds the
- * tolerance; the horizontal coordinates are the character offsets. */
+/** Hit-test canonical offsets even after highlighting splits the text nodes. */
+function stubSurfaceHitTest(root: HTMLElement) {
+  const capable = document as PointCapable;
+  const original = capable.caretPositionFromPoint;
+  capable.caretPositionFromPoint = (x: number) => {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let remaining = Math.round(x);
+    let node: Text | null;
+    let last: Text | null = null;
+    while ((node = walker.nextNode() as Text | null)) {
+      if (remaining < node.length) return { offsetNode: node, offset: remaining };
+      remaining -= node.length;
+      last = node;
+    }
+    return last && remaining === 0 ? { offsetNode: last, offset: last.length } : null;
+  };
+  return () => {
+    if (original) capable.caretPositionFromPoint = original;
+    else delete capable.caretPositionFromPoint;
+  };
+}
+
+/** Physical movement exceeds the threshold while the hit test stays on beta. */
 function immediateDrag(from: number, to: number) {
   vi.useFakeTimers();
   const surface = document.querySelector('[data-student-highlightable="true"]')!;
   fireEvent.pointerDown(surface, { pointerType: 'touch', pointerId: 1, clientX: from, clientY: 10 });
-  fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: from, clientY: 25 });
-  fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: to, clientY: 25 });
+  fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: from + 9, clientY: 10 });
+  fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: to, clientY: 10 });
   fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1 });
 }
 
 describe('IELTS owned touch highlighting', () => {
+  it.each(['touch', 'mouse', 'pen'])('owns %s selection and commits once on release without a menu', (pointerType) => {
+    vi.useFakeTimers();
+    const { surface, container } = renderSurface({ ownedTouchSelection: true });
+    restoreEnvironment = stubSurfaceHitTest(surface);
+    expect(surface).toHaveAttribute('data-student-selection-owner', 'app');
+    const addRange = vi.spyOn(Selection.prototype, 'addRange');
+
+    fireEvent.pointerDown(surface, { pointerType, pointerId: 1, clientX: 0, clientY: 10 });
+    fireEvent.pointerMove(document, { pointerType, pointerId: 1, clientX: 16, clientY: 10 });
+    act(() => { vi.advanceTimersByTime(20); });
+    expect(document.querySelector('[data-student-selection-highlight]')).not.toBeNull();
+    expect(container.querySelector('mark')).toBeNull();
+    fireEvent.pointerUp(document, { pointerType, pointerId: 1 });
+    fireEvent.mouseUp(surface);
+
+    expect(container.querySelectorAll('mark')).toHaveLength(1);
+    expect(container.querySelector('mark')).toHaveTextContent('Alpha beta gamma');
+    expect(document.querySelector('[data-student-selection-highlight]')).toBeNull();
+    expect(document.querySelector('[data-selection-action-menu]')).toBeNull();
+    expect(addRange).not.toHaveBeenCalled();
+    expect(surface).toHaveAttribute('data-student-selection-owner', 'app');
+  });
+
+  it.each(studentHighlightPalette)('previews $label ink during selection and saves that color', (entry) => {
+    vi.useFakeTimers();
+    const { surface } = renderSurface({ ownedTouchSelection: true, color: entry.id });
+    restoreEnvironment = stubSurfaceHitTest(surface);
+    fireEvent.pointerDown(surface, { pointerType: 'mouse', pointerId: 1, clientX: 0, clientY: 10 });
+    fireEvent.pointerMove(document, { pointerType: 'mouse', pointerId: 1, clientX: 16, clientY: 10 });
+    act(() => { vi.advanceTimersByTime(20); });
+    const paint = document.querySelector<HTMLElement>('[data-student-selection-highlight]');
+    expect(paint?.style.getPropertyValue('--selection-fill')).toBe(`color-mix(in srgb, ${entry.highlightColorValue} 45%, transparent)`);
+    fireEvent.pointerUp(document, { pointerType: 'mouse', pointerId: 1 });
+    expect(surface.querySelector('mark')).toHaveAttribute('data-highlight-color', entry.id);
+  });
+
+  it.each(['touch', 'mouse', 'pen'])('partially erases with %s, preserves leftovers and persists the result', (pointerType) => {
+    vi.useFakeTimers();
+    const { surface, container, update, unmount } = renderSurface({ ownedTouchSelection: true, color: 'purple' });
+    restoreEnvironment = stubSurfaceHitTest(surface);
+    longPressAndDrag(0, 16);
+    update({ toolMode: 'erase' });
+
+    fireEvent.pointerDown(surface, { pointerType, pointerId: 2, clientX: 6, clientY: 10 });
+    act(() => { vi.advanceTimersByTime(350); });
+    fireEvent.pointerMove(document, { pointerType, pointerId: 2, clientX: 10, clientY: 10 });
+    act(() => { vi.advanceTimersByTime(20); });
+    expect(document.querySelector<HTMLElement>('[data-student-selection-highlight]')?.style.getPropertyValue('--selection-fill')).toBe('rgba(100, 116, 139, 0.25)');
+    fireEvent.pointerUp(document, { pointerType, pointerId: 2 });
+
+    expect([...surface.querySelectorAll('mark')].map((mark) => mark.textContent)).toEqual(['Alpha ', ' gamma']);
+    for (const mark of surface.querySelectorAll('mark')) expect(mark).toHaveAttribute('data-highlight-color', 'purple');
+    expect(container.querySelector('[role="status"]')).toHaveTextContent('Highlight erased.');
+    expect(document.querySelector('[data-student-selection-highlight]')).toBeNull();
+
+    // Repeating an erasure on already plain text is a truthful no-op.
+    longPressAndDrag(7, 9);
+    expect(container.querySelector('[role="status"]')).toHaveTextContent('No highlights in the selected text.');
+    unmount();
+    const restored = renderSurface({ ownedTouchSelection: true, toolMode: 'off' });
+    expect([...restored.surface.querySelectorAll('mark')].map((mark) => mark.textContent)).toEqual(['Alpha ', ' gamma']);
+  });
+
+  it('erases across differently colored marks, then fully clears and persists an empty surface', () => {
+    const { surface, update, unmount } = renderSurface({ ownedTouchSelection: true, color: 'yellow' });
+    restoreEnvironment = stubSurfaceHitTest(surface);
+    longPressAndDrag(0, 16);
+    update({ color: 'blue' });
+    longPressAndDrag(7, 9);
+    update({ toolMode: 'erase' });
+    longPressAndDrag(1, 9);
+    expect([...surface.querySelectorAll('mark')].map((mark) => [mark.textContent, mark.dataset['highlightColor']])).toEqual([[' gamma', 'yellow']]);
+    longPressAndDrag(1, 15);
+    expect(surface.querySelector('mark')).toBeNull();
+    unmount();
+    expect(renderSurface({ ownedTouchSelection: true }).surface.querySelector('mark')).toBeNull();
+  });
+
+  it('rejects leaked native selection on pointer-owned prose without painting a mark', () => {
+    const { surface } = renderSurface({ ownedTouchSelection: true });
+    const range = document.createRange();
+    range.selectNodeContents(surface);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    fireEvent(document, new Event('selectionchange'));
+    expect(window.getSelection()?.rangeCount).toBe(0);
+    expect(surface.querySelector('mark')).toBeNull();
+    const selectStart = new Event('selectstart', { bubbles: true, cancelable: true });
+    fireEvent(surface, selectStart);
+    expect(selectStart.defaultPrevented).toBe(true);
+  });
+
+  it.each(['cancel', 'off', 'erase', 'passage', 'content', 'escape'])('discards a drag on %s', (reason) => {
+    vi.useFakeTimers();
+    const { surface, update } = renderSurface({ ownedTouchSelection: true });
+    restoreEnvironment = stubSurfaceHitTest(surface);
+    fireEvent.pointerDown(surface, { pointerType: 'mouse', pointerId: 1, clientX: 0, clientY: 10 });
+    fireEvent.pointerMove(document, { pointerType: 'mouse', pointerId: 1, clientX: 16, clientY: 10 });
+    act(() => { vi.advanceTimersByTime(20); });
+    if (reason === 'cancel') fireEvent.pointerCancel(document, { pointerType: 'mouse', pointerId: 1 });
+    if (reason === 'off' || reason === 'erase') update({ toolMode: reason });
+    if (reason === 'passage') update({ surfaceId: 'another-passage' });
+    if (reason === 'content') update({ text: 'Replacement passage' });
+    if (reason === 'escape') fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.pointerUp(document, { pointerType: 'mouse', pointerId: 1 });
+    expect(surface.querySelector('mark')).toBeNull();
+    expect(document.querySelector('[data-student-selection-highlight]')).toBeNull();
+  });
+
+  it('hands keyboard selection back, applies Alt+H, and reclaims the next pointer', () => {
+    const { surface } = renderSurface({ ownedTouchSelection: true });
+    surface.focus();
+    expect(document.activeElement).toBe(surface);
+    fireEvent.keyDown(surface, { key: 'ArrowRight', shiftKey: true });
+    expect(surface).not.toHaveAttribute('data-student-selection-owner');
+    const range = document.createRange();
+    range.setStart(surface.firstChild!, 6);
+    range.setEnd(surface.firstChild!, 10);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    expect(window.getSelection()?.toString()).toBe('beta');
+    fireEvent.keyDown(surface, { key: 'h', altKey: true });
+    expect(surface.querySelector('mark')).toHaveTextContent('beta');
+    restoreEnvironment = stubSurfaceHitTest(surface);
+    fireEvent.pointerDown(surface, { pointerType: 'mouse', pointerId: 1, clientX: 0, clientY: 10 });
+    expect(surface).toHaveAttribute('data-student-selection-owner', 'app');
+    fireEvent.pointerCancel(document, { pointerType: 'mouse', pointerId: 1 });
+  });
+
   it('highlights the dragged span without ever making a browser selection', () => {
     const { container, surface } = renderSurface({ ownedTouchSelection: true });
     const leaf = surface.firstChild as Text;

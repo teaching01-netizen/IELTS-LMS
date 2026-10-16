@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { type CSSProperties } from 'react';
 import type { SelectionRect } from '../domain/selectionTypes';
 import '../styles/selection.css';
 
@@ -23,7 +23,7 @@ import '../styles/selection.css';
  * ATTACHES to a selection — a grip appearing, a magnifier opening — never to the
  * selection itself.
  */
-export function SelectionHighlight({ rects }: { rects: readonly SelectionRect[] }) {
+export function SelectionHighlight({ rects, color }: { rects: readonly SelectionRect[]; color?: string | undefined }) {
   if (rects.length === 0) return null;
 
   return (
@@ -34,7 +34,7 @@ export function SelectionHighlight({ rects }: { rects: readonly SelectionRect[] 
       // Hit-testing policy as a property of the component, not only a stylesheet
       // rule: decoration that could swallow the finger dragging over it is the
       // one failure this overlay cannot recover from.
-      style={{ pointerEvents: 'none' }}
+      style={{ pointerEvents: 'none', ...(color ? { '--selection-fill': color } : {}) } as CSSProperties}
     >
       {rects.map((rect, index) => (
         <span

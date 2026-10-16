@@ -712,6 +712,7 @@ export function AnsweredExamPaper({
                           </p>
                           <StructuredContentRenderer
                             content={question.stimulus}
+                            className="sat-exam-prose"
                             loadMediaUrl={loadMediaUrl}
                             onMediaFailure={mediaFailure}
                             questionId={question.examQuestionId}
@@ -722,6 +723,7 @@ export function AnsweredExamPaper({
                       <div className="sat-paper-prompt">
                         <StructuredContentRenderer
                           content={question.prompt}
+                          className="sat-exam-prose"
                           loadMediaUrl={loadMediaUrl}
                           onMediaFailure={mediaFailure}
                           questionId={question.examQuestionId}
@@ -749,6 +751,7 @@ export function AnsweredExamPaper({
                                   <div className="sat-paper-choice-content">
                                     <StructuredContentRenderer
                                       content={option.content}
+                                      className="sat-exam-prose"
                                       loadMediaUrl={loadMediaUrl}
                                       onMediaFailure={mediaFailure}
                                       questionId={question.examQuestionId}

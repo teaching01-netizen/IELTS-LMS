@@ -152,6 +152,8 @@ function actionTargetKind(target: EventTarget | null): "control" | "label-text" 
 
 export interface SelectionOverlayProps {
   selection: SelectionOverlaySelection;
+  /** Product ink for the live range; omitted to keep the shared blue selection. */
+  selectionColor?: string | undefined;
   /** Scale for visible chrome in a product-owned visual space; measured rects stay viewport-based. */
   visualScale?: number | undefined;
   /** Physical-viewport portal root, when the product owns one. */
@@ -168,6 +170,7 @@ export interface SelectionOverlayProps {
 
 export function SelectionOverlay({
   selection,
+  selectionColor,
   visualScale = 1,
   portalContainer,
   handleLabels = { start: "Adjust selection start", end: "Adjust selection end" },
@@ -175,7 +178,9 @@ export function SelectionOverlay({
   onSelectionCleared,
   onEscape,
 }: SelectionOverlayProps) {
-  const visible = selection.phase !== "idle" && selection.selectionText.length > 0;
+  // A candidate may still become a native scroll. Opening the top layer before
+  // the gesture claims text can interrupt that scroll in Chromium.
+  const visible = selection.phase !== "idle" && selection.phase !== "pending" && selection.selectionText.length > 0;
   // The finger comes from the selection itself: it is the engine that follows it,
   // and a second place to pass a position would be a second thing to keep in step.
   const pointer = selection.pointer;
@@ -328,7 +333,7 @@ export function SelectionOverlay({
 
   return (
     <SelectionFloatingLayer open label="Selection" portalContainer={portalContainer}>
-      <SelectionHighlight rects={selection.rects} />
+      <SelectionHighlight rects={selection.rects} color={selectionColor} />
 
       {selection.startHandle ? (
         <SelectionHandle

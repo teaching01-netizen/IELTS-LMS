@@ -270,7 +270,7 @@ test("IELTS Reading: arming, caret resolution, range, capture and persistence", 
     select: getComputedStyle(root).getPropertyValue("-webkit-user-select"),
     touch: getComputedStyle(root).touchAction,
   }));
-  expect(styles).toEqual({ marker: "true", select: "text", touch: "none" });
+  expect(styles).toEqual({ marker: "true", select: "none", touch: "pan-y" });
   await drag(page, surface, "beta gamma", browserName, isMobile);
   await expect(surface.locator("mark")).toHaveText("beta gamma");
   const snapshot = await page.evaluate(() => window.__studentTouchSelectionDebug?.snapshot());
