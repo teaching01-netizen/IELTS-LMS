@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { FormattedText } from '../FormattedText';
 import { StudentExamInteractionScopeProvider } from '@shared/ui/touch-selection/StudentExamInteractionScope';
+import { createInMemoryHighlightSelectionPort, StudentHighlightSelectionPortProvider } from '../highlightSelectionPort';
 import { studentHighlightPalette, type StudentHighlightColor } from '../highlightPalette';
 import { StudentHighlightPersistenceProvider } from '../highlightV2Persistence';
 
@@ -395,5 +396,119 @@ describe('IELTS owned touch highlighting', () => {
     longPressAndDrag(6, 10);
 
     expect(container.querySelectorAll('mark')).toHaveLength(0);
+  });
+});
+
+describe('IELTS unscoped native highlight path (preview/admin)', () => {
+  function renderUnscoped(toolMode: 'highlight' | 'erase', port: ReturnType<typeof createInMemoryHighlightSelectionPort>) {
+    return render(
+      <StudentExamInteractionScopeProvider ownedTouchSelection={false}>
+        <StudentHighlightPersistenceProvider namespace="unscoped-selection-test">
+          <StudentHighlightSelectionPortProvider port={port}>
+            <FormattedText
+              text="Alpha beta gamma"
+              highlightEnabled
+              highlightToolMode={toolMode}
+              highlightColor="yellow"
+              highlightSurfaceId="unscoped-surface"
+            />
+          </StudentHighlightSelectionPortProvider>
+        </StudentHighlightPersistenceProvider>
+      </StudentExamInteractionScopeProvider>,
+    );
+  }
+
+  function surfaceOf(container: HTMLElement): HTMLElement {
+    const surface = container.querySelector('[data-student-highlightable="true"]') as HTMLElement;
+    if (!surface) throw new Error('Expected highlightable surface');
+    return surface;
+  }
+
+  it('commits a native selection to a highlight when no scope owns the gesture', () => {
+    const port = createInMemoryHighlightSelectionPort({
+      selection: { start: 6, end: 10, selectedText: 'beta' },
+      selectionText: 'beta',
+    });
+    const { container, rerender } = renderUnscoped('highlight', port);
+    const surface = surfaceOf(container);
+
+    // No custom gesture is armed here, so the platform selection is the
+    // command — and the surface must advertise the armed tool for the CSS
+    // carve-out that keeps it selectable under the exam lock.
+    expect(surface).not.toHaveAttribute('data-student-selection-owner');
+    expect(surface).not.toHaveAttribute('data-student-owned-touch-selection');
+    expect(surface).toHaveAttribute('data-student-highlight-armed', 'true');
+
+    act(() => {
+      port.emit();
+    });
+    rerender(
+      <StudentExamInteractionScopeProvider ownedTouchSelection={false}>
+        <StudentHighlightPersistenceProvider namespace="unscoped-selection-test">
+          <StudentHighlightSelectionPortProvider port={port}>
+            <FormattedText
+              text="Alpha beta gamma"
+              highlightEnabled
+              highlightToolMode="erase"
+              highlightColor="yellow"
+              highlightSurfaceId="unscoped-surface"
+            />
+          </StudentHighlightSelectionPortProvider>
+        </StudentHighlightPersistenceProvider>
+      </StudentExamInteractionScopeProvider>,
+    );
+
+    expect(surfaceOf(container).querySelector('mark')).toHaveTextContent('beta');
+    expect(surfaceOf(container)).toHaveAttribute('data-student-highlight-armed', 'true');
+  });
+
+  it('erases through the native path and reports an empty erase truthfully', () => {
+    const port = createInMemoryHighlightSelectionPort({
+      selection: { start: 0, end: 5, selectedText: 'Alpha' },
+      selectionText: 'Alpha',
+    });
+    const first = renderUnscoped('highlight', port);
+    act(() => {
+      port.emit();
+    });
+    expect(surfaceOf(first.container).querySelector('mark')).toHaveTextContent('Alpha');
+    first.unmount();
+
+    const second = renderUnscoped('erase', port);
+    const surface = surfaceOf(second.container);
+    expect(surface).toHaveAttribute('data-student-highlight-armed', 'true');
+    expect(surface).not.toHaveAttribute('data-student-selection-owner');
+    // The highlight commit cleared the port snapshot, so re-present the span.
+    port.setSnapshot({ selection: { start: 0, end: 5, selectedText: 'Alpha' }, selectionText: 'Alpha' });
+    act(() => {
+      port.emit();
+    });
+    expect(surfaceOf(second.container).querySelector('mark')).toBeNull();
+    expect(second.container.querySelector('[role="status"]')).toHaveTextContent('Highlight erased.');
+
+    port.setSnapshot({ selection: { start: 0, end: 5, selectedText: 'Alpha' }, selectionText: 'Alpha' });
+    act(() => {
+      port.emit();
+    });
+    expect(second.container.querySelector('[role="status"]')).toHaveTextContent('No highlights in the selected text.');
+  });
+
+  it('marks the surface unarmed when the tool turns off', () => {
+    const port = createInMemoryHighlightSelectionPort();
+    const { container } = render(
+      <StudentExamInteractionScopeProvider ownedTouchSelection={false}>
+        <StudentHighlightPersistenceProvider namespace="unscoped-selection-test">
+          <StudentHighlightSelectionPortProvider port={port}>
+            <FormattedText
+              text="Alpha beta gamma"
+              highlightEnabled
+              highlightToolMode="off"
+              highlightSurfaceId="unscoped-surface-off"
+            />
+          </StudentHighlightSelectionPortProvider>
+        </StudentHighlightPersistenceProvider>
+      </StudentExamInteractionScopeProvider>,
+    );
+    expect(surfaceOf(container)).not.toHaveAttribute('data-student-highlight-armed');
   });
 });

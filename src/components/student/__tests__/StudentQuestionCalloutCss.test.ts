@@ -47,7 +47,9 @@ describe('student exam content selection CSS', () => {
     expect(disable!.body).toContain('-webkit-touch-callout: none');
 
     // Every exam-scoped rule that hands text selection back to a prose root
-    // must be an editable carve-out or the armed-highlight marker — never a
+    // must be an editable carve-out, the owned-touch marker, or the armed-tool
+    // marker (preview/admin scopes never set the owned-touch marker, but their
+    // armed selectionPort path is still the highlight command) — never a
     // default. A reintroduced "unarmed roots stay selectable" rule fails here.
     const proseText = rules.filter(
       (rule) =>
@@ -57,7 +59,7 @@ describe('student exam content selection CSS', () => {
     );
     expect(proseText.length).toBeGreaterThan(0);
     for (const rule of proseText) {
-      expect(rule.selectors).toMatch(/input|textarea|select|\[contenteditable\]|data-student-owned-touch-selection/);
+      expect(rule.selectors).toMatch(/input|textarea|select|\[contenteditable\]|data-student-owned-touch-selection|data-student-highlight-armed/);
     }
 
     // Editable controls stay typable — and keep the edit menu they need for
@@ -115,6 +117,33 @@ describe('student exam content selection CSS', () => {
     expect(restore[0]!.body).not.toContain('touch-callout');
     // SAT roots are owned by the owner rule, never by this marker.
     expect(restore[0]!.selectors).not.toContain('data-sat-selection-protected');
+  });
+
+  it('hands native selection back to an armed tool that owns no pointer', () => {
+    const restore = rules.filter(
+      (rule) =>
+        rule.selectors.includes('[data-student-highlightable="true"][data-student-highlight-armed="true"]')
+        && rule.body.includes('user-select: text'),
+    );
+
+    expect(restore).toHaveLength(1);
+    expect(restore[0]!.selectors.replace(/\s+/g, ' ')).toBe(
+      'html.student-exam-active [data-student-highlightable="true"][data-student-highlight-armed="true"],'
+      + ' html.student-exam-active [data-student-highlightable="true"][data-student-highlight-armed="true"] *',
+    );
+    // An armed tool is highlight OR erase: the marker must not depend on the
+    // tint attribute, which erase deliberately never sets.
+    expect(restore[0]!.selectors).not.toContain('data-student-highlight-selection');
+    // The custom-gesture owner rule stays later in the sheet and wins ties, so
+    // a surface the gesture actually owns still suppresses the platform.
+    const ownerIndex = rules.findIndex((rule) =>
+      rule.selectors.includes('[data-student-highlightable="true"][data-student-selection-owner="app"]')
+      && /user-select:\s*none/.test(rule.body),
+    );
+    const armedIndex = rules.findIndex((rule) =>
+      rule.selectors.includes('[data-student-highlightable="true"][data-student-highlight-armed="true"]'),
+    );
+    expect(ownerIndex).toBeGreaterThan(armedIndex);
   });
 
   it('scopes the IELTS callout guard to an active exam and away from form controls', () => {

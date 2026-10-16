@@ -301,7 +301,7 @@ describe("SatCompleteScreen", () => {
     expect(first).toHaveTextContent("second");
     const selected = first.querySelector("[data-selected]");
     expect(selected?.textContent).toMatch(/B/);
-    expect(selected?.textContent).toContain("Your answer");
+    expect(selected?.querySelector('input[type="radio"]')).toBeChecked();
     expect(first.querySelectorAll("[data-selected]")).toHaveLength(1);
     // A student-produced response sits in the answer box as typed.
     expect(articles[1]).toHaveTextContent("Your answer");

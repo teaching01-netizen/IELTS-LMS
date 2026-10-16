@@ -134,45 +134,40 @@
   .sat-paper-runhead-context p { margin-top: 0.5mm; font-size: 9pt; color: var(--paper-muted); }
   .sat-paper-review-note { padding-block: 1.5mm 2.5mm; font-size: 7.5pt; color: var(--paper-muted); }
 
-  /* One row per question lets the engine move a question as a unit without
-     orphaning a separate module-intro page. Oversized rows may still split. */
+  /* The exam itself is rendered by the live components and .sat-ui tokens.
+     Only page flow is different: paper cannot clip or scroll a reading pane. */
   .sat-paper-question-row { break-inside: avoid; }
-  .sat-paper-question { padding-block: 2mm 4mm; break-inside: avoid; }
-  .sat-paper-question-header { display: flex; align-items: center; gap: 2.5mm; padding-bottom: 2mm; border-bottom: 0.5pt solid var(--paper-rule); break-after: avoid; }
-  .sat-paper-question-number { display: grid; place-items: center; width: 8mm; height: 8mm; flex-shrink: 0; border: 1pt solid var(--paper-ink); border-radius: 1mm; font-weight: 700; font-size: 11pt; }
-  .sat-paper-question-header h3 { font-size: 10pt; font-weight: 700; }
-  .sat-paper-question-status { margin-left: auto; font-size: 8pt; color: var(--paper-muted); text-align: right; }
-  .sat-paper-workspace { padding-top: 4mm; }
-  .sat-paper-workspace[data-split="true"] { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6mm; }
-  .sat-paper-workspace[data-split="false"] { max-width: 170mm; margin-inline: auto; }
-  .sat-paper-stimulus { min-width: 0; padding-right: 6mm; border-right: 0.5pt solid var(--paper-rule); }
-  .sat-paper-prompt { min-width: 0; }
-  .sat-paper-pane-label { margin-bottom: 2.5mm; color: var(--paper-muted); font-weight: 700; font-size: 8pt; }
-  .sat-paper-stimulus > div,
-  .sat-paper-prompt > div:first-child { font-size: 10pt; line-height: 1.55; }
-  .sat-paper-choices { display: grid; gap: 2mm; margin-top: 3mm; }
-  .sat-paper-choice { display: flex; align-items: flex-start; gap: 2.5mm; min-height: 11mm; padding: 2.5mm 3mm; border: 0.6pt solid #9fa8b7; border-radius: 2mm; break-inside: avoid; }
-  .sat-paper-choice[data-selected] { border: 1.5pt solid var(--paper-accent); }
-  .sat-paper-choice-letter { display: grid; place-items: center; flex: 0 0 6.5mm; height: 6.5mm; border: 0.6pt solid #737d90; border-radius: 50%; font-size: 9pt; font-weight: 700; }
-  .sat-paper-choice[data-selected] .sat-paper-choice-letter { border: 1.5pt solid var(--paper-accent); }
-  .sat-paper-choice-content { flex: 1; min-width: 0; padding-top: 0.2mm; font-size: 9.5pt; line-height: 1.45; }
-  .sat-paper-choice-content p { margin-block: 0; }
-  .sat-paper-selected-label { display: block; margin-top: 0.5mm; font-size: 7.5pt; font-weight: 700; color: var(--paper-ink); }
-  .sat-paper-written-answer { margin-top: 4mm; max-width: 95mm; break-inside: avoid; }
-  .sat-paper-written-answer > p { font-size: 9pt; font-weight: 700; }
-  .sat-paper-answer-box { margin-top: 1.5mm; min-height: 12mm; padding: 2.5mm 3mm; border: 0.75pt solid #737d90; border-radius: 2mm; font-size: 12pt; font-weight: 600; }
+  .sat-paper-question-row + .sat-paper-question-row { break-before: page; }
+  .sat-paper-question.sat-ui {
+    padding-block: 2mm 4mm;
+    font-size: 16px;
+    line-height: 1.5;
+    break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  /* Uniformly fit the desktop plane to landscape A4; font sizes, spacing,
+     card geometry and colours remain the live exam's own CSS values. */
+  .sat-paper-exam-frame { zoom: 0.75; }
+  .sat-paper-question-meta { display: flex; justify-content: space-between; gap: 4mm; padding-block: 1mm; border-bottom: 0.5pt solid var(--paper-rule); color: var(--paper-muted); font-family: var(--font-sat-ui); font-size: 8pt; break-after: avoid; }
+  .sat-paper-question-meta h3 { font-weight: 600; }
+  .sat-paper-question .sat-reading-surface,
+  .sat-paper-question [data-student-exam-scroll-owner] {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  .sat-paper-question .sat-answer-choice,
+  .sat-paper-question [data-review-spr] { break-inside: avoid; }
   .sat-paper-response-note { margin-top: 2mm; font-size: 8pt; color: var(--paper-muted); }
 
   .sat-paper-footer { padding-top: 4mm; }
   .sat-paper-footer p { padding-top: 2mm; border-top: 0.5pt solid var(--paper-rule); color: #444b57; font-size: 6pt; line-height: 1.4; text-align: left; }
-  /* Hidden text still takes up its measured height in tfoot; the identical
-     visible copy sits at the page bottom. Keep their inline sizes identical. */
-  .sat-paper-table > tfoot .sat-paper-footer { visibility: hidden; }
-  .sat-paper-fixed-footer { position: fixed; bottom: 0; left: 4mm; right: 4mm; }
   /* Reuse the bundled colour PNG for every mark. Opacity and clipping keep
      text selectable and avoid filter-driven per-page rasterization. */
   .sat-paper-watermark {
     position: fixed;
+    z-index: 1;
     inset: 20mm 4mm 24mm;
     pointer-events: none;
   }
@@ -236,5 +231,5 @@
     top: -43.357%;
   }
   .sat-answered-paper figure { max-width: 100%; break-inside: avoid; }
-  .sat-answered-paper figure img { max-width: 100% !important; height: auto !important; max-height: 95mm; object-fit: contain; }
+  .sat-answered-paper figure img { max-width: 100% !important; height: auto !important; }
 }

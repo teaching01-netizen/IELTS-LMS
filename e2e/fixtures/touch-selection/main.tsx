@@ -14,6 +14,10 @@ import { studentHighlightPalette, type StudentHighlightColor } from '../../../sr
 
 const params = new URLSearchParams(location.search);
 const owned = params.get('preview') !== '1';
+// A locked preview (preview scope, exam lock on) reproduces the admin surface
+// the dead zone was reported on: no owned gesture, but the exam-wide
+// `user-select: none` still applies.
+const locked = params.get('lock') === '1' || owned;
 const phrase = 'Alpha beta gamma delta. The student selects this passage.';
 // Two fixture-owned paragraphs for the caret-alignment e2e: real Thai clusters
 // and a real RTL run, rendered through the same passage path as everything else.
@@ -53,7 +57,7 @@ const state: ExamState = {
 
 function IeltsReading() {
   const { state: ui, actions } = useStudentUI();
-  useStudentExamPageLock(owned);
+  useStudentExamPageLock(locked);
   return <main className="student-exam-shell" style={{ height: '100dvh', gridTemplateRows: 'auto minmax(0, 1fr) auto' }}>
     <div>
       <button onClick={actions.toggleHighlightMode} aria-pressed={ui.accessibilitySettings.highlightToolMode === 'highlight'}>Highlight</button>

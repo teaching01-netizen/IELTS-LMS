@@ -37,6 +37,43 @@ function setup(options: { enabled?: boolean } = {}) {
   return { host, root, prose, proseText, record: record as Mock, view };
 }
 
+function setupHighlightable(options: { enabled?: boolean } = {}) {
+  const host = document.createElement('div');
+  host.innerHTML =
+    '<div id="root" data-student-highlightable="true">'
+    + '<p>alpha beta gamma</p>'
+    + '<button id="excluded">tap</button>'
+    + '</div>';
+  document.body.append(host);
+  const root = host.querySelector('#root') as HTMLElement;
+  const prose = root.querySelector('p') as HTMLElement;
+  const proseText = prose.firstChild as Text;
+  const record = vi.fn();
+  const rootRef = { current: root };
+  const view = renderHook(() =>
+    useStudentSelectionGesture({
+      enabled: options.enabled ?? true,
+      activation: 'drag',
+      rootRef,
+      // Production IELTS passes its own exclusion (buttons, links, images,
+      // math) — the hook default only covers editables.
+      isExcludedTarget: (target) => {
+        const element =
+          target instanceof Element ? target : target instanceof Node ? target.parentElement : null;
+        return (
+          element?.closest(
+            'input, textarea, select, [contenteditable]:not([contenteditable="false"]), button, a, [role="button"], img, [role="math"]',
+          ) != null
+        );
+      },
+      resolveCaretAtPoint: () => ({ node: proseText, offset: 0 }),
+      onSelect: vi.fn(),
+      diagnostics: { record, listener: vi.fn() },
+    }),
+  );
+  return { host, root, prose, proseText, record: record as Mock, view };
+}
+
 function leakRecords(record: Mock, stage = 'native-selection-leak') {
   return record.mock.calls
     .filter(([s]) => s === stage)
@@ -175,6 +212,20 @@ describe('scoped touchstart guard', () => {
 
   it('does nothing when the surface is not armed', () => {
     const { prose, view } = setup({ enabled: false });
+    const event = new Event('touchstart', { bubbles: true, cancelable: true });
+    fireEvent(prose, event);
+    expect(event.defaultPrevented).toBe(false);
+    view.unmount();
+  });
+});
+
+describe('touchstart guard leaves IELTS highlightable roots alone', () => {
+  it('never prevents touches on highlightable prose, so armed pane scrolling survives', () => {
+    // The whole highlightable surface is prose: preventing touchstart there
+    // would also kill the vertical scroll (pinned by the armed-scroll e2e).
+    // Callout suppression for these roots lives in CSS, not in this guard.
+    const { root, prose, view } = setupHighlightable();
+    expect(root.getAttribute('data-student-selection-owner')).toBe('app');
     const event = new Event('touchstart', { bubbles: true, cancelable: true });
     fireEvent(prose, event);
     expect(event.defaultPrevented).toBe(false);

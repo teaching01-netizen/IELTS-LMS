@@ -97,6 +97,33 @@ function renderWorkspace(
 }
 
 describe('notes in the reading layout', () => {
+  it('keeps printed questions in the desktop split without inheriting an open live notes pane', () => {
+    const preferences = reading();
+    const { container } = render(withNotes(
+      <p>Live private notes</p>,
+      <SatReadingLayoutHarness box={{ width: 390, height: 844 }} preferences={preferences} hasStimulus>
+        <SatQuestionWorkspace
+          print
+          split
+          stimulus={<p>Printed passage</p>}
+          question={<p>Printed question</p>}
+          readingPreferences={preferences}
+          onSplitRatioChange={vi.fn()}
+        />
+      </SatReadingLayoutHarness>,
+      'pair',
+      <p>Live notes handle</p>,
+    ));
+    const layout = container.querySelector('[data-sat-print-workspace]')!;
+    expect(layout).toHaveAttribute('data-sat-reading-layout', 'split');
+    expect(layout).toHaveAttribute('data-sat-notes-placement', 'none');
+    expect(screen.getByText('Printed passage')).toBeInTheDocument();
+    expect(screen.getByText('Printed question')).toBeInTheDocument();
+    expect(screen.queryByText('Live private notes')).not.toBeInTheDocument();
+    expect(screen.queryByText('Live notes handle')).not.toBeInTheDocument();
+    expect(screen.queryByText('Select text')).not.toBeInTheDocument();
+  });
+
   it('places the column between passage and question when it fits', () => {
     const { container } = renderWorkspace(
       { placement: 'column', column: <div data-testid="notes-content" /> },

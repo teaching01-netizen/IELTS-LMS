@@ -60,6 +60,7 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
           <div key={option.id} className="flex items-center gap-2">
             <label
               htmlFor={inputId}
+              data-selected={selected || undefined}
               // Bluebook answer system (Phase 6): min-height + radius +
               // 1px answer-border from component tokens; selected = 2px
               // accent border + accent-soft tint (never flooded blue);

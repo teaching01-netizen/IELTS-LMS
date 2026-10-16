@@ -1425,6 +1425,15 @@ export function useStudentSelectionGesture(
    * on the armed root and only for touches that begin on real selectable prose.
    * Never on `document`, never for scrolling candidates outside
    * `[data-content-text-node]`, never inside excluded/editable UI.
+   *
+   * IELTS highlightable surfaces are deliberately NOT covered: the whole
+   * surface is prose, so preventing every touchstart would also kill the
+   * vertical pane scroll students rely on (pinned by e2e). Their callout is
+   * already suppressed by CSS (`-webkit-touch-callout: none` on highlightable
+   * roots), and with `user-select: none` under ownership there is no native
+   * selection for the recognizer to decorate — so a pointercancel there ends an
+   * unclaimed gesture rather than raising a menu. Revisit only with iPad
+   * evidence of pointercancel killing claimed IELTS drags.
    */
   const preventNativeOwnedSelection = useCallback(
     (event: Event) => {

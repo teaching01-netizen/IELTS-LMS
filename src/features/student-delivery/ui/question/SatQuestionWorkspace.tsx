@@ -12,6 +12,8 @@ import { SatReadingSplitHandle } from "./SatReadingSplitHandle";
 import { useSatNotesSurface } from '../annotations/SatNotesSurfaceContext';
 
 export interface SatQuestionWorkspaceProps {
+  /** Desktop exam composition without registering a live viewport or notes pane. */
+  print?: boolean;
   split: boolean;
   stimulus?: ReactNode;
   stimulusLabel?: string;
@@ -65,6 +67,7 @@ const SAT_STACKED_QUESTION_ROWS_WITH_NOTES =
  * position — is remounted when the text size crosses the threshold.
  */
 export function SatQuestionWorkspace({
+  print = false,
   split,
   stimulus,
   stimulusLabel = "Passage",
@@ -76,14 +79,17 @@ export function SatQuestionWorkspace({
   const readingLayout = useSatReadingLayout();
   const { registerWorkspace } = readingLayout;
   const readingStyle = satReadingStyle(readingPreferences);
-  const notes = useSatNotesSurface();
+  const notesSurface = useSatNotesSurface();
+  const notes = print
+    ? { open: false, placement: 'none' as const, column: null, rail: null, passageHint: null }
+    : notesSurface;
   // A question with a stimulus is either split or stacked — `single` IS the
   // no-stimulus case, which the `split` prop already states. Before the first
   // measurement lands, the workspace keeps the classic two-pane arrangement
   // rather than guessing stacked from nothing.
   const presentation: SatReadingPresentation = !split
     ? "single"
-    : readingLayout.decision.presentation === "stacked"
+    : !print && readingLayout.decision.presentation === "stacked"
       ? "stacked"
       : "split";
   const stacked = presentation === "stacked";
@@ -97,9 +103,9 @@ export function SatQuestionWorkspace({
   const workspaceRef = useCallback(
     (node: HTMLDivElement | null) => {
       splitContainerRef.current = node;
-      registerWorkspace(node, split);
+      if (!print) registerWorkspace(node, split);
     },
-    [registerWorkspace, split],
+    [print, registerWorkspace, split],
   );
   // The column is the single landmark (it names itself); the seat below only
   // places it, so the accessible tree never carries two "Notes" landmarks, and
@@ -164,6 +170,7 @@ export function SatQuestionWorkspace({
   // One machine-readable answer for tests, support, and the e2e legs: which
   // arrangement is on screen, whether it came from a measurement, and why.
   const layoutAttributes = {
+    'data-sat-print-workspace': print || undefined,
     'data-sat-reading-layout': presentation,
     'data-sat-reading-layout-measured': readingLayout.measured ? 'true' : 'false',
     'data-sat-reading-layout-reason': readingLayout.decision.reason,
@@ -265,7 +272,7 @@ export function SatQuestionWorkspace({
         ratio={readingPreferences.splitRatio}
         leftPaneLabel={stimulusLabel}
         onChange={onSplitRatioChange}
-        onInteractionChange={readingLayout.setSplitInteractionActive}
+        onInteractionChange={print ? undefined : readingLayout.setSplitInteractionActive}
       /> : null}
       {!stacked && !showsQuestion ? <div aria-hidden="true" className="bg-[var(--sat-divider)]" /> : null}
       {notesSlot}

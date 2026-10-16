@@ -935,8 +935,12 @@
 
      2. An armed highlight/annotation tool. Selection v2 owns pointer selection
         on IELTS and SAT before contact through `data-student-selection-owner`.
-        IELTS keyboard selection temporarily removes that marker, letting the
-        armed-surface rule below restore native text selection for Alt+H. */
+        Where it does not own the surface (preview/admin, or any scope without
+        an owned pointer), the armed marker below (`data-student-highlight-armed`)
+        hands native text selection back instead — an armed tool must leave the
+        student exactly one working selection, never zero. IELTS keyboard
+        selection temporarily removes the owner marker, letting the armed-surface
+        rule below restore native text selection for Alt+H. */
   html.student-exam-active,
   html.student-exam-active * {
     -webkit-user-select: none;
@@ -956,6 +960,18 @@
 
   html.student-exam-active [data-student-highlightable="true"][data-student-owned-touch-selection="true"],
   html.student-exam-active [data-student-highlightable="true"][data-student-owned-touch-selection="true"] * {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* An armed tool without an owned pointer still needs native selection: a
+     preview/admin surface (or any scope the custom gesture does not cover)
+     never sets the markers above, but its selectionPort path is the highlight
+     command. Erase arms this too — its selections must never paint, but they
+     must still exist. The owner rule below stays later in the sheet, so a
+     surface the custom gesture actually owns still suppresses the platform. */
+  html.student-exam-active [data-student-highlightable="true"][data-student-highlight-armed="true"],
+  html.student-exam-active [data-student-highlightable="true"][data-student-highlight-armed="true"] * {
     -webkit-user-select: text;
     user-select: text;
   }

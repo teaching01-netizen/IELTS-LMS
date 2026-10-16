@@ -3,8 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "
 import { createPortal } from "react-dom";
 import "./score-report/sat-answered-paper.css";
 import warwickWatermark from "../../../../assets/warwick-institute-logo.png";
-import { hasStructuredContent } from "../../../exam-authoring/api/renderingPublic";
-import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
+import { SatPrintedQuestion } from "./score-report/SatPrintedQuestion";
 import type {
   AssessmentAnsweredExam,
   AssessmentDeliverySection,
@@ -362,9 +361,9 @@ function PaperWatermark() {
   );
 }
 
-function PaperLegalNotice({ fixed = false }: { fixed?: boolean }) {
+function PaperLegalNotice() {
   return (
-    <div className={fixed ? "sat-paper-footer sat-paper-fixed-footer" : "sat-paper-footer"}>
+    <div className="sat-paper-footer">
       <p>{ANSWERED_EXAM_LEGAL_FOOTER}</p>
     </div>
   );
@@ -541,6 +540,7 @@ export function AnsweredExamPaper({
   const complete = printable.size === administered.size;
   const answers = new Map<string, string>();
   const markedForReview = new Set<string>();
+  const eliminatedOptions = new Map<string, string[]>();
   for (const response of exam.attempt.responses) {
     const moduleId = moduleIdByAttempt.get(response.moduleAttemptId);
     const value =
@@ -549,6 +549,7 @@ export function AnsweredExamPaper({
         : "";
     if (moduleId && value) answers.set(`${moduleId}:${response.examQuestionId}`, value);
     if (moduleId && response.markedForReview) markedForReview.add(`${moduleId}:${response.examQuestionId}`);
+    if (moduleId) eliminatedOptions.set(`${moduleId}:${response.examQuestionId}`, response.eliminatedOptions ?? []);
   }
   const printableModules: { section: (typeof exam.sections)[number]; sectionNo: number; module: AssessmentDeliverySection["modules"][number] }[] = [];
   exam.sections.forEach((section, sectionIndex) => {
@@ -642,9 +643,6 @@ export function AnsweredExamPaper({
         <PaperFooter />
       </table>
       {printableModules.map(({ section, sectionNo, module }) => {
-        // Both SAT sections use the Bluebook two-pane layout when a question
-        // has supporting material; Math calls that pane "Supporting material".
-        const stimulusLabel = section.sectionKey === "math" ? "Supporting material" : "Passage";
         const sectionLabel = SAT_SECTION_LABEL[section.sectionKey] ?? section.title;
         return (
           <table key={`review-${module.id}`} className="sat-paper-table sat-paper-review" role="presentation" data-review-module={module.id}>
@@ -671,124 +669,21 @@ export function AnsweredExamPaper({
               .map((question, index) => {
                 const answer = answers.get(`${module.id}:${question.examQuestionId}`) ?? null;
                 const marked = markedForReview.has(`${module.id}:${question.examQuestionId}`);
-                const unmatched =
-                  answer !== null &&
-                  question.answer.kind === "single_choice" &&
-                  !question.answer.options.some((option) => option.id === answer);
-                const split = hasStructuredContent(question.stimulus);
-                const choiceIndex =
-                  answer !== null && question.answer.kind === "single_choice"
-                    ? question.answer.options.findIndex((option) => option.id === answer)
-                    : -1;
-                const status =
-                  answer === null
-                    ? "Unanswered"
-                    : question.answer.kind === "single_choice" && choiceIndex >= 0
-                      ? `Answered · ${CHOICE_LETTERS[choiceIndex] ?? choiceIndex + 1}`
-                      : "Answered";
                 return (
                   <tr key={question.examQuestionId} className="sat-paper-question-row">
-                  <td>
-                  <article
-                    className="sat-paper-question"
-                    data-review-question={index + 1}
-                  >
-                    {/* Keeps the exam's numbered strip and right-aligned response status. */}
-                    <div className="sat-paper-question-header">
-                      <span className="sat-paper-question-number" aria-hidden="true">
-                        {index + 1}
-                      </span>
-                      <h3>Question {index + 1}</h3>
-                      <span className="sat-paper-question-status">
-                        {status}
-                        {marked ? " · Marked for review" : null}
-                      </span>
-                    </div>
-                    <div className="sat-paper-workspace" data-split={split}>
-                      {split ? (
-                        <div className="sat-paper-stimulus">
-                          <p className="sat-paper-pane-label">
-                            {stimulusLabel}
-                          </p>
-                          <StructuredContentRenderer
-                            content={question.stimulus}
-                            className="sat-exam-prose"
-                            loadMediaUrl={loadMediaUrl}
-                            onMediaFailure={mediaFailure}
-                            questionId={question.examQuestionId}
-                            eagerMedia
-                          />
-                        </div>
-                      ) : null}
-                      <div className="sat-paper-prompt">
-                        <StructuredContentRenderer
-                          content={question.prompt}
-                          className="sat-exam-prose"
-                          loadMediaUrl={loadMediaUrl}
-                          onMediaFailure={mediaFailure}
-                          questionId={question.examQuestionId}
-                          eagerMedia
-                        />
-                        {question.answer.kind === "single_choice" ? (
-                          // Mirrors SatSingleChoiceAnswer: lettered cards; the
-                          // chosen card keeps the exam's accent border, with a
-                          // thicker circle and label for monochrome printing.
-                          <div className="sat-paper-choices" data-review-choices="true">
-                            {question.answer.options.map((option, optionIndex) => {
-                              const selected = answer === option.id;
-                              return (
-                                <div
-                                  key={option.id}
-                                  data-selected={selected || undefined}
-                                  className="sat-paper-choice"
-                                >
-                                  <span
-                                    className="sat-paper-choice-letter"
-                                    aria-hidden="true"
-                                  >
-                                    {CHOICE_LETTERS[optionIndex] ?? optionIndex + 1}
-                                  </span>
-                                  <div className="sat-paper-choice-content">
-                                    <StructuredContentRenderer
-                                      content={option.content}
-                                      className="sat-exam-prose"
-                                      loadMediaUrl={loadMediaUrl}
-                                      onMediaFailure={mediaFailure}
-                                      questionId={question.examQuestionId}
-                                      eagerMedia
-                                    />
-                                    {selected ? (
-                                      <span className="sat-paper-selected-label">
-                                        Your answer
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          // Mirrors SatStudentProducedAnswer: label above an
-                          // input-grade box holding the typed answer.
-                          <div className="sat-paper-written-answer" data-review-spr="true">
-                            <p>Your answer</p>
-                            <div className="sat-paper-answer-box">
-                              {answer ?? <span className="text-[13px] font-normal italic">Unanswered</span>}
-                            </div>
-                          </div>
-                        )}
-                        {unmatched ? (
-                          <p className="sat-paper-response-note">
-                            Recorded answer “{answer}” matches none of the listed choices.
-                          </p>
-                        ) : null}
-                        {answer === null && question.answer.kind === "single_choice" ? (
-                          <p className="sat-paper-response-note">Unanswered</p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </article>
-                  </td>
+                    <td>
+                      <SatPrintedQuestion
+                        question={question}
+                        questionNumber={index + 1}
+                        moduleId={module.id}
+                        sectionKey={section.sectionKey}
+                        answer={answer}
+                        markedForReview={marked}
+                        eliminatedOptionIds={eliminatedOptions.get(`${module.id}:${question.examQuestionId}`) ?? []}
+                        loadMediaUrl={loadMediaUrl}
+                        onMediaFailure={mediaFailure}
+                      />
+                    </td>
                   </tr>
                 );
               })}
@@ -797,7 +692,6 @@ export function AnsweredExamPaper({
           </table>
         );
       })}
-      <PaperLegalNotice fixed />
     </div>
   );
 }

@@ -100,6 +100,27 @@ async function openDetail(page: Page, figureAsset: string) {
 
 const prints = (page: Page) => page.evaluate(() => (window as unknown as { __prints: number }).__prints);
 
+async function examPresentation(page: Page) {
+  return page.locator('[data-review-module] article').first().evaluate(article => {
+    const selectors = [
+      'h2',
+      '[data-sat-color-rail]',
+      '[data-review-choices] .sat-answer-choice[data-selected]',
+      '[data-review-choices] .sat-answer-choice[data-selected] .sat-type-body',
+    ];
+    return selectors.map(selector => {
+      const element = article.querySelector(selector);
+      if (!element) throw new Error(`Live exam component missing: ${selector}`);
+      const style = getComputedStyle(element);
+      return {
+        font: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight,
+        color: style.color, background: style.backgroundColor,
+        border: style.border, radius: style.borderRadius, padding: style.padding,
+      };
+    });
+  });
+}
+
 test("prints only the complete paper, figures decoded, nothing clipped", async ({ page, browserName }, testInfo) => {
   await openDetail(page, "asset-ok");
   await page.getByRole("button", { name: "Download answered exam (PDF)" }).click();
@@ -108,7 +129,16 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
     .toBe("Mina Chen - SAT Practice 04 - Answered exam");
   expect(await page.title()).not.toContain("Answered exam");
 
+  // Compare the same uniform A4-fit scale in both media. Fractional zoom
+  // legitimately snaps a 2px border to a device pixel in some engines.
+  await page.locator('.sat-paper-exam-frame').evaluateAll(frames => {
+    for (const frame of frames) (frame as HTMLElement).style.zoom = '0.75';
+  });
+  const screenPresentation = await examPresentation(page);
   await page.emulateMedia({ media: "print" });
+  // Printing may remove scroll clipping, but must not restyle the exam's
+  // question strip, fonts, selected card, marker, or colours.
+  expect(await examPresentation(page)).toEqual(screenPresentation);
   const layout = await page.evaluate(() => {
     const paper = document.querySelector<HTMLElement>("body > .sat-answered-print .sat-answered-paper")!;
     const width = document.documentElement.clientWidth;
@@ -129,7 +159,7 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
       overflow: paper.scrollWidth - paper.clientWidth,
       selected: paper.querySelectorAll("[data-selected]").length,
       text: paper.textContent ?? "",
-      footerReservation: getComputedStyle(paper.querySelector("tfoot .sat-paper-footer")!).visibility,
+      footerVisible: getComputedStyle(paper.querySelector("tfoot .sat-paper-footer")!).visibility,
       width,
     };
   });
@@ -145,7 +175,7 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
   expect(layout.coverLogoLoaded).toBe(true);
   expect(layout.smallWatermarks).toBe(8);
   expect(layout.largeWatermarks).toBe(1);
-  expect(layout.footerReservation).toBe("hidden");
+  expect(layout.footerVisible).toBe("visible");
   expect(layout.text).toContain("LEGAL DISCLAIMER");
   expect(layout.text).toContain("THB 540,000");
   expect(layout.images).toHaveLength(2);

@@ -61,6 +61,7 @@ export function HighlightableSurface({
         className={className}
         data-student-highlightable="true"
         data-student-highlight-selection={highlightSelectionColor ? 'true' : undefined}
+        data-student-highlight-armed={highlightToolMode !== 'off' ? 'true' : undefined}
         data-student-question-callout-protected={suppressTouchCallout ? 'true' : undefined}
         style={surfaceStyle}
         // S1-C9: highlightable copy is keyboard-focusable so the Alt+H

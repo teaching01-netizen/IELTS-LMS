@@ -52,6 +52,42 @@ async function dragText(page: Page, surface: Locator, text: string, browserName:
   return () => surface.dispatchEvent('pointerup', { pointerType: 'touch', pointerId: 1 });
 }
 
+test('IELTS locked preview without an owned gesture still highlights through native selection', async ({ page, browserName, isMobile }) => {
+  // WebKit here uses synthetic pointers that cannot make a real native
+  // selection, and CDP-synthesized touch does not run the long-press
+  // recognizer that starts touch text selection. Desktop mouse is genuine
+  // platform input; the touch commit path is covered by unit tests and the
+  // owned-gesture suites.
+  test.skip(browserName !== 'chromium' || isMobile, 'Requires real mouse input for native selection.');
+  await page.goto(`${fixture}?preview=1&lock=1`);
+  const surface = page.locator('.student-reading-passage-pane [data-student-highlightable="true"]');
+  await expect(surface).toBeVisible();
+  await expect(surface).not.toHaveAttribute('data-student-selection-owner', 'app');
+  await expect(page.locator('html.student-exam-active')).toHaveCount(1);
+
+  await page.getByRole('button', { name: 'Highlight', exact: true }).click();
+  await expect(surface).toHaveAttribute('data-student-highlight-armed', 'true');
+  await expect(surface).not.toHaveAttribute('data-student-selection-owner', 'app');
+  expect(await surface.evaluate((root) => getComputedStyle(root).userSelect)).toBe('text');
+
+  const release = await dragText(page, surface, 'beta', browserName, isMobile);
+  const selected = await page.evaluate(() => {
+    const selection = window.getSelection();
+    return {
+      text: selection?.toString() ?? null,
+      ranges: selection?.rangeCount ?? null,
+      anchor: selection?.anchorNode?.nodeName ?? null,
+    };
+  });
+  expect(selected.ranges).toBeGreaterThan(0);
+  // Native selection has no word expansion: the helper lands mid-glyph, so
+  // the committed span is the exact dragged characters.
+  expect(selected.text ?? '').toContain('bet');
+  await release();
+  await expect(surface.locator('mark')).toHaveText('bet');
+  await expect(page.locator('[data-student-selection-highlight]')).toHaveCount(0);
+});
+
 test('IELTS previews each color, applies on release, and partially erases persistently without a menu', async ({ page, browserName, isMobile }) => {
   await page.goto(fixture);
   await page.getByRole('button', { name: 'Highlight', exact: true }).click();
