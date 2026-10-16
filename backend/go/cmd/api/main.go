@@ -19,6 +19,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/accesslinks"
 	"example.com/ielts-proctoring/internal/act"
+	"example.com/ielts-proctoring/internal/answeredpdf"
 	"example.com/ielts-proctoring/internal/answerhistory"
 	shared "example.com/ielts-proctoring/internal/app"
 	"example.com/ielts-proctoring/internal/attempts"
@@ -94,6 +95,7 @@ type App struct {
 	SAT           *sat.Service
 	ACT           *act.Service
 	Delivery      *delivery.Service
+	AnsweredPDF   *answeredpdf.Renderer
 	Release       *release.Service
 	Runtime       *runtime.Service
 	Terminal      *terminalization.Service
@@ -248,6 +250,10 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 			PerSchedule: cfg.WSCapSchedule,
 			TTL:         liveupdates.LeaseTTL,
 		})}
+	if dir := strings.TrimSpace(cfg.FrontendDistDir); dir != "" {
+		// The PDF print route ships in the same bundle the SPA serves.
+		app.AnsweredPDF = answeredpdf.New(frontendHandler(dir), answeredPDFSlots)
+	}
 	if pool != nil {
 		app.ExportLimiter = httpx.NewDBRateLimiter(pool, "results_export", cfg.RateLimitExportPerUser, time.Duration(cfg.RateLimitExportPerUserWindowSecs)*time.Second)
 		// WS-04b: domain services come from the shared graph so the
@@ -801,6 +807,12 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "POST", "/submissions/{submissionID}/schedule-release", gradingScheduleReleaseHandler(app))
 			authzRoute(r, "POST", "/submissions/{submissionID}/reopen-review", gradingReopenHandler(app))
 			authzRoute(r, "GET", "/results/{resultID}/events", gradingResultEventsHandler(app))
+		})
+		// Server-rendered answered-exam PDFs (one file on every browser). Own
+		// body cap: the caller posts its loaded figures as data URLs.
+		r.With(httpx.BodyLimit(answeredPDFMaxBodyBytes)).Route("/sat-answered-pdf", func(r chi.Router) {
+			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Post("/schedules/{scheduleID}", authorize("POST /api/v1/sat-answered-pdf/schedules/{scheduleID}", deliveryAnsweredPDFHandler(app)))
+			r.With(limitTier(app, httpx.TierWrites, userKey())).Post("/attempts/{attemptID}", authorize("POST /api/v1/sat-answered-pdf/attempts/{attemptID}", resultsSATAnsweredPDFHandler(app)))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/results", func(r chi.Router) {
 			authzRoute(r, "GET", "/", resultsListHandler(app))

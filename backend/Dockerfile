@@ -52,8 +52,15 @@ FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
+# chromium prints the SAT answered-exam PDF (internal/answeredpdf). It reaches
+# no network, so the fonts the page names (Inter from Google Fonts, system-ui)
+# and Thai candidate names must be installed locally.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    chromium \
+    fonts-inter \
+    fonts-noto-core \
+    fonts-thai-tlwg \
     && rm -rf /var/lib/apt/lists/*
 
 ENV FRONTEND_DIST_DIR=/app/frontend/dist

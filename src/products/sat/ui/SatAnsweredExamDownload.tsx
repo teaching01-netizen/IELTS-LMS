@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { fetchSatAnsweredExam } from '../../../features/results/api/satResultsQueries';
+import { postAnsweredExamPdf, type AnsweredExamPdfRequest } from '../../../features/student-delivery/api/answeredExamPdf';
 import type { AssessmentAnsweredExam } from '../../../features/student-delivery/contracts/assessmentDelivery';
 import { useAnsweredExamPrint } from '../../../features/student-delivery/ui/transitions/SatScoreReport';
 import type { StudentScoreReportView } from '../../../features/student-delivery/ui/transitions/score-report/scoreReportViewModel';
@@ -10,7 +11,11 @@ import type { StudentScoreReportView } from '../../../features/student-delivery/
  * `view` adds the score report to the paper; omit it for an unscored attempt.
  */
 export function SatAnsweredExamDownload({ attemptId, view = null }: { attemptId: string; view?: StudentScoreReportView | null }) {
-  const source = useMemo(() => ({ load: () => fetchSatAnsweredExam<AssessmentAnsweredExam>(attemptId) }), [attemptId]);
+  const source = useMemo(() => ({
+    load: () => fetchSatAnsweredExam<AssessmentAnsweredExam>(attemptId),
+    renderPdf: (request: AnsweredExamPdfRequest) =>
+      postAnsweredExamPdf(`/api/v1/sat-answered-pdf/attempts/${encodeURIComponent(attemptId)}`, request),
+  }), [attemptId]);
   const { download, print, paper } = useAnsweredExamPrint(source, view);
   return (
     <div className="mt-3 print:hidden">

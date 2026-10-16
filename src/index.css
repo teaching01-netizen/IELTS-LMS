@@ -5774,8 +5774,4 @@ textarea.sat-input {
     min-height: 0 !important;
     background: white !important;
   }
-  /* The answered-exam paper prints alone (useAnsweredExamPrint). */
-  body:has(> .sat-answered-print) > :not(.sat-answered-print) {
-    display: none !important;
-  }
 }

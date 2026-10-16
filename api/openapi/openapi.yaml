@@ -4514,6 +4514,94 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /sat-answered-pdf/schedules/{scheduleId}:
+    post:
+      tags: [sat, results]
+      summary: Answered exam PDF for the attempt bearer
+      description: |-
+        Same audience as GET /assessment-delivery/schedules/{scheduleId}/answered-exam.
+        The body carries the caller's score report view and its loaded
+        figures; the paper is always the authorized projection. A4
+        landscape, rendered server-side so every browser gets the same file.
+        422 when the paper cannot print completely (no file); 429 with
+        Retry-After when every renderer is busy. Cache-Control: no-store.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                view: { type: object }
+                media:
+                  type: object
+                  additionalProperties: { type: string, description: data:image URL }
+      responses:
+        "200":
+          description: Answered exam PDF
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /sat-answered-pdf/attempts/{attemptId}:
+    post:
+      tags: [sat, results]
+      summary: Answered exam PDF of one SAT attempt (staff)
+      description: |-
+        Same audience as GET /results/sat/attempts/{attemptId}/answered-exam.
+        The body carries the caller's score report view and its loaded
+        figures; the paper is always the authorized projection. A4
+        landscape, rendered server-side so every browser gets the same file.
+        422 when the paper cannot print completely (no file); 429 with
+        Retry-After when every renderer is busy. Cache-Control: no-store.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                view: { type: object }
+                media:
+                  type: object
+                  additionalProperties: { type: string, description: data:image URL }
+      responses:
+        "200":
+          description: Answered exam PDF
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /results/sat/{resultId}:
     get:
       tags: [sat, results]

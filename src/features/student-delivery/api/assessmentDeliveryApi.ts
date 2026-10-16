@@ -12,6 +12,7 @@ import {
   type ApiRequestConfig,
   type BackendAttemptCredential,
 } from '../infrastructure/assessmentDeliveryBackendGateway';
+import { postAnsweredExamPdf, type AnsweredExamPdfRequest } from './answeredExamPdf';
 import type {
   AssessmentAnsweredExam,
   AssessmentDeliveryBootstrap,
@@ -318,6 +319,15 @@ export const assessmentDeliveryApi = {
     return attemptRequest(scheduleId, attemptId, (config) => backendGet<AssessmentAnsweredExam>(
       `/v1/assessment-delivery/schedules/${scheduleId}/answered-exam`,
       config,
+    ));
+  },
+
+  /** The same paper as a server-rendered PDF (one file on every browser). */
+  answeredExamPdf(scheduleId: string, attemptId: string, body: AnsweredExamPdfRequest): Promise<Blob> {
+    return attemptRequest(scheduleId, attemptId, (config) => postAnsweredExamPdf(
+      `/api/v1/sat-answered-pdf/schedules/${encodeURIComponent(scheduleId)}`,
+      body,
+      config.headers,
     ));
   },
 

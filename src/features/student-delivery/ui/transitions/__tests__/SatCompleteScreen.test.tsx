@@ -1,9 +1,15 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SAT_COPY } from "../../../domain/satCopy";
 import type { AssessmentResult } from "../../../contracts/assessmentDelivery";
 import { SatCompleteScreen } from "../SatCompleteScreen";
 import { AnsweredExamPaper, answeredPaperReady, type AnsweredExam, type AnsweredExamSource } from "../SatScoreReport";
+import type { AnsweredExamPdfRequest } from "../../../api/answeredExamPdf";
+
+const downloadBlob = vi.hoisted(() => vi.fn());
+vi.mock("../../../../../utils/downloadBlob", () => ({ downloadBlob }));
+beforeEach(() => downloadBlob.mockClear());
+const pdf = () => new Blob(["%PDF-1.7"], { type: "application/pdf" });
 
 const text = (value: string) => ({ version: 1 as const, nodes: [{ type: "paragraph" as const, id: value, text: value }] });
 
@@ -49,7 +55,7 @@ function answeredExam(): AnsweredExam {
 
 /** The report's source: delivered sections title modules; the paper comes from the server projection. */
 function sourceOf(exam: AnsweredExam, extra: Partial<AnsweredExamSource> = {}): AnsweredExamSource {
-  return { sections: exam.sections, load: async () => exam, ...extra };
+  return { sections: exam.sections, load: async () => exam, renderPdf: async () => pdf(), ...extra };
 }
 
 function result(overrides: Partial<AssessmentResult> = {}): AssessmentResult {
@@ -437,79 +443,71 @@ describe("SatCompleteScreen", () => {
     const projection = answeredExam();
     projection.attempt.responses.push({ moduleAttemptId: "ma1", examQuestionId: "q3", response: "12" } as never);
     let printedText = "";
-    let isolated = false;
-    const print = vi.spyOn(window, "print").mockImplementation(() => {
+    const renderPdf = vi.fn(async () => {
       printedText = document.querySelector(".sat-answered-paper")?.textContent ?? "";
-      // Portaled to <body>, where the print rule hides every other subtree.
-      isolated = document.querySelector("body > .sat-answered-print > .sat-answered-paper") !== null;
+      return pdf();
     });
-    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(delivered, { load: async () => projection })} />);
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(delivered, { load: async () => projection, renderPdf })} />);
     expect(document.querySelector(".sat-answered-paper")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
     expect(printedText).toContain("12");
-    expect(isolated).toBe(true);
+    // The server prints it: no print dialog, and the paper unmounts after.
+    expect(print).not.toHaveBeenCalled();
+    expect(document.querySelector(".sat-answered-paper")).toBeNull();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     print.mockRestore();
   });
 
-  it("holds the landscape page rule only for the print flow", async () => {
-    let styleDuringPrint: Element | null = null;
-    const print = vi.spyOn(window, "print").mockImplementation(() => {
-      styleDuringPrint = document.querySelector("style[data-sat-answered-page]");
-    });
-    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam())} />);
-    expect(document.querySelector("style[data-sat-answered-page]")).toBeNull();
+  it("makes no file when the server cannot print the paper", async () => {
+    const renderPdf = vi.fn(async () => Promise.reject(new Error("422")));
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { renderPdf })} />);
     fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
-    // Present while the dialog is open (added synchronously with the mount,
-    // so a figure-less paper cannot print portrait before effects flush)…
-    expect(styleDuringPrint).not.toBeNull();
-    expect(styleDuringPrint?.textContent).toContain("landscape");
-    // …and removed once it closes, so no other surface prints landscape.
-    expect(document.querySelector("style[data-sat-answered-page]")).toBeNull();
-    print.mockRestore();
+    expect(await screen.findByRole("alert")).toHaveTextContent("no PDF was made");
+    expect(renderPdf).toHaveBeenCalledTimes(1);
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("posts the score report with the paper", async () => {
+    const renderPdf = vi.fn(async (_request: AnsweredExamPdfRequest) => pdf());
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { renderPdf })} />);
+    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    await waitFor(() => expect(renderPdf).toHaveBeenCalledTimes(1));
+    const request = renderPdf.mock.calls[0]![0];
+    expect(request.view).not.toBeNull();
+    expect(request.media).toEqual({});
   });
 
   it.each([
     ["Mina Chen", "SAT Practice 04", "Mina Chen - SAT Practice 04 - Score report and exam review"],
     ["  มินา  เฉิน  ", 'SAT: Practice / 04?', "มินา เฉิน - SAT Practice 04 - Score report and exam review"],
     ["", "", "Digital SAT - Score report and exam review"],
-  ])("suggests a contextual PDF filename for %s and restores the app title", async (candidateName, examTitle, expectedTitle) => {
-    const originalTitle = document.title;
-    document.title = "IELTS Proctoring System";
-    let titleAtPrint = "";
-    const print = vi.spyOn(window, "print").mockImplementation(() => {
-      titleAtPrint = document.title;
-    });
-    try {
-      const exam = { ...answeredExam(), candidateName, examTitle };
-      render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(exam)} />);
-      fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-      await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
-      expect(titleAtPrint).toBe(expectedTitle);
-      expect(document.title).toBe("IELTS Proctoring System");
-    } finally {
-      print.mockRestore();
-      document.title = originalTitle;
-    }
+  ])("names the PDF for %s", async (candidateName, examTitle, expectedTitle) => {
+    const renderPdf = vi.fn(async (_request: AnsweredExamPdfRequest) => pdf());
+    const exam = { ...answeredExam(), candidateName, examTitle };
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(exam, { renderPdf })} />);
+    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
+    expect(renderPdf.mock.calls[0]![0].title).toBe(expectedTitle);
+    expect(downloadBlob).toHaveBeenCalledWith(`${expectedTitle}.pdf`, expect.any(Blob));
   });
 
   it("runs one download at a time", async () => {
-    const print = vi.spyOn(window, "print").mockImplementation(() => {});
     const exam = answeredExam();
     const load = vi.fn(async () => exam);
-    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(exam, { load })} />);
+    const renderPdf = vi.fn(async () => pdf());
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(exam, { load, renderPdf })} />);
     const button = screen.getByRole("button", { name: /answered exam/ });
     // Two clicks in one task, before React can disable the button.
     act(() => {
       button.click();
       button.click();
     });
-    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
     expect(load).toHaveBeenCalledTimes(1);
+    expect(renderPdf).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    print.mockRestore();
   });
 
   it("titles each module within its own section", () => {
@@ -545,17 +543,17 @@ describe("SatCompleteScreen", () => {
   });
 
   it("never prints when the projection cannot be read", async () => {
-    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    const renderPdf = vi.fn(async () => pdf());
     // A refusal (409 not terminal, 403 report closed, 429 busy) or no projection at all.
     for (const load of [async () => Promise.reject(new Error("409")), async () => null]) {
-      const { unmount } = render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { load })} />);
+      const { unmount } = render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { load, renderPdf })} />);
       fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
       expect(await screen.findByRole("alert")).toHaveTextContent("no PDF was made");
       expect(screen.getByRole("button", { name: /answered exam/ })).toBeEnabled();
       unmount();
     }
-    expect(print).not.toHaveBeenCalled();
-    print.mockRestore();
+    expect(renderPdf).not.toHaveBeenCalled();
+    expect(downloadBlob).not.toHaveBeenCalled();
   });
 
   it("shows no alert region on the completed screen", () => {

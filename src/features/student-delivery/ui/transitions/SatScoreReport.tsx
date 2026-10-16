@@ -1,6 +1,5 @@
 /* eslint-disable jsx-a11y/control-has-associated-label -- Presentational, aria-hidden print tables use rows and cells for native page repetition. */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
-import { createPortal } from "react-dom";
 import "./score-report/sat-answered-paper.css";
 import warwickWatermark from "../../../../assets/warwick-institute-logo.png";
 import { SatPrintedQuestion } from "./score-report/SatPrintedQuestion";
@@ -10,6 +9,9 @@ import type {
   AssessmentResult,
 } from "../../contracts/assessmentDelivery";
 import { logWarn } from "../../../../shared/observability/errorLogger";
+import { downloadBlob } from "../../../../utils/downloadBlob";
+import { getAssessmentMediaAsset } from "../../../exam-authoring/api/assessmentMediaApi";
+import type { AnsweredExamPdfRequest } from "../../api/answeredExamPdf";
 import { SatKnowledgeSkills } from "./score-report/SatKnowledgeSkills";
 import { SatReportActions, SatReportDownload } from "./score-report/SatReportActions";
 import { SatReportHeader } from "./score-report/SatReportHeader";
@@ -111,11 +113,13 @@ export interface AnsweredExamPrintSource {
   /** One authoritative read of the projection; null when it could not be loaded. */
   load: () => Promise<AnsweredExam | null>;
   /**
-   * Resolves a protected figure to a printable URL. When omitted the paper
+   * Resolves a protected figure to a loadable URL. When omitted the paper
    * falls back to the staff media read; the student session passes its own
    * attempt-scoped loader.
    */
   loadMediaUrl?: LoadMediaUrl | undefined;
+  /** Prints the posted report and figures on the server; resolves to the PDF. */
+  renderPdf: (request: AnsweredExamPdfRequest) => Promise<Blob>;
 }
 
 export interface AnsweredExamSource extends AnsweredExamPrintSource {
@@ -124,7 +128,7 @@ export interface AnsweredExamSource extends AnsweredExamPrintSource {
 }
 
 // offcut: readiness is polled; an exam whose figures need over 30 s fails closed with a retry
-const PAPER_READY_TIMEOUT_MS = 30_000;
+export const PAPER_READY_TIMEOUT_MS = 30_000;
 const PAPER_READY_POLL_MS = 100;
 
 /**
@@ -140,10 +144,32 @@ export function answeredPaperReady(paper: HTMLElement): boolean {
   });
 }
 
+async function staffMediaUrl(assetId: string): Promise<string | null> {
+  return (await getAssessmentMediaAsset(assetId)).downloadUrl ?? null;
+}
+
+/** The server renderer reaches no network, so every figure travels inline. */
+async function imageDataUrl(url: string): Promise<string> {
+  if (url.startsWith("data:image/")) return url;
+  const response = await fetch(url, { credentials: "same-origin" });
+  if (!response.ok) throw new Error(`Figure request failed (${response.status}).`);
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/")) throw new Error("Figure is not an image.");
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Figure could not be read."));
+    reader.readAsDataURL(blob);
+  });
+}
+
 /**
- * Print orchestration shared by the student report and the staff result view:
- * load the projection, mount the paper, print only once it is complete
- * (PDF-10). Model: verification/lean/sat-result (PrintGate.print_gate_sound).
+ * Download orchestration shared by the student report and the staff result
+ * view: load the projection, mount the paper hidden so every figure loads and
+ * decodes, then (only once it is complete, PDF-10) have the server print it.
+ * The server prints A4 landscape itself, so the file is the same on every
+ * browser; no print dialog is involved.
+ * Model: verification/lean/sat-result (PrintGate.print_gate_sound).
  */
 export function useAnsweredExamPrint(
   source: AnsweredExamPrintSource | null,
@@ -160,26 +186,28 @@ export function useAnsweredExamPrint(
   const generationRef = useRef(0);
   const paperRef = useRef<HTMLDivElement | null>(null);
   const mediaFailed = useRef(false);
+  // Figures the paper showed, by media id: exactly what the server prints.
+  const media = useRef<Record<string, string>>({});
   // One download in flight: a second flow would remount the paper under the
   // first one's poll and report a false failure.
   const inFlight = useRef(false);
-  // Landscape lives only for this print flow: a static @page rule would
-  // reorient every other print surface of the app, and an effect would race a
-  // figure-less paper that is ready before effects flush. The style is added
-  // synchronously with the paper mount and removed once the dialog closes
-  // (window.print blocks until then) or the flow fails, with unmount as backstop.
-  const pageStyleRef = useRef<HTMLStyleElement | null>(null);
-  const removePageStyle = () => {
-    pageStyleRef.current?.remove();
-    pageStyleRef.current = null;
-  };
-  useEffect(() => removePageStyle, []);
+  const loadMediaUrl = useMemo<LoadMediaUrl>(() => {
+    const load = source?.loadMediaUrl ?? staffMediaUrl;
+    return async (assetId, options) => {
+      const url = await (options?.fresh ? load(assetId, { fresh: true }) : load(assetId));
+      if (!url) return null;
+      const dataUrl = await imageDataUrl(url);
+      media.current[assetId] = dataUrl;
+      return dataUrl;
+    };
+  }, [source]);
 
   const print = async () => {
     if (!source || inFlight.current) return;
     inFlight.current = true;
     setDownload("preparing");
     mediaFailed.current = false;
+    media.current = {};
     try {
       const exam = await source.load().catch(() => null);
       if (!exam) {
@@ -188,59 +216,43 @@ export function useAnsweredExamPrint(
       }
       const generation = ++generationRef.current;
       setLoaded({ exam, generation });
-      if (!pageStyleRef.current) {
-        const style = document.createElement("style");
-        style.dataset["satAnsweredPage"] = "true";
-        style.textContent = "@page { size: A4 landscape; margin: 10mm; }";
-        document.head.appendChild(style);
-        pageStyleRef.current = style;
-      }
       const deadline = Date.now() + PAPER_READY_TIMEOUT_MS;
       while (Date.now() < deadline) {
         await new Promise((resolve) => window.setTimeout(resolve, PAPER_READY_POLL_MS));
         if (mediaFailed.current) break;
         const paper = paperRef.current;
         if (paper?.dataset["generation"] === String(generation) && answeredPaperReady(paper)) {
+          const title = answeredExamPrintTitle(exam, Boolean(view));
+          const pdf = await source
+            .renderPdf({ title, view: view ?? null, media: { ...media.current } })
+            .catch(() => null);
+          if (!pdf) break;
+          downloadBlob(`${title}.pdf`, pdf);
           setDownload("idle");
-          // The browser uses the document title as its suggested PDF filename.
-          // Use the authoritative projection, then restore the app's tab title.
-          const previousTitle = document.title;
-          document.title = answeredExamPrintTitle(exam, Boolean(view));
-          try {
-            window.print();
-          } finally {
-            document.title = previousTitle;
-          }
           return;
         }
       }
       setDownload("failed");
     } finally {
-      removePageStyle();
+      // The paper only fed the server; the PDF is the record.
+      setLoaded(null);
       inFlight.current = false;
     }
   };
-  // Portaled to <body>: printing then shows only the paper, whatever page
-  // chrome or overflow container hosts the button (index.css).
   const paper =
-    source && loaded
-      ? createPortal(
-          <div className="sat-answered-print">
-            <AnsweredExamPaper
-              key={loaded.generation}
-              exam={loaded.exam}
-              view={view}
-              loadMediaUrl={source.loadMediaUrl}
-              generation={loaded.generation}
-              paperRef={paperRef}
-              onMediaFailure={() => {
-                mediaFailed.current = true;
-              }}
-            />
-          </div>,
-          document.body
-        )
-      : null;
+    source && loaded ? (
+      <AnsweredExamPaper
+        key={loaded.generation}
+        exam={loaded.exam}
+        view={view}
+        loadMediaUrl={loadMediaUrl}
+        generation={loaded.generation}
+        paperRef={paperRef}
+        onMediaFailure={() => {
+          mediaFailed.current = true;
+        }}
+      />
+    ) : null;
   return { download, print, paper };
 }
 

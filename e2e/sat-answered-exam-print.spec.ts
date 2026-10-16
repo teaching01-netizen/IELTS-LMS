@@ -1,8 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-// PDF-05 / PDF-10 (docs/sat-result.md §4–5) in real engines: the staff
-// "Download answered exam" prints only the paper, every figure decoded, nothing
-// clipped at page width, and never prints when a figure cannot load.
+// PDF-05 / PDF-10 (docs/sat-result.md §4–5) in real engines. The staff
+// "Download answered exam" posts the decoded figures to the server renderer
+// and downloads its PDF; it never asks when a figure cannot load. The server
+// prints /print/sat-answered in Chromium, A4 landscape, one question per page.
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -62,12 +63,10 @@ function answeredExam(figureAsset: string) {
 }
 
 async function openDetail(page: Page, figureAsset: string) {
-  await page.addInitScript(() => {
-    (window as unknown as { __prints: number }).__prints = 0;
-    window.print = () => {
-      (window as unknown as { __prints: number }).__prints++;
-      (window as unknown as { __printTitle: string }).__printTitle = document.title;
-    };
+  const posts: { title: string; view: unknown; media: Record<string, string> }[] = [];
+  await page.route("**/api/v1/sat-answered-pdf/attempts/attempt-print", async (route) => {
+    posts.push(route.request().postDataJSON());
+    await route.fulfill({ status: 200, contentType: "application/pdf", body: Buffer.from("%PDF-1.7\n%%EOF\n") });
   });
   await page.route("**/api/v1/auth/session", (route) =>
     fulfillJson(route, {
@@ -96,9 +95,8 @@ async function openDetail(page: Page, figureAsset: string) {
   );
   await page.goto("/sat/results/result-print");
   await expect(page.getByRole("heading", { name: "Mina Chen", level: 1 })).toBeVisible();
+  return posts;
 }
-
-const prints = (page: Page) => page.evaluate(() => (window as unknown as { __prints: number }).__prints);
 
 async function examPresentation(page: Page) {
   return page.locator('[data-review-module] article').first().evaluate(article => {
@@ -121,38 +119,72 @@ async function examPresentation(page: Page) {
   });
 }
 
-test("prints only the complete paper, figures decoded, nothing clipped", async ({ page, browserName }, testInfo) => {
-  await openDetail(page, "asset-ok");
-  await page.getByRole("button", { name: "Download answered exam (PDF)" }).click();
-  await expect.poll(() => prints(page), { timeout: 35_000 }).toBe(1);
-  expect(await page.evaluate(() => (window as unknown as { __printTitle: string }).__printTitle))
-    .toBe("Mina Chen - SAT Practice 04 - Answered exam");
-  expect(await page.title()).not.toContain("Answered exam");
+const PAGE_HEIGHT_PX = 718; // A4 landscape content box at 10 mm margins
 
-  // Compare the same uniform A4-fit scale in both media. Fractional zoom
-  // legitimately snaps a 2px border to a device pixel in some engines.
-  await page.locator('.sat-paper-exam-frame').evaluateAll(frames => {
-    for (const frame of frames) (frame as HTMLElement).style.zoom = '0.75';
-  });
-  const screenPresentation = await examPresentation(page);
+test("downloads the server's PDF of the complete paper, with its figures inline", async ({ page }) => {
+  const posts = await openDetail(page, "asset-ok");
+  let printed = 0;
+  await page.exposeFunction("__printed", () => printed++);
+  await page.addInitScript(() => { window.print = () => void (window as unknown as { __printed: () => void }).__printed(); });
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download answered exam (PDF)" }).click();
+  expect((await download).suggestedFilename()).toBe("Mina Chen - SAT Practice 04 - Answered exam.pdf");
+  expect(posts).toHaveLength(1);
+  expect(posts[0]!.title).toBe("Mina Chen - SAT Practice 04 - Answered exam");
+  // The renderer has no network: the figure travels as the bytes the paper decoded.
+  expect(posts[0]!.media).toEqual({ "asset-ok": `data:image/png;base64,${PNG.toString("base64")}` });
+  expect(printed).toBe(0);
+  await expect(page.locator(".sat-answered-paper")).toHaveCount(0);
+});
+
+test("never asks for a PDF when a figure cannot load", async ({ page }) => {
+  const posts = await openDetail(page, "asset-blocked");
+  const started = Date.now();
+  await page.getByRole("button", { name: "Download answered exam (PDF)" }).click();
+  await expect(page.getByRole("alert")).toContainText("no PDF was made", { timeout: 10_000 });
+  // Fails fast on the reported figure, not after the 30 s readiness bound.
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect(posts).toHaveLength(0);
+});
+
+// What backend/go/internal/answeredpdf does, minus the browser launch.
+test("print route fits every question to one A4 landscape page", async ({ page, browserName }, testInfo) => {
+  test.skip(browserName !== "chromium", "the server renders with Chromium only");
+  const token = "0123456789abcdef0123456789abcdef";
+  await page.route(`**/__answered-exam-payload/${token}`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      json: { exam: answeredExam("asset-ok"), view: null, media: { "asset-ok": `data:image/png;base64,${PNG.toString("base64")}` } },
+    }),
+  );
+  await page.setViewportSize({ width: 1047, height: PAGE_HEIGHT_PX });
   await page.emulateMedia({ media: "print" });
-  // Printing may remove scroll clipping, but must not restyle the exam's
-  // question strip, fonts, selected card, marker, or colours.
-  expect(await examPresentation(page)).toEqual(screenPresentation);
-  const layout = await page.evaluate(() => {
-    const paper = document.querySelector<HTMLElement>("body > .sat-answered-print .sat-answered-paper")!;
+  await page.goto(`/print/sat-answered?payload=${token}`);
+  await expect(page.locator("body")).toHaveAttribute("data-print-state", "ready", { timeout: 35_000 });
+
+  const layout = await page.evaluate((pageHeight) => {
+    const paper = document.querySelector<HTMLElement>("body > .sat-answered-paper")!;
     const width = document.documentElement.clientWidth;
-    const shown = [...document.body.children].filter((child) => getComputedStyle(child).display !== "none");
+    const shown = [...document.body.children].filter((child) => getComputedStyle(child).display !== "none" && child.tagName !== "STYLE" && child.tagName !== "SCRIPT");
+    const tables = [...paper.querySelectorAll<HTMLElement>(".sat-paper-review")];
+    const unfit = tables.flatMap((table) => {
+      const reserve = (table.querySelector(":scope > thead")?.getBoundingClientRect().height ?? 0)
+        + (table.querySelector(":scope > tfoot")?.getBoundingClientRect().height ?? 0);
+      return [...table.querySelectorAll<HTMLElement>(".sat-paper-question-row")]
+        .filter((row) => row.getBoundingClientRect().height > pageHeight - reserve)
+        .map((row) => row.textContent?.slice(0, 40));
+    });
     return {
       paperDisplay: getComputedStyle(paper).display,
-      onlyPaperShown: shown.length === 1 && shown[0]!.classList.contains("sat-answered-print"),
+      onlyPaperShown: shown.length === 1 && shown[0] === paper,
       answerSheets: paper.querySelectorAll("ol li[data-question]").length,
       reviewModules: paper.querySelectorAll("[data-review-module]").length,
       runheads: paper.querySelectorAll("[data-runhead-module]").length,
       questions: paper.querySelectorAll("article").length,
       coverCount: paper.querySelectorAll("[data-cover-page]").length,
-      coverLogoLoaded: [...paper.querySelectorAll<HTMLImageElement>('[data-cover-page] img')].every(image => image.complete && image.naturalWidth > 0),
-      images: [...paper.querySelectorAll("figure img")].map((image) => ({ complete: image.complete, natural: image.naturalWidth, right: image.getBoundingClientRect().right })),
+      coverLogoLoaded: [...paper.querySelectorAll<HTMLImageElement>("[data-cover-page] img")].every((image) => image.complete && image.naturalWidth > 0),
+      images: [...paper.querySelectorAll("figure img")].map((image) => ({ complete: (image as HTMLImageElement).complete, natural: (image as HTMLImageElement).naturalWidth, right: image.getBoundingClientRect().right })),
       smallWatermarks: paper.querySelectorAll('[data-watermark="small"]').length,
       largeWatermarks: paper.querySelectorAll('[data-watermark="large"]').length,
       clipped: [...paper.querySelectorAll<HTMLElement>("article, article *")].filter((element) => element.getBoundingClientRect().right > width + 0.5).length,
@@ -160,15 +192,14 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
       selected: paper.querySelectorAll("[data-selected]").length,
       text: paper.textContent ?? "",
       footerVisible: getComputedStyle(paper.querySelector("tfoot .sat-paper-footer")!).visibility,
+      unfit,
       width,
     };
-  });
+  }, PAGE_HEIGHT_PX);
   expect(layout.paperDisplay).toBe("block");
   expect(layout.onlyPaperShown).toBe(true);
-  // Compact answer sheet covers every question, then each module is reviewed in full.
   expect(layout.answerSheets).toBe(24);
   expect(layout.reviewModules).toBe(2);
-  // Each review module repeats its exam · section · module runhead per page.
   expect(layout.runheads).toBe(2);
   expect(layout.questions).toBe(24);
   expect(layout.coverCount).toBe(1);
@@ -186,31 +217,36 @@ test("prints only the complete paper, figures decoded, nothing clipped", async (
   }
   expect(layout.clipped).toBe(0);
   expect(layout.overflow).toBeLessThanOrEqual(0);
+  // Every question, choices included, fits under its runhead and footer.
+  expect(layout.unfit).toEqual([]);
   expect(layout.selected).toBe(1);
   expect(layout.text).toContain("Exam review");
   expect(layout.text).toContain("Correct answers are not shown");
-  expect(layout.text).toContain("Your answer");
   expect(layout.text).toContain("3/4");
   expect(layout.text).toContain("-12.5");
-  expect(layout.text).not.toContain("Mina Chen, In progress");
 
-  if (browserName === "chromium") {
-    // Same margins the print flow declares via @page (dialog Default honors
-    // them; page.pdf defaults to none and would hide a margin regression).
-    const pdf = await page.pdf({ format: "A4", landscape: true, printBackground: true, margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" } });
-    const pages = pdf.toString("latin1").match(/\/Type\s*\/Page[^s]/g)?.length ?? 0;
-    // Answer sheet plus one review page per module: 24 questions do not fit on three.
-    expect(pages).toBeGreaterThanOrEqual(3);
-    await testInfo.attach("answered-exam.pdf", { body: pdf, contentType: "application/pdf" });
+  // Printing must not restyle the live exam's components (same zoom both ways).
+  await page.locator(".sat-paper-exam-frame").evaluateAll((frames) => {
+    for (const frame of frames) (frame as HTMLElement).style.zoom = "0.75";
+  });
+  const printPresentation = await examPresentation(page);
+  await page.emulateMedia({ media: "screen" });
+  expect(await examPresentation(page)).toEqual(printPresentation);
+  await page.reload();
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator("body")).toHaveAttribute("data-print-state", "ready", { timeout: 35_000 });
+
+  // The renderer's PrintToPDF call: the page's own @page decides size and margins.
+  const pdf = await page.pdf({ preferCSSPageSize: true, printBackground: true });
+  const pages = [...pdf.toString("latin1").matchAll(/\/Type\s*\/Page[^s]/g)];
+  const boxes = [...pdf.toString("latin1").matchAll(/\/MediaBox\s*\[\s*0 0 ([\d.]+) ([\d.]+)/g)];
+  // Landscape A4 (842 × 595 pt) on every page.
+  for (const [, w, h] of boxes) {
+    expect(Math.round(Number(w))).toBe(842);
+    expect(Math.round(Number(h))).toBe(595);
   }
-});
-
-test("never prints when a figure cannot load", async ({ page }) => {
-  await openDetail(page, "asset-blocked");
-  const started = Date.now();
-  await page.getByRole("button", { name: "Download answered exam (PDF)" }).click();
-  await expect(page.getByRole("alert")).toContainText("no PDF was made", { timeout: 10_000 });
-  // Fails fast on the reported figure, not after the 30 s readiness bound.
-  expect(Date.now() - started).toBeLessThan(10_000);
-  expect(await prints(page)).toBe(0);
+  // Front matter, then exactly one page per question.
+  expect(pages.length).toBeGreaterThanOrEqual(24 + 2);
+  expect(pages.length).toBeLessThanOrEqual(24 + 4);
+  await testInfo.attach("answered-exam.pdf", { body: pdf, contentType: "application/pdf" });
 });

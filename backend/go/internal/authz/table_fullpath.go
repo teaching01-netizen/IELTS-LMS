@@ -11,6 +11,9 @@ func init() {
 		// /metrics has its own bearer/token gate inside metricsHandler
 		// (METRICS_PUBLIC or METRICS_TOKEN); the authz layer passes through.
 		"GET /metrics": {Public: true},
+		// Answered-exam PDFs: same audiences as the answered-exam reads.
+		"POST /api/v1/sat-answered-pdf/schedules/{scheduleID}": {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /api/v1/sat-answered-pdf/attempts/{attemptID}":   {MinRoles: []string{RoleAdmin, RoleAdminObserver, RoleGrader, RoleProctor}},
 		// release-state GET (admin/observer/builder read).
 		"GET /api/v1/assessment-release/exams/{examID}": {MinRoles: readStaff},
 		// authoring reads (admin/observer/builder) vs writes

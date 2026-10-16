@@ -134,6 +134,9 @@ const SatExamResponsesRoute = lazy(() =>
 const SatScoreConversionRoute = lazy(() =>
   import("../../products/sat/routes/SatScoreConversionRoute").then((module) => ({ default: module.SatScoreConversionRoute }))
 );
+const SatAnsweredPrintRoute = lazy(() =>
+  import("../../features/student-delivery/routes/SatAnsweredPrintRoute").then((module) => ({ default: module.SatAnsweredPrintRoute }))
+);
 const ExamSettingsRoute = lazy(() =>
   import("../../features/exam-authoring/routes/ExamSettingsRoute").then((module) => ({ default: module.ExamSettingsRoute }))
 );
@@ -252,6 +255,16 @@ const baseRoutes = [
   {
     path: "/password/reset/complete",
     element: <PasswordResetCompletePage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    // Printed by the PDF renderer only; the payload lives on its loopback origin.
+    path: "/print/sat-answered",
+    element: (
+      <Suspense fallback={null}>
+        <SatAnsweredPrintRoute />
+      </Suspense>
+    ),
     errorElement: <RouteErrorBoundary />,
   },
   {
