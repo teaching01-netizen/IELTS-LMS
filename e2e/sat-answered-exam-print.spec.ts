@@ -1,8 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 // PDF-05 / PDF-10 (docs/sat-result.md §4–5) in real engines. The staff
-// "Download answered exam" posts the decoded figures to the server renderer
-// and downloads its PDF; it never asks when a figure cannot load. The server
+// "Download answered exam" prepares the PDF on the server, then exposes a
+// direct attachment link. Missing server media blocks export. The server
 // prints /print/sat-answered in Chromium, A4 landscape, one question per page.
 
 const PNG = Buffer.from(
@@ -62,11 +62,16 @@ function answeredExam(figureAsset: string) {
   };
 }
 
-async function openDetail(page: Page, figureAsset: string) {
-  const posts: { title: string; view: unknown; media: Record<string, string> }[] = [];
-  await page.route("**/api/v1/sat-answered-pdf/attempts/attempt-print", async (route) => {
+async function openDetail(page: Page, figureAsset: string, preparationDelay = 0) {
+  const posts: { view: unknown; media?: unknown }[] = [];
+  await page.route("**/api/v1/sat-answered-pdf/attempts/attempt-print/prepare", async (route) => {
     posts.push(route.request().postDataJSON());
-    await route.fulfill({ status: 200, contentType: "application/pdf", body: Buffer.from("%PDF-1.7\n%%EOF\n") });
+    if (preparationDelay) await new Promise(resolve => setTimeout(resolve, preparationDelay));
+    if (figureAsset === "asset-blocked") {
+      await route.fulfill({ status: 422, contentType: 'application/json', json: { success: false, error: { code: 'VALIDATION', message: 'Missing figure' } } });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', json: { downloadUrl: '/api/v1/sat-answered-pdf/downloads/0123456789abcdef0123456789abcdef', filename: 'Mina Chen - SAT Practice 04 - Answered exam.pdf', sizeBytes: 15, expiresAt: new Date(Date.now()+300_000).toISOString() } });
   });
   await page.route("**/api/v1/auth/session", (route) =>
     fulfillJson(route, {
@@ -121,30 +126,45 @@ async function examPresentation(page: Page) {
 
 const PAGE_HEIGHT_PX = 718; // A4 landscape content box at 10 mm margins
 
-test("downloads the server's PDF of the complete paper, with its figures inline", async ({ page }) => {
-  const posts = await openDetail(page, "asset-ok");
+test("one tap downloads after slow preparation without leaving the report", async ({ page }) => {
+  const posts = await openDetail(page, "asset-ok", 6500);
+  const reportUrl = page.url();
   let printed = 0;
   await page.exposeFunction("__printed", () => printed++);
   await page.addInitScript(() => { window.print = () => void (window as unknown as { __printed: () => void }).__printed(); });
+  await page.evaluate(() => {
+    URL.createObjectURL = () => { throw new Error('PDF export must not create object URLs'); };
+  });
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download answered exam (PDF)" }).click();
-  expect((await download).suggestedFilename()).toBe("Mina Chen - SAT Practice 04 - Answered exam.pdf");
+  await expect(page.getByRole("button", { name: "Preparing answered exam…" })).toBeDisabled();
+  await expect(page.locator('.sat-answered-paper')).toHaveCount(0);
+  const saved = await download;
+  expect(saved.suggestedFilename()).toBe("Mina Chen - SAT Practice 04 - Answered exam.pdf");
+  expect(await saved.failure()).toBeNull();
+  expect(page.url()).toBe(reportUrl);
+  expect(page.context().pages()).toHaveLength(1);
+  await expect(page.getByRole('status')).toContainText('Check your downloads');
+  const stream = await saved.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+  expect(Buffer.concat(chunks).toString()).toBe('%PDF-1.7\n%%EOF\n');
   expect(posts).toHaveLength(1);
-  expect(posts[0]!.title).toBe("Mina Chen - SAT Practice 04 - Answered exam");
-  // The renderer has no network: the figure travels as the bytes the paper decoded.
-  expect(posts[0]!.media).toEqual({ "asset-ok": `data:image/png;base64,${PNG.toString("base64")}` });
+  expect(posts[0]!).toEqual({ view: null });
+  expect(JSON.stringify(posts[0])).not.toContain('media');
   expect(printed).toBe(0);
   await expect(page.locator(".sat-answered-paper")).toHaveCount(0);
 });
 
-test("never asks for a PDF when a figure cannot load", async ({ page }) => {
+test("keeps a retry on the report when the server refuses an incomplete paper", async ({ page }) => {
   const posts = await openDetail(page, "asset-blocked");
   const started = Date.now();
   await page.getByRole("button", { name: "Download answered exam (PDF)" }).click();
   await expect(page.getByRole("alert")).toContainText("no PDF was made", { timeout: 10_000 });
   // Fails fast on the reported figure, not after the 30 s readiness bound.
   expect(Date.now() - started).toBeLessThan(10_000);
-  expect(posts).toHaveLength(0);
+  expect(posts).toHaveLength(1);
+  await expect(page.getByRole("button", { name: "Download answered exam (PDF)" })).toBeEnabled();
 });
 
 // What backend/go/internal/answeredpdf does, minus the browser launch.

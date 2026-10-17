@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { satStageAnimation } from "../motion/satPresence";
 import type { SatStudentStageKind } from "../../application/satStudentSurface";
 
@@ -20,6 +20,7 @@ export interface SatStudentStageHostProps {
    */
   instant?: boolean | undefined;
   children: ReactNode;
+  onExitComplete?: (() => void) | undefined;
 }
 
 /**
@@ -72,8 +73,18 @@ function SatStudentStageLayer({
  * Reduced motion renders the current layer with no presence at all: an instant
  * replacement, never a two-layer frame.
  */
-export function SatStudentStageHost({ stage, instant = false, children }: SatStudentStageHostProps) {
+export function SatStudentStageHost({ stage, instant = false, children, onExitComplete }: SatStudentStageHostProps) {
   const reducedMotion = Boolean(useReducedMotion());
+  const [completedExits, setCompletedExits] = useState(0);
+  const reportedExits = useRef(0);
+  useEffect(() => {
+    // Motion calls its callback before React removes the outgoing layer.
+    // Notify after that commit so cached image URLs stay valid until unmount.
+    if (reducedMotion || instant || completedExits !== reportedExits.current) {
+      reportedExits.current = completedExits;
+      onExitComplete?.();
+    }
+  }, [reducedMotion, instant, onExitComplete, stage.key, completedExits]);
 
   return (
     <div
@@ -93,7 +104,7 @@ export function SatStudentStageHost({ stage, instant = false, children }: SatStu
           {children}
         </div>
       ) : (
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} onExitComplete={() => setCompletedExits((count) => count + 1)}>
           <SatStudentStageLayer key={stage.key} stageKind={stage.kind} stageKey={stage.key}>
             {children}
           </SatStudentStageLayer>

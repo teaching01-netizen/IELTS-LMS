@@ -38,6 +38,8 @@ var RequiredTables = []string{
 	// One-action SAT room creation (0088): the replay receipt for every
 	// Create room request; without it a lost response cannot be recovered.
 	"sat_room_operations",
+	// Native SAT downloads (0092): browser grants and artifact cleanup.
+	"sat_pdf_exports",
 }
 
 // RequiredColumns: 19 durability-critical columns from the Rust
@@ -85,6 +87,10 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "exam_entities", Column: "sat_score_report_enabled"},
 	{Table: "exam_entities", Column: "sat_section_scope"},
 	{Table: "sat_room_operations", Column: "response_snapshot"},
+	{Table: "sat_pdf_exports", Column: "scope_key"},
+	{Table: "sat_pdf_exports", Column: "browser_hash"},
+	{Table: "sat_pdf_exports", Column: "binding"},
+	{Table: "sat_pdf_exports", Column: "expires_at"},
 }
 
 // RequiredIndex is one (table, index) pair the runtime depends on.
@@ -116,6 +122,8 @@ var RequiredIndexes = []RequiredIndex{
 	{Table: "sat_start_code_reservation_slots", Index: "uq_sat_start_code_slots_active_attempt"},
 	{Table: "sat_start_code_reservation_slots", Index: "idx_sat_start_code_slots_budget"},
 	{Table: "sat_start_code_reservation_slots", Index: "idx_sat_start_code_slots_lease"},
+	{Table: "sat_pdf_exports", Index: "uq_sat_pdf_export_scope"},
+	{Table: "sat_pdf_exports", Index: "idx_sat_pdf_export_expiry"},
 }
 
 // SchemaVerifier queries information_schema for the required lists.

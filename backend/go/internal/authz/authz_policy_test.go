@@ -184,6 +184,10 @@ var expectedFullPaths = []string{
 	// Server-rendered answered-exam PDFs.
 	"POST /api/v1/sat-answered-pdf/schedules/{scheduleID}",
 	"POST /api/v1/sat-answered-pdf/attempts/{attemptID}",
+	"POST /api/v1/sat-answered-pdf/schedules/{scheduleID}/prepare",
+	"POST /api/v1/sat-answered-pdf/attempts/{attemptID}/prepare",
+	"GET /api/v1/sat-answered-pdf/downloads/{exportID}",
+	"HEAD /api/v1/sat-answered-pdf/downloads/{exportID}",
 	// Prompt co-editing (2026-09-13 design): public token issuance plus the
 	// private, service-signature-authenticated Hocuspocus endpoints.
 	"POST /api/v1/assessment-authoring/exam-questions/{examQuestionID}/coedit-token",

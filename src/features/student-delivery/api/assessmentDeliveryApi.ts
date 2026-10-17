@@ -12,7 +12,7 @@ import {
   type ApiRequestConfig,
   type BackendAttemptCredential,
 } from '../infrastructure/assessmentDeliveryBackendGateway';
-import { postAnsweredExamPdf, type AnsweredExamPdfRequest } from './answeredExamPdf';
+import { prepareAnsweredExamPdf, type PrepareAnsweredExamPdfRequest, type PreparedAnsweredExamPdf } from './answeredExamPdf';
 import type {
   AssessmentAnsweredExam,
   AssessmentDeliveryBootstrap,
@@ -323,10 +323,11 @@ export const assessmentDeliveryApi = {
   },
 
   /** The same paper as a server-rendered PDF (one file on every browser). */
-  answeredExamPdf(scheduleId: string, attemptId: string, body: AnsweredExamPdfRequest): Promise<Blob> {
-    return attemptRequest(scheduleId, attemptId, (config) => postAnsweredExamPdf(
-      `/api/v1/sat-answered-pdf/schedules/${encodeURIComponent(scheduleId)}`,
+  answeredExamPdf(scheduleId: string, attemptId: string, body: PrepareAnsweredExamPdfRequest, signal: AbortSignal): Promise<PreparedAnsweredExamPdf> {
+    return attemptRequest(scheduleId, attemptId, (config) => prepareAnsweredExamPdf(
+      `/api/v1/sat-answered-pdf/schedules/${encodeURIComponent(scheduleId)}/prepare`,
       body,
+      signal,
       config.headers,
     ));
   },

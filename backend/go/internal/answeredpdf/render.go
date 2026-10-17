@@ -3,9 +3,9 @@
 // (iOS Safari ignores @page size; every print dialog lets the user change
 // paper, orientation and scale).
 //
-// The caller's browser has already loaded the authorized projection and its
-// figures (as data URLs); it posts them here. Each render gets its own
-// loopback listener that serves only the built SPA plus that one payload, and
+// Preparation supplies the authorized projection and inline figures entirely
+// on the server; legacy callers may still post figures. Each render gets its
+// own loopback listener that serves only the built SPA plus that one payload, and
 // every request outside the listener is refused, so content in the payload can
 // neither reach the API nor any other host.
 package answeredpdf
@@ -32,7 +32,7 @@ const PrintRoute = "/print/sat-answered"
 
 const payloadPath = "/__answered-exam-payload/"
 
-// RenderTimeout bounds one render, browser start to last PDF byte.
+// RenderTimeout bounds preparation, media loading, rendering and optimization.
 const RenderTimeout = 90 * time.Second
 
 // A4 landscape with 10 mm margins: the content box is 277 × 190 mm. The
@@ -66,6 +66,12 @@ func New(frontend http.Handler, slots int) *Renderer {
 
 // Render prints payload (the JSON the print route reads) to PDF bytes.
 func (r *Renderer) Render(ctx context.Context, payload []byte) ([]byte, error) {
+	return r.RenderPrepared(ctx, func(context.Context) ([]byte, error) { return payload, nil })
+}
+
+// RenderPrepared includes media preparation in the same concurrency and time
+// budget as Chromium and optimization. Legacy binary POSTs use Render.
+func (r *Renderer) RenderPrepared(ctx context.Context, build func(context.Context) ([]byte, error)) ([]byte, error) {
 	select {
 	case r.slots <- struct{}{}:
 	default:
@@ -75,6 +81,18 @@ func (r *Renderer) Render(ctx context.Context, payload []byte) ([]byte, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, RenderTimeout)
 	defer cancel()
+	payload, err := build(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pdf, err := r.render(ctx, payload)
+	if err != nil {
+		return nil, err
+	}
+	return optimizePDF(ctx, pdf, losslessOptimize)
+}
+
+func (r *Renderer) render(ctx context.Context, payload []byte) ([]byte, error) {
 
 	token, err := randomToken()
 	if err != nil {
@@ -154,7 +172,10 @@ func (r *Renderer) Render(ctx context.Context, payload []byte) ([]byte, error) {
 		)(ctx, t)
 	})
 	// A paper that never reports a state within the bound is not printable.
-	if errors.Is(err, ErrNotPrintable) || ctx.Err() != nil {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if errors.Is(err, ErrNotPrintable) {
 		return nil, ErrNotPrintable
 	}
 	if err != nil {

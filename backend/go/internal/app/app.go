@@ -14,6 +14,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/accesslinks"
 	"example.com/ielts-proctoring/internal/act"
+	"example.com/ielts-proctoring/internal/answeredpdf"
 	"example.com/ielts-proctoring/internal/answerhistory"
 	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/authoring"
@@ -54,6 +55,7 @@ type Services struct {
 	Grading       *grading.Service
 	Results       *results.Service
 	Media         *media.Service
+	PDFExports    *answeredpdf.Exports
 	Library       *library.Service
 	AnswerHistory *answerhistory.Service
 	Authoring     *authoring.Service
@@ -124,6 +126,7 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 		objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot),
 		media.NewHTTPRemoteImageFetcher(media.RemoteImageFetcherOptions{}),
 	)
+	s.PDFExports = answeredpdf.NewExports(pool, objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot))
 	s.Exams.SetMediaVerifier(s.Media)
 	s.Library = library.NewService(pool, s.Tx)
 	s.AnswerHistory = answerhistory.NewService(pool)

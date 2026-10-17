@@ -1,5 +1,5 @@
 /* eslint-disable jsx-a11y/control-has-associated-label -- Presentational, aria-hidden print tables use rows and cells for native page repetition. */
-import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useMemo, type Ref } from "react";
 import "./score-report/sat-answered-paper.css";
 import warwickWatermark from "../../../../assets/warwick-institute-logo.png";
 import { SatPrintedQuestion } from "./score-report/SatPrintedQuestion";
@@ -9,10 +9,8 @@ import type {
   AssessmentResult,
 } from "../../contracts/assessmentDelivery";
 import { logWarn } from "../../../../shared/observability/errorLogger";
-import { downloadBlob } from "../../../../utils/downloadBlob";
-import { getAssessmentMediaAsset } from "../../../exam-authoring/api/assessmentMediaApi";
-import type { AnsweredExamPdfRequest } from "../../api/answeredExamPdf";
 import { SatKnowledgeSkills } from "./score-report/SatKnowledgeSkills";
+import { useAnsweredExamDownload, type AnsweredExamDownloadSource } from "./score-report/useAnsweredExamDownload";
 import { SatReportActions, SatReportDownload } from "./score-report/SatReportActions";
 import { SatReportHeader } from "./score-report/SatReportHeader";
 import { SatReportMethodology } from "./score-report/SatReportMethodology";
@@ -90,46 +88,18 @@ function isScaled(value: unknown): value is ScaledScore {
 export type AnsweredExam = Pick<AssessmentAnsweredExam, "sections" | "attempt"> &
   Partial<Pick<AssessmentAnsweredExam, "examTitle" | "candidateName">>;
 
-function answeredExamPrintTitle(exam: AnsweredExam, hasScoreReport: boolean): string {
-  const filenamePart = (value: string) => value
-    .replace(/[<>:"/\\|?*]|\p{Cc}/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 80)
-    .replace(/[. ]+$/g, "");
-  return [
-    filenamePart(exam.candidateName ?? ""),
-    filenamePart(exam.examTitle ?? "") || "Digital SAT",
-    hasScoreReport ? "Score report and exam review" : "Answered exam",
-  ].filter(Boolean).join(" - ");
-}
-
 export type LoadMediaUrl = (
   assetId: string,
   options?: { fresh?: boolean }
 ) => Promise<string | null>;
 
-export interface AnsweredExamPrintSource {
-  /** One authoritative read of the projection; null when it could not be loaded. */
-  load: () => Promise<AnsweredExam | null>;
-  /**
-   * Resolves a protected figure to a loadable URL. When omitted the paper
-   * falls back to the staff media read; the student session passes its own
-   * attempt-scoped loader.
-   */
-  loadMediaUrl?: LoadMediaUrl | undefined;
-  /** Prints the posted report and figures on the server; resolves to the PDF. */
-  renderPdf: (request: AnsweredExamPdfRequest) => Promise<Blob>;
-}
-
-export interface AnsweredExamSource extends AnsweredExamPrintSource {
+export interface AnsweredExamSource extends AnsweredExamDownloadSource {
   /** The delivered sections, used only to title the report's modules. */
   sections: AssessmentDeliverySection[];
 }
 
 // offcut: readiness is polled; an exam whose figures need over 30 s fails closed with a retry
 export const PAPER_READY_TIMEOUT_MS = 30_000;
-const PAPER_READY_POLL_MS = 100;
 
 /**
  * PDF-10: the paper may print only when every administered module is present
@@ -142,118 +112,6 @@ export function answeredPaperReady(paper: HTMLElement): boolean {
     const image = figure.querySelector("img");
     return image !== null && image.complete && image.naturalWidth > 0;
   });
-}
-
-async function staffMediaUrl(assetId: string): Promise<string | null> {
-  return (await getAssessmentMediaAsset(assetId)).downloadUrl ?? null;
-}
-
-/** The server renderer reaches no network, so every figure travels inline. */
-async function imageDataUrl(url: string): Promise<string> {
-  if (url.startsWith("data:image/")) return url;
-  const response = await fetch(url, { credentials: "same-origin" });
-  if (!response.ok) throw new Error(`Figure request failed (${response.status}).`);
-  const blob = await response.blob();
-  if (!blob.type.startsWith("image/")) throw new Error("Figure is not an image.");
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error("Figure could not be read."));
-    reader.readAsDataURL(blob);
-  });
-}
-
-/**
- * Download orchestration shared by the student report and the staff result
- * view: load the projection, mount the paper hidden so every figure loads and
- * decodes, then (only once it is complete, PDF-10) have the server print it.
- * The server prints A4 landscape itself, so the file is the same on every
- * browser; no print dialog is involved.
- * Model: verification/lean/sat-result (PrintGate.print_gate_sound).
- */
-export function useAnsweredExamPrint(
-  source: AnsweredExamPrintSource | null,
-  view?: StudentScoreReportView | null
-): {
-  download: "idle" | "preparing" | "failed";
-  print: () => Promise<void>;
-  paper: ReactNode;
-} {
-  const [download, setDownload] = useState<"idle" | "preparing" | "failed">("idle");
-  // The paper mounts on request only. A new generation remounts it, so a
-  // retry re-reads the answers.
-  const [loaded, setLoaded] = useState<{ exam: AnsweredExam; generation: number } | null>(null);
-  const generationRef = useRef(0);
-  const paperRef = useRef<HTMLDivElement | null>(null);
-  const mediaFailed = useRef(false);
-  // Figures the paper showed, by media id: exactly what the server prints.
-  const media = useRef<Record<string, string>>({});
-  // One download in flight: a second flow would remount the paper under the
-  // first one's poll and report a false failure.
-  const inFlight = useRef(false);
-  const loadMediaUrl = useMemo<LoadMediaUrl>(() => {
-    const load = source?.loadMediaUrl ?? staffMediaUrl;
-    return async (assetId, options) => {
-      const url = await (options?.fresh ? load(assetId, { fresh: true }) : load(assetId));
-      if (!url) return null;
-      const dataUrl = await imageDataUrl(url);
-      media.current[assetId] = dataUrl;
-      return dataUrl;
-    };
-  }, [source]);
-
-  const print = async () => {
-    if (!source || inFlight.current) return;
-    inFlight.current = true;
-    setDownload("preparing");
-    mediaFailed.current = false;
-    media.current = {};
-    try {
-      const exam = await source.load().catch(() => null);
-      if (!exam) {
-        setDownload("failed");
-        return;
-      }
-      const generation = ++generationRef.current;
-      setLoaded({ exam, generation });
-      const deadline = Date.now() + PAPER_READY_TIMEOUT_MS;
-      while (Date.now() < deadline) {
-        await new Promise((resolve) => window.setTimeout(resolve, PAPER_READY_POLL_MS));
-        if (mediaFailed.current) break;
-        const paper = paperRef.current;
-        if (paper?.dataset["generation"] === String(generation) && answeredPaperReady(paper)) {
-          const title = answeredExamPrintTitle(exam, Boolean(view));
-          const pdf = await source
-            .renderPdf({ title, view: view ?? null, media: { ...media.current } })
-            .catch(() => null);
-          if (!pdf) break;
-          downloadBlob(`${title}.pdf`, pdf);
-          setDownload("idle");
-          return;
-        }
-      }
-      setDownload("failed");
-    } finally {
-      // The paper only fed the server; the PDF is the record.
-      setLoaded(null);
-      inFlight.current = false;
-    }
-  };
-  const paper =
-    source && loaded ? (
-      <AnsweredExamPaper
-        key={loaded.generation}
-        exam={loaded.exam}
-        view={view}
-        loadMediaUrl={loadMediaUrl}
-        generation={loaded.generation}
-        paperRef={paperRef}
-        onMediaFailure={() => {
-          mediaFailed.current = true;
-        }}
-      />
-    ) : null;
-  return { download, print, paper };
 }
 
 /**
@@ -273,7 +131,7 @@ export function SatScoreReport({
     () => buildStudentScoreReportView(report, answered?.sections),
     [report, answered?.sections]
   );
-  const { download, print: printAnsweredExam, paper } = useAnsweredExamPrint(answered, view);
+  const { download, ready, prepare } = useAnsweredExamDownload(answered, view);
   const issues = view.issues.join(",");
   useEffect(() => {
     // Codes only: nothing here identifies the student.
@@ -288,7 +146,8 @@ export function SatScoreReport({
             <SatReportDownload
               canPrint={answered !== null}
               download={download}
-              onPrint={() => void printAnsweredExam()}
+              ready={ready}
+              onPrint={() => void prepare()}
             />
             <div className="mt-6">
               <SatScoreOverview view={view} />
@@ -300,7 +159,6 @@ export function SatScoreReport({
           </section>
         </main>
       </div>
-      {paper}
     </>
   );
 }

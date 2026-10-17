@@ -4,12 +4,15 @@ import { SAT_COPY } from "../../../domain/satCopy";
 import type { AssessmentResult } from "../../../contracts/assessmentDelivery";
 import { SatCompleteScreen } from "../SatCompleteScreen";
 import { AnsweredExamPaper, answeredPaperReady, type AnsweredExam, type AnsweredExamSource } from "../SatScoreReport";
-import type { AnsweredExamPdfRequest } from "../../../api/answeredExamPdf";
+import type { PreparedAnsweredExamPdf } from "../../../api/answeredExamPdf";
 
 const downloadBlob = vi.hoisted(() => vi.fn());
 vi.mock("../../../../../utils/downloadBlob", () => ({ downloadBlob }));
-beforeEach(() => downloadBlob.mockClear());
-const pdf = () => new Blob(["%PDF-1.7"], { type: "application/pdf" });
+beforeEach(() => {
+  downloadBlob.mockClear();
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+});
+const prepared = (): PreparedAnsweredExamPdf => ({ downloadUrl: '/api/v1/sat-answered-pdf/downloads/0123456789abcdef0123456789abcdef', filename: 'มินา - Answered exam.pdf', sizeBytes: 100, expiresAt: new Date(Date.now()+300_000).toISOString() });
 
 const text = (value: string) => ({ version: 1 as const, nodes: [{ type: "paragraph" as const, id: value, text: value }] });
 
@@ -55,7 +58,7 @@ function answeredExam(): AnsweredExam {
 
 /** The report's source: delivered sections title modules; the paper comes from the server projection. */
 function sourceOf(exam: AnsweredExam, extra: Partial<AnsweredExamSource> = {}): AnsweredExamSource {
-  return { sections: exam.sections, load: async () => exam, renderPdf: async () => pdf(), ...extra };
+  return { key: "student:attempt", sections: exam.sections, preparePdf: async () => prepared(), ...extra };
 }
 
 function result(overrides: Partial<AssessmentResult> = {}): AssessmentResult {
@@ -436,78 +439,64 @@ describe("SatCompleteScreen", () => {
     }
   });
 
-  it("prints the server's answered-exam projection, alone, not the delivered snapshot", async () => {
-    // The delivered snapshot predates the last answer (a close ack keeps old
-    // responses); the projection read at download time carries it.
-    const delivered = answeredExam();
-    const projection = answeredExam();
-    projection.attempt.responses.push({ moduleAttemptId: "ma1", examQuestionId: "q3", response: "12" } as never);
-    let printedText = "";
-    const renderPdf = vi.fn(async () => {
-      printedText = document.querySelector(".sat-answered-paper")?.textContent ?? "";
-      return pdf();
-    });
-    const print = vi.spyOn(window, "print").mockImplementation(() => {});
-    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(delivered, { load: async () => projection, renderPdf })} />);
-    expect(document.querySelector(".sat-answered-paper")).toBeNull();
+  it("prepares on the server without mounting another exam or downloading a Blob", async () => {
+    const preparePdf = vi.fn(async () => prepared());
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
     fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-    await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
-    expect(printedText).toContain("12");
-    // The server prints it: no print dialog, and the paper unmounts after.
-    expect(print).not.toHaveBeenCalled();
-    expect(document.querySelector(".sat-answered-paper")).toBeNull();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    print.mockRestore();
+    const link = await screen.findByRole("link", { name: "Download PDF again" });
+    expect(link).toHaveAttribute('href', prepared().downloadUrl);
+    expect(link).toHaveAttribute('download', prepared().filename);
+    expect(preparePdf).toHaveBeenCalledWith({ view: expect.any(Object) }, expect.any(AbortSignal));
+    expect(document.querySelector('.sat-answered-paper')).toBeNull();
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
   });
 
-  it("makes no file when the server cannot print the paper", async () => {
-    const renderPdf = vi.fn(async () => Promise.reject(new Error("422")));
-    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { renderPdf })} />);
+  it("keeps preparation failures and retry on the report", async () => {
+    const preparePdf = vi.fn().mockRejectedValueOnce(new Error('429')).mockResolvedValueOnce(prepared());
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
     fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("no PDF was made");
-    expect(renderPdf).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('alert')).toHaveTextContent('no PDF was made');
+    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    expect(await screen.findByRole('link', { name: 'Download PDF again' })).toBeInTheDocument();
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
-  it("posts the score report with the paper", async () => {
-    const renderPdf = vi.fn(async (_request: AnsweredExamPdfRequest) => pdf());
-    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { renderPdf })} />);
-    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-    await waitFor(() => expect(renderPdf).toHaveBeenCalledTimes(1));
-    const request = renderPdf.mock.calls[0]![0];
-    expect(request.view).not.toBeNull();
-    expect(request.media).toEqual({});
-  });
-
-  it.each([
-    ["Mina Chen", "SAT Practice 04", "Mina Chen - SAT Practice 04 - Score report and exam review"],
-    ["  มินา  เฉิน  ", 'SAT: Practice / 04?', "มินา เฉิน - SAT Practice 04 - Score report and exam review"],
-    ["", "", "Digital SAT - Score report and exam review"],
-  ])("names the PDF for %s", async (candidateName, examTitle, expectedTitle) => {
-    const renderPdf = vi.fn(async (_request: AnsweredExamPdfRequest) => pdf());
-    const exam = { ...answeredExam(), candidateName, examTitle };
-    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(exam, { renderPdf })} />);
-    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-    await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
-    expect(renderPdf.mock.calls[0]![0].title).toBe(expectedTitle);
-    expect(downloadBlob).toHaveBeenCalledWith(`${expectedTitle}.pdf`, expect.any(Blob));
-  });
-
-  it("runs one download at a time", async () => {
-    const exam = answeredExam();
-    const load = vi.fn(async () => exam);
-    const renderPdf = vi.fn(async () => pdf());
-    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(exam, { load, renderPdf })} />);
+  it("runs one preparation at a time", async () => {
+    const preparePdf = vi.fn(async () => prepared());
+    render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
     const button = screen.getByRole("button", { name: /answered exam/ });
-    // Two clicks in one task, before React can disable the button.
-    act(() => {
-      button.click();
-      button.click();
-    });
-    await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
-    expect(load).toHaveBeenCalledTimes(1);
-    expect(renderPdf).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    act(() => { button.click(); button.click(); });
+    await screen.findByRole('link', { name: 'Download PDF again' });
+    expect(preparePdf).toHaveBeenCalledTimes(1);
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels preparation on unmount and ignores its late response", async () => {
+    let resolve!: (value: PreparedAnsweredExamPdf) => void;
+    let signal: AbortSignal | undefined;
+    const preparePdf: AnsweredExamSource['preparePdf'] = (_body, inputSignal) => { signal = inputSignal; return new Promise(r => { resolve = r; }); };
+    const { unmount } = render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
+    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { resolve(prepared()); });
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+    expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("cancels a previous student's preparation when the report identity changes", async () => {
+    let resolve!: (value: PreparedAnsweredExamPdf) => void;
+    let signal: AbortSignal | undefined;
+    const preparePdf: AnsweredExamSource['preparePdf'] = (_body, inputSignal) => { signal = inputSignal; return new Promise(r => { resolve = r; }); };
+    const { rerender } = render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
+    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    rerender(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { key: 'student:another-attempt' })} />);
+    expect(signal?.aborted).toBe(true);
+    await act(async () => { resolve(prepared()); });
+    expect(screen.queryByRole('link', { name: 'Download PDF again' })).not.toBeInTheDocument();
+    expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /answered exam/ })).toBeEnabled();
   });
 
   it("titles each module within its own section", () => {
@@ -540,20 +529,6 @@ describe("SatCompleteScreen", () => {
     const report = screen.getByRole("region", { name: "Score report" });
     expect(report).toHaveTextContent("RW Module 1");
     expect(report).toHaveTextContent("Math Module 1");
-  });
-
-  it("never prints when the projection cannot be read", async () => {
-    const renderPdf = vi.fn(async () => pdf());
-    // A refusal (409 not terminal, 403 report closed, 429 busy) or no projection at all.
-    for (const load of [async () => Promise.reject(new Error("409")), async () => null]) {
-      const { unmount } = render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { load, renderPdf })} />);
-      fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-      expect(await screen.findByRole("alert")).toHaveTextContent("no PDF was made");
-      expect(screen.getByRole("button", { name: /answered exam/ })).toBeEnabled();
-      unmount();
-    }
-    expect(renderPdf).not.toHaveBeenCalled();
-    expect(downloadBlob).not.toHaveBeenCalled();
   });
 
   it("shows no alert region on the completed screen", () => {

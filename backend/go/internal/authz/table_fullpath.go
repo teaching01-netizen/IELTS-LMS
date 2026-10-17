@@ -12,8 +12,14 @@ func init() {
 		// (METRICS_PUBLIC or METRICS_TOKEN); the authz layer passes through.
 		"GET /metrics": {Public: true},
 		// Answered-exam PDFs: same audiences as the answered-exam reads.
-		"POST /api/v1/sat-answered-pdf/schedules/{scheduleID}": {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /api/v1/sat-answered-pdf/attempts/{attemptID}":   {MinRoles: []string{RoleAdmin, RoleAdminObserver, RoleGrader, RoleProctor}},
+		"POST /api/v1/sat-answered-pdf/schedules/{scheduleID}":         {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /api/v1/sat-answered-pdf/attempts/{attemptID}":           {MinRoles: []string{RoleAdmin, RoleAdminObserver, RoleGrader, RoleProctor}},
+		"POST /api/v1/sat-answered-pdf/schedules/{scheduleID}/prepare": {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /api/v1/sat-answered-pdf/attempts/{attemptID}/prepare":   {MinRoles: []string{RoleAdmin, RoleAdminObserver, RoleGrader, RoleProctor}},
+		// Public at this layer only: the handler requires its browser-bound
+		// HttpOnly grant and rechecks the original attempt/staff entitlement.
+		"GET /api/v1/sat-answered-pdf/downloads/{exportID}":  {Public: true},
+		"HEAD /api/v1/sat-answered-pdf/downloads/{exportID}": {Public: true},
 		// release-state GET (admin/observer/builder read).
 		"GET /api/v1/assessment-release/exams/{examID}": {MinRoles: readStaff},
 		// authoring reads (admin/observer/builder) vs writes

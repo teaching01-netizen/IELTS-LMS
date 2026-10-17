@@ -77,6 +77,22 @@ describe("SatStudentStageHost", () => {
     return waitFor(() => expect(document.querySelector("[data-sat-stage-exiting]")).toBeNull());
   });
 
+  it("releases completed exam media only after the outgoing surface unmounts", async () => {
+    const release = vi.fn(() => expect(screen.queryByTestId('outgoing')).toBeNull());
+    const view = render(<SatStudentStageHost stage={stage('exam', 'exam:attempt-1')}><div data-testid="outgoing">Exam</div></SatStudentStageHost>);
+    view.rerender(<SatStudentStageHost stage={{ kind: 'complete', key: 'complete:attempt-1' }} onExitComplete={release}><div>Report</div></SatStudentStageHost>);
+    expect(screen.getByTestId('outgoing')).toBeInTheDocument();
+    expect(release).not.toHaveBeenCalled();
+    await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+  });
+
+  it("releases media after an instant replacement commits", () => {
+    const release = vi.fn(() => expect(screen.queryByTestId('outgoing')).toBeNull());
+    const view = render(<SatStudentStageHost stage={stage('exam', 'exam:attempt-1')}><div data-testid="outgoing">Exam</div></SatStudentStageHost>);
+    view.rerender(<SatStudentStageHost stage={{ kind: 'complete', key: 'complete:attempt-1' }} instant onExitComplete={release}><div>Report</div></SatStudentStageHost>);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a stage mounted while its key is unchanged", () => {
     const view = render(
       <SatStudentStageHost stage={stage("exam", "exam:attempt-1")}>

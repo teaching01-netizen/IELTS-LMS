@@ -96,6 +96,7 @@ type App struct {
 	ACT           *act.Service
 	Delivery      *delivery.Service
 	AnsweredPDF   *answeredpdf.Renderer
+	PDFExports    *answeredpdf.Exports
 	Release       *release.Service
 	Runtime       *runtime.Service
 	Terminal      *terminalization.Service
@@ -282,6 +283,7 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.Grading = svc.Grading
 		app.Results = svc.Results
 		app.Media = svc.Media
+		app.PDFExports = svc.PDFExports
 		app.Library = svc.Library
 		app.AnswerHistory = svc.AnswerHistory
 		app.Authoring = svc.Authoring
@@ -808,9 +810,13 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "POST", "/submissions/{submissionID}/reopen-review", gradingReopenHandler(app))
 			authzRoute(r, "GET", "/results/{resultID}/events", gradingResultEventsHandler(app))
 		})
-		// Server-rendered answered-exam PDFs (one file on every browser). Own
-		// body cap: the caller posts its loaded figures as data URLs.
+		// Native PDF preparation posts only report JSON. Legacy binary routes
+		// retain their larger body cap for older clients' inline figures.
 		r.With(httpx.BodyLimit(answeredPDFMaxBodyBytes)).Route("/sat-answered-pdf", func(r chi.Router) {
+			r.With(httpx.BodyLimit(128<<10), limitTier(app, httpx.TierWrites, attemptKey())).Post("/schedules/{scheduleID}/prepare", authorize("POST /api/v1/sat-answered-pdf/schedules/{scheduleID}/prepare", prepareAnsweredPDFHandler(app, true)))
+			r.With(httpx.BodyLimit(128<<10), limitTier(app, httpx.TierWrites, userKey())).Post("/attempts/{attemptID}/prepare", authorize("POST /api/v1/sat-answered-pdf/attempts/{attemptID}/prepare", prepareAnsweredPDFHandler(app, false)))
+			r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Get("/downloads/{exportID}", authorize("GET /api/v1/sat-answered-pdf/downloads/{exportID}", downloadAnsweredPDFHandler(app)))
+			r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Head("/downloads/{exportID}", authorize("HEAD /api/v1/sat-answered-pdf/downloads/{exportID}", downloadAnsweredPDFHandler(app)))
 			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Post("/schedules/{scheduleID}", authorize("POST /api/v1/sat-answered-pdf/schedules/{scheduleID}", deliveryAnsweredPDFHandler(app)))
 			r.With(limitTier(app, httpx.TierWrites, userKey())).Post("/attempts/{attemptID}", authorize("POST /api/v1/sat-answered-pdf/attempts/{attemptID}", resultsSATAnsweredPDFHandler(app)))
 		})

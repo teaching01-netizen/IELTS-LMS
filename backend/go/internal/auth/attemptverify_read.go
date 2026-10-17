@@ -35,6 +35,16 @@ func VerifyAttemptRead(ctx context.Context, db Querier, cfg config.Config, now t
 	if err != nil {
 		return zero, fmt.Errorf("auth: verify attempt token: %w", err)
 	}
+	return VerifyAttemptReadBinding(ctx, db, now, claims)
+}
+
+// VerifyAttemptReadBinding rechecks server-established claims saved by a
+// short-lived export grant. Never call it on claims supplied by a client.
+func VerifyAttemptReadBinding(ctx context.Context, db Querier, now time.Time, claims crypto.AttemptClaims) (crypto.AttemptClaims, error) {
+	var zero crypto.AttemptClaims
+	if claims.Exp <= now.Unix() {
+		return zero, fmt.Errorf("auth: expired attempt binding")
+	}
 	if db == nil {
 		return zero, fmt.Errorf("auth: attempt read requires a session binding")
 	}
@@ -46,7 +56,7 @@ func VerifyAttemptRead(ctx context.Context, db Querier, cfg config.Config, now t
 	var revokedAt sql.NullTime
 	var expiresAt time.Time
 	var rowLease sql.NullInt64
-	err = db.QueryRowContext(ctx,
+	err := db.QueryRowContext(ctx,
 		`SELECT token_id, revoked_at, expires_at, lease_epoch FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL`,
 		claims.TokenID).Scan(&tokenID, &revokedAt, &expiresAt, &rowLease)
 	if err != nil && !isMissingColumn(err) {

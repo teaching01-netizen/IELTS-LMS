@@ -11,9 +11,9 @@ const useSatResultQueryMock = vi.hoisted(() => vi.fn());
 const useSatAttemptAnswersQueryMock = vi.hoisted(() => vi.fn());
 const downloadSatRawdataXlsxMock = vi.hoisted(() => vi.fn());
 const fetchSatAnsweredExamMock = vi.hoisted(() => vi.fn());
-const postAnsweredExamPdfMock = vi.hoisted(() => vi.fn());
+const prepareAnsweredExamPdfMock = vi.hoisted(() => vi.fn());
 const downloadBlobMock = vi.hoisted(() => vi.fn());
-vi.mock('../../../../features/student-delivery/api/answeredExamPdf', () => ({ postAnsweredExamPdf: postAnsweredExamPdfMock }));
+vi.mock('../../../../features/student-delivery/api/answeredExamPdf', () => ({ prepareAnsweredExamPdf: prepareAnsweredExamPdfMock }));
 vi.mock('../../../../utils/downloadBlob', () => ({ downloadBlob: downloadBlobMock }));
 vi.mock('../../../../features/results/api/satRawdataExport', () => ({
   downloadSatRawdataXlsx: downloadSatRawdataXlsxMock,
@@ -56,6 +56,7 @@ function renderResultsRoute(initialEntry = '/sat/results') {
 
 describe('SAT Results hierarchy', () => {
   beforeEach(() => {
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     vi.clearAllMocks();
     downloadSatRawdataXlsxMock.mockResolvedValue(undefined);
     useSatResultsQueryMock.mockReturnValue({ data: accessGroups, isLoading: false, error: null, isFetching: false, refetch: vi.fn() });
@@ -205,48 +206,19 @@ describe('SAT Results hierarchy', () => {
     expect(within(screen.getByRole('row', { name: /Unscored Student/ })).getByText('Not scored')).toBeInTheDocument();
   });
 
-  // PDF-08: staff print the same server projection the student does.
-  it('prints the answered exam from the staff projection, and never a partial one', async () => {
-    const text = (value: string) => ({ version: 1, nodes: [{ type: 'paragraph', id: value, text: value }] });
-    const exam = {
-      attemptId: 'attempt-1', examTitle: 'Practice Test 06', candidateName: 'John Smith', versionId: 'v12',
-      sections: [{ sectionKey: 'math', title: 'Math', modules: [{ id: 'm1', moduleKey: 'math-1', title: 'Module 1', displayOrder: 0, questions: [
-        { examQuestionId: 'q1', questionId: 'q1', displayOrder: 0, isPretest: false, questionType: 'student_produced_response', stimulus: text('stim'), prompt: text('P1'), answer: { kind: 'student_produced_response' }, metadata: {}, accessibility: { longDescription: null } },
-      ] }] }],
-      attempt: { id: 'attempt-1', moduleAttempts: [{ id: 'ma1', moduleId: 'm1', startedAt: '2026-09-01T07:00:00Z' }], responses: [{ moduleAttemptId: 'ma1', examQuestionId: 'q1', response: '7' }] },
-    };
-    let printed = '';
-    postAnsweredExamPdfMock.mockImplementation(async () => {
-      printed = document.querySelector('.sat-answered-paper')?.textContent ?? '';
-      return new Blob(['%PDF-1.7'], { type: 'application/pdf' });
-    });
-    fetchSatAnsweredExamMock.mockResolvedValueOnce(exam).mockRejectedValueOnce(new Error('429'));
-    const detail = useSatResultQueryMock();
-    useSatResultQueryMock.mockReturnValue({ ...detail, data: { ...detail.data, scorePayload: { classroomRaw: {
-      rawCorrect: 1, total: 1,
-      sections: [{ sectionKey: 'math', rawCorrect: 1, total: 1, modules: [{ moduleKey: 'math-m1', rawCorrect: 1, total: 1 }] }],
-      domains: [{ sectionKey: 'math', domain: 'Algebra', correct: 1, total: 1 }],
-    } } } });
+  it('prepares the staff PDF on the server without loading a hidden paper', async () => {
+    const prepared = { downloadUrl: '/api/v1/sat-answered-pdf/downloads/0123456789abcdef0123456789abcdef', filename: 'John Smith - Answered exam.pdf', sizeBytes: 100, expiresAt: new Date(Date.now()+300_000).toISOString() };
+    prepareAnsweredExamPdfMock.mockResolvedValue(prepared);
     renderResultsRoute('/sat/results/result-1');
-    const button = screen.getByRole('button', { name: 'Download answered exam (PDF)' });
-    fireEvent.click(button);
-    await waitFor(() => expect(downloadBlobMock).toHaveBeenCalledTimes(1));
-    expect(fetchSatAnsweredExamMock).toHaveBeenCalledWith('attempt-1');
-    expect(postAnsweredExamPdfMock).toHaveBeenCalledWith('/api/v1/sat-answered-pdf/attempts/attempt-1', expect.objectContaining({ title: expect.stringContaining('John Smith') }));
-    // Answer sheet first: question number and the student's answer.
-    expect(printed).toContain('Q17');
-    // Then the exam review: full question content with the answer marked.
-    expect(printed).toContain('P1');
-    expect(printed).toContain('Exam review');
-    expect(printed).toContain('Your answer');
-    expect(printed).toContain('Correct answers are not shown');
-    // The score report prints with it.
-    expect(printed).toContain('Total correct: 1 of 1 · 100%');
-    expect(printed).toContain('1 of 1 correct');
-    expect(printed).toContain('Algebra1 of 1 · 100%');
     fireEvent.click(screen.getByRole('button', { name: 'Download answered exam (PDF)' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('no PDF was made');
-    expect(postAnsweredExamPdfMock).toHaveBeenCalledTimes(1);
+    const link = await screen.findByRole('link', { name: 'Download PDF again' });
+    expect(link).toHaveAttribute('href', prepared.downloadUrl);
+    expect(link).toHaveAttribute('download', prepared.filename);
+    expect(prepareAnsweredExamPdfMock).toHaveBeenCalledWith('/api/v1/sat-answered-pdf/attempts/attempt-1/prepare', { view: null }, expect.any(AbortSignal));
+    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
+    expect(fetchSatAnsweredExamMock).not.toHaveBeenCalled();
+    expect(downloadBlobMock).not.toHaveBeenCalled();
+    expect(document.querySelector('.sat-answered-paper')).toBeNull();
   });
 
   it('explains a missing score instead of showing a zero', () => {

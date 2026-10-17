@@ -4514,6 +4514,160 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /sat-answered-pdf/schedules/{scheduleId}/prepare:
+    post:
+      tags: [sat, results]
+      summary: Prepare a private answered-exam PDF for native download
+      description: |-
+        Loads the authorized completed exam and figures on the server, preserving
+        the existing A4 landscape layout and image source policy. Returns only
+        metadata after the complete optimized PDF is stored. Sets an HttpOnly,
+        SameSite Strict browser cookie scoped to the download URL. Ready exports
+        expire after five minutes (or the attempt credential expiry, if earlier).
+        422 refuses incomplete papers; 429 with Retry-After indicates a busy renderer
+        or another preparation for the same owner, attempt and browser session.
+      security:
+        - attemptBearer: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                view: { type: object, nullable: true, description: Existing score report presentation }
+      responses:
+        "200":
+          description: Complete PDF ready for a direct download in the preparing browser
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            Set-Cookie: { schema: { type: string }, description: Export-scoped browser binding; contains no attempt bearer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PreparedAnsweredExamPDF" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /sat-answered-pdf/attempts/{attemptId}/prepare:
+    post:
+      tags: [sat, results]
+      summary: Prepare a private answered-exam PDF for native download
+      description: |-
+        Loads the authorized completed exam and figures on the server, preserving
+        the existing A4 landscape layout and image source policy. Returns only
+        metadata after the complete optimized PDF is stored. Sets an HttpOnly,
+        SameSite Strict browser cookie scoped to the download URL. Ready exports
+        expire after five minutes (or the attempt credential expiry, if earlier).
+        422 refuses incomplete papers; 429 with Retry-After indicates a busy renderer
+        or another preparation for the same owner, attempt and browser session.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                view: { type: object, nullable: true, description: Existing score report presentation }
+      responses:
+        "200":
+          description: Complete PDF ready for a direct download in the preparing browser
+          headers:
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+            Set-Cookie: { schema: { type: string }, description: Export-scoped browser binding; contains no attempt bearer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PreparedAnsweredExamPDF" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /sat-answered-pdf/downloads/{exportId}:
+    parameters:
+      - name: exportId
+        in: path
+        required: true
+        schema: { type: string, pattern: "^[0-9a-f]{32}$" }
+    get:
+      tags: [sat, results]
+      summary: Download a prepared PDF as an attachment
+      description: |-
+        Requires the preparing browser's export cookie and freshly rechecks the
+        original student or staff entitlement. Staff additionally require their
+        current session. No attempt credentials appear in the URL. Requests are
+        repeatable until expiry, including byte ranges and interrupted transfers.
+      security:
+        - pdfDownloadCookie: []
+      parameters:
+        - name: Range
+          in: header
+          schema: { type: string }
+        - name: If-Range
+          in: header
+          schema: { type: string }
+      responses:
+        "200":
+          description: Complete PDF
+          headers:
+            Content-Disposition: { schema: { type: string }, description: attachment with the configured filename }
+            Content-Length: { schema: { type: integer, format: int64 } }
+            Accept-Ranges: { schema: { type: string, enum: [bytes] } }
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "206":
+          description: Requested PDF byte range
+          headers:
+            Content-Range: { schema: { type: string } }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "416": { description: Unsatisfiable byte range }
+        "429": { $ref: "#/components/responses/Error" }
+    head:
+      tags: [sat, results]
+      summary: Inspect a prepared PDF without transferring its body
+      description: Same browser binding, entitlement and expiry rules as GET. Does not consume the export.
+      security:
+        - pdfDownloadCookie: []
+      responses:
+        "200":
+          description: PDF headers only
+          headers:
+            Content-Length: { schema: { type: integer, format: int64 } }
+            Content-Disposition: { schema: { type: string } }
+            Accept-Ranges: { schema: { type: string, enum: [bytes] } }
+            Cache-Control: { schema: { type: string, enum: ["private, no-store"] } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /sat-answered-pdf/schedules/{scheduleId}:
     post:
       tags: [sat, results]
@@ -4910,6 +5064,11 @@ paths:
         "422": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
+    pdfDownloadCookie:
+      type: apiKey
+      in: cookie
+      name: sat-pdf-download
+      description: Random HttpOnly SameSite Strict cookie scoped to one export URL; five-minute lifetime.
     cookieAuth:
       type: apiKey
       in: cookie
@@ -4985,6 +5144,14 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    PreparedAnsweredExamPDF:
+      type: object
+      required: [downloadUrl, filename, sizeBytes, expiresAt]
+      properties:
+        downloadUrl: { type: string, pattern: "^/api/v1/sat-answered-pdf/downloads/[0-9a-f]{32}$" }
+        filename: { type: string }
+        sizeBytes: { type: integer, format: int64, minimum: 1 }
+        expiresAt: { type: string, format: date-time }
     SATScoreConversionScore:
       type: object
       required: [low, high]

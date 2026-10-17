@@ -278,10 +278,11 @@ export function SatStudentSessionRoute({
     />
   ) : null;
 
+  const releaseCompletedMedia = useCallback(() => releaseAssessmentDeliveryMedia(scheduleId, attemptId), [scheduleId, attemptId]);
   const stageHost = (target: SatStudentStage, children: ReactNode) => (
     <>
       <SatTemporalRuntime model={exam.temporalModel ?? null} onBoundary={exam.onTemporalBoundary}>
-        <SatStudentStageHost stage={target} instant={attemptChanged}>
+        <SatStudentStageHost stage={target} instant={attemptChanged} onExitComplete={target.kind === "complete" ? releaseCompletedMedia : undefined}>
           {children}
         </SatStudentStageHost>
       </SatTemporalRuntime>
@@ -465,10 +466,9 @@ export function SatStudentSessionRoute({
         result={data.result ?? result}
         onExit={onExit}
         answered={{
+          key: `student:${scheduleId}:${attemptId}`,
           sections: data.sections,
-          load: () => assessmentDeliveryApi.answeredExam(scheduleId, attemptId),
-          loadMediaUrl,
-          renderPdf: (request) => assessmentDeliveryApi.answeredExamPdf(scheduleId, attemptId, request),
+          preparePdf: (request, signal) => assessmentDeliveryApi.answeredExamPdf(scheduleId, attemptId, request, signal),
         }}
       />,
     );

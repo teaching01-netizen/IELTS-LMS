@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"example.com/ielts-proctoring/internal/act"
+	"example.com/ielts-proctoring/internal/answeredpdf"
 	shared "example.com/ielts-proctoring/internal/app"
 	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/liveupdates"
@@ -49,6 +50,7 @@ var Jobs = []string{
 	"RunGradingProjection",
 	"RunRetention",
 	"RunMediaCleanup",
+	"RunSATPDFCleanup",
 	"NormalizeMediaDownloadURLs",
 	"RepairACTCanonicalResults",
 }
@@ -67,15 +69,16 @@ type terminalSealer interface {
 }
 
 type Runner struct {
-	cfg      config.Config
-	db       *sql.DB
-	outbox   *outbox.Repository
-	sat      *sat.Service
-	act      *act.Service
-	delivery deliveryService
-	proctor  *proctor.Service
-	student  *student.Service
-	terminal *terminalization.Service
+	cfg        config.Config
+	db         *sql.DB
+	pdfExports *answeredpdf.Exports
+	outbox     *outbox.Repository
+	sat        *sat.Service
+	act        *act.Service
+	delivery   deliveryService
+	proctor    *proctor.Service
+	student    *student.Service
+	terminal   *terminalization.Service
 	// sealer overrides terminal when set (tests only; nil = production).
 	sealer   terminalSealer
 	liveBus  *liveupdates.Bus
@@ -125,8 +128,9 @@ func New(cfg config.Config, pool *sql.DB, deps shared.Deps) *Runner {
 	}
 	return &Runner{
 		cfg: cfg, db: pool,
-		outbox: outbox.NewRepository(pool).WithClaim(cfg.WorkerClaimPartitions, 0, claimMode),
-		sat:    svc.SAT, act: svc.ACT, delivery: svc.Delivery,
+		pdfExports: svc.PDFExports,
+		outbox:     outbox.NewRepository(pool).WithClaim(cfg.WorkerClaimPartitions, 0, claimMode),
+		sat:        svc.SAT, act: svc.ACT, delivery: svc.Delivery,
 		proctor: svc.Proctor, student: svc.Student, terminal: svc.Terminal,
 		liveBus: deps.LiveBus, liveHub: deps.LiveHub, workerID: workerID,
 	}
@@ -984,6 +988,13 @@ func (w *Runner) runMaintenanceCycle(ctx context.Context, at time.Time) {
 		log.Printf("worker: RunRetention total=%d cache=%d idempotency=%d authoringKeys=%d sessions=%d heartbeats=%d mutations=%d outbox=%d ratelimit=%d live=%d leases=%d",
 			rep.Total(), rep.CacheRows, rep.IdempotencyRows, rep.AuthoringOpKeyRows, rep.UserSessionRows, rep.HeartbeatRows,
 			rep.MutationRows, rep.OutboxRows, rep.RateLimitRows, rep.LiveUpdateRows, rep.LeaseRows)
+	}
+	if w.pdfExports != nil {
+		if n, err := w.pdfExports.Cleanup(ctx, 100); err != nil {
+			log.Printf("worker: RunSATPDFCleanup failed")
+		} else if n > 0 {
+			log.Printf("worker: RunSATPDFCleanup deleted=%d", n)
+		}
 	}
 	if rep, err := maintenance.RunMedia(ctx, w.db); err != nil {
 		log.Printf("worker: RunMediaCleanup error: %v", err)

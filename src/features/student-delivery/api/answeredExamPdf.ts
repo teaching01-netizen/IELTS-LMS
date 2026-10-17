@@ -1,37 +1,53 @@
-import { apiClient } from '../../../shared/api/apiClient';
+import { apiClient } from "../../../shared/api/apiClient";
 
-/** What the browser posts for a server-rendered answered-exam PDF. */
-export interface AnsweredExamPdfRequest {
-  title: string;
-  view: unknown;
-  /** Figures the paper loaded, as data:image URLs keyed by media id. */
-  media: Record<string, string>;
+export interface PreparedAnsweredExamPdf {
+  downloadUrl: string;
+  filename: string;
+  sizeBytes: number;
+  expiresAt: string;
 }
 
-/**
- * POSTs the request and returns the PDF. A non-OK answer throws with its
- * `statusCode`, so the attempt bearer's 401 refresh still applies.
- */
-export async function postAnsweredExamPdf(
+export interface PrepareAnsweredExamPdfRequest {
+  view: unknown;
+}
+
+/** Only a small JSON response enters JavaScript; the browser downloads the file. */
+export async function prepareAnsweredExamPdf(
   endpoint: string,
-  body: AnsweredExamPdfRequest,
-  headers?: Record<string, string>,
-): Promise<Blob> {
+  body: PrepareAnsweredExamPdfRequest,
+  signal: AbortSignal,
+  headers?: Record<string, string>
+): Promise<PreparedAnsweredExamPdf> {
   const csrfToken = apiClient.getCsrfToken();
   const response = await fetch(endpoint, {
-    method: 'POST',
-    credentials: 'same-origin',
+    method: "POST",
+    credentials: "same-origin",
+    signal,
     headers: {
-      'content-type': 'application/json',
-      ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
+      "content-type": "application/json",
+      ...(csrfToken ? { "x-csrf-token": csrfToken } : {}),
       ...headers,
     },
     body: JSON.stringify(body),
   });
-  if (!response.ok) {
-    throw Object.assign(new Error(`PDF request failed (${response.status}).`), { statusCode: response.status });
+  if (!response.ok)
+    throw Object.assign(new Error(`PDF preparation failed (${response.status}).`), {
+      statusCode: response.status,
+    });
+  const pdf = (await response.json()) as PreparedAnsweredExamPdf | null;
+  if (
+    !pdf ||
+    typeof pdf.downloadUrl !== "string" ||
+    typeof pdf.expiresAt !== "string" ||
+    !/^\/api\/v1\/sat-answered-pdf\/downloads\/[0-9a-f]{32}$/.test(pdf.downloadUrl) ||
+    typeof pdf.filename !== "string" ||
+    !pdf.filename.endsWith(".pdf") ||
+    !Number.isSafeInteger(pdf.sizeBytes) ||
+    pdf.sizeBytes <= 0 ||
+    !Number.isFinite(Date.parse(pdf.expiresAt)) ||
+    Date.parse(pdf.expiresAt) <= Date.now()
+  ) {
+    throw new Error("PDF preparation returned no usable download.");
   }
-  const pdf = await response.blob();
-  if (pdf.type !== 'application/pdf') throw new Error('PDF request returned no PDF.');
   return pdf;
 }
