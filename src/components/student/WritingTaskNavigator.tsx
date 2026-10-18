@@ -61,7 +61,7 @@ export function WritingTaskNavigator({
         event.preventDefault();
         onClose();
       }}
-      className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] flex flex-col p-0 backdrop:bg-black/50"
+      className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[calc(var(--student-vh,1vh)*90)] flex flex-col p-0 backdrop:bg-black/50"
       aria-labelledby="writing-task-navigator-title"
       aria-modal="true"
     >

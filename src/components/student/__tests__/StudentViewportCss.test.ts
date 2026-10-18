@@ -11,8 +11,13 @@ describe('student exam viewport shell CSS', () => {
     expect(shellRule).toBeDefined();
     expect(shellRule).toMatch(/position:\s*relative\s*;/);
     expect(shellRule).toMatch(/min-height:\s*0\s*;/);
-    expect(shellRule).toMatch(/height:\s*var\(--student-exam-height,\s*100dvh\)\s*;/);
-    expect(shellRule).toMatch(/max-height:\s*var\(--student-exam-height,\s*100dvh\)\s*;/);
+    // Divided by the shell's own zoom so the footer stays on screen.
+    expect(shellRule).toMatch(
+      /height:\s*calc\(var\(--student-exam-height,\s*100dvh\)\s*\/\s*var\(--student-exam-zoom,\s*1\)\)\s*;/,
+    );
+    expect(shellRule).toMatch(
+      /max-height:\s*calc\(var\(--student-exam-height,\s*100dvh\)\s*\/\s*var\(--student-exam-zoom,\s*1\)\)\s*;/,
+    );
     expect(css).not.toContain('--student-visual-viewport-height');
     expect(css).not.toContain('--student-viewport-height');
     expect(css).not.toContain('--student-viewport-offset-top');

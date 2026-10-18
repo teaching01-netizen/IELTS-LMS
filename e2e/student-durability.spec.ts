@@ -104,7 +104,7 @@ async function waitForBlockedAttention(page: Page, timeoutMs = 45_000) {
           const body = document.body?.innerText ?? '';
           const status = document.querySelector('[data-testid="student-auto-save-status"]')?.textContent ?? '';
           const banner = document.querySelector('[role="banner"]')?.textContent ?? '';
-          const hit = /needs attention|need re-check|kept on this device|not synced|offline|retrying|error/i.test(`${body} ${status} ${banner}`);
+          const hit = /needs attention|need re-check|kept on this device|not synced|not saved|offline|retrying|error/i.test(`${body} ${status} ${banner}`);
           return hit ? `${status} | ${banner.slice(0, 200)}` : null;
         }),
       { timeout: timeoutMs, message: 'student surface shows blocked/needs-attention copy' },
@@ -393,7 +393,7 @@ test.describe('Student durability surface (frozen V2 candidate)', () => {
     const flagSurvived = await page
       .evaluate(() => {
         const flagButtons = Array.from(
-          document.querySelectorAll('button[aria-label="Flag question"], button[aria-label="Unflag question"]'),
+          document.querySelectorAll('button[aria-label^="Flag question"], button[aria-label^="Unflag question"]'),
         );
         if (flagButtons.some((button) => button.getAttribute('aria-pressed') === 'true')) return true;
         const pressedFlag = Array.from(document.querySelectorAll('[aria-pressed="true"]')).some((element) =>
@@ -1159,7 +1159,7 @@ test.describe('Student durability surface (frozen V2 candidate)', () => {
             const status = document.querySelector('[data-testid="student-auto-save-status"]')?.textContent ?? '';
             const banner = document.querySelector('[role="banner"]')?.textContent ?? '';
             const body = document.body?.innerText ?? '';
-            if (/not synced|needs attention|storage|unavailable|retrying|error/i.test(`${status} ${banner} ${body}`)) {
+            if (/not synced|not saved|needs attention|storage|unavailable|retrying|error/i.test(`${status} ${banner} ${body}`)) {
               return `${status} | ${banner.slice(0, 160)}`;
             }
             return null;
@@ -1170,7 +1170,7 @@ test.describe('Student durability surface (frozen V2 candidate)', () => {
 
     const statusText =
       (await page.getByTestId('student-auto-save-status').textContent().catch(() => '')) ?? '';
-    expect(/saved/i.test(statusText) && !/not synced/i.test(statusText)).toBe(false);
+    expect(/saved/i.test(statusText) && !/not (synced|saved)/i.test(statusText)).toBe(false);
 
     // Input retained visible: the faulted keystroke is still the field value.
     await expect(page.getByLabel('Answer for question 1')).toHaveValue(faultAnswer);

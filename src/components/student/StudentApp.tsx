@@ -17,6 +17,11 @@ import { StudentExamShell } from "./layout/StudentExamShell";
 import { StudentExamViewport } from "./layout/StudentExamViewport";
 import { useStudentExamViewport } from "./layout/useStudentExamViewport";
 import { useStudentExamPageLock } from "./layout/useStudentExamPageLock";
+import {
+  useMediaQuery,
+  useRootTextScale,
+  useSystemTextScale,
+} from "./useSystemAccessibilityPreferences";
 import { useStudentFocusedControlVisibility } from "./layout/useStudentFocusedControlVisibility";
 import { useStudentLayoutEnvironment } from "./layout/useStudentLayoutEnvironment";
 import "./SubmitConfirmation";
@@ -189,7 +194,18 @@ export function StudentApp({
   const examSessionStore = useStudentExamSessionStore();
   const { state: uiState, actions: uiActions } = useStudentUI();
   const { registerSubmitHandler } = useKeyboardSubmitHandler();
-  const layoutEnvironment = useStudentLayoutEnvironment();
+  // HIG: IELTS follows the iPad's own Text Size and Increase Contrast
+  // settings, on top of the exam's Tools preferences. ACT keeps its tuning.
+  const isIeltsExam = examState.type !== "ACT";
+  const systemTextScale = useSystemTextScale(isIeltsExam);
+  useRootTextScale(systemTextScale);
+  const prefersMoreContrast = useMediaQuery("(prefers-contrast: more)");
+  const highContrast =
+    uiState.accessibilitySettings.highContrast || (isIeltsExam && prefersMoreContrast);
+  const layoutEnvironment = useStudentLayoutEnvironment(
+    uiState.accessibilitySettings.zoom,
+    getStudentTypographyScale(uiState.accessibilitySettings.fontSize).fontScale * systemTextScale,
+  );
   const layoutMode = layoutEnvironment.layoutMode;
   const tabletMode =
     layoutMode !== "phone" &&
@@ -210,7 +226,9 @@ export function StudentApp({
       getStudentPassageReadabilityGeometry(uiState.accessibilitySettings.passageReadabilityLevel),
     [uiState.accessibilitySettings.passageReadabilityLevel]
   );
-  useZoomScrollAnchoring(uiState.accessibilitySettings.zoom * studentTypography.fontScale);
+  useZoomScrollAnchoring(
+    uiState.accessibilitySettings.zoom * studentTypography.fontScale * systemTextScale,
+  );
   const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
   const { resetHighlightTool } = uiActions;
   const timeExtensionReason =
@@ -238,6 +256,9 @@ export function StudentApp({
     () =>
       ({
         zoom: uiState.accessibilitySettings.zoom,
+        ...(isIeltsExam
+          ? { ["--student-exam-zoom" as string]: uiState.accessibilitySettings.zoom }
+          : {}),
         fontSize: studentTypography.rootFontSize,
         lineHeight: studentTypography.lineHeight,
         ["--student-meta-font-size" as string]: studentTypography.metaFontSize,
@@ -254,6 +275,7 @@ export function StudentApp({
           passageReadabilityGeometry.lineHeightFactor
         ).toFixed(2),
         ["--student-passage-measure" as string]: passageReadabilityGeometry.measure,
+        ["--student-passage-prose-measure" as string]: passageReadabilityGeometry.proseMeasure,
         ["--student-question-font-size" as string]: studentTypography.questionFontSize,
         ["--student-question-line-height" as string]: studentTypography.questionLineHeight,
         ["--student-answer-font-size" as string]: studentTypography.answerFontSize,
@@ -263,7 +285,7 @@ export function StudentApp({
         ["--student-writing-prompt-font-size" as string]: studentTypography.writingPromptFontSize,
         ["--student-writing-prompt-line-height" as string]: studentTypography.writingPromptLineHeight,
       }) as React.CSSProperties,
-    [passageReadabilityGeometry, studentTypography, uiState.accessibilitySettings.zoom]
+    [isIeltsExam, passageReadabilityGeometry, studentTypography, uiState.accessibilitySettings.zoom]
   );
   const runtimeStateRef = useRef(runtimeState);
   const runtimeActionsRef = useRef(runtimeActions);
@@ -943,7 +965,7 @@ export function StudentApp({
     <StudentExamShell
       layoutMode={layoutMode}
       examType={examState.type}
-      highContrast={uiState.accessibilitySettings.highContrast}
+      highContrast={highContrast}
       touchMode={tabletMode}
       style={studentShellStyle}
       keyboardOpen={examViewportActive ? examViewport.keyboardOpen : false}
@@ -1216,6 +1238,7 @@ export function StudentApp({
         onClose={() => uiActions.setShowAccessibility(false)}
         fontSize={uiState.accessibilitySettings.fontSize}
         highContrast={uiState.accessibilitySettings.highContrast}
+        systemHighContrast={isIeltsExam && prefersMoreContrast}
         zoom={uiState.accessibilitySettings.zoom}
         passageReadabilityLevel={uiState.accessibilitySettings.passageReadabilityLevel}
         playbackRate={uiState.accessibilitySettings.playbackRate}

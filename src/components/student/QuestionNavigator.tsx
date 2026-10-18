@@ -106,7 +106,7 @@ export function QuestionNavigator({
 
       <div className="p-3 md:p-4 border-b border-gray-100 bg-gray-50 flex flex-wrap gap-x-3 md:gap-x-5 gap-y-1.5 text-xs md:text-sm">
         <div className="flex items-center gap-1.5 md:gap-2">
-          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-blue-800 rounded-sm"></div>
+          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-blue-800 rounded-sm ring-2 ring-blue-800 ring-offset-1"></div>
           <span>Current</span>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
@@ -116,11 +116,13 @@ export function QuestionNavigator({
           <span>Fully answered ({summary.fullyAnswered})</span>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
-          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-green-200 rounded-sm border border-green-700"></div>
+          <div className="relative w-3.5 md:w-4 h-3.5 md:h-4 bg-green-200 rounded-sm border border-green-700">
+            <span className="absolute bottom-0.5 right-0.5 h-1 w-1 rounded-full bg-green-900" aria-hidden="true" />
+          </div>
           <span>Partially answered ({summary.partiallyAnswered})</span>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
-          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-gray-100 rounded-sm border border-gray-200"></div>
+          <div className="w-3.5 md:w-4 h-3.5 md:h-4 bg-gray-100 rounded-sm border border-dashed border-gray-500"></div>
           <span>Unanswered ({summary.unanswered})</span>
         </div>
         <div className="flex items-center gap-1.5 md:gap-2">
@@ -148,23 +150,39 @@ export function QuestionNavigator({
                     type="button"
                     key={item.navigationId}
                     onClick={() => navigateToQuestion(item.navigationId)}
-                    aria-label={`Question ${item.label}${isCurrent ? ', current' : ''}${isFullyComplete ? ', complete' : item.answered ? ', answered' : ', not answered'}${isFlagged ? ', flagged' : ''}`}
+                    aria-label={`Question ${item.label}${isCurrent ? ', current' : ''}${isFullyComplete ? ', complete' : item.answered ? ', partially answered' : ', not answered'}${isFlagged ? ', flagged' : ''}`}
+                    aria-current={isCurrent ? 'true' : undefined}
                     className={`
-                      relative h-11 md:h-12 rounded-md border border-transparent flex items-center justify-center text-[length:var(--student-control-font-size)] font-medium transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out
+                      relative h-11 md:h-12 rounded-md border flex items-center justify-center text-[length:var(--student-control-font-size)] font-medium transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out
                       ${
                         isCurrent
-                          ? 'bg-blue-800 text-white border-blue-800 hover:bg-blue-700 active:bg-blue-800'
+                          ? 'bg-blue-800 text-white border-blue-800 ring-2 ring-blue-800 ring-offset-2 hover:bg-blue-700 active:bg-blue-800'
                           : isFlagged
                             ? 'bg-amber-100 text-amber-800 border-amber-300 hover:bg-amber-200 active:bg-amber-300'
                             : isFullyComplete
-                              ? 'bg-green-800 text-white hover:bg-green-900 active:bg-green-900'
+                              ? 'bg-green-800 text-white border-green-800 hover:bg-green-900 active:bg-green-900'
                               : item.answered
-                                ? 'bg-green-200 text-green-900 hover:bg-green-300 active:bg-green-400'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300'
+                                ? 'bg-green-200 text-green-900 border-green-700 hover:bg-green-300 active:bg-green-400'
+                                : 'bg-gray-100 text-gray-700 border-dashed border-gray-500 hover:bg-gray-200 active:bg-gray-300'
                       }
                     `}
                   >
                     <span aria-hidden="true">{item.label}</span>
+                    {/* Answer state as shape, not only fill: a check when
+                        complete, a dot when partial, a dashed edge when empty. */}
+                    {isFullyComplete ? (
+                      <Check
+                        size={10}
+                        strokeWidth={3.5}
+                        aria-hidden="true"
+                        className="absolute bottom-0.5 right-0.5"
+                      />
+                    ) : item.answered ? (
+                      <span
+                        aria-hidden="true"
+                        className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-current"
+                      />
+                    ) : null}
                     {isFlagged ? (
                       <div className="absolute -top-1 md:-top-1.5 -right-1 md:-right-1.5 w-3.5 md:w-4 h-3.5 md:h-4 bg-amber-500 rounded-full flex items-center justify-center shadow-sm">
                         <Flag size={6} className="text-white fill-white" />

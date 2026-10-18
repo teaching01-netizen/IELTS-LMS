@@ -294,7 +294,7 @@ describe('StudentWriting a11y', () => {
       />,
     );
 
-    const headerLabel = screen.getByText('Writing Response');
+    const headerLabel = screen.getByText('Your response');
     const headerRow = headerLabel.closest('div');
     if (!headerRow) {
       throw new Error('Expected writing header row to render');
@@ -371,7 +371,7 @@ describe('StudentWriting a11y', () => {
       />,
     );
 
-    const headerLabel = screen.getByText('Writing Response');
+    const headerLabel = screen.getByText('Your response');
     const headerRow = headerLabel.closest('div');
     if (!headerRow) {
       throw new Error('Expected writing header row to render');
@@ -526,7 +526,7 @@ describe('StudentWriting a11y', () => {
     const wordCount = screen.getByLabelText(/current word count/i);
     const bottomWordCount = container.querySelector('.border-t.border-gray-200.p-3');
 
-    expect(wordCount).toHaveTextContent('Word Count');
+    expect(wordCount).toHaveTextContent('Word count');
     expect(wordCount).toHaveTextContent('3');
     expect(wordCount.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(bottomWordCount).not.toBeInTheDocument();
@@ -554,7 +554,7 @@ describe('StudentWriting a11y', () => {
       />,
     );
 
-    const stimulus = screen.getByText(/stimulus chart/i).closest('.rounded-xl');
+    const stimulus = screen.getByText(/task figure/i).closest('.rounded-xl');
     if (!stimulus) {
       throw new Error('Expected stimulus chart container');
     }

@@ -148,6 +148,7 @@ export function SubAnswerTreeQuestionList({
                       <StudentFlagButton
                         flagged={isFlagged}
                         size="compact"
+                        questionLabel={displayNumber}
                         onToggle={() => onToggleFlag(slotId)}
                       />
                     ) : null}

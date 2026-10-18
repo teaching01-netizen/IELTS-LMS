@@ -36,7 +36,6 @@ interface StudentListeningProps {
   highlightClassName?: string | undefined;
   tabletMode?: boolean | undefined;
   layoutMode?: StudentLayoutMode | undefined;
-  contentZoom?: number | undefined;
   playbackRate?: StudentPlaybackRate | undefined;
   onPlaybackRateChange?: ((rate: StudentPlaybackRate) => void) | undefined;
   registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
@@ -72,35 +71,13 @@ export function StudentListening({
   highlightClassName,
   tabletMode = false,
   layoutMode = "wide",
-  contentZoom = 1,
   playbackRate = 1,
   onPlaybackRateChange,
   registerLiveAnswer,
   persistenceKeyBase,
 }: StudentListeningProps) {
+  // The exam shell (StudentApp) is the single owner of the zoom preference.
   const isTabletMode = Boolean(tabletMode);
-  const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
-  const supportsCssZoom =
-    typeof CSS !== "undefined" &&
-    typeof CSS.supports === "function" &&
-    CSS.supports("zoom", "1.01");
-  const tabletContentZoomStyle = useMemo<React.CSSProperties | undefined>(() => {
-    if (!isTabletMode || clampedContentZoom === 1) {
-      return undefined;
-    }
-
-    if (supportsCssZoom) {
-      return { zoom: clampedContentZoom };
-    }
-
-    const inverseZoom = 1 / clampedContentZoom;
-    return {
-      transform: `scale(${clampedContentZoom})`,
-      transformOrigin: "top left",
-      width: `${inverseZoom * 100}%`,
-      minHeight: `${inverseZoom * 100}%`,
-    };
-  }, [clampedContentZoom, isTabletMode, supportsCssZoom]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(70);
@@ -405,9 +382,6 @@ export function StudentListening({
               : "lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12"
           }`}
           data-student-zoom-scroll
-          style={{
-            ...(tabletContentZoomStyle ?? {}),
-          }}
         >
           <h2
             className={`${materialCompact ? "mb-2 text-base md:text-lg" : "mb-4 text-lg md:mb-6 md:text-xl"} font-bold break-words [overflow-wrap:anywhere]`}
@@ -567,7 +541,7 @@ export function StudentListening({
                     key={pin.id}
                     className="flex items-center gap-2 md:gap-3 p-2 bg-gray-50 border border-gray-200 rounded-lg"
                   >
-                    <span className="font-mono text-[length:var(--student-meta-font-size)] text-blue-600 bg-blue-100 px-2 py-0.5 rounded">
+                    <span className="font-mono text-[length:var(--student-meta-font-size)] text-blue-800 bg-blue-100 px-2 py-0.5 rounded">
                       {pin.time}
                     </span>
                     <span className="text-[length:var(--student-control-font-size)] text-gray-700">
@@ -651,7 +625,7 @@ export function StudentListening({
         highlightColor,
         registerLiveAnswer,
         questionContainerRef,
-        contentZoomStyle: tabletContentZoomStyle,
+        contentZoomStyle: undefined,
         panelTestId: "listening-question-scroll",
         getBlockStartQuestionNumber,
         renderBlockInstruction,

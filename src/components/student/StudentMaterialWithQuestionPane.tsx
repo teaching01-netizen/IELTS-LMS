@@ -7,9 +7,6 @@ import type { StudentLayoutMode } from "./layout/studentLayoutMode";
 import { StudentQuestionPanel } from "./StudentQuestionPanel";
 import { StudentSplitPaneResizer, type StudentSplitResizeCommands } from "./StudentSplitPaneResizer";
 
-const paneTabClassName =
-  "student-touch-target flex-1 rounded-sm border px-3 text-sm font-semibold transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out";
-
 interface StudentMaterialWithQuestionPaneProps {
   isTabletMode: boolean;
   layoutMode?: StudentLayoutMode | undefined;
@@ -247,14 +244,9 @@ export function StudentMaterialWithQuestionPane({
           ref={workspaceRef}
           data-testid={workspaceTestId}
         >
-          <div className="student-compact-pane-tabs flex flex-shrink-0 gap-2 border-b border-gray-200 bg-gray-50 p-2">
+          <div className="student-compact-pane-tabs student-segmented" role="group" aria-label="Show">
             <button
               type="button"
-              className={`${paneTabClassName} ${
-                activeCompactPane === "material"
-                  ? "border-blue-700 bg-blue-50 text-blue-900 active:bg-blue-100"
-                  : "border-gray-300 bg-white text-gray-900"
-              }`}
               aria-pressed={activeCompactPane === "material"}
               onClick={() => selectCompactPane("material")}
             >
@@ -262,11 +254,6 @@ export function StudentMaterialWithQuestionPane({
             </button>
             <button
               type="button"
-              className={`${paneTabClassName} ${
-                activeCompactPane === "questions"
-                  ? "border-blue-700 bg-blue-50 text-blue-900 active:bg-blue-100"
-                  : "border-gray-300 bg-white text-gray-900"
-              }`}
               aria-pressed={activeCompactPane === "questions"}
               onClick={() => selectCompactPane("questions")}
             >

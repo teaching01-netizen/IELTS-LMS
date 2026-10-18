@@ -17,13 +17,17 @@ import type { StudentHighlightToolMode } from "../providers/StudentUIProvider";
 import type { ExamType } from "../../../types";
 import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
 import { StudentToolsSheet } from "./StudentToolsSheet";
+import {
+  getStudentSaveStatusPresentation,
+  type StudentAutoSaveStatus,
+} from "../saveStatusPresentation";
 
 interface CompactStudentHeaderProps {
   readonly examType?: ExamType | undefined;
   readonly moduleLabel: string;
   readonly testTakerId?: string | undefined;
   readonly timeRemaining?: number | undefined;
-  readonly autoSaveStatus?: "saved" | "saving" | "syncing" | "offline" | "error" | null | undefined;
+  readonly autoSaveStatus?: StudentAutoSaveStatus | null | undefined;
   readonly highlightEnabled?: boolean | undefined;
   readonly highlightToolMode?: StudentHighlightToolMode | undefined;
   readonly highlightColor?: StudentHighlightColor | undefined;
@@ -43,7 +47,11 @@ function formatTime(seconds: number): string {
   return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
-const sheetActionClassName = `student-touch-target flex items-center gap-3 rounded-sm border border-gray-200 px-3 text-left text-sm font-semibold text-gray-900 hover:bg-gray-50 transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out`;
+// Inset-grouped cells: a filled row with no resting outline; the active
+// state adds an edge so it never relies on the tint alone.
+const sheetActionClassName = `student-touch-target flex items-center gap-3 rounded-xl border px-3 text-left text-[length:var(--student-control-font-size)] font-semibold text-gray-900 transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out`;
+const sheetActionRestClassName = "border-transparent bg-gray-100 hover:bg-gray-200 active:bg-gray-200";
+const sheetActionActiveClassName = "border-blue-700 bg-blue-50";
 
 export function CompactStudentHeader({
   examType = "Academic",
@@ -63,6 +71,7 @@ export function CompactStudentHeader({
   onOpenAccessibility,
   onOpenNavigator,
 }: CompactStudentHeaderProps) {
+  const saveStatus = autoSaveStatus ? getStudentSaveStatusPresentation(autoSaveStatus) : null;
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsTriggerRef = useRef<HTMLButtonElement>(null);
   const closeTools = useCallback(() => {
@@ -120,30 +129,22 @@ export function CompactStudentHeader({
         </div>
       ) : null}
 
-      {autoSaveStatus ? (
+      {saveStatus ? (
         <span
-          className={`flex min-h-8 max-w-28 flex-shrink-0 items-center justify-center rounded-sm px-1.5 text-[10px] font-semibold uppercase tracking-tight ${
-            autoSaveStatus === "saved"
-              ? "text-green-900"
-              : autoSaveStatus === "offline"
-                ? "text-amber-800"
-                : autoSaveStatus === "error"
-                  ? "text-red-700"
-                  : "text-gray-700"
+          className={`flex min-h-8 max-w-32 flex-shrink-0 items-center justify-center rounded-sm px-1.5 text-[length:var(--student-meta-font-size)] font-semibold whitespace-nowrap ${
+            {
+              success: "text-green-900",
+              neutral: "text-gray-700",
+              warning: "text-amber-800",
+              danger: "text-red-700",
+            }[saveStatus.tone]
           }`}
           role="status"
           aria-live="polite"
           data-testid="student-auto-save-status"
         >
-          {autoSaveStatus === "syncing"
-            ? "Syncing"
-            : autoSaveStatus === "saving"
-              ? "Saving"
-              : autoSaveStatus === "offline"
-                ? "Offline"
-                : autoSaveStatus === "error"
-                  ? "Not synced"
-                  : "Saved"}
+          {saveStatus.shortLabel}
+          <span className="sr-only">{saveStatus.label.slice(saveStatus.shortLabel.length)}</span>
         </span>
       ) : null}
 
@@ -163,7 +164,7 @@ export function CompactStudentHeader({
         {shouldShowChoiceEliminationTool ? (
           <button
             type="button"
-            className={`${sheetActionClassName} ${choiceEliminationEnabled ? "border-blue-700 bg-blue-50" : ""}`}
+            className={`${sheetActionClassName} ${choiceEliminationEnabled ? sheetActionActiveClassName : sheetActionRestClassName}`}
             aria-pressed={choiceEliminationEnabled}
             onClick={() => {
               onToggleChoiceElimination?.();
@@ -178,7 +179,7 @@ export function CompactStudentHeader({
         {onOpenNavigator ? (
           <button
             type="button"
-            className={sheetActionClassName}
+            className={`${sheetActionClassName} ${sheetActionRestClassName}`}
             onClick={() => {
               onOpenNavigator();
               closeTools();
@@ -194,7 +195,7 @@ export function CompactStudentHeader({
           <>
             <button
               type="button"
-              className={`${sheetActionClassName} ${highlightToolMode === "highlight" ? "border-blue-700 bg-blue-50" : ""}`}
+              className={`${sheetActionClassName} ${highlightToolMode === "highlight" ? sheetActionActiveClassName : sheetActionRestClassName}`}
               aria-pressed={highlightToolMode === "highlight"}
               onClick={onToggleHighlightMode}
               data-student-primary-touch-target
@@ -208,13 +209,16 @@ export function CompactStudentHeader({
                 aria-hidden="true"
               />
             </button>
-            <div className="grid grid-cols-2 gap-2" aria-label="Highlight colors">
+            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Highlight colors">
               {studentHighlightPalette.map((entry) => (
                 <button
                   key={entry.id}
                   type="button"
-                  className="student-touch-target flex items-center gap-2 rounded-sm border border-gray-200 px-3 text-sm font-semibold text-gray-800 transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out hover:bg-gray-50"
+                  className={`student-touch-target flex items-center gap-2 rounded-xl border px-3 text-[length:var(--student-control-font-size)] font-semibold text-gray-900 transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out ${
+                    highlightColor === entry.id ? sheetActionActiveClassName : sheetActionRestClassName
+                  }`}
                   aria-label={entry.label}
+                  aria-pressed={highlightColor === entry.id}
                   onClick={() => onSelectHighlightColor?.(entry.id)}
                   data-student-primary-touch-target
                 >
@@ -223,15 +227,13 @@ export function CompactStudentHeader({
                     aria-hidden="true"
                   />
                   <span className="flex-1 text-left">{entry.label}</span>
-                  {highlightToolMode === "highlight" && highlightColor === entry.id ? (
-                    <Check size={16} aria-hidden="true" />
-                  ) : null}
+                  {highlightColor === entry.id ? <Check size={16} aria-hidden="true" /> : null}
                 </button>
               ))}
             </div>
             <button
               type="button"
-              className={`${sheetActionClassName} ${highlightToolMode === "erase" ? "border-blue-700 bg-blue-50" : ""}`}
+              className={`${sheetActionClassName} ${highlightToolMode === "erase" ? sheetActionActiveClassName : sheetActionRestClassName}`}
               aria-pressed={highlightToolMode === "erase"}
               onClick={onSelectEraseMode}
               data-student-primary-touch-target
@@ -245,7 +247,7 @@ export function CompactStudentHeader({
         {onOpenAccessibility ? (
           <button
             type="button"
-            className={sheetActionClassName}
+            className={`${sheetActionClassName} ${sheetActionRestClassName}`}
             onClick={() => {
               onOpenAccessibility();
               closeTools();

@@ -268,6 +268,7 @@ export const StudentQuestionBlockSection = React.memo(
                     <div className="student-question-row-action">
                       <StudentFlagButton
                         flagged={Boolean(flags[flagId])}
+                        questionLabel={globalQuestionNumber}
                         onToggle={(event) => {
                           event.stopPropagation();
                           onToggleFlag?.(flagId);
@@ -322,6 +323,7 @@ export const StudentQuestionBlockSection = React.memo(
                 <div className="student-question-row-action">
                   <StudentFlagButton
                     flagged={Boolean(flags[singleBlockQuestion.id])}
+                    questionLabel={getQuestionStartNumber(allQuestions, singleBlockQuestion.id) ?? blockStartQ}
                     onToggle={(event) => {
                       event.stopPropagation();
                       onToggleFlag(singleBlockQuestion.id);

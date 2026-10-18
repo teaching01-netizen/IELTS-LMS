@@ -173,6 +173,13 @@ export function StudentFooter({
                         aria-current={isCurrent ? 'true' : undefined}
                       >
                         {displayLabel}
+                        {/* Answered is also a shape (underline), not only green. */}
+                        {isAnswered && !isCurrent ? (
+                          <span
+                            aria-hidden="true"
+                            className="absolute inset-x-1 bottom-0.5 h-0.5 rounded-full bg-current"
+                          />
+                        ) : null}
                         {isFlagged && !isCurrent ? (
                           <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-amber-700 rounded-full border border-white"></div>
                         ) : null}
@@ -221,6 +228,10 @@ export function StudentFooter({
         <div className="flex flex-shrink-0 items-center rounded-sm bg-gray-50 px-2 py-1 md:px-2.5">
           <span className="text-[length:var(--student-chip-font-size)] font-semibold tabular-nums text-gray-900">
             {answeredCount}/{totalQuestions}
+          </span>
+          {/* Labeled so it can't be read as the "N of M" position beside it. */}
+          <span className="ml-1 text-[length:var(--student-meta-font-size)] font-medium text-gray-600">
+            answered
           </span>
         </div>
         {/* P4: the global navigator is the single navigation authority. The

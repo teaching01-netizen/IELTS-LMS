@@ -8,27 +8,28 @@ describe("autosave error visibility", () => {
   it("surfaces a recoverable autosave error in the desktop header", () => {
     render(<StudentHeader autoSaveStatus="error" />);
 
-    const label = screen.getByText("Not synced — retrying");
+    const label = screen.getByText("Not saved · retrying");
     expect(label).toBeInTheDocument();
     expect(label).toHaveClass("text-red-700");
   });
 
   it("surfaces offline status in the desktop header", () => {
     render(<StudentHeader autoSaveStatus="offline" />);
-    expect(screen.getByText("Offline")).toHaveClass("text-amber-700");
+    expect(screen.getByText("Offline · saving paused")).toHaveClass("text-amber-800");
   });
 
   it("distinguishes saving from a confirmed saved state in the desktop header", () => {
     const { rerender } = render(<StudentHeader autoSaveStatus="saving" />);
-    expect(screen.getByText("Saving")).toBeInTheDocument();
+    expect(screen.getByText("Saving…")).toBeInTheDocument();
     rerender(<StudentHeader autoSaveStatus="saved" />);
-    expect(screen.queryByText("Saving")).not.toBeInTheDocument();
+    expect(screen.queryByText("Saving…")).not.toBeInTheDocument();
+    expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
   it("surfaces a recoverable autosave error in the compact header", () => {
     render(<CompactStudentHeader moduleLabel="Reading" autoSaveStatus="error" />);
     const status = screen.getByTestId("student-auto-save-status");
-    expect(status).toHaveTextContent("Not synced");
+    expect(status).toHaveTextContent("Not saved");
     expect(status).toHaveClass("text-red-700");
     expect(status).toHaveAttribute("aria-live", "polite");
   });

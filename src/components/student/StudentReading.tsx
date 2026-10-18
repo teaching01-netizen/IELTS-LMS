@@ -37,7 +37,6 @@ interface StudentReadingProps {
   highlightClassName?: string | undefined;
   tabletMode?: boolean | undefined;
   layoutMode?: StudentLayoutMode | undefined;
-  contentZoom?: number | undefined;
   registerLiveAnswer?: ((answerKey: string, value: QuestionAnswer) => void) | undefined;
   /** S1-C3: sessionStorage base key (per exam). Module suffix is appended. */
   persistenceKeyBase?: string | undefined;
@@ -48,7 +47,6 @@ interface ReadingPassagePaneProps {
   passageTitle: string;
   materialCompact: boolean;
   isTabletMode: boolean;
-  tabletContentZoomStyle: React.CSSProperties | undefined;
   highlightEnabled: boolean;
   highlightColor: StudentHighlightColor | undefined;
   highlightClassName: string | undefined;
@@ -60,12 +58,36 @@ interface ReadingPassagePaneProps {
   ) => React.ReactNode;
 }
 
+/**
+ * Authored passage images become real, labeled controls (role, tabindex,
+ * name) so they can be enlarged by keyboard, switch control and screen
+ * readers, not only by a pointer tap. Done on the HTML string because the
+ * highlight engine rewrites the surface's innerHTML; DOMPurify keeps these
+ * attributes on its second pass.
+ */
+function markPassageImagesAsZoomTriggers(html: string): string {
+  if (typeof document === "undefined" || !html.includes("<img")) {
+    return html;
+  }
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  template.content.querySelectorAll("img[src]").forEach((image) => {
+    if (getImageUrlCandidates(image.getAttribute("src")?.trim() ?? "").length === 0) {
+      return;
+    }
+    const alt = image.getAttribute("alt")?.trim();
+    image.setAttribute("role", "button");
+    image.setAttribute("tabindex", "0");
+    image.setAttribute("aria-label", alt ? `Enlarge image: ${alt}` : "Enlarge passage image");
+  });
+  return template.innerHTML;
+}
+
 const ReadingPassagePane = React.memo(function ReadingPassagePane({
   passageId,
   passageTitle,
   materialCompact,
   isTabletMode,
-  tabletContentZoomStyle,
   highlightEnabled,
   highlightColor,
   highlightClassName,
@@ -73,16 +95,36 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
   passageImages,
   renderPassageImageAnnotations,
 }: ReadingPassagePaneProps) {
-  const [inlineImageToZoom, setInlineImageToZoom] = useState<{ src: string; alt: string } | null>(null);
-  const handleInlineImageClick = (event: React.MouseEvent<HTMLDivElement>) => {
+  const [inlineImageToZoom, setInlineImageToZoom] = useState<{
+    src: string;
+    alt: string;
+    index: number;
+  } | null>(null);
+  const inlineImageHostRef = useRef<HTMLDivElement>(null);
+  const openInlineImage = (event: React.SyntheticEvent<HTMLDivElement>): boolean => {
     const target = event.target;
-    if (!(target instanceof Element)) return;
+    if (!(target instanceof Element)) return false;
     const image = target.closest("img");
     const src = image?.getAttribute("src")?.trim();
     if (!src || !image || !event.currentTarget.contains(image) || getImageUrlCandidates(src).length === 0) {
-      return;
+      return false;
     }
-    setInlineImageToZoom({ src, alt: image.getAttribute("alt")?.trim() || "Passage image" });
+    const index = Array.from(event.currentTarget.querySelectorAll("img")).indexOf(image);
+    setInlineImageToZoom({ src, alt: image.getAttribute("alt")?.trim() || "Passage image", index });
+    return true;
+  };
+  const handleInlineImageKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (openInlineImage(event)) event.preventDefault();
+  };
+  const closeInlineImage = () => {
+    const index = inlineImageToZoom?.index ?? -1;
+    setInlineImageToZoom(null);
+    // The highlight engine may have replaced the <img> node while the viewer
+    // was open, so focus returns to the image at the same position.
+    window.setTimeout(() => {
+      inlineImageHostRef.current?.querySelectorAll<HTMLElement>("img")[index]?.focus();
+    }, 0);
   };
 
   return (
@@ -99,7 +141,6 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
       // exam's coarse-pointer rule can remove the platform's own selection here
       // without an inline declaration outranking it (index.css).
       style={{
-        ...(tabletContentZoomStyle ?? {}),
         fontSize: "var(--student-passage-font-size)",
         lineHeight: "var(--student-passage-line-height)",
       }}
@@ -114,7 +155,14 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
       <div
         className={`student-passage-measure ${materialCompact ? "space-y-3" : "space-y-5"} break-normal text-gray-900 [&_h1]:font-black [&_h1]:leading-tight [&_h1]:[font-size:var(--student-passage-h1-font-size)] [&_h2]:font-bold [&_h2]:leading-tight [&_h2]:[font-size:var(--student-passage-h2-font-size)] [&_h3]:font-bold [&_h3]:leading-snug [&_h3]:[font-size:var(--student-passage-h3-font-size)] [&_img]:max-w-full [&_img]:rounded-2xl [&_li]:mb-2 [&_ol]:list-decimal [&_ol]:space-y-2 [&_ol]:pl-7 [&_p]:my-[0.5em] [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-7`}
       >
-        <div onClick={handleInlineImageClick}>
+        {/* Delegation host only: the controls are the img[role="button"]
+            nodes inside, which the highlight engine may re-create. */}
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+        <div
+          ref={inlineImageHostRef}
+          onClick={openInlineImage}
+          onKeyDown={handleInlineImageKeyDown}
+        >
           <RichTextHighlighter
             content={renderedPassageContent}
             contentType="html"
@@ -134,7 +182,7 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
             hint="Tap to zoom the passage image"
             openOnMount
             renderTrigger={false}
-            onDismiss={() => setInlineImageToZoom(null)}
+            onDismiss={closeInlineImage}
           />
         ) : null}
         {(passageImages ?? []).map((image) => (
@@ -170,33 +218,12 @@ export function StudentReading({
   highlightClassName,
   tabletMode = false,
   layoutMode = "wide",
-  contentZoom = 1,
   registerLiveAnswer,
   persistenceKeyBase,
 }: StudentReadingProps) {
+  // The exam shell (StudentApp) is the single owner of the zoom preference;
+  // scaling the panes again here compounded it (125% rendered as ~156%).
   const isTabletMode = Boolean(tabletMode);
-  const clampedContentZoom = Math.min(1.5, Math.max(0.85, contentZoom));
-  const supportsCssZoom =
-    typeof CSS !== "undefined" &&
-    typeof CSS.supports === "function" &&
-    CSS.supports("zoom", "1.01");
-  const tabletContentZoomStyle = useMemo<React.CSSProperties | undefined>(() => {
-    if (!isTabletMode || clampedContentZoom === 1) {
-      return undefined;
-    }
-
-    if (supportsCssZoom) {
-      return { zoom: clampedContentZoom };
-    }
-
-    const inverseZoom = 1 / clampedContentZoom;
-    return {
-      transform: `scale(${clampedContentZoom})`,
-      transformOrigin: "top left",
-      width: `${inverseZoom * 100}%`,
-      minHeight: `${inverseZoom * 100}%`,
-    };
-  }, [clampedContentZoom, isTabletMode, supportsCssZoom]);
   const questionContainerRef = useRef<HTMLDivElement>(null);
   const {
     answerCompact,
@@ -234,7 +261,7 @@ export function StudentReading({
   const renderedPassageContent = useMemo(() => {
     const content = activePassage?.content ?? "";
     return passageHasHtml
-      ? sanitizeReadingPassageHtml(content)
+      ? markPassageImagesAsZoomTriggers(sanitizeReadingPassageHtml(content))
       : normalizeReadingPlainTextForDisplay(content);
   }, [activePassage?.content, passageHasHtml]);
   const blockStartNumbers = useMemo(() => {
@@ -381,7 +408,6 @@ export function StudentReading({
           passageTitle={activePassage.title}
           materialCompact={materialCompact}
           isTabletMode={isTabletMode}
-          tabletContentZoomStyle={tabletContentZoomStyle}
           highlightEnabled={highlightEnabled}
           highlightColor={highlightColor}
           highlightClassName={highlightClassName}
@@ -404,7 +430,7 @@ export function StudentReading({
         highlightColor,
         registerLiveAnswer,
         questionContainerRef,
-        contentZoomStyle: tabletContentZoomStyle,
+        contentZoomStyle: undefined,
         panelTestId: "reading-question-scroll",
         getBlockStartQuestionNumber,
         renderBlockInstruction,

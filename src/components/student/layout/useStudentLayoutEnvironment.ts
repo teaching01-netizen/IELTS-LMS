@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import {
   getStudentCapabilitySnapshot,
   getStudentInteractionCapabilities,
+  type StudentContentScale,
   type StudentInteractionCapabilities,
 } from './studentCapabilities';
 
-function getInitialCapabilities(): StudentInteractionCapabilities {
+function getInitialCapabilities(contentScale?: StudentContentScale): StudentInteractionCapabilities {
   if (typeof window === 'undefined') {
     return {
       layoutMode: 'wide',
@@ -16,15 +17,22 @@ function getInitialCapabilities(): StudentInteractionCapabilities {
     };
   }
 
-  return getStudentInteractionCapabilities(getStudentCapabilitySnapshot(window));
+  return getStudentInteractionCapabilities(getStudentCapabilitySnapshot(window), contentScale);
 }
 
-export function useStudentLayoutEnvironment(): StudentInteractionCapabilities {
-  const [capabilities, setCapabilities] = useState(getInitialCapabilities);
+export function useStudentLayoutEnvironment(
+  zoom = 1,
+  textScale = 1,
+): StudentInteractionCapabilities {
+  const [capabilities, setCapabilities] = useState(() =>
+    getInitialCapabilities({ zoom, textScale }),
+  );
 
   useEffect(() => {
     const updateCapabilities = () => {
-      setCapabilities(getStudentInteractionCapabilities(getStudentCapabilitySnapshot(window)));
+      setCapabilities(
+        getStudentInteractionCapabilities(getStudentCapabilitySnapshot(window), { zoom, textScale }),
+      );
     };
 
     const mediaQueries = [
@@ -43,7 +51,7 @@ export function useStudentLayoutEnvironment(): StudentInteractionCapabilities {
       window.removeEventListener('orientationchange', updateCapabilities);
       mediaQueries.forEach((query) => query.removeEventListener?.('change', updateCapabilities));
     };
-  }, []);
+  }, [zoom, textScale]);
 
   return capabilities;
 }

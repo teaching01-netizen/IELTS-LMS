@@ -17,8 +17,14 @@ describe('student adaptive shell CSS contract', () => {
     const shellRule = css.match(/\.student-exam-shell\s*\{([^}]*)\}/s)?.[1];
 
     expect(shellRule).toBeDefined();
-    expect(shellRule).toMatch(/height:\s*var\(--student-exam-height,\s*100dvh\)\s*;/);
-    expect(shellRule).toMatch(/max-height:\s*var\(--student-exam-height,\s*100dvh\)\s*;/);
+    // The shell's own CSS zoom scales its height too, so the zoom is divided
+    // back out; otherwise the footer renders below the screen at any zoom.
+    expect(shellRule).toMatch(
+      /height:\s*calc\(var\(--student-exam-height,\s*100dvh\)\s*\/\s*var\(--student-exam-zoom,\s*1\)\)\s*;/,
+    );
+    expect(shellRule).toMatch(
+      /max-height:\s*calc\(var\(--student-exam-height,\s*100dvh\)\s*\/\s*var\(--student-exam-zoom,\s*1\)\)\s*;/,
+    );
     expect(shellRule).toMatch(/min-height:\s*0\s*;/);
     expect(shellRule).toMatch(/overflow:\s*hidden\s*;/);
     expect(shellRule).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s*;/);

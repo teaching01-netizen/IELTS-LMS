@@ -804,22 +804,20 @@ export function StudentWriting({
         data-testid="writing-split-workspace"
       >
         {isCompactLayout ? (
-          <div className="student-compact-pane-tabs flex flex-shrink-0 gap-2 border-b border-gray-200 bg-gray-50 p-2">
+          <div className="student-compact-pane-tabs student-segmented" role="group" aria-label="Show">
             <button
               type="button"
-              className="student-touch-target flex-1 rounded-sm border border-gray-300 px-3 text-sm font-semibold text-gray-900"
               aria-pressed={activeCompactPane === 'prompt'}
               onClick={() => selectCompactPane('prompt')}
             >
-              Show prompt
+              Task
             </button>
             <button
               type="button"
-              className="student-touch-target flex-1 rounded-sm border border-gray-300 px-3 text-sm font-semibold text-gray-900"
               aria-pressed={activeCompactPane === 'response'}
               onClick={() => selectCompactPane('response')}
             >
-              Show response
+              Response
             </button>
           </div>
         ) : null}
@@ -831,6 +829,7 @@ export function StudentWriting({
         {(!isCompactLayout || activeCompactPane === 'prompt') ? (
                 <WritingPromptPane
   isTabletMode={isTabletMode}
+  isSinglePane={isCompactLayout}
   currentTaskId={activeTaskId}
   currentTaskLabel={currentTask.label}
   currentChart={currentChart}
@@ -864,6 +863,7 @@ export function StudentWriting({
         {(!isCompactLayout || activeCompactPane === 'response') ? (
                 <WritingResponsePane
                   isTabletMode={isTabletMode}
+                  isSinglePane={isCompactLayout}
                   activeTaskId={activeTaskId}
                   currentText={currentText}
                   showEditorPlaceholder={showEditorPlaceholder}
@@ -896,15 +896,17 @@ export function StudentWriting({
           {writingConfig.tasks.map((task) => (
             <button
               key={task.id}
+              type="button"
+              aria-current={activeTaskId === task.id ? 'step' : undefined}
               onClick={() => {
                 commitEditorDraft();
                 setActiveTaskId(task.id);
                 onNavigate(task.id);
               }}
-              className={`min-w-[5rem] md:min-w-[5.75rem] px-3 md:px-4 py-1.5 md:py-2 rounded-sm text-[length:var(--student-control-font-size)] font-bold transition-all flex-shrink-0 ${
+              className={`min-h-11 min-w-[5rem] md:min-w-[5.75rem] px-3 md:px-4 py-1.5 md:py-2 rounded-lg border text-[length:var(--student-control-font-size)] font-bold transition-colors flex-shrink-0 ${
                 activeTaskId === task.id
-                  ? 'bg-blue-800 text-white'
-                  : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-100'
+                  ? 'border-blue-800 bg-blue-800 text-white'
+                  : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-100'
               }`}
             >
               {task.label}
@@ -912,8 +914,9 @@ export function StudentWriting({
           ))}
           {showSubmitButton ? (
             <button
+              type="button"
               onClick={handleSubmitClick}
-              className="min-w-[8.25rem] md:min-w-[9.5rem] px-4 md:px-6 py-1.5 md:py-2 bg-blue-800 hover:bg-blue-700 text-white rounded-sm text-[length:var(--student-control-font-size)] font-bold transition-colors shadow-md flex-shrink-0"
+              className="ml-auto min-h-11 min-w-[8.25rem] md:min-w-[9.5rem] px-4 md:px-6 py-1.5 md:py-2 bg-blue-800 hover:bg-blue-700 text-white rounded-lg text-[length:var(--student-control-font-size)] font-bold transition-colors flex-shrink-0"
             >
               Review & Submit
             </button>
@@ -927,32 +930,39 @@ export function StudentWriting({
           role="dialog"
           aria-modal="true"
           aria-labelledby="writing-review-title"
+          aria-describedby="writing-review-description"
         >
           <div
             ref={reviewModalPanelRef}
             tabIndex={-1}
-            className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col focus:outline-none"
+            className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[calc(var(--student-vh,1vh)*90)] overflow-hidden flex flex-col focus:outline-none"
           >
             <div className="p-6 border-b border-gray-200">
               <h2 id="writing-review-title" className="text-xl font-bold text-gray-900">Review Your Responses</h2>
-              <p className="text-sm text-gray-500 mt-1">Please review your answers before submitting.</p>
+              <p id="writing-review-description" className="text-sm text-gray-600 mt-1">
+                After you submit, you can’t change your Writing responses.
+              </p>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
               {writingConfig.tasks.map((task) => {
                 const text = readWritingAnswerByTaskId(writingAnswers, task.id);
                 const hasResponse = text.length > 0;
+                const taskWordCount = text.trim() === '' ? 0 : text.trim().split(/\s+/).length;
 
                 return (
                   <div key={task.id} className="border border-gray-200 rounded-xl p-4">
                     <div className="flex items-center justify-between mb-2">
                       <h3 className="font-bold text-gray-900">{task.label}</h3>
+                      <span className="text-sm font-semibold tabular-nums text-gray-700">
+                        {taskWordCount === 1 ? '1 word' : `${taskWordCount} words`}
+                      </span>
                     </div>
                     <div className="text-sm text-gray-600 max-h-32 overflow-y-auto bg-gray-50 rounded-lg p-3">
                       {hasResponse ? (
                         <pre className="m-0 whitespace-pre-wrap font-sans">{text}</pre>
                       ) : (
-                        <span className="text-gray-400 italic">No response written</span>
+                        <span className="text-gray-600 italic">No response written</span>
                       )}
                     </div>
                   </div>

@@ -208,7 +208,7 @@ export function SubmitConfirmation({
             {hasFlagged && (
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600">Flagged:</span>
-                <span className="font-semibold text-blue-600">{flaggedCount}</span>
+                <span className="font-semibold text-blue-700">{flaggedCount}</span>
               </div>
             )}
           </div>

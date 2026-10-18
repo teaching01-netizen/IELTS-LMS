@@ -153,11 +153,13 @@ export function QuestionRenderer({
     if (!onToggleFlag) {
       return null;
     }
+    const slotIndex = slotIds.indexOf(slotId);
 
     return (
       <StudentFlagButton
         flagged={Boolean(flags[slotId])}
         size="compact"
+        questionLabel={slotIndex >= 0 ? getSlotNumber(slotIndex, number + slotIndex) : number}
         onToggle={() => onToggleFlag(slotId)}
       />
     );
@@ -269,7 +271,7 @@ export function QuestionRenderer({
               key={option}
               className={`flex items-center gap-3 cursor-pointer rounded-md border p-3 transition-colors ${
                 answer === option
-                  ? "border-blue-500 bg-blue-50"
+                  ? "border-blue-600 bg-blue-50 shadow-[inset_0_0_0_1px_var(--color-blue-600)]"
                   : "border-gray-200 hover:border-blue-300"
               }`}
             >
@@ -406,7 +408,7 @@ export function QuestionRenderer({
                 key={option.id}
                 className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-blue-600/40 peer-focus-visible:border-blue-400 ${
                   isSelected
-                    ? "border-blue-500 bg-blue-50"
+                    ? "border-blue-600 bg-blue-50 shadow-[inset_0_0_0_1px_var(--color-blue-600)]"
                     : isDisabled
                       ? "cursor-not-allowed border-gray-200 opacity-50 peer-focus-visible:ring-0"
                       : "border-gray-200 hover:border-blue-300"
@@ -563,7 +565,7 @@ export function QuestionRenderer({
                 key={option.id}
                 className={`flex items-start gap-3 rounded-md border p-3 transition-colors ${
                   answer === option.id
-                    ? "border-blue-500 bg-blue-50"
+                    ? "border-blue-600 bg-blue-50 shadow-[inset_0_0_0_1px_var(--color-blue-600)]"
                     : isEliminated
                       ? "border-gray-200 bg-gray-50"
                       : "border-gray-200 hover:border-blue-300"

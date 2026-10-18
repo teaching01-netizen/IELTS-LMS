@@ -20,6 +20,8 @@ interface AccessibilitySettingsProps {
   onClose: () => void;
   fontSize: StudentFontSize;
   highContrast: boolean;
+  /** The device's Increase Contrast setting is forcing high contrast on. */
+  systemHighContrast?: boolean | undefined;
   zoom: number;
   passageReadabilityLevel: StudentPassageReadabilityLevel;
   playbackRate: StudentPlaybackRate;
@@ -36,6 +38,7 @@ export function AccessibilitySettings({
   onClose,
   fontSize,
   highContrast,
+  systemHighContrast = false,
   zoom,
   passageReadabilityLevel,
   playbackRate,
@@ -128,10 +131,12 @@ export function AccessibilitySettings({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="rounded-lg shadow-xl w-full max-w-md backdrop:bg-black/50"
+      // Header and Done stay on screen at every zoom/text size; only the
+      // body scrolls. `open:flex` keeps the closed dialog hidden.
+      className="rounded-lg shadow-xl w-full max-w-md max-h-[calc(var(--student-vh,1vh)*100_-_2rem)] flex-col open:flex backdrop:bg-black/50"
       aria-labelledby="accessibility-title"
     >
-      <div className="flex items-center justify-between p-4 sm:p-6 border-b border-gray-200">
+      <div className="flex flex-shrink-0 items-center justify-between p-4 sm:p-6 border-b border-gray-200">
         <div className="flex items-center gap-2 md:gap-3">
           <div className="p-1.5 md:p-2 bg-gray-100 rounded-lg">
             <Contrast size={20} className="text-gray-700" />
@@ -141,14 +146,14 @@ export function AccessibilitySettings({
         <button
           type="button"
           onClick={onClose}
-          className="p-1.5 md:p-2 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
+          className="student-touch-target flex items-center justify-center rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
           aria-label="Close accessibility settings"
         >
           <X size={18} />
         </button>
       </div>
 
-      <div className="p-4 sm:p-6 space-y-4 md:space-y-6 max-h-[70vh] overflow-y-auto">
+      <div className="min-h-0 flex-1 p-4 sm:p-6 space-y-4 md:space-y-6 overflow-y-auto overscroll-contain">
         <div>
           <h3 className="font-semibold text-gray-900 mb-3">Text Size</h3>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -171,7 +176,7 @@ export function AccessibilitySettings({
                 </span>
                 <span
                   data-testid={`font-size-preview-${size.value}`}
-                  className="mt-2 block font-serif text-gray-900"
+                  className="mt-2 block font-sans text-gray-900"
                   style={{ fontSize: size.preview, lineHeight: 1.35 }}
                 >
                   The quick brown fox reads the passage comfortably.
@@ -208,7 +213,7 @@ export function AccessibilitySettings({
                   </span>
                   <span
                     data-testid={`passage-layout-preview-${layout.value}`}
-                    className="mt-2 block font-serif text-gray-900 text-sm"
+                    className="mt-2 block font-sans text-gray-900 text-sm"
                     style={{
                       lineHeight: (1.5 * geometry.lineHeightFactor).toFixed(2),
                       maxWidth: geometry.measure,
@@ -227,28 +232,40 @@ export function AccessibilitySettings({
 
         <div>
           <h3 className="font-semibold text-gray-900 mb-3">Display</h3>
-          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <div>
-              <div className="font-medium text-gray-900">High Contrast Mode</div>
-              <div className="text-sm text-gray-600">Increase color contrast for better readability</div>
-            </div>
-            <button
-              type="button"
-              onClick={onHighContrastToggle}
-              className={`relative w-12 h-6 rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
-                highContrast ? 'bg-blue-600' : 'bg-gray-300'
+          {/* The whole row is the switch: a 44pt+ target with an iOS-sized
+              (51×31) visual switch inside, so the touch-target floor never
+              distorts the switch itself. */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={highContrast || systemHighContrast}
+            aria-label="High contrast mode"
+            aria-describedby="student-high-contrast-description"
+            disabled={systemHighContrast}
+            onClick={onHighContrastToggle}
+            className="flex w-full items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-default"
+          >
+            <span>
+              <span className="block font-medium text-gray-900">High Contrast Mode</span>
+              <span id="student-high-contrast-description" className="block text-sm text-gray-600">
+                {systemHighContrast
+                  ? 'On while your device’s Increase Contrast setting is on'
+                  : 'Increase color contrast for better readability'}
+              </span>
+            </span>
+            <span
+              aria-hidden="true"
+              className={`relative inline-flex h-[31px] w-[51px] flex-shrink-0 rounded-full transition-colors ${
+                highContrast || systemHighContrast ? 'bg-green-700' : 'bg-gray-300'
               }`}
-              role="switch"
-              aria-checked={highContrast}
-              aria-label="Toggle high contrast mode"
             >
-              <div
-                className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-transform ${
-                  highContrast ? 'translate-x-7' : 'translate-x-1'
+              <span
+                className={`absolute top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow transition-transform ${
+                  highContrast || systemHighContrast ? 'translate-x-[22px]' : 'translate-x-[2px]'
                 }`}
               />
-            </button>
-          </div>
+            </span>
+          </button>
 
           <div className="mt-3 flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200">
             <div>
@@ -354,7 +371,7 @@ export function AccessibilitySettings({
         </div>
       </div>
 
-      <div className="p-4 sm:p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg">
+      <div className="flex-shrink-0 p-4 sm:p-6 border-t border-gray-200 bg-gray-50 rounded-b-lg">
         <Button
           type="button"
           onClick={onClose}

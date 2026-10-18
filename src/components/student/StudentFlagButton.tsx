@@ -19,6 +19,12 @@ export interface StudentFlagButtonProps {
   onToggle: (event: MouseEvent<HTMLButtonElement>) => void;
   /** Dense rows (inline completion slots) use the compact target. */
   size?: 'default' | 'compact';
+  /**
+   * The question number(s) this flag belongs to. VoiceOver lists buttons
+   * out of context (rotor, Switch Control), so 40 identical "Flag question"
+   * buttons are indistinguishable without it.
+   */
+  questionLabel?: string | number | undefined;
   className?: string;
 }
 
@@ -29,7 +35,8 @@ const sharedClassName =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ' +
   'focus-visible:outline-blue-700';
 
-const restClassName = 'text-gray-400';
+// gray-500 keeps the resting glyph above the 3:1 non-text contrast minimum.
+const restClassName = 'text-gray-500';
 const flaggedClassName = 'bg-blue-50 text-blue-700 hover:bg-blue-100 active:bg-blue-200';
 
 const sizeClassName: Record<'default' | 'compact', string> = {
@@ -41,15 +48,17 @@ export function StudentFlagButton({
   flagged,
   onToggle,
   size = 'default',
+  questionLabel,
   className,
 }: StudentFlagButtonProps) {
+  const action = flagged ? 'Unflag question' : 'Flag question';
   return (
     <button
       type="button"
       onClick={onToggle}
       aria-pressed={flagged}
-      aria-label={flagged ? 'Unflag question' : 'Flag question'}
-      title={flagged ? 'Unflag question' : 'Flag question'}
+      aria-label={questionLabel != null && questionLabel !== '' ? `${action} ${questionLabel}` : action}
+      title={action}
       className={[
         sharedClassName,
         sizeClassName[size],

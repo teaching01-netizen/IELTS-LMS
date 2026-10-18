@@ -262,11 +262,15 @@ describe('student interaction motion class contracts', () => {
 
       for (const name of ['Question navigator', 'Highlight', 'Erase highlights', 'Accessibility settings']) {
         expect(screen.getByRole('button', { name })).toHaveClass(pressRecipe);
-        expect(screen.getByRole('button', { name })).toHaveClass('hover:bg-gray-50');
+        expect(screen.getByRole('button', { name })).toHaveClass('hover:bg-gray-200');
       }
       for (const name of ['Yellow', 'Amber', 'Green', 'Blue', 'Purple']) {
         expect(screen.getByRole('button', { name })).toHaveClass(pressRecipe);
-        expect(screen.getByRole('button', { name })).toHaveClass('hover:bg-gray-50');
+        // The chosen color is exposed as pressed, not only by a check glyph.
+        expect(screen.getByRole('button', { name })).toHaveAttribute(
+          'aria-pressed',
+          name === 'Yellow' ? 'true' : 'false',
+        );
       }
     });
 
@@ -343,24 +347,21 @@ describe('student interaction motion class contracts', () => {
       );
     }
 
-    it('shows the pressed tab in the blue active state and keeps both tabs on the recipe', () => {
+    it('renders one segmented control whose pressed segment follows the selection', () => {
       renderTabs();
 
       const passage = screen.getByRole('button', { name: 'Passage' });
       const questions = screen.getByRole('button', { name: 'Questions' });
+      const group = passage.closest('.student-segmented');
 
-      expect(passage).toHaveClass(pressRecipe, 'student-touch-target');
-      expect(passage).toHaveClass('border-blue-700', 'bg-blue-50', 'text-blue-900', 'active:bg-blue-100');
-
-      expect(questions).toHaveClass(pressRecipe, 'student-touch-target');
-      expect(questions).toHaveClass('border-gray-300', 'bg-white', 'text-gray-900');
+      expect(group).not.toBeNull();
+      expect(group).toContainElement(questions);
+      expect(passage).toHaveAttribute('aria-pressed', 'true');
+      expect(questions).toHaveAttribute('aria-pressed', 'false');
 
       fireEvent.click(questions);
       expect(questions).toHaveAttribute('aria-pressed', 'true');
-      expect(questions).toHaveClass('border-blue-700', 'bg-blue-50', 'text-blue-900', 'active:bg-blue-100');
-      expect(questions).not.toHaveClass('border-gray-300');
       expect(passage).toHaveAttribute('aria-pressed', 'false');
-      expect(passage).toHaveClass('border-gray-300', 'bg-white', 'text-gray-900');
     });
   });
 
@@ -396,7 +397,7 @@ describe('student interaction motion class contracts', () => {
       expect(screen.getByRole('dialog', { name: 'Question Navigator' })).toHaveClass('student-question-navigator');
 
       const current = screen.getByRole('button', { name: 'Question 1, current, not answered' });
-      const answered = screen.getByRole('button', { name: 'Question 2-3, answered' });
+      const answered = screen.getByRole('button', { name: 'Question 2-3, partially answered' });
       const complete = screen.getByRole('button', { name: 'Question 4-5, complete' });
       const flagged = screen.getByRole('button', { name: 'Question 6, not answered, flagged' });
       const unanswered = screen.getByRole('button', { name: 'Question 7, not answered' });

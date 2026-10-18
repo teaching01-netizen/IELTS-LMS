@@ -105,7 +105,10 @@ export function StudentToolsSheet({ open, onClose, children }: StudentToolsSheet
   return (
     <dialog
       ref={dialogRef}
-      className="student-tools-sheet fixed inset-x-0 bottom-0 m-0 max-h-[min(80vh,40rem)] w-full max-w-none overflow-y-auto rounded-t-xl border border-gray-200 bg-white p-4 pb-[max(1rem,var(--student-safe-bottom))] shadow-xl backdrop:bg-gray-900/50"
+      // HIG presentation: a bottom sheet on phones, a centred form sheet on
+      // iPad widths. `top-auto` matters: a modal <dialog> keeps the UA's
+      // `top: 0`, which pinned the "bottom" sheet to the top edge.
+      className="student-tools-sheet fixed inset-x-0 top-auto bottom-0 m-0 max-h-[min(calc(var(--student-vh,1vh)*80),40rem)] w-full max-w-none overflow-y-auto rounded-t-2xl border border-gray-200 bg-white p-4 pb-[max(1rem,var(--student-safe-bottom))] shadow-xl backdrop:bg-gray-900/50 min-[600px]:inset-0 min-[600px]:m-auto min-[600px]:h-fit min-[600px]:w-[min(30rem,calc(100vw-2rem))] min-[600px]:rounded-2xl min-[600px]:pb-4"
       aria-labelledby="student-tools-title"
       aria-modal="true"
       data-testid="student-tools-sheet"
@@ -115,12 +118,12 @@ export function StudentToolsSheet({ open, onClose, children }: StudentToolsSheet
       }}
     >
       <div className="mb-3 flex items-center justify-between">
-        <h2 id="student-tools-title" className="text-base font-bold text-gray-900">
+        <h2 id="student-tools-title" className="text-[length:var(--student-control-font-size)] font-bold text-gray-900">
           Exam tools
         </h2>
         <button
           type="button"
-          className="student-touch-target flex items-center justify-center rounded-sm text-gray-700 hover:bg-gray-100"
+          className="student-touch-target flex items-center justify-center rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700"
           aria-label="Close exam tools"
           onClick={onClose}
         >

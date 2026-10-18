@@ -142,7 +142,7 @@ test.describe("Student session recovery", () => {
 
     await context.setOffline(true);
 
-    await expect(page.getByTestId("student-auto-save-status")).toHaveText("Offline");
+    await expect(page.getByTestId("student-auto-save-status")).toHaveText(/^Offline/);
 
     await context.setOffline(false);
 
@@ -166,7 +166,7 @@ test.describe("Student session recovery", () => {
     await enterRuntimeBackedExam(page, manifest.student.scheduleId, wcode);
 
     await context.setOffline(true);
-    await expect(page.getByTestId("student-auto-save-status")).toHaveText("Offline");
+    await expect(page.getByTestId("student-auto-save-status")).toHaveText(/^Offline/);
 
     const answerField = visibleAnswerField(page);
     const offlineAnswer = `offline-answer-${Date.now()}`;

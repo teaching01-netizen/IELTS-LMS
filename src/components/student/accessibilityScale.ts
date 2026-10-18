@@ -16,6 +16,12 @@ export interface StudentPassageReadabilityGeometry {
   lineHeightFactor: number;
   /** Maximum line measure (column width) for long-form reading surfaces. */
   measure: string;
+  /**
+   * The same measure for IELTS prose in em. `ch` is the width of "0", about
+   * 40% wider than an average proportional glyph, so 68ch sets ~110
+   * characters per line; 33em sets ~68.
+   */
+  proseMeasure: string;
 }
 
 /**
@@ -29,9 +35,9 @@ const STUDENT_PASSAGE_READABILITY_GEOMETRY: Record<
   StudentPassageReadabilityLevel,
   StudentPassageReadabilityGeometry
 > = {
-  0: { lineHeightFactor: 0.95, measure: '74ch' },
-  1: { lineHeightFactor: 1, measure: '68ch' },
-  2: { lineHeightFactor: 1.08, measure: '60ch' },
+  0: { lineHeightFactor: 0.95, measure: '74ch', proseMeasure: '36em' },
+  1: { lineHeightFactor: 1, measure: '68ch', proseMeasure: '33em' },
+  2: { lineHeightFactor: 1.08, measure: '60ch', proseMeasure: '29em' },
 };
 
 export function getStudentPassageReadabilityGeometry(

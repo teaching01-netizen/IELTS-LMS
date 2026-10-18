@@ -14,9 +14,11 @@ import {
   RefreshCw,
   TriangleAlert,
   Wifi,
+  WifiOff,
   X,
 } from 'lucide-react';
-import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
+import { LoadingMark } from '../ui/LoadingMark';
+import { getStudentSaveStatusPresentation, type StudentAutoSaveStatus } from './saveStatusPresentation';
 import { useStudentTimerAnnouncement } from '@shared/hooks/useStudentTimerAnnouncement';
 import { getStudentHighlightPaletteEntry, studentHighlightPalette, type StudentHighlightColor } from './highlightPalette';
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
@@ -29,7 +31,7 @@ interface StudentHeaderProps {
   examType?: ExamType | undefined;
   testTakerId?: string | undefined;
   timeRemaining?: number | undefined;
-  autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | 'error' | null | undefined;
+  autoSaveStatus?: StudentAutoSaveStatus | null | undefined;
   highlightEnabled?: boolean | undefined;
   highlightToolMode?: StudentHighlightToolMode | undefined;
   highlightColor?: StudentHighlightColor | undefined;
@@ -74,6 +76,7 @@ export function StudentHeader({
   onZoomReset,
   isExamActive = false,
 }: StudentHeaderProps) {
+  const saveStatus = autoSaveStatus ? getStudentSaveStatusPresentation(autoSaveStatus) : null;
   void onClearHighlights;
   const examLabel = examType === 'ACT' ? 'ACT' : 'IELTS';
   const [showTabletZoomControls, setShowTabletZoomControls] = useState(false);
@@ -239,7 +242,7 @@ export function StudentHeader({
           ref={tabletZoomPanelRef}
           role="dialog"
           aria-label="Zoom controls"
-          className="fixed z-[90] max-h-[calc(100vh-5rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-2xl"
+          className="fixed z-[90] max-h-[calc(var(--student-vh,1vh)*100_-_5rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-2xl"
           style={tabletZoomControlsStyle}
         >
           <div className="mb-2 text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-[0.18em] text-gray-500">
@@ -398,7 +401,7 @@ export function StudentHeader({
                   <div
                 ref={highlightOptionsPanelRef}
                 role="group"
-                className="fixed z-[130] max-h-[calc(100vh-5rem)] min-w-48 overflow-y-auto rounded-md border border-gray-200 bg-white p-1.5 shadow-xl"
+                className="fixed z-[130] max-h-[calc(var(--student-vh,1vh)*100_-_5rem)] min-w-48 overflow-y-auto rounded-md border border-gray-200 bg-white p-1.5 shadow-xl"
                 style={highlightOptionsStyle}
                 aria-label="Highlight options"
               >
@@ -449,35 +452,32 @@ export function StudentHeader({
         ) : null}
         {autoSaveStatus && (
           <div
-            className="flex items-center gap-1 md:gap-1.5 text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide"
+            className="flex items-center gap-1 md:gap-1.5 whitespace-nowrap text-[length:var(--student-meta-font-size)] font-semibold"
             role="status"
             aria-live="polite"
             data-testid="student-auto-save-status"
           >
             {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
-              <>
-                <LoadingMark size="xs" className="bg-gray-300" />
-                <SrLoadingText>{autoSaveStatus === 'syncing' ? 'Syncing…' : 'Saving…'}</SrLoadingText>
-                <span className="text-gray-600">
-                  {autoSaveStatus === 'syncing' ? 'Syncing' : 'Saving'}
-                </span>
-              </>
+              <LoadingMark size="xs" className="bg-gray-300" />
             ) : autoSaveStatus === 'offline' ? (
-              <>
-                <Wifi size={10} className="text-amber-600" />
-                <span className="text-amber-700">Offline</span>
-              </>
+              <WifiOff size={12} aria-hidden="true" className="text-amber-700" />
             ) : autoSaveStatus === 'error' ? (
-              <>
-                <RefreshCw size={10} className="text-red-600" />
-                <span className="text-red-700">Not synced — retrying</span>
-              </>
+              <RefreshCw size={12} aria-hidden="true" className="text-red-700" />
             ) : (
-              <>
-                <CheckCircle size={10} className="text-green-600" />
-                <span className="text-green-900">Saved</span>
-              </>
+              <CheckCircle size={12} aria-hidden="true" className="text-green-700" />
             )}
+            <span
+              className={
+                {
+                  success: 'text-green-900',
+                  neutral: 'text-gray-700',
+                  warning: 'text-amber-800',
+                  danger: 'text-red-700',
+                }[saveStatus?.tone ?? 'neutral']
+              }
+            >
+              {saveStatus?.label}
+            </span>
           </div>
         )}
         {tabletMode ? (

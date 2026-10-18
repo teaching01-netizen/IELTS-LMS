@@ -237,12 +237,12 @@ describe('question flag placement', () => {
     // The flag owns a real trailing action column in the question header.
     expect(row).toHaveClass('student-question-row', 'student-question-row--flagged');
 
-    const flag = within(row as HTMLElement).getByRole('button', { name: 'Flag question' });
+    const flag = within(row as HTMLElement).getByRole('button', { name: /^Flag question/ });
     // In-flow control: the old absolute overlay is gone for good.
     expect(flag.className).not.toContain('absolute');
     expect(flag.className).toContain('flex-shrink-0');
     // Quiet at rest: no permanent heavy ring, neutral glyph.
-    expect(flag.className).toContain('text-gray-400');
+    expect(flag.className).toContain('text-gray-500');
     expect(flag.className).not.toContain('rounded-full');
     expect(flag).toHaveAttribute('aria-pressed', 'false');
 
@@ -253,7 +253,7 @@ describe('question flag placement', () => {
   it('lets the flagged state carry the accent instead of a heavy outline', () => {
     renderPanel({ flags: { q1: true } });
 
-    const flag = screen.getByRole('button', { name: 'Unflag question' });
+    const flag = screen.getByRole('button', { name: /^Unflag question/ });
     expect(flag).toHaveAttribute('aria-pressed', 'true');
     expect(flag.className).toContain('text-blue-700');
     expect(flag.className).not.toContain('shadow-sm');
@@ -268,6 +268,6 @@ describe('question flag placement', () => {
     // The action column is still a real grid track — it moves, it never floats.
     const action = (row as HTMLElement).querySelector('.student-question-row-action');
     expect(action).not.toBeNull();
-    expect((action as HTMLElement).querySelector('button[aria-label="Flag question"]')).not.toBeNull();
+    expect((action as HTMLElement).querySelector('button[aria-label^="Flag question"]')).not.toBeNull();
   });
 });

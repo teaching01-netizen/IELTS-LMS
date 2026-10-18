@@ -69,4 +69,38 @@ describe('student interaction capabilities', () => {
       }).layoutMode,
     ).toBe('standard');
   });
+
+  it('lays out in zoomed CSS pixels so 150% zoom collapses a landscape iPad split', () => {
+    const ipadLandscape = {
+      width: 1180,
+      height: 820,
+      hasCoarsePointer: true,
+      hasTouchSupport: true,
+      hasHover: false,
+    };
+    expect(getStudentInteractionCapabilities(ipadLandscape).layoutMode).toBe('wide');
+    // 1180 / 1.5 ≈ 787 CSS px of content: two readable panes cannot fit.
+    expect(
+      getStudentInteractionCapabilities(ipadLandscape, { zoom: 1.5, textScale: 1 }).layoutMode,
+    ).toBe('compact');
+    // Orientation is a device fact, not a zoomed one.
+    expect(
+      getStudentInteractionCapabilities(ipadLandscape, { zoom: 1.5, textScale: 1 }).orientation,
+    ).toBe('landscape');
+  });
+
+  it('widens readable pane minimums for larger text before splitting', () => {
+    const standardTablet = {
+      width: 1024,
+      height: 768,
+      hasCoarsePointer: true,
+      hasTouchSupport: true,
+      hasHover: false,
+    };
+    expect(getStudentInteractionCapabilities(standardTablet).layoutMode).toBe('standard');
+    // 380 + 430 at 1.3× = 1053 + rail > 1024: one pane, not two cramped ones.
+    expect(
+      getStudentInteractionCapabilities(standardTablet, { zoom: 1, textScale: 1.3 }).layoutMode,
+    ).toBe('compact');
+  });
 });

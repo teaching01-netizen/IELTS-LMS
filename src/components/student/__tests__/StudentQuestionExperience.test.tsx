@@ -2420,7 +2420,7 @@ describe('student question experience', () => {
     });
   });
 
-  it('applies tablet zoom scaling to reading and listening content panes', () => {
+  it('leaves zoom to the exam shell instead of re-scaling reading and listening panes', () => {
     const readingState = {
       title: 'Reading Test',
       type: 'Academic',
@@ -2472,7 +2472,6 @@ describe('student question experience', () => {
         currentQuestionId="reading-q1"
         onNavigate={() => {}}
         tabletMode
-        contentZoom={1.3}
       />,
     );
 
@@ -2482,7 +2481,7 @@ describe('student question experience', () => {
     expect(readingZoomedPanes.length).toBeGreaterThan(1);
     for (const pane of readingZoomedPanes) {
       const style = pane.getAttribute('style') ?? '';
-      expect(style).toMatch(/zoom: 1\.3|transform: scale\(1\.3\)/);
+      expect(style).not.toMatch(/zoom:|transform: scale/);
     }
 
     unmount();
@@ -2546,7 +2545,6 @@ describe('student question experience', () => {
         currentQuestionId="q1"
         onNavigate={() => {}}
         tabletMode
-        contentZoom={1.3}
       />,
     );
 
@@ -2556,7 +2554,7 @@ describe('student question experience', () => {
     expect(listeningZoomedPanes.length).toBeGreaterThan(1);
     for (const pane of listeningZoomedPanes) {
       const style = pane.getAttribute('style') ?? '';
-      expect(style).toMatch(/zoom: 1\.3|transform: scale\(1\.3\)/);
+      expect(style).not.toMatch(/zoom:|transform: scale/);
     }
   });
 

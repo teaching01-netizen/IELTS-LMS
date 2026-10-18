@@ -180,7 +180,7 @@ describe('SubAnswerTreeQuestionList', () => {
       />,
     );
 
-    const flagButton = container.querySelector('button[aria-label="Unflag question"]');
+    const flagButton = container.querySelector('button[aria-label^="Unflag question"]');
     expect(flagButton).not.toBeNull();
     expect(flagButton).toHaveClass('flex-shrink-0');
   });

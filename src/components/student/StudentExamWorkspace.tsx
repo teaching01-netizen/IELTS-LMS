@@ -109,7 +109,6 @@ export function StudentExamWorkspace({
             onToggleFlag={onFlagToggle}
             tabletMode={tabletMode}
             layoutMode={layoutMode}
-            contentZoom={contentZoom}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}
@@ -129,7 +128,6 @@ export function StudentExamWorkspace({
             onToggleFlag={onFlagToggle}
             tabletMode={tabletMode}
             layoutMode={layoutMode}
-            contentZoom={contentZoom}
             highlightEnabled={highlightEnabled}
             highlightColor={highlightColor}
             highlightClassName={highlightClassName}

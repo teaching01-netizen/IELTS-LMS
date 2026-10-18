@@ -455,6 +455,8 @@
     --color-blue-800: #0000cc;
     --color-blue-700: #0000dd;
     --color-blue-600: #0000ee;
+    --color-blue-500: #0000ee;
+    --color-blue-50: #e8e8ff;
     --color-green-800: #005a00;
     --color-amber-800: #8a5a00;
     --color-exam-canvas: #ffffff;
@@ -498,8 +500,11 @@
     width: 100%;
     min-width: 0;
     min-height: 0;
-    height: var(--student-exam-height, 100dvh);
-    max-height: var(--student-exam-height, 100dvh);
+    /* The shell's own CSS zoom also scales this height, so it is divided
+       back out: at 150% an 820px viewport is 547px of zoomed layout. Without
+       it the footer (Next/Finish) rendered below the screen at any zoom. */
+    height: calc(var(--student-exam-height, 100dvh) / var(--student-exam-zoom, 1));
+    max-height: calc(var(--student-exam-height, 100dvh) / var(--student-exam-zoom, 1));
     overflow: hidden;
     overflow: clip;
     overscroll-behavior: none;
@@ -521,6 +526,72 @@
       --color-exam-question-current: Highlight;
       --color-exam-question-answered: Highlight;
       --color-exam-question-flagged: Highlight;
+    }
+  }
+
+  /* IELTS primary buttons: white on the shared blue-600 (#2383e2) is only
+     ~3.9:1; blue-700 clears the 4.5:1 AA minimum for button text. */
+  .student-exam-shell:not([data-exam-type='ACT']) {
+    /* 1vh as seen inside the zoomed shell: dialogs sized in vh would
+       otherwise grow past the screen with the zoom setting. */
+    --student-vh: calc(1dvh / var(--student-exam-zoom, 1));
+    --color-primary: var(--color-blue-700);
+    --color-primary-hover: var(--color-blue-800);
+    --color-primary-active: var(--color-blue-900);
+  }
+
+  /* IELTS compact pane switcher (Passage/Questions, Task/Response): one
+     segmented control. The selected segment is raised (surface + shadow +
+     weight), so selection never relies on hue alone. */
+  .student-segmented {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.125rem;
+    margin: 0.5rem;
+    padding: 0.1875rem;
+    border-radius: 0.75rem;
+    background-color: rgb(118 118 128 / 0.14);
+  }
+
+  .student-segmented > button {
+    flex: 1 1 0;
+    min-block-size: var(--student-touch-target-min);
+    padding-inline: 0.75rem;
+    border: 0;
+    border-radius: 0.5625rem;
+    background-color: transparent;
+    color: var(--color-gray-700);
+    font-size: var(--student-control-font-size, 0.9375rem);
+    font-weight: 600;
+    touch-action: manipulation;
+    transition: background-color 120ms ease-out, box-shadow 120ms ease-out, color 120ms ease-out;
+  }
+
+  .student-segmented > button[aria-pressed='true'] {
+    background-color: #ffffff;
+    color: var(--color-gray-950);
+    font-weight: 700;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+  }
+
+  .student-segmented > button:focus-visible {
+    outline: 2px solid var(--color-exam-control-border-focus, #175cd3);
+    outline-offset: 1px;
+  }
+
+  .high-contrast .student-segmented > button[aria-pressed='true'] {
+    box-shadow: inset 0 0 0 2px #000000;
+  }
+
+  @media (forced-colors: active) {
+    .student-segmented > button[aria-pressed='true'] {
+      outline: 2px solid Highlight;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .student-segmented > button {
+      transition: none;
     }
   }
 
@@ -597,6 +668,36 @@
     min-inline-size: 1rem !important;
     min-width: 1rem !important;
     min-height: 1rem !important;
+  }
+
+  /* IELTS: inside an answer row the <label> is the hit area (>= 44px), so
+     the native radio/checkbox stays glyph-sized instead of inflating to the
+     48px control floor. Bare inputs outside a label keep the floor. */
+  /* IELTS keyboard focus (iPad + hardware keyboard): the whole answer row
+     takes the focus ring, like a selected cell, instead of a small square
+     around the glyph. */
+  .student-exam-shell:not([data-exam-type='ACT'])
+    label:has(:is(input[type='radio'], input[type='checkbox']):focus-visible) {
+    outline: 3px solid var(--color-exam-control-border-focus, #175cd3);
+    outline-offset: 2px;
+  }
+
+  .student-exam-shell:not([data-exam-type='ACT'])
+    label :is(input[type='radio'], input[type='checkbox']):focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
+  .student-exam-shell:not([data-exam-type='ACT'])
+    label :is(input[type='radio'], input[type='checkbox']) {
+    inline-size: 1.375rem;
+    block-size: 1.375rem;
+    min-block-size: 1.375rem !important;
+    min-inline-size: 1.375rem !important;
+    min-width: 1.375rem !important;
+    min-height: 1.375rem !important;
+    flex-shrink: 0;
+    accent-color: var(--color-blue-700);
   }
 
   .student-touch-target {
@@ -742,6 +843,12 @@
   .student-exam-shell .student-passage-measure {
     max-width: var(--student-passage-measure);
     margin-inline: auto;
+  }
+
+  /* IELTS prose: an em measure (~68 characters at Comfort) instead of the
+     ch token, which overshoots to ~110 in a proportional face. */
+  .student-exam-shell:not([data-exam-type='ACT']) .student-passage-measure {
+    max-width: var(--student-passage-prose-measure, var(--student-passage-measure));
   }
 
   .student-exam-shell .student-question-scroll > * {

@@ -335,15 +335,15 @@ describe('StudentWriting lifecycle durability', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show response' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Response' }));
     const editor = screen.getByRole('textbox', { name: /writing response/i });
     setWritingEditorText(editor, 'Compact response draft');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show prompt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Task' }));
     expect(screen.queryByRole('textbox', { name: /writing response/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('writing-task-prompt')).toHaveTextContent('Task 1 prompt');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show response' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Response' }));
     expect(screen.getByRole('textbox', { name: /writing response/i })).toHaveValue('Compact response draft');
     expect(screen.queryByRole('button', { name: /review & submit/i })).not.toBeInTheDocument();
   });

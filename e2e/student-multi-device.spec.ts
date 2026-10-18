@@ -104,7 +104,7 @@ test.describe("Student multi-device fingerprint mismatch", () => {
       .toBe(true);
 
     await context.setOffline(true);
-    await expect(page.getByTestId("student-auto-save-status")).toHaveText("Offline");
+    await expect(page.getByTestId("student-auto-save-status")).toHaveText(/^Offline/);
 
     await context.setOffline(false);
 
