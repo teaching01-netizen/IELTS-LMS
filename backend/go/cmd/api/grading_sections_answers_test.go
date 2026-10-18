@@ -30,6 +30,9 @@ func TestGradingSectionsHandlerReturnsPersistedAnswers(t *testing.T) {
 		sqlmock.NewRows([]string{"id", "section", "answers", "grading_status", "auto_grading_results"}).
 			AddRow("section-1", "science", answersJSON, "auto_graded", autoGradingJSON),
 	)
+	mock.ExpectQuery("SELECT COALESCE\\(s.attempt_id").WithArgs("submission-1").WillReturnRows(
+		sqlmock.NewRows([]string{"attempt_id", "protocol_version"}),
+	)
 
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("submissionID", "submission-1")
@@ -92,11 +95,13 @@ func testGradingWritingResponse(t *testing.T, storedText string) {
 		sqlmock.NewRows([]string{"id", "submission_id", "task_id", "task_label", "prompt", "student_text", "word_count", "grading_status", "submitted_at", "protocol_version"}).
 			AddRow("writing-1", "submission-1", "task1", "Task 1", "<p>Describe the chart.</p>", storedText, 3, "needs_review", submittedAt, 2),
 	)
+	finalSubmission := any(nil)
 	if storedText == "" {
-		mock.ExpectQuery("SELECT a.final_submission").WithArgs("submission-1").WillReturnRows(
-			sqlmock.NewRows([]string{"final_submission"}).AddRow(`{"answers":{"task1":"<p>My saved essay.</p>"},"writingAnswers":{}}`),
-		)
+		finalSubmission = `{"answers":{"task1":"<p>My saved essay.</p>"},"writingAnswers":{}}`
 	}
+	mock.ExpectQuery("SELECT a.id, COALESCE\\(a.protocol_version, 1\\), a.final_submission").
+		WithArgs("submission-1").WillReturnRows(sqlmock.NewRows([]string{"id", "protocol_version", "final_submission"}).
+			AddRow("attempt-1", 1, finalSubmission))
 
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("submissionID", "submission-1")

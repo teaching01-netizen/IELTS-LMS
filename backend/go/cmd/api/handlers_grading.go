@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,7 @@ import (
 	"example.com/ielts-proctoring/internal/act"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/grading"
+	"example.com/ielts-proctoring/internal/platform/answerblobs"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
@@ -441,8 +443,94 @@ func gradingSectionsHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
+		if err := rows.Close(); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if err := recoverSealedObjectiveAnswersForReview(r.Context(), app.DB, submissionID, out); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
+}
+
+// Row-first V2 responses are authoritative even when an older terminal
+// projection sealed an empty compatibility answer map. Overlay those saved
+// cells at the grading read boundary so existing submissions remain reviewable.
+func recoverSealedObjectiveAnswersForReview(ctx context.Context, db *sql.DB, submissionID string, sections []map[string]any) error {
+	var attemptID string
+	var protocolVersion int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COALESCE(s.attempt_id, ''), COALESCE(a.protocol_version, 1)
+		FROM student_submissions s
+		LEFT JOIN student_attempts a ON a.id = s.attempt_id
+		WHERE s.id = ? AND s.provider_key = 'ielts'`, submissionID).Scan(&attemptID, &protocolVersion); err == sql.ErrNoRows {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if attemptID == "" || protocolVersion < 2 {
+		return nil
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT COALESCE(s.section_key, ''), r.module_id, r.question_id, CAST(r.response AS CHAR)
+		FROM attempt_responses_v2 r
+		LEFT JOIN assessment_modules m ON m.id = r.module_id
+		LEFT JOIN assessment_sections s ON s.id = m.section_id
+		WHERE r.attempt_id = ?`, attemptID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	cellsBySection := map[string][]answerblobs.Cell{}
+	for rows.Next() {
+		var sectionKey, moduleID, questionID, canonical string
+		if err := rows.Scan(&sectionKey, &moduleID, &questionID, &canonical); err != nil {
+			return err
+		}
+		if sectionKey == "listening" || sectionKey == "reading" {
+			cellsBySection[sectionKey] = append(cellsBySection[sectionKey], answerblobs.Cell{
+				QuestionID: questionID, ModuleID: moduleID, SectionKey: sectionKey,
+				Canonical: json.RawMessage(canonical),
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for sectionKey, cells := range cellsBySection {
+		blobs, err := answerblobs.Assemble(cells)
+		if err != nil {
+			return err
+		}
+		var saved map[string]any
+		if err := json.Unmarshal([]byte(blobs.Answers), &saved); err != nil {
+			return err
+		}
+		for _, section := range sections {
+			if section["section"] != sectionKey || len(saved) == 0 {
+				continue
+			}
+			payload, _ := section["answers"].(map[string]any)
+			if payload == nil {
+				payload = map[string]any{}
+			}
+			answers, _ := payload["answers"].(map[string]any)
+			if answers == nil {
+				answers = map[string]any{}
+			}
+			for questionID, answer := range saved {
+				answers[questionID] = answer
+			}
+			payload["type"] = sectionKey
+			payload["answers"] = answers
+			section["answers"] = payload
+			break
+		}
+	}
+	return nil
 }
 
 // gradingOverrideQuestionHandler records a per-question teacher override.

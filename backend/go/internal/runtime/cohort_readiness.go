@@ -15,8 +15,8 @@ type CohortReadiness struct {
 	RemainingStudents int        `json:"remainingStudents"`
 }
 
-// cohortStartLead covers one readiness poll and delivery of the armed clock.
-// It follows measured transport latency instead of spending exam time loading.
+// cohortStartLead covers readiness polling and delivery of the armed clock.
+// It follows measured transport latency while keeping the fixed handoff buffer short.
 func cohortStartLead(roundTripMS int) time.Duration {
 	if roundTripMS < 0 {
 		roundTripMS = 0
@@ -24,7 +24,7 @@ func cohortStartLead(roundTripMS int) time.Duration {
 	if roundTripMS > 10000 {
 		roundTripMS = 10000
 	}
-	return time.Duration(1000+3*roundTripMS) * time.Millisecond
+	return time.Duration(600+2*roundTripMS) * time.Millisecond
 }
 
 // ReadyCohortSection is idempotent and serializes with admission, proctor

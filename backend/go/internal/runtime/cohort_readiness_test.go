@@ -59,7 +59,7 @@ func TestCohortReadinessWaitsForEveryStudent(t *testing.T) {
 			mock.ExpectExec("INSERT INTO ielts_section_readiness").WithArgs("rt", "reading", "a", 100).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectQuery("SELECT COALESCE.*SUM").WithArgs("rt", "reading", "sch").WillReturnRows(sqlmock.NewRows([]string{"remaining", "rtt"}).AddRow(remaining, 100))
 			if remaining == 0 {
-				mock.ExpectExec("UPDATE exam_session_runtime_sections SET status = 'live'").WithArgs(now.Add(1300*time.Millisecond), "rt", "reading").WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("UPDATE exam_session_runtime_sections SET status = 'live'").WithArgs(now.Add(800*time.Millisecond), "rt", "reading").WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectExec("UPDATE exam_session_runtimes SET waiting").WithArgs("rt").WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectExec("UPDATE student_attempts sa").WithArgs("rt", "reading", "sch").WillReturnResult(sqlmock.NewResult(0, 2))
 				mock.ExpectExec("INSERT INTO outbox_events").WillReturnResult(sqlmock.NewResult(0, 1))

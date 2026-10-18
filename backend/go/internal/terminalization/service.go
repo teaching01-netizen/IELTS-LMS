@@ -912,9 +912,11 @@ func buildFinalSubmission(snapshot json.RawMessage, cmd SealCommand, terminaliza
 	}
 	for _, k := range []string{"answers", "writingAnswers", "flags", "providerKey"} {
 		if v, ok := snap[k]; ok {
-			if _, present := proj[k]; !present {
-				proj[k] = v
-			}
+			// Compatibility submissions can contain stale client copies of
+			// these maps. The server snapshot has already been rebuilt from
+			// accepted response rows, so it must replace even a present but
+			// empty client value.
+			proj[k] = v
 		}
 	}
 	if cmd.Outcome == OutcomeTerminated {

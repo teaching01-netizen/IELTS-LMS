@@ -5,40 +5,81 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+
+	"example.com/ielts-proctoring/internal/attempts"
 )
 
-// Older normalized writing modules sealed their saved essays in answers.
-// Recover only known writing task IDs, from the immutable submitted snapshot.
+// V2 response rows are the exact saved text source; sealed answer maps recover
+// writing tasks from older projections that stored essays in answers.
 func recoverSealedWritingForReview(ctx context.Context, db *sql.DB, submissionID string, tasks []map[string]any) error {
+	if len(tasks) == 0 {
+		return nil
+	}
 	missing := false
 	for _, task := range tasks {
 		if text, _ := task["studentText"].(string); text == "" {
 			missing = true
 		}
 	}
-	if !missing {
-		return nil
-	}
 	var raw sql.NullString
-	err := db.QueryRowContext(ctx, `SELECT a.final_submission FROM student_submissions s JOIN student_attempts a ON a.id = s.attempt_id WHERE s.id = ? AND s.provider_key = 'ielts'`, submissionID).Scan(&raw)
-	if err == sql.ErrNoRows || (err == nil && !raw.Valid) {
+	var attemptID string
+	var protocolVersion int
+	err := db.QueryRowContext(ctx, `SELECT a.id, COALESCE(a.protocol_version, 1), a.final_submission FROM student_submissions s JOIN student_attempts a ON a.id = s.attempt_id WHERE s.id = ? AND s.provider_key = 'ielts'`, submissionID).Scan(&attemptID, &protocolVersion, &raw)
+	if err == sql.ErrNoRows {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
+	if protocolVersion < 2 && !missing {
+		return nil
+	}
 	var sealed struct {
 		Answers        map[string]json.RawMessage `json:"answers"`
 		WritingAnswers map[string]json.RawMessage `json:"writingAnswers"`
 	}
-	if err := json.Unmarshal([]byte(raw.String), &sealed); err != nil {
-		return err
+	if raw.Valid && strings.TrimSpace(raw.String) != "" {
+		if err := json.Unmarshal([]byte(raw.String), &sealed); err != nil {
+			return err
+		}
+	}
+	rowAnswers := map[string]json.RawMessage{}
+	rowWritingAnswers := map[string]json.RawMessage{}
+	if protocolVersion >= 2 {
+		blobs, err := attempts.MaterializeBlobs(ctx, db, attemptID)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(blobs.Answers), &rowAnswers); err != nil {
+			return err
+		}
+		if err := json.Unmarshal([]byte(blobs.WritingAnswers), &rowWritingAnswers); err != nil {
+			return err
+		}
 	}
 	for _, task := range tasks {
+		id, _ := task["taskId"].(string)
+		value, hasRowAnswer := rowWritingAnswers[id]
+		if !hasRowAnswer {
+			value, hasRowAnswer = rowAnswers[id]
+		}
+		if hasRowAnswer {
+			var text string
+			if json.Unmarshal(value, &text) != nil {
+				var object struct {
+					Text string `json:"text"`
+				}
+				if json.Unmarshal(value, &object) == nil {
+					text = object.Text
+				}
+			}
+			task["studentText"] = text
+			task["wordCount"] = len(strings.Fields(text))
+			continue
+		}
 		if task["studentText"] != "" {
 			continue
 		}
-		id, _ := task["taskId"].(string)
 		value, exists := sealed.WritingAnswers[id]
 		if !exists {
 			value = sealed.Answers[id]
