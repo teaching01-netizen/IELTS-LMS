@@ -71,6 +71,22 @@ describe('gradingRepository bundle cache', () => {
     backendGet.mockReset();
   });
 
+  it('keeps native writing text and its format unchanged for grading', async () => {
+    const studentText = '\n  a\t\tb\u00a0\u2003 &nbsp; <p>literal</p>\n\n  c  \n\n';
+    backendGet.mockResolvedValueOnce([{
+      id: 'writing-exact',
+      submissionId: 'sub-exact',
+      taskId: 'task1',
+      studentText,
+      responseFormat: 'plain_text',
+    }]);
+
+    const tasks = await gradingRepository.getWritingSubmissionsBySubmissionId('sub-exact');
+
+    expect(tasks[0]?.studentText).toBe(studentText);
+    expect(tasks[0]?.responseFormat).toBe('plain_text');
+  });
+
   it('reloads a submission bundle after saving a review draft', async () => {
     const initialDraft = buildBundle().reviewDraft;
     const updatedDraft = {

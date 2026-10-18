@@ -507,8 +507,10 @@ func gradingWritingTasksHandler(app *App) http.HandlerFunc {
 		}
 		rows, err := app.DB.QueryContext(r.Context(),
 			`SELECT w.id, w.submission_id, w.task_id, w.task_label, w.prompt, w.student_text,
-				w.word_count, w.grading_status, w.submitted_at
+				w.word_count, w.grading_status, w.submitted_at, COALESCE(a.protocol_version, 1)
 			FROM writing_task_submissions w
+			LEFT JOIN student_submissions s ON s.id = w.submission_id
+			LEFT JOIN student_attempts a ON a.id = s.attempt_id
 			WHERE w.submission_id = ?
 			ORDER BY w.task_id ASC`,
 			submissionID)
@@ -522,7 +524,8 @@ func gradingWritingTasksHandler(app *App) http.HandlerFunc {
 			var id, rowSubmissionID, taskID, label, prompt, studentText, status string
 			var words sql.NullInt64
 			var submittedAt time.Time
-			if err := rows.Scan(&id, &rowSubmissionID, &taskID, &label, &prompt, &studentText, &words, &status, &submittedAt); err != nil {
+			var protocolVersion int
+			if err := rows.Scan(&id, &rowSubmissionID, &taskID, &label, &prompt, &studentText, &words, &status, &submittedAt, &protocolVersion); err != nil {
 				httpx.WriteError(w, r, err)
 				return
 			}
@@ -531,6 +534,11 @@ func gradingWritingTasksHandler(app *App) http.HandlerFunc {
 				"taskId": taskID, "taskLabel": label,
 				"prompt": prompt, "studentText": studentText,
 				"gradingStatus": status, "submittedAt": submittedAt,
+			}
+			if protocolVersion >= 2 {
+				row["responseFormat"] = "plain_text"
+			} else {
+				row["responseFormat"] = "html"
 			}
 			if words.Valid {
 				row["wordCount"] = words.Int64

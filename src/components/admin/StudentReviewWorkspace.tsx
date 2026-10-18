@@ -759,9 +759,10 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   }, [writingSubmissions, writingTasks]);
 
   const getWritingResponseText = useCallback((taskId: string) => {
-    const fromWritingTasks = getWritingTaskSubmission(taskId)?.studentText;
+    const task = getWritingTaskSubmission(taskId);
+    const fromWritingTasks = task?.studentText;
     if (typeof fromWritingTasks === 'string') {
-      return fromWritingTasks;
+      return htmlToPlainTextPreserveLineBreaks(fromWritingTasks, task?.responseFormat);
     }
 
     const writingSection = getSectionSubmission('writing');
@@ -774,7 +775,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       const match = tasks.find((entry) => isWritingTaskEntry(entry) && entry.taskId === taskId);
       const text = match?.text;
       if (typeof text === 'string') {
-        return text;
+        return htmlToPlainTextPreserveLineBreaks(text);
       }
     }
 
@@ -807,7 +808,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const currentWritingTaskId = activeSection === 'writing' ? activeTask : null;
   const currentWritingPrompt = currentWritingTaskId ? htmlToPlainText(getWritingPrompt(currentWritingTaskId)) : '';
   const currentWritingText = currentWritingTaskId
-    ? htmlToPlainTextPreserveLineBreaks(getWritingResponseText(currentWritingTaskId))
+    ? getWritingResponseText(currentWritingTaskId)
     : '';
   const currentWritingTaskSubmission = currentWritingTaskId ? getWritingTaskSubmission(currentWritingTaskId) : null;
   const currentWritingAssessment = useMemo(() => {
@@ -849,8 +850,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
     return (['task1', 'task2'] as const).map((slot) => {
       const taskIdForPrompt = promptTaskIdsBySlot.get(slot) ?? slot;
-      const rawText = getWritingResponseText(taskIdForPrompt);
-      const text = htmlToPlainTextPreserveLineBreaks(rawText);
+      const text = getWritingResponseText(taskIdForPrompt);
       const taskSubmission = submissionTaskBySlot.get(slot);
 
       return {
@@ -923,7 +923,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     writingTasks.forEach((task) => {
       const slot = task.taskId === 'task2' ? 'task2' : 'task1';
       const rubric = reviewDraft.sectionDrafts.writing?.[slot];
-      const taskText = htmlToPlainTextPreserveLineBreaks(getWritingResponseText(task.taskId));
+      const taskText = getWritingResponseText(task.taskId);
       results[slot] = {
         taskId: task.taskId,
         taskLabel: task.taskId === 'task1' ? 'Task 1' : 'Task 2',

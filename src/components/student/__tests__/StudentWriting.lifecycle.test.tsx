@@ -278,7 +278,7 @@ describe('StudentWriting lifecycle durability', () => {
     );
 
     const editor = screen.getByRole('textbox', { name: /writing response/i });
-    const exact = '  line 1 with  spaces\n\n\tline 3 after blank\n  ';
+    const exact = '  line 1 with  spaces\u00a0\u2003 &nbsp; <p>literal</p>\n\n\tline 3 after blank\n  \n\n';
     setWritingEditorText(editor, exact);
     fireEvent.blur(editor);
 

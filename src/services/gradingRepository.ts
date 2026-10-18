@@ -412,6 +412,7 @@ class BackendGradingRepository implements IGradingRepository {
       taskLabel: payload.taskLabel,
       prompt: payload.prompt,
       studentText: payload.studentText,
+      responseFormat: payload.responseFormat,
       wordCount: payload.wordCount,
       rubricAssessment: payload.rubricAssessment ?? undefined,
       annotations: payload.annotations ?? [],

@@ -1194,7 +1194,7 @@ function assignWritingTaskColumns(row: Record<string, unknown>, slot: 'task1' | 
   const rubric = task.rubricAssessment;
 
   row[`${slot}:wordCount`] = task.wordCount;
-  row[`${slot}:response`] = htmlToPlainTextPreserveLineBreaks(task.studentText);
+  row[`${slot}:response`] = htmlToPlainTextPreserveLineBreaks(task.studentText, task.responseFormat);
   row[`${slot}:taskResponseBand`] = rubric?.taskResponseBand ?? '';
   row[`${slot}:coherenceBand`] = rubric?.coherenceBand ?? '';
   row[`${slot}:lexicalBand`] = rubric?.lexicalBand ?? '';

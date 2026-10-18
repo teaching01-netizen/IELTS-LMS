@@ -649,7 +649,7 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
                   <h4>Student Response</h4>
                   {page.task ? (
                     <div className="session-writing-print-response">
-                      {htmlToPlainTextPreserveLineBreaks(page.task.studentText) || 'No writing response recorded.'}
+                      {htmlToPlainTextPreserveLineBreaks(page.task.studentText, page.task.responseFormat) || 'No writing response recorded.'}
                     </div>
                   ) : (
                     <div className="session-writing-print-empty">No writing response recorded.</div>

@@ -489,6 +489,7 @@ export interface WritingTaskSubmission {
   // Immutable snapshot
   prompt: string;
   studentText: string;
+  responseFormat?: 'plain_text' | 'html' | undefined;
   wordCount: number;
   
   // Grading

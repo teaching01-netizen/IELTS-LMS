@@ -69,6 +69,7 @@ func TestGradingSectionsHandlerReturnsPersistedAnswers(t *testing.T) {
 func TestGradingWritingTasksHandlerReturnsPromptAndStudentResponse(t *testing.T) {
 	t.Run("persisted essay", func(t *testing.T) { testGradingWritingResponse(t, "<p>My saved essay.</p>") })
 	t.Run("recover essay sealed under objective answers", func(t *testing.T) { testGradingWritingResponse(t, "") })
+	t.Run("exact native writing text", func(t *testing.T) { testGradingWritingResponse(t, "  A\t\u00a0 B &nbsp; <p>literal</p>\n\n  ") })
 }
 
 func testGradingWritingResponse(t *testing.T, storedText string) {
@@ -81,13 +82,15 @@ func testGradingWritingResponse(t *testing.T, storedText string) {
 	submittedAt := time.Date(2026, time.October, 4, 8, 15, 0, 0, time.UTC)
 	mock.ExpectQuery(regexp.QuoteMeta(
 		`SELECT w.id, w.submission_id, w.task_id, w.task_label, w.prompt, w.student_text,
-				w.word_count, w.grading_status, w.submitted_at
+				w.word_count, w.grading_status, w.submitted_at, COALESCE(a.protocol_version, 1)
 			FROM writing_task_submissions w
+			LEFT JOIN student_submissions s ON s.id = w.submission_id
+			LEFT JOIN student_attempts a ON a.id = s.attempt_id
 			WHERE w.submission_id = ?
 			ORDER BY w.task_id ASC`,
 	)).WithArgs("submission-1").WillReturnRows(
-		sqlmock.NewRows([]string{"id", "submission_id", "task_id", "task_label", "prompt", "student_text", "word_count", "grading_status", "submitted_at"}).
-			AddRow("writing-1", "submission-1", "task1", "Task 1", "<p>Describe the chart.</p>", storedText, 3, "needs_review", submittedAt),
+		sqlmock.NewRows([]string{"id", "submission_id", "task_id", "task_label", "prompt", "student_text", "word_count", "grading_status", "submitted_at", "protocol_version"}).
+			AddRow("writing-1", "submission-1", "task1", "Task 1", "<p>Describe the chart.</p>", storedText, 3, "needs_review", submittedAt, 2),
 	)
 	if storedText == "" {
 		mock.ExpectQuery("SELECT a.final_submission").WithArgs("submission-1").WillReturnRows(
@@ -117,8 +120,15 @@ func testGradingWritingResponse(t *testing.T, storedText string) {
 	if tasks[0]["prompt"] != "<p>Describe the chart.</p>" {
 		t.Errorf("expected persisted prompt in response, got %#v", tasks[0]["prompt"])
 	}
-	if tasks[0]["studentText"] != "<p>My saved essay.</p>" {
+	expectedText := storedText
+	if expectedText == "" {
+		expectedText = "<p>My saved essay.</p>"
+	}
+	if tasks[0]["studentText"] != expectedText {
 		t.Errorf("expected persisted student response in response, got %#v", tasks[0]["studentText"])
+	}
+	if tasks[0]["responseFormat"] != "plain_text" {
+		t.Errorf("native essays must be returned as literal plain text, got %#v", tasks[0]["responseFormat"])
 	}
 	if tasks[0]["submissionId"] != "submission-1" {
 		t.Errorf("expected submission ID in response, got %#v", tasks[0]["submissionId"])

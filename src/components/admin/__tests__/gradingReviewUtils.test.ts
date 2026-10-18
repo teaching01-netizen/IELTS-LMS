@@ -1397,6 +1397,23 @@ describe('gradingReviewUtils', () => {
     expect(exportData.rows[0]?.['task2:overallBand']).toBe('');
   });
 
+  test('wide writing export preserves exact native text including literal HTML and entities', () => {
+    const exact = '\n  a\t\tb\u00a0\u2003 &nbsp; <p>literal</p>\n\n  c  \n\n';
+    const exportData = buildWideWritingExport({
+      session: { sessionId: 'session-1', examTitle: 'Exam' },
+      submissions: [createStudentSubmission('sub-1', 'stu-1', 'Student One')],
+      writingSubmissions: [{
+        submissionId: 'sub-1',
+        writing: [{
+          ...createWritingTaskSubmission('sub-1', 'task1', exact, 4),
+          responseFormat: 'plain_text',
+        }],
+      }],
+    });
+
+    expect(exportData.rows[0]?.['task1:response']).toBe(exact);
+  });
+
   test('wide writing csv keeps escaping and formula protection', () => {
     const exportData = buildWideWritingExport({
       session: { sessionId: 'session-1', examTitle: 'Exam' },

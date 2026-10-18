@@ -839,7 +839,7 @@ func buildProjectionWritingTasks(writingAnswers, content, config map[string]any)
 		label := labels[id]
 		prompt := prompts[id]
 		if object, ok := value.(map[string]any); ok {
-			if candidate := stringOrEmpty(object["text"]); candidate != "" {
+			if candidate, ok := object["text"].(string); ok {
 				text = candidate
 			}
 			if candidate := stringOrEmpty(object["label"]); candidate != "" {

@@ -2,6 +2,13 @@ import { describe, expect, test } from 'vitest';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../htmlText';
 
 describe('htmlToPlainText', () => {
+  test.each([
+    '  first\t\tline\u00a0\u2003 &nbsp; &amp; <p>literal text</p>\n\n  last line  \n\n',
+    ' \t\n\n  ',
+    'e\u0301 ≠ é\r\n\tend  ',
+  ])('preserves every character of a native plain-text writing response', (exact) => {
+    expect(htmlToPlainTextPreserveLineBreaks(exact, 'plain_text')).toBe(exact);
+  });
   test('converts block-level html boundaries into normalized line breaks', () => {
     const input = '<div> First line </div><p>Second line</p><li>Third line</li>';
 

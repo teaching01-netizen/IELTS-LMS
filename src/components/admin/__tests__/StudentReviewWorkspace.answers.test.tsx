@@ -410,7 +410,10 @@ describe('StudentReviewWorkspace objective answers', () => {
     expect(await screen.findByText('Strengths')).toBeInTheDocument();
   });
 
-  test('renders writing responses as plain text without stored html tags', async () => {
+  test.each([
+    { name: 'legacy HTML', studentText: '<div>Hello&nbsp;world</div><div>Second line</div>', responseFormat: 'html' },
+    { name: 'exact native text', studentText: '\n  Hello\t\tworld\u00a0\u2003 &nbsp; <p>literal</p>\n\nSecond line  \n\n', responseFormat: 'plain_text' },
+  ] as const)('renders writing responses from $name', async ({ studentText, responseFormat }) => {
     const { createInitialExamState } = await import('../../../services/examAdapterService');
     const { gradingRepository } = await import('../../../services/gradingRepository');
     const { examRepository } = await import('../../../services/examRepository');
@@ -455,7 +458,8 @@ describe('StudentReviewWorkspace objective answers', () => {
         taskId: 'task1',
         taskLabel: 'Task 1',
         prompt: '<p class="MsoNormal"><span>You should write something.</span></p><p><b>Use details.</b></p>',
-        studentText: '<div>Hello&nbsp;world</div><div>Second line</div>',
+        studentText,
+        responseFormat,
         wordCount: 4,
         rubricAssessment: undefined,
         annotations: [],
@@ -505,14 +509,23 @@ describe('StudentReviewWorkspace objective answers', () => {
 
     expect((await screen.findAllByText(/You should write something/)).length).toBeGreaterThan(0);
     expect((await screen.findAllByText(/Use details/)).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText(/Hello world/)).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText(/Second line/)).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/<div>/)).not.toBeInTheDocument();
+    if (responseFormat === 'plain_text') {
+      const response = document.querySelector('.font-serif.whitespace-pre-wrap');
+      expect(response?.textContent).toBe(studentText);
+      expect(response?.querySelector('p')).toBeNull();
+    } else {
+      expect((await screen.findAllByText(/Hello world/)).length).toBeGreaterThan(0);
+      expect((await screen.findAllByText(/Second line/)).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/<div>/)).not.toBeInTheDocument();
+    }
     expect(screen.queryByText(/MsoNormal/)).not.toBeInTheDocument();
 
     const printSpy = vi.spyOn(window, 'print').mockImplementation(() => undefined);
     fireEvent.click(screen.getByRole('button', { name: /print writing/i }));
     expect(printSpy).toHaveBeenCalledOnce();
+    if (responseFormat === 'plain_text') {
+      expect(document.querySelector('.writing-print-response')?.textContent).toBe(studentText);
+    }
     printSpy.mockRestore();
   });
 

@@ -53,8 +53,13 @@ export function htmlToPlainText(content: string | null | undefined): string {
   );
 }
 
-export function htmlToPlainTextPreserveLineBreaks(content: string | null | undefined): string {
+export function htmlToPlainTextPreserveLineBreaks(
+  content: string | null | undefined,
+  format: 'plain_text' | 'html' = 'html',
+): string {
   const safeContent = normalizeHtmlTextInput(content);
+  // Native exam responses are literal text, including whitespace and <tags>.
+  if (format === 'plain_text') return safeContent;
 
   if (!HTML_TAG_PATTERN.test(safeContent)) {
     return normalizePlainTextPreservingLineBreaks(decodeEntities(safeContent));

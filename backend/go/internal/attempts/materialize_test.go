@@ -64,15 +64,24 @@ func TestMaterializeBlobsKeepsNormalizedWritingResponses(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	exact := "  A\t\tcomplete\u00a0\u2003 saved essay. &nbsp; <p>literal</p>\n\n  final  \n\n"
+	response, err := json.Marshal(map[string]any{"answer": exact, "markedForReview": false})
+	if err != nil {
+		t.Fatal(err)
+	}
 	mock.ExpectQuery("LEFT JOIN assessment_sections s ON s.id = m.section_id").
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}).
-			AddRow("task1", "d8b6426d-2698-49ee-a072-4552810c741e", "writing", `{"answer":"A complete saved essay.","markedForReview":false}`))
+			AddRow("task1", "d8b6426d-2698-49ee-a072-4552810c741e", "writing", string(response)))
 	blobs, err := MaterializeBlobs(context.Background(), db, "att-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if blobs.WritingAnswers != `{"task1":"A complete saved essay."}` || blobs.Answers != "{}" {
+	var writing map[string]string
+	if err := json.Unmarshal([]byte(blobs.WritingAnswers), &writing); err != nil {
+		t.Fatal(err)
+	}
+	if writing["task1"] != exact || blobs.Answers != "{}" {
 		t.Fatalf("the writing section must own a UUID-module essay: %+v", blobs)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

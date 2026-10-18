@@ -150,7 +150,7 @@ export function renderWritingLikeDefaultPrint(
     y += 5;
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    const responseText = task ? htmlToPlainTextPreserveLineBreaks(task.studentText) : '';
+    const responseText = task ? htmlToPlainTextPreserveLineBreaks(task.studentText, task.responseFormat) : '';
     y = writeWrappedText(doc, responseText || 'No submission', left, y, maxWidth, lineHeight);
     y += 4;
 
