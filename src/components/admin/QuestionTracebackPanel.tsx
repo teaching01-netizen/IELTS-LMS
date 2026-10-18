@@ -1,12 +1,17 @@
 import React, { useMemo } from 'react';
 import { AlertTriangle, BookOpen, CheckCircle2, FileText, Hash } from 'lucide-react';
 import type { ExamState } from '../../types';
-import type { ObjectiveQuestionResult, SectionSubmission } from '../../types/grading';
+import type {
+  ObjectiveGradingAudit,
+  ObjectiveQuestionResult,
+  SectionSubmission,
+} from '../../types/grading';
 import {
   buildQuestionTracebackGroups,
   type ObjectiveTracebackGroup,
 } from './gradingReviewUtils';
 import { extractObjectiveAnswerMap } from './gradingAnswerUtils';
+import { describeObjectiveIntegrityIssue } from './ObjectiveIntegrityAuditSection';
 
 interface QuestionTracebackPanelProps {
   section: 'reading' | 'listening';
@@ -82,6 +87,70 @@ function buildFallbackTracebackGroups(
       answerKey: result.questionId,
     })),
   }];
+}
+
+/**
+ * Why "no student answer" and "no correct answer" are two different faults.
+ * The persisted grading audit already distinguishes them — a missing sealed
+ * answer key (content fault) from a saved answer whose id is absent from the
+ * loaded exam version (identity fault) from a student who simply saved
+ * nothing. Without it on screen the three look identical, which is exactly how
+ * a content defect gets mistaken for a durability defect.
+ */
+function StoredAnswerAuditBanner({ audit }: { audit: ObjectiveGradingAudit }) {
+  const status = audit.integrityStatus;
+  const expected = audit.expectedQuestionCount;
+  const nothingSaved = expected > 0 && audit.verifiedUnansweredCount === expected;
+  const tone =
+    status === 'invalid'
+      ? { panel: 'border-rose-200 bg-rose-50 text-rose-900', icon: 'text-rose-700' }
+      : { panel: 'border-amber-200 bg-amber-50 text-amber-900', icon: 'text-amber-700' };
+  const headline =
+    status === 'verified' && nothingSaved
+      ? 'No answer was saved for any question in this section.'
+      : status === 'invalid'
+        ? 'The sealed answer key for this section is missing or invalid.'
+        : 'Some stored answers do not line up with this exam version.';
+  const issueCodes = audit.issueCodes ?? [];
+  const unknownAnswerIds = audit.unknownAnswerIds ?? [];
+
+  return (
+    <section className="border-b border-gray-100 px-4 py-4 sm:px-6" aria-labelledby="traceback-audit-heading">
+      <div className={`rounded-xl border px-4 py-3 text-sm ${tone.panel}`} role="status">
+        <div className="flex items-start gap-2">
+          <AlertTriangle size={16} className={`mt-0.5 shrink-0 ${tone.icon}`} />
+          <div className="min-w-0">
+            <p id="traceback-audit-heading" className="font-medium">
+              {headline}
+            </p>
+            <p className="mt-1 text-xs">
+              Saved-answer audit: expected {expected}, correct {audit.verifiedCorrectCount},
+              incorrect {audit.verifiedIncorrectCount}, unanswered {audit.verifiedUnansweredCount},
+              needs recheck {audit.unresolvedCount}, invalid {audit.invalidCount}.
+            </p>
+            {issueCodes.length > 0 ? (
+              <ul className="mt-2 space-y-1 text-xs">
+                {issueCodes.map((code) => (
+                  <li key={code}>
+                    <span className="font-semibold">{describeObjectiveIntegrityIssue(code).label}</span>
+                    {' — '}
+                    {describeObjectiveIntegrityIssue(code).description}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {unknownAnswerIds.length > 0 ? (
+              <p className="mt-2 break-words text-xs">
+                Saved under ids this exam version does not contain:{' '}
+                {unknownAnswerIds.slice(0, 3).join(', ')}
+                {unknownAnswerIds.length > 3 ? ', ...' : ''}.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 function renderGroup(
@@ -292,6 +361,14 @@ export function QuestionTracebackPanel({
   );
   const groups = schemaGroups.length > 0 || examLoading ? schemaGroups : fallbackGroups;
 
+  const storedAnswerAudit = sectionSubmission?.autoGradingResults?.integrity;
+  const showStoredAnswerAudit = Boolean(
+    storedAnswerAudit &&
+      (storedAnswerAudit.integrityStatus !== 'verified' ||
+        (storedAnswerAudit.expectedQuestionCount > 0 &&
+          storedAnswerAudit.verifiedUnansweredCount === storedAnswerAudit.expectedQuestionCount)),
+  );
+
   const rawAnswerPayload = sectionSubmission ? sectionSubmission.answers : null;
   const objectiveAnswerMap = useMemo(
     () => (sectionSubmission ? extractObjectiveAnswerMap(sectionSubmission.answers) : {}),
@@ -361,6 +438,10 @@ export function QuestionTracebackPanel({
           </div>
         </div>
         </div>
+
+      {showStoredAnswerAudit && storedAnswerAudit ? (
+        <StoredAnswerAuditBanner audit={storedAnswerAudit} />
+      ) : null}
 
       {examError ? (
         <div className="px-6 py-5 border-b border-gray-200 bg-red-50 text-sm text-red-800" role="alert">

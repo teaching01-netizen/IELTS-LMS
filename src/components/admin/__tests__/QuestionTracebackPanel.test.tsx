@@ -444,3 +444,89 @@ describe('QuestionTracebackPanel', () => {
     expect(screen.getByText(/2 answers required for 1 point/i)).toBeInTheDocument();
   });
 });
+
+// The persisted audit is the only on-screen evidence that separates "the exam
+// content has no answer key" from "the saved answers do not match this exam
+// version" from "the student saved nothing". Regression: all three used to
+// render as identical '—' rows.
+describe('QuestionTracebackPanel stored-answer audit', () => {
+  function renderPanel(audit: Record<string, unknown>) {
+    return render(
+      <QuestionTracebackPanel
+        section="listening"
+        examState={null}
+        sectionSubmission={{
+          id: 'sec-audit',
+          submissionId: 'sub-audit',
+          section: 'listening',
+          answers: { type: 'listening', answers: {} },
+          autoGradingResults: {
+            totalScore: 0,
+            maxScore: 10,
+            percentage: 0,
+            generatedAt: '2026-01-01T00:00:00.000Z',
+            questionResults: [],
+            integrity: {
+              section: 'listening',
+              expectedQuestionCount: 10,
+              verifiedCorrectCount: 0,
+              verifiedIncorrectCount: 0,
+              verifiedUnansweredCount: 10,
+              unresolvedCount: 0,
+              invalidCount: 0,
+              unknownAnswerCount: 0,
+              integrityStatus: 'verified',
+              gradingSourceVersionId: 'version-1',
+              questions: [],
+              ...audit,
+            },
+          },
+          gradingStatus: 'auto_graded',
+          submittedAt: '2026-01-01T00:00:00.000Z',
+        } as any}
+        examLoading={false}
+        examError={null}
+      />,
+    );
+  }
+
+  test('states that nothing was saved when every expected answer is unanswered', () => {
+    renderPanel({});
+
+    expect(screen.getByText(/no answer was saved for any question/i)).toBeInTheDocument();
+    expect(screen.getByText(/unanswered 10/)).toBeInTheDocument();
+  });
+
+  test('names a missing sealed answer key as the fault, not a save failure', () => {
+    renderPanel({
+      integrityStatus: 'invalid',
+      verifiedUnansweredCount: 0,
+      invalidCount: 10,
+      issueCodes: ['missing_answer_key'],
+    });
+
+    expect(screen.getByText(/sealed answer key for this section is missing or invalid/i)).toBeInTheDocument();
+    expect(screen.getByText('Missing answer key')).toBeInTheDocument();
+    expect(screen.queryByText(/no answer was saved/i)).not.toBeInTheDocument();
+  });
+
+  test('lists saved answers whose ids the loaded exam version does not contain', () => {
+    renderPanel({
+      integrityStatus: 'needs_recheck',
+      verifiedUnansweredCount: 7,
+      unknownAnswerCount: 3,
+      unresolvedCount: 3,
+      issueCodes: ['unknown_student_answer_id'],
+      unknownAnswerIds: ['note-1:b1', 'note-1:b2', 'note-1:b3'],
+    });
+
+    expect(screen.getByText(/do not line up with this exam version/i)).toBeInTheDocument();
+    expect(screen.getByText(/note-1:b1, note-1:b2, note-1:b3/)).toBeInTheDocument();
+  });
+
+  test('stays silent when a verified audit has saved answers', () => {
+    renderPanel({ verifiedCorrectCount: 6, verifiedUnansweredCount: 4 });
+
+    expect(screen.queryByText(/saved-answer audit/i)).not.toBeInTheDocument();
+  });
+});

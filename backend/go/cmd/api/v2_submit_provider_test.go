@@ -77,6 +77,13 @@ func TestV2SubmitLegacyNullProviderKeySeals(t *testing.T) {
 	mock.ExpectQuery("SELECT answer_revision, revision, organization_id FROM student_attempts").
 		WillReturnRows(sqlmock.NewRows([]string{"answer_revision", "revision", "organization_id"}).AddRow(0, 5, nil))
 	mock.ExpectExec("INSERT INTO attempt_terminalizations").WillReturnResult(sqlmock.NewResult(1, 1))
+	// The compatibility final_submission is rebuilt from the sealed response
+	// rows (the grading projection reads its answer maps), then claimed.
+	mock.ExpectQuery("SELECT COALESCE\\(protocol_version, 1\\), answers, writing_answers, flags FROM student_attempts").
+		WillReturnRows(sqlmock.NewRows([]string{"protocol_version", "answers", "writing_answers", "flags"}).AddRow(2, `{}`, `{}`, `{}`))
+	mock.ExpectQuery("FROM attempt_responses_v2 r").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}))
+	mock.ExpectExec("UPDATE student_attempts SET answers=").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE student_attempts SET phase = 'post-exam'").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE student_attempts SET response_revision=").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO attempt_submissions_v2").WillReturnResult(sqlmock.NewResult(1, 1))
@@ -130,6 +137,13 @@ func TestV2SubmitSATSealsAfterTopologyGate(t *testing.T) {
 	mock.ExpectQuery("SELECT answer_revision, revision, organization_id FROM student_attempts").
 		WillReturnRows(sqlmock.NewRows([]string{"answer_revision", "revision", "organization_id"}).AddRow(0, 5, nil))
 	mock.ExpectExec("INSERT INTO attempt_terminalizations").WillReturnResult(sqlmock.NewResult(1, 1))
+	// The compatibility final_submission is rebuilt from the sealed response
+	// rows (the grading projection reads its answer maps), then claimed.
+	mock.ExpectQuery("SELECT COALESCE\\(protocol_version, 1\\), answers, writing_answers, flags FROM student_attempts").
+		WillReturnRows(sqlmock.NewRows([]string{"protocol_version", "answers", "writing_answers", "flags"}).AddRow(2, `{}`, `{}`, `{}`))
+	mock.ExpectQuery("FROM attempt_responses_v2 r").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}))
+	mock.ExpectExec("UPDATE student_attempts SET answers=").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE student_attempts SET phase = 'post-exam'").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE student_attempts SET response_revision=").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO attempt_submissions_v2").WillReturnResult(sqlmock.NewResult(1, 1))

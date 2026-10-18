@@ -592,6 +592,20 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 			projectionFields[key] = value
 		}
 	}
+	// The compatibility final_submission IS the IELTS grading projection's
+	// input: it reads answers/writingAnswers from it. A student V2 submit used
+	// to stamp receipt fields only, so every section projected as an empty
+	// answer map and a fully answered exam read as "answers were not saved" in
+	// review — for every question type, because the loss was the whole map.
+	// Publish the same sealed answer maps the terminalization seal publishes.
+	answers, writingAnswers, flags, err := sealCompatibilityAnswerMaps(ctx, q, attemptID)
+	if err != nil {
+		return err
+	}
+	projectionFields["answers"] = answers
+	projectionFields["writingAnswers"] = writingAnswers
+	projectionFields["flags"] = flags
+	projectionFields["providerKey"] = provider
 	proj, _ := json.Marshal(projectionFields)
 	const claim = `UPDATE student_attempts SET phase = 'post-exam', delivery_status = 'submitted', final_submission = ?, submitted_at = COALESCE(submitted_at, ?), updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ? AND ((submitted_at IS NULL AND phase <> 'post-exam') OR (delivery_status = 'submitted' AND phase = 'post-exam' AND final_submission IS NULL)) AND COALESCE(proctor_status, 'active') <> 'terminated'`
 	res, err := q.ExecContext(ctx, claim, string(proj), eff, attemptID, scheduleID)
@@ -616,6 +630,58 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 	}
 	payload, _ := json.Marshal(map[string]any{"terminalizationId": tid, "attemptId": attemptID, "scheduleId": scheduleID, "outcome": terminalization.OutcomeSubmitted, "reason": terminalization.ReasonStudentSubmit, "answerRevision": answerRev})
 	return outbox.EnqueueInTx(ctx, q, "attempt_terminalization", attemptID, revision+1, "attempt_terminalized", json.RawMessage(payload))
+}
+
+// sealCompatibilityAnswerMaps returns the answer maps the compatibility
+// final_submission carries. Protocol-2 (row-first) attempts rebuild the legacy
+// blob columns from attempt_responses_v2 rows — the seal-time correctness
+// point, so grading never sees a stale blob — and protocol-1 attempts keep
+// their authoritative V1 blobs untouched.
+func sealCompatibilityAnswerMaps(ctx context.Context, q tx.Tx, attemptID string) (map[string]any, map[string]any, map[string]any, error) {
+	var protocolVersion int
+	var storedAnswers, storedWriting, storedFlags sql.NullString
+	if err := q.QueryRowContext(ctx,
+		`SELECT COALESCE(protocol_version, 1), answers, writing_answers, flags FROM student_attempts WHERE id = ? FOR UPDATE`,
+		attemptID).Scan(&protocolVersion, &storedAnswers, &storedWriting, &storedFlags); err != nil {
+		return nil, nil, nil, err
+	}
+	if protocolVersion >= 2 {
+		blobs, err := attempts.MaterializeBlobs(ctx, q, attemptID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if _, err := q.ExecContext(ctx,
+			`UPDATE student_attempts SET answers=?, writing_answers=?, flags=? WHERE id=?`,
+			blobs.Answers, blobs.WritingAnswers, blobs.Flags, attemptID); err != nil {
+			return nil, nil, nil, err
+		}
+		storedAnswers = sql.NullString{String: blobs.Answers, Valid: true}
+		storedWriting = sql.NullString{String: blobs.WritingAnswers, Valid: true}
+		storedFlags = sql.NullString{String: blobs.Flags, Valid: true}
+	}
+	decode := func(raw sql.NullString) (map[string]any, error) {
+		out := map[string]any{}
+		if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+			return out, nil
+		}
+		if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+	answers, err := decode(storedAnswers)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	writingAnswers, err := decode(storedWriting)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	flags, err := decode(storedFlags)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return answers, writingAnswers, flags, nil
 }
 
 func requireBearer(w http.ResponseWriter, r *http.Request) (string, bool) {

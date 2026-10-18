@@ -94,6 +94,15 @@ const ISSUE_COPY = {
   },
 } satisfies Record<ObjectiveIntegrityIssueCode, AuditCopy>;
 
+/**
+ * The single owner of issue-code copy. The review traceback renders the same
+ * codes in its stored-answer audit, so the wording can never drift between the
+ * schedule-level audit panel and the per-submission one.
+ */
+export function describeObjectiveIntegrityIssue(code: ObjectiveIntegrityIssueCode): AuditCopy {
+  return ISSUE_COPY[code];
+}
+
 const SUMMARY_COPY: Record<
   ObjectiveIntegrityStatus,
   (overview: ObjectiveIntegrityOverview) => string
@@ -201,7 +210,7 @@ export function ObjectiveIntegrityAuditSection({
               <h4 className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Problems found</h4>
               <ul className="mt-2 space-y-2">
                 {overview.issues.map((issue, index) => {
-                  const copy = ISSUE_COPY[issue.code];
+                  const copy = describeObjectiveIntegrityIssue(issue.code);
                   return (
                     <li
                       key={`${issue.submissionId}:${issue.section}:${issue.questionId ?? issue.code}:${index}`}

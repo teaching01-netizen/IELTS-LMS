@@ -311,12 +311,7 @@ func buildProjectionObjectiveSections(ctx context.Context, q tx.Tx, answers, con
 	sections := make([]projectionSection, 0, 2)
 	for _, name := range []string{"listening", "reading"} {
 		model := collectProjectionSection(content, name)
-		filtered := map[string]any{}
-		for key, value := range projectionEffectiveAnswers(answers, model.Aliases) {
-			if model.AnswerKeys[key] {
-				filtered[key] = value
-			}
-		}
+		filtered := projectionSectionAnswers(answers, model)
 		results := projectionObjectiveResults(name, filtered, model.Specs, keys, versionID)
 		sections = append(sections, projectionSection{
 			Name:          name,
@@ -452,29 +447,21 @@ func collectProjectionBlock(model *projectionSectionModel, block map[string]any,
 			addProjectionOptionQuestion(model, blockID, block["options"], fallbackRule, false)
 		}
 	case "DIAGRAM_LABELING":
-		collectProjectionSlots(model, blockID, block["labels"], fallbackRule)
+		collectProjectionSlots(model, blockID, block["labels"], fallbackRule, "")
 	case "FLOW_CHART":
-		collectProjectionSlots(model, blockID, block["steps"], fallbackRule)
+		collectProjectionSlots(model, blockID, block["steps"], fallbackRule, "")
 	case "TABLE_COMPLETION":
-		collectProjectionSlots(model, blockID, block["cells"], fallbackRule)
+		collectProjectionSlots(model, blockID, block["cells"], fallbackRule, "")
+	// CLASSIFICATION items and MATCHING_FEATURES features are answered by one
+	// array under the block id, exactly like the slot blocks above: the stored
+	// key is the block, the slot is the array index. Registering the slots
+	// without the array alias (their own loops, before this shared rule) made
+	// the section filter drop every saved answer of both block types, so a
+	// student's selections read as unanswered in review and scoring.
 	case "CLASSIFICATION":
-		items, _ := block["items"].([]any)
-		for _, raw := range items {
-			if item, ok := raw.(map[string]any); ok {
-				id, _ := stringValue(item["id"])
-				copyField(item, "correctCategory", "correctAnswer")
-				addProjectionQuestionWithID(model, blockID+":"+id, item, fallbackRule, false)
-			}
-		}
+		collectProjectionSlots(model, blockID, block["items"], fallbackRule, "correctCategory")
 	case "MATCHING_FEATURES":
-		items, _ := block["features"].([]any)
-		for _, raw := range items {
-			if item, ok := raw.(map[string]any); ok {
-				id, _ := stringValue(item["id"])
-				copyField(item, "correctMatch", "correctAnswer")
-				addProjectionQuestionWithID(model, blockID+":"+id, item, fallbackRule, false)
-			}
-		}
+		collectProjectionSlots(model, blockID, block["features"], fallbackRule, "correctMatch")
 	default:
 		for _, raw := range questions {
 			if question, ok := raw.(map[string]any); ok {
@@ -504,7 +491,14 @@ func collectProjectionTree(model *projectionSectionModel, node map[string]any, b
 	}
 }
 
-func collectProjectionSlots(model *projectionSectionModel, blockID string, raw any, rule string) {
+// collectProjectionSlots registers one slot block whose answers the client
+// stores as ONE array under the block id: labels, flow steps, table cells and
+// (via answerField) classification items and matching-features entries. The
+// alias is what turns the stored array back into per-slot answers; a slot
+// block without it can never match a saved answer.
+// answerField names a per-item field that holds the correct answer when the
+// block does not store it as "correctAnswer" ("" for blocks that do).
+func collectProjectionSlots(model *projectionSectionModel, blockID string, raw any, rule string, answerField string) {
 	items, _ := raw.([]any)
 	for index, itemRaw := range items {
 		item, ok := itemRaw.(map[string]any)
@@ -514,6 +508,9 @@ func collectProjectionSlots(model *projectionSectionModel, blockID string, raw a
 		id, ok := stringValue(item["id"])
 		if !ok || blockID == "" {
 			continue
+		}
+		if answerField != "" {
+			copyField(item, answerField, "correctAnswer")
 		}
 		questionID := blockID + ":" + id
 		addProjectionQuestionWithID(model, questionID, item, rule, false)
@@ -620,6 +617,20 @@ func projectionAcceptedAnswers(question map[string]any) []string {
 		}
 	}
 	return accepted
+}
+
+// projectionSectionAnswers is the one place a saved answer map is narrowed to
+// the questions of a section: stored keys first, then every slot alias the
+// model declares. Keeping it single-owner is what makes "the answer was saved
+// but the section lost it" a failing test instead of a silent read-time gap.
+func projectionSectionAnswers(answers map[string]any, model projectionSectionModel) map[string]any {
+	filtered := map[string]any{}
+	for key, value := range projectionEffectiveAnswers(answers, model.Aliases) {
+		if model.AnswerKeys[key] {
+			filtered[key] = value
+		}
+	}
+	return filtered
 }
 
 func projectionEffectiveAnswers(answers map[string]any, aliases []projectionAnswerAlias) map[string]any {

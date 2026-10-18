@@ -455,6 +455,40 @@ func gradingSectionsHandler(app *App) http.HandlerFunc {
 	}
 }
 
+// reviewSectionKeyForCell resolves the IELTS section a saved V2 response row
+// belongs to. Normalized (SAT/ACT/authoring-era) modules answer through the
+// assessment_modules -> assessment_sections join. Snapshot-backed IELTS exams
+// store the module KEY itself as module_id ('reading', 'listening'), so the
+// join yields nothing and the row's own module key is the only section
+// identity available. Without this fallback every saved cell of a legacy exam
+// is discarded and the review shows an empty answer map while the rows hold
+// the student's answers — which is exactly how a durability fault gets
+// mistaken for a lost save.
+func reviewSectionKeyForCell(rawSectionKey, moduleID string) string {
+	if key := normalizeReviewSectionKey(rawSectionKey); key != "" {
+		return key
+	}
+	return normalizeReviewSectionKey(moduleID)
+}
+
+// normalizeReviewSectionKey maps a stored section or module identifier onto the
+// objective section vocabulary of this read path. Exact section keys win;
+// prefixed module keys ('reading-part-1', 'listening_1') keep their section.
+// Anything else (an opaque module UUID whose assessment row is gone) is
+// unresolvable and must not be guessed into a section.
+func normalizeReviewSectionKey(raw string) string {
+	key := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(raw), "_", "-"))
+	if key == "" {
+		return ""
+	}
+	for _, section := range []string{"listening", "reading"} {
+		if key == section || strings.HasPrefix(key, section+"-") {
+			return section
+		}
+	}
+	return ""
+}
+
 // Row-first V2 responses are authoritative even when an older terminal
 // projection sealed an empty compatibility answer map. Overlay those saved
 // cells at the grading read boundary so existing submissions remain reviewable.
@@ -490,9 +524,9 @@ func recoverSealedObjectiveAnswersForReview(ctx context.Context, db *sql.DB, sub
 		if err := rows.Scan(&sectionKey, &moduleID, &questionID, &canonical); err != nil {
 			return err
 		}
-		if sectionKey == "listening" || sectionKey == "reading" {
-			cellsBySection[sectionKey] = append(cellsBySection[sectionKey], answerblobs.Cell{
-				QuestionID: questionID, ModuleID: moduleID, SectionKey: sectionKey,
+		if key := reviewSectionKeyForCell(sectionKey, moduleID); key != "" {
+			cellsBySection[key] = append(cellsBySection[key], answerblobs.Cell{
+				QuestionID: questionID, ModuleID: moduleID, SectionKey: key,
 				Canonical: json.RawMessage(canonical),
 			})
 		}
