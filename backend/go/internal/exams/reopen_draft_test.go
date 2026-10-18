@@ -48,13 +48,11 @@ func TestReopenDraftHealsOrphanDraftExam(t *testing.T) {
 			nil, nil,
 			1, 0, time.Now(), time.Now(), nil, nil, false, "full",
 		))
-	// No surviving versions.
+	// No surviving versions: the ordering key resolves to no row, so the
+	// snapshot read is skipped and the draft seeds from an empty skeleton.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE exam_id = ?")).
 		WithArgs("exam-orphan").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "version_number", "content_snapshot", "config_snapshot",
-			"created_by", "is_draft", "is_published", "revision",
-		}))
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(regexp.QuoteMeta("COALESCE(MAX(version_number), 0)")).
 		WithArgs("exam-orphan").
 		WillReturnRows(sqlmock.NewRows([]string{"n"}).AddRow(1))
@@ -123,12 +121,14 @@ func TestReopenDraftClonesPublishedSnapshot(t *testing.T) {
 			1, 7, time.Now(), time.Now(), "reading-writing", 3, false, "full",
 		))
 	// Latest surviving version is the published seal; reuse its snapshots.
+	// The ordering key and the payload are read separately so the server never
+	// sorts snapshot rows (Error 1038 on long, payload-heavy histories).
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE exam_id = ?")).
 		WithArgs("exam-sealed").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "version_number", "content_snapshot", "config_snapshot",
-			"created_by", "is_draft", "is_published", "revision",
-		}).AddRow("ver-pub", 3, string(content), string(config), "owner-1", false, true, 2))
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("ver-pub"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR) FROM exam_versions WHERE id = ?")).
+		WithArgs("ver-pub").
+		WillReturnRows(sqlmock.NewRows([]string{"content", "config"}).AddRow(string(content), string(config)))
 	mock.ExpectQuery(regexp.QuoteMeta("COALESCE(MAX(version_number), 0)")).
 		WithArgs("exam-sealed").
 		WillReturnRows(sqlmock.NewRows([]string{"n"}).AddRow(4))

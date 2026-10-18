@@ -327,6 +327,15 @@ func claimExamOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, fing
 
 const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), (SELECT v.version_number FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), sat_score_report_enabled, sat_section_scope"
 
+// versionColumns is the full exam_versions projection, snapshot payloads
+// included: only ever selected by id or for a single ordered row.
+const versionColumns = "id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, sat_publish_scope, is_draft, is_published, revision, created_at"
+
+// versionOrderSQL selects the newest version per exam using only the ordering
+// columns. The (exam_id, version_number) unique index answers it without
+// sorting the snapshot payloads, which cannot ride along on that index.
+const versionOrderSQL = "SELECT id FROM exam_versions WHERE exam_id = ? ORDER BY version_number DESC, created_at DESC"
+
 func scanExam(row interface {
 	Scan(dest ...any) error
 }) (Exam, error) {
@@ -1325,29 +1334,20 @@ func (s *Service) ReopenDraft(ctx context.Context, examID string, actorID string
 			out = v
 			return nil
 		}
-		type survivingVersion struct {
-			id            string
-			versionNumber int
-			content       string
-			config        string
-		}
-		rows, err := q.QueryContext(ctx, "SELECT id, version_number, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), created_by, is_draft, is_published, revision FROM exam_versions WHERE exam_id = ? ORDER BY version_number DESC, created_at DESC", examID)
+		// Only the newest surviving version seeds the new draft, so the ordering
+		// key is read on its own first. Selecting the snapshot payloads together
+		// with the ORDER BY makes the server buffer every version's JSON in the
+		// sort buffer (hundreds of KB per row): a long version history then fails
+		// with "Error 1038: Out of sort memory" and the heal never runs.
+		rows, err := q.QueryContext(ctx, versionOrderSQL+" LIMIT 1", examID)
 		if err != nil {
 			return err
 		}
-		var latest *survivingVersion
-		for rows.Next() {
-			var sv survivingVersion
-			var createdBy string
-			var isDraft, isPublished bool
-			var revision int
-			if err := rows.Scan(&sv.id, &sv.versionNumber, &sv.content, &sv.config, &createdBy, &isDraft, &isPublished, &revision); err != nil {
+		var latestID string
+		if rows.Next() {
+			if err := rows.Scan(&latestID); err != nil {
 				rows.Close()
 				return err
-			}
-			if latest == nil {
-				copy := sv
-				latest = &copy
 			}
 		}
 		rows.Close()
@@ -1357,14 +1357,18 @@ func (s *Service) ReopenDraft(ctx context.Context, examID string, actorID string
 		seedContent := "{}"
 		seedConfig := "{}"
 		var parentVersionID *string
-		if latest != nil {
-			if strings.TrimSpace(latest.content) != "" {
-				seedContent = latest.content
+		if latestID != "" {
+			var content, config sql.NullString
+			if err := q.QueryRowContext(ctx, "SELECT CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR) FROM exam_versions WHERE id = ?", latestID).Scan(&content, &config); err != nil {
+				return err
 			}
-			if strings.TrimSpace(latest.config) != "" {
-				seedConfig = latest.config
+			if strings.TrimSpace(nullStr(content)) != "" {
+				seedContent = nullStr(content)
 			}
-			parent := latest.id
+			if strings.TrimSpace(nullStr(config)) != "" {
+				seedConfig = nullStr(config)
+			}
+			parent := latestID
 			parentVersionID = &parent
 		}
 		var nextVersionNumber int
@@ -1513,21 +1517,63 @@ func (s *Service) GetValidationForScope(ctx context.Context, examID string, scop
 }
 
 // ListVersions returns every version for an exam, newest first.
+//
+// The order is resolved on the ordering columns alone and the payload rows are
+// read unordered afterwards: a single ordered statement carries every
+// snapshot (hundreds of KB per row) through the server sort buffer, which
+// fails outright (Error 1038 "Out of sort memory") on exams with a long
+// version history.
 func (s *Service) ListVersions(ctx context.Context, examID string) ([]Version, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, sat_publish_scope, is_draft, is_published, revision, created_at FROM exam_versions WHERE exam_id = ? ORDER BY version_number DESC, created_at DESC", examID)
+	ids, err := s.versionIDsNewestFirst(ctx, examID)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT "+versionColumns+" FROM exam_versions WHERE exam_id = ?", examID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Version
+	byID := make(map[string]Version, len(ids))
 	for rows.Next() {
 		v, err := scanVersion(rows)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, v)
+		byID[v.ID] = v
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Version, 0, len(ids))
+	for _, id := range ids {
+		if v, ok := byID[id]; ok {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}
+
+// versionIDsNewestFirst returns an exam's version ids newest first without
+// their snapshot payloads, so the server can order them from the
+// (exam_id, version_number) index instead of sorting the payload rows.
+func (s *Service) versionIDsNewestFirst(ctx context.Context, examID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, versionOrderSQL, examID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // validateContentShape checks section keys in content.config against the
@@ -1624,7 +1670,7 @@ func (s *Service) ListVersionSummaries(ctx context.Context, examID string) ([]Ve
 }
 
 func loadVersion(ctx context.Context, q tx.Tx, id string) (Version, error) {
-	row := q.QueryRowContext(ctx, "SELECT id, exam_id, version_number, parent_version_id, CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(validation_snapshot AS CHAR), created_by, publish_notes, sat_publish_scope, is_draft, is_published, revision, created_at FROM exam_versions WHERE id = ?", id)
+	row := q.QueryRowContext(ctx, "SELECT "+versionColumns+" FROM exam_versions WHERE id = ?", id)
 	return scanVersion(row)
 }
 
