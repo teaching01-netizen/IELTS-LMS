@@ -27,6 +27,9 @@ func snapshotRuntimeGate(snap runtime.Snapshot, now time.Time) attempts.RuntimeG
 	if snap.ActiveSectionKey != nil && *snap.ActiveSectionKey != "" {
 		gate.ActiveSectionKey = *snap.ActiveSectionKey
 	}
+	if snap.SectionStartAt != nil && now.Before(*snap.SectionStartAt) {
+		gate.SectionStarted, gate.SectionLive = false, false
+	}
 	return gate
 }
 

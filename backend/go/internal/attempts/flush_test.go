@@ -20,17 +20,17 @@ func TestFlushStaleBlobs(t *testing.T) {
 		WithArgs(50).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1").AddRow("att-2"))
 	// att-1 has rows -> materialize + update.
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_responses_v2 WHERE attempt_id")).
+	mock.ExpectQuery(regexp.QuoteMeta("LEFT JOIN assessment_sections s ON s.id = m.section_id")).
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response"}).
-			AddRow("q-1", "mod-reading", `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`))
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}).
+			AddRow("q-1", "mod-reading", "reading", `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET answers=?, writing_answers=?, flags=? WHERE id=?")).
 		WithArgs(`{"q-1":"A"}`, "{}", "{}", "att-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	// att-2 has no rows -> empty triple persisted (keeps read view fresh).
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_responses_v2 WHERE attempt_id")).
+	mock.ExpectQuery(regexp.QuoteMeta("LEFT JOIN assessment_sections s ON s.id = m.section_id")).
 		WithArgs("att-2").
-		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response"}))
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET answers=?, writing_answers=?, flags=? WHERE id=?")).
 		WithArgs("{}", "{}", "{}", "att-2").
 		WillReturnResult(sqlmock.NewResult(0, 1))

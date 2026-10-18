@@ -22,6 +22,7 @@ export interface BlockingPolicyInput {
   readonly proctorStatus: StudentAttempt['proctorStatus'];
   readonly blockingReasonOverride: StudentBlockingReason;
   readonly timeRemaining: number;
+  readonly sectionStarting?: boolean;
 }
 
 export interface BlockingPolicyState {
@@ -97,6 +98,10 @@ export function deriveBlockingState(input: BlockingPolicyInput): BlockingPolicyS
       runtimeStatus,
       timeRemaining: input.timeRemaining,
     };
+  }
+
+  if (input.sectionStarting || currentSection?.status === 'locked') {
+    return { active: true, reason: 'waiting_for_runtime', runtimeStatus, timeRemaining: input.timeRemaining };
   }
 
   if (input.waitingForCohortAdvance || input.runtime?.waitingForNextSection) {

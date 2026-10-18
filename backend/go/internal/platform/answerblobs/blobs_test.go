@@ -36,15 +36,43 @@ func TestAssembleEmpty(t *testing.T) {
 }
 
 func TestProjectMalformedFallback(t *testing.T) {
-	ans, flag := Project("mod-reading", json.RawMessage(`not-json`))
+	ans, flag := Project("mod-reading", "", json.RawMessage(`not-json`))
 	if !ans.IsAnswer || string(ans.Value) != `not-json` {
 		t.Fatalf("malformed reading cell must fall back to raw answer: %+v", ans)
 	}
 	if flag.Set {
 		t.Fatalf("malformed cell must not set flags")
 	}
-	wans, _ := Project("mod-writing", json.RawMessage(`not-json`))
+	wans, _ := Project("mod-writing", "", json.RawMessage(`not-json`))
 	if wans.IsAnswer {
 		t.Fatalf("malformed writing cell must split to writing: %+v", wans)
+	}
+}
+
+func TestNormalizedSectionOwnsWritingClassification(t *testing.T) {
+	for _, test := range []struct {
+		name, moduleID, sectionKey string
+		writing                    bool
+	}{
+		{"opaque writing module", "d8b6426d-2698-49ee-a072-4552810c741e", "writing", true},
+		{"reading-writing is objective", "mod-reading-writing", "reading-writing", false},
+		{"legacy writing module", "mod-Writing-task", "", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			blobs, err := Assemble([]Cell{{
+				QuestionID: "task1", ModuleID: test.moduleID, SectionKey: test.sectionKey,
+				Canonical: json.RawMessage(`{"answer":"saved text","markedForReview":true}`),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, other := blobs.Answers, blobs.WritingAnswers
+			if test.writing {
+				want, other = other, want
+			}
+			if want != `{"task1":"saved text"}` || other != "{}" || blobs.Flags != `{"task1":true}` {
+				t.Fatalf("wrong answer ownership: %+v", blobs)
+			}
+		})
 	}
 }

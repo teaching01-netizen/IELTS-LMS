@@ -267,7 +267,8 @@ function resolveRuntimeDisplayRemainingSeconds(options: {
 
   const adjustedNowMs = options.nowMs + options.clockOffsetMs;
   const remainingMs = Math.max(0, deadlineMs - adjustedNowMs);
-  return Math.max(0, Math.ceil(remainingMs / 1_000));
+  const allotment = Math.max(0, activeSection.plannedDurationMinutes + activeSection.extensionMinutes) * 60;
+  return Math.min(allotment, Math.max(0, Math.ceil(remainingMs / 1_000)));
 }
 
 function deriveBlockingState(
@@ -276,7 +277,8 @@ function deriveBlockingState(
   waitingForCohortAdvance: boolean,
   proctorStatus: StudentAttempt['proctorStatus'],
   blockingReasonOverride: RuntimeReducerState['blockingReasonOverride'],
-  timeRemainingSeconds: number
+  timeRemainingSeconds: number,
+  sectionStarting = false,
 ): RuntimeBlockingState {
   return deriveStudentBlockingState({
     runtimeBacked,
@@ -285,6 +287,7 @@ function deriveBlockingState(
     proctorStatus,
     blockingReasonOverride,
     timeRemaining: timeRemainingSeconds,
+    sectionStarting,
   });
 }
 
@@ -995,7 +998,7 @@ export function StudentRuntimeProvider({
             phase: runtimeState.phase,
             fallbackSeconds: runtimeState.timeRemaining,
             clockOffsetMs,
-            nowMs: derivedClockNowMs,
+            nowMs: Math.max(derivedClockNowMs, Date.now()),
           }) ?? runtimeState.timeRemaining)
         : runtimeState.timeRemaining
       : undefined;
@@ -1004,6 +1007,11 @@ export function StudentRuntimeProvider({
   // Stable state does not need to tick every second, but it must flip to locked at the
   // authoritative deadline. Until then the snapshot value is sufficient for blocking policy.
   const blockingTimeRemaining = runtimeDeadlineExpired ? 0 : runtimeState.timeRemaining;
+  const activeSectionStart = runtimeSnapshot?.sections.find(
+    (section) => section.sectionKey === runtimeSnapshot.currentSectionKey,
+  )?.actualStartAt;
+  const sectionStarting = Boolean(runtimeBacked && activeSectionStart &&
+    Date.parse(activeSectionStart) > Math.max(derivedClockNowMs, Date.now()) + clockOffsetMs);
   const blocking = useMemo(
     () =>
       deriveBlockingState(
@@ -1012,10 +1020,12 @@ export function StudentRuntimeProvider({
         runtimeState.waitingForCohortAdvance,
         runtimeState.proctorStatus,
         runtimeState.blockingReasonOverride,
-        blockingTimeRemaining
+        blockingTimeRemaining,
+        sectionStarting,
       ),
     [
       blockingTimeRemaining,
+      sectionStarting,
       runtimeBacked,
       runtimeState.proctorStatus,
       runtimeSnapshot,

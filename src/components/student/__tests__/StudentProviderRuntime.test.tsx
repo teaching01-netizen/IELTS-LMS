@@ -264,6 +264,35 @@ describe("Student Provider Runtime Integration", () => {
     expect(screen.getByText(/waiting for cohort advance/i)).toBeInTheDocument();
   });
 
+  it("shows a loading transition without a countdown and opens the next section immediately", () => {
+    runtimeSnapshot.currentSectionRemainingSeconds = 0;
+    const props = {
+      state, onExit: () => {}, attemptSnapshot,
+      persistenceEnabled: false, enableMonitoring: false,
+    };
+    const { rerender } = render(<StudentAppWrapper {...props} runtimeSnapshot={runtimeSnapshot} />);
+
+    expect(screen.getByRole('status', { name: 'Loading section' })).toBeInTheDocument();
+    expect(screen.queryByText(/^Remaining /)).not.toBeInTheDocument();
+
+    const now = new Date();
+    const nextRuntime: ExamSessionRuntime = {
+      ...runtimeSnapshot,
+      currentSectionKey: 'writing', activeSectionKey: 'writing',
+      currentSectionRemainingSeconds: 3600,
+      serverNow: now.toISOString(),
+      currentSectionDeadlineAt: new Date(now.getTime() + 3600_000).toISOString(),
+      sections: [{
+        ...runtimeSnapshot.sections[0]!, sectionKey: 'writing', label: 'Writing',
+        actualStartAt: now.toISOString(), plannedDurationMinutes: 60,
+      }],
+    };
+    rerender(<StudentAppWrapper {...props} runtimeSnapshot={nextRuntime} />);
+
+    expect(screen.queryByRole('status', { name: 'Loading section' })).not.toBeInTheDocument();
+    expect(screen.getByRole('timer', { name: 'Time remaining' })).toHaveTextContent('60:00');
+  });
+
   it("handles runtime paused status by showing blocking overlay", () => {
     runtimeSnapshot.status = "paused";
     runtimeSnapshot.currentSectionKey = "reading";

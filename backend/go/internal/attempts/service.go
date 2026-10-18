@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/platform/answerblobs"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/crypto"
@@ -74,13 +75,13 @@ func NewService(runner *tx.Runner, clk clock.Clock, secret []byte) *Service {
 // IELTS/SAT/ACT validation behind this port; the core stays neutral (plan 15).
 type QuestionOwner struct {
 	CanonicalQuestionID string
-	ModuleID         string
-	SectionKey       string
-	ModuleState      string // must be active|review for writes
-	ModuleDeadlineAt *time.Time
-	TimingModel      string
-	ModuleStartedAt  *time.Time
-	EntryConfirmedAt *time.Time
+	ModuleID            string
+	SectionKey          string
+	ModuleState         string // must be active|review for writes
+	ModuleDeadlineAt    *time.Time
+	TimingModel         string
+	ModuleStartedAt     *time.Time
+	EntryConfirmedAt    *time.Time
 }
 
 // QuestionResolver maps question IDs to ownership within the attempt.
@@ -401,7 +402,7 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 			// same canonical bytes + idempotency/version fencing above, and
 			// the I/O strategy only decides WHEN those statements are
 			// issued (per command, or once for the whole batch).
-			writing := strings.Contains(strings.ToLower(owner.ModuleID), "writing")
+			writing := answerblobs.IsWritingResponse(owner.ModuleID, owner.SectionKey)
 			if err := io.applyProjection(projectionWrite{
 				AttemptID: cmd.AttemptID, QuestionID: c.QuestionID, ModuleID: owner.ModuleID,
 				LeaseEpoch: cmd.LeaseEpoch, ControlEpoch: cmd.ControlEpoch, ClientVersion: c.ClientVersion,

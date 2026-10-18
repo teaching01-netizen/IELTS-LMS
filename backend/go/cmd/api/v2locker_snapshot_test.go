@@ -29,6 +29,18 @@ func TestSnapshotRuntimeGateMapping(t *testing.T) {
 	}
 }
 
+func TestSnapshotRuntimeGateWaitsForArmedCohortStart(t *testing.T) {
+	now := time.Now().UTC()
+	start := now.Add(time.Second)
+	snap := runtime.Snapshot{Status: runtime.StatusLive, SectionLive: true, SectionStarted: true, SectionStartAt: &start}
+	if gate := snapshotRuntimeGate(snap, now); gate.SectionLive || gate.SectionStarted {
+		t.Fatal("responses must wait for the database start instant")
+	}
+	if gate := snapshotRuntimeGate(snap, start); !gate.SectionLive || !gate.SectionStarted {
+		t.Fatal("responses must open at the shared start instant")
+	}
+}
+
 // A snapshot with no active section is "no section scoping": the gate must fall
 // back to "*" so ensureQuestionAdmitted does not compare against a nil section.
 func TestSnapshotRuntimeGateWithoutActiveSection(t *testing.T) {

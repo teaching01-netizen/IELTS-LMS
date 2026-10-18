@@ -49,7 +49,11 @@ import (
 // them). Runs inside the caller's seal tx after the attempt lock.
 func materializeBlobsForSeal(ctx context.Context, q tx.Tx, attemptID string) (answerblobs.Blobs, error) {
 	rows, err := q.QueryContext(ctx,
-		`SELECT question_id, module_id, CAST(response AS CHAR) FROM attempt_responses_v2 WHERE attempt_id = ? ORDER BY question_id`,
+		`SELECT r.question_id, r.module_id, COALESCE(s.section_key, ''), CAST(r.response AS CHAR)
+		 FROM attempt_responses_v2 r
+		 LEFT JOIN assessment_modules m ON m.id = r.module_id
+		 LEFT JOIN assessment_sections s ON s.id = m.section_id
+		 WHERE r.attempt_id = ? ORDER BY r.question_id`,
 		attemptID)
 	if err != nil {
 		return answerblobs.Blobs{}, err
@@ -57,11 +61,11 @@ func materializeBlobsForSeal(ctx context.Context, q tx.Tx, attemptID string) (an
 	defer rows.Close()
 	var cells []answerblobs.Cell
 	for rows.Next() {
-		var questionID, moduleID, raw string
-		if err := rows.Scan(&questionID, &moduleID, &raw); err != nil {
+		var questionID, moduleID, sectionKey, raw string
+		if err := rows.Scan(&questionID, &moduleID, &sectionKey, &raw); err != nil {
 			return answerblobs.Blobs{}, err
 		}
-		cells = append(cells, answerblobs.Cell{QuestionID: questionID, ModuleID: moduleID, Canonical: json.RawMessage(raw)})
+		cells = append(cells, answerblobs.Cell{QuestionID: questionID, ModuleID: moduleID, SectionKey: sectionKey, Canonical: json.RawMessage(raw)})
 	}
 	if err := rows.Err(); err != nil {
 		return answerblobs.Blobs{}, err

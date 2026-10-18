@@ -260,6 +260,34 @@ func TestIELTSAndACTWaitForFinalResponseSaveGrace(t *testing.T) {
 	}
 }
 
+func TestIELTSDelayedTransitionKeepsTheNextSectionsFullTime(t *testing.T) {
+	deadline := planBase.Add(time.Minute)
+	for _, delay := range []time.Duration{8 * time.Second, 10 * time.Minute} {
+		t.Run(delay.String(), func(t *testing.T) {
+			asOf := deadline.Add(delay)
+			plan := planSectionAdvance(reconcileRuntime{
+				activeSectionKey: ptr("listening"), providerKey: "ielts",
+			}, []runtimeSection{
+				liveSection("listening", 1, 1, 0, planBase),
+				lockedSection("reading", 2, 1, 0),
+				lockedSection("writing", 3, 1, 0),
+			}, true, asOf, attempts.ResponseSaveGrace)
+			if len(plan.steps) != 2 || plan.steps[1].kind != stepStartSection {
+				t.Fatalf("a delayed IELTS transition must open only the next section: %+v", plan.steps)
+			}
+			if start := plan.steps[1].startAt; !start.Equal(asOf) {
+				t.Fatalf("next section starts at %v, want activation time %v", start, asOf)
+			}
+			if plan.steps[1].remaining != 60 {
+				t.Fatalf("next section lost its allocation: %+v", plan.steps[1])
+			}
+			if !plan.steps[1].prepare {
+				t.Fatal("IELTS must wait for cohort readiness before starting the next clock")
+			}
+		})
+	}
+}
+
 // A sweep that returns after an outage catches up through every expired section
 // and preserves the authored timeline: each section starts at its
 // predecessor's end plus the gap, never at "now".

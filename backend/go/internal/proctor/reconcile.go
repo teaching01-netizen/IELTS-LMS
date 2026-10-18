@@ -60,6 +60,7 @@ func (s runtimeSection) deadline() time.Time {
 
 type reconcileRuntime struct {
 	id               string
+	providerKey      string
 	status           string
 	activeSectionKey *string
 	waiting          bool
@@ -324,12 +325,12 @@ func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID strin
 		}
 		saveGrace := responseSaveGraceForProvider(providerKey)
 		decisionAt := asOf
-		if providerKey == "sat" {
-			saveGrace = attempts.SATSaveGrace
+		if providerKey == "sat" || providerKey == "ielts" {
 			if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&decisionAt); err != nil {
 				return err
 			}
 		}
+		runtime.providerKey = providerKey
 		plan := planSectionAdvance(*runtime, sections, autoSubmit, decisionAt, saveGrace)
 		if plan.activeSectionMissing {
 			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Active section row is missing.", HTTPStatus: 409}
@@ -371,7 +372,8 @@ const (
 )
 
 type advanceStep struct {
-	kind advanceStepKind
+	prepare bool
+	kind    advanceStepKind
 	// sectionKey is the section the step closes (complete) or opens (start).
 	sectionKey string
 	// nextKey is the section the waiting window is for.
@@ -397,10 +399,9 @@ type advancePlan struct {
 //	live(N) --deadline(N)--> completed(N), waiting = true
 //	        --end(N)+gap(N->N+1)--> live(N+1), waiting = false
 //
-// One plan may catch up through several expired sections after a worker
-// outage, preserving the timeline (each section starts at its predecessor's
-// end plus the authored gap) instead of compressing it against "now". Gap 0
-// therefore reproduces the immediate advance exactly.
+// IELTS prepares the successor without starting its clock; cohort readiness
+// activates it after loading. Other providers preserve their authored
+// timeline and may catch up through expired sections after a worker outage.
 //
 // The runtime keeps pointing at the completed section during the window so the
 // "section not live" write gate stays closed; `waiting` is the explicit second
@@ -493,11 +494,18 @@ func planSectionAdvance(runtime reconcileRuntime, locked []runtimeSection, autoS
 			}
 			return plan
 		}
+		if runtime.providerKey == "ielts" {
+			startAt = asOf
+		}
 
 		plan.steps = append(plan.steps, advanceStep{
 			kind: stepStartSection, sectionKey: next.key, startAt: startAt,
 			remaining: (next.planned + next.extension) * 60,
+			prepare:   runtime.providerKey == "ielts",
 		})
+		if runtime.providerKey == "ielts" {
+			return plan
+		}
 		next.status = "live"
 		next.startedAt = &startAt
 		activeIndex = nextIndex
@@ -538,6 +546,7 @@ const (
 // separate SQL, and the proctor copy omitted the delivery handover, leaving a
 // proctor-ended section's modules open until the maintenance sweep.
 type sectionAdvance struct {
+	prepare bool
 	// sectionKey / endAt / reason describe the outgoing section.
 	sectionKey string
 	endAt      time.Time
@@ -665,6 +674,7 @@ func (s *Service) applyAdvancePlan(ctx context.Context, q tx.Tx, scheduleID, ori
 				nextKey:       step.sectionKey,
 				nextRemaining: step.remaining,
 				startAt:       step.startAt,
+				prepare:       step.prepare,
 			}); err != nil {
 				return wrote, err
 			}
@@ -698,11 +708,17 @@ const systemActor = "system"
 // startSectionEffect opens the successor section, re-projects the V2 clocks,
 // and clears the between-sections window.
 func (s *Service) startSectionEffect(ctx context.Context, q tx.Tx, scheduleID, runtimeID string, adv sectionAdvance) error {
-	if _, err := q.ExecContext(ctx, `
+	var sectionErr error
+	if adv.prepare {
+		_, sectionErr = q.ExecContext(ctx, `UPDATE exam_session_runtime_sections SET status = 'locked', available_at = UTC_TIMESTAMP(6), actual_start_at = NULL WHERE runtime_id = ? AND section_key = ?`, runtimeID, adv.nextKey)
+	} else {
+		_, sectionErr = q.ExecContext(ctx, `
 		UPDATE exam_session_runtime_sections
 		SET status = 'live', available_at = COALESCE(available_at, ?), actual_start_at = COALESCE(actual_start_at, ?)
-		WHERE runtime_id = ? AND section_key = ?`, adv.startAt, adv.startAt, runtimeID, adv.nextKey); err != nil {
-		return err
+		WHERE runtime_id = ? AND section_key = ?`, adv.startAt, adv.startAt, runtimeID, adv.nextKey)
+	}
+	if sectionErr != nil {
+		return sectionErr
 	}
 	if _, err := q.ExecContext(ctx, `
 		UPDATE exam_session_runtimes
@@ -721,7 +737,11 @@ func (s *Service) startSectionEffect(ctx context.Context, q tx.Tx, scheduleID, r
 	if err := examruntime.SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, adv.nextKey, strptr("running")); err != nil {
 		return err
 	}
-	if err := insertAuditLog(ctx, q, scheduleID, adv.actor, "SECTION_START", nil, map[string]any{
+	auditEvent := "SECTION_START"
+	if adv.prepare {
+		auditEvent = "SECTION_PREPARE"
+	}
+	if err := insertAuditLog(ctx, q, scheduleID, adv.actor, auditEvent, nil, map[string]any{
 		"sectionKey": adv.nextKey, "effectiveAt": adv.startAt,
 	}); err != nil {
 		return err

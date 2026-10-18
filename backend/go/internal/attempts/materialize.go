@@ -26,15 +26,19 @@ type BlobQuerier interface {
 }
 
 // MaterializeBlobs rebuilds answers/writing_answers/flags from
-// attempt_responses_v2 rows. Writing-module responses (module_id containing
-// "writing", case-insensitive — same rule as saveInTx) land in
-// writing_answers; all others land in answers. markedForReview sets flags.
+// attempt_responses_v2 rows. Normalized section identity routes writing
+// responses into writing_answers; legacy module keys remain the fallback.
+// All others land in answers. markedForReview sets flags.
 // The answer value stored is the canonical payload's "answer" field,
 // matching mergeProjection's payloadAnswer extraction. Empty row sets yield
 // "{}" (never NULL). Loader errors propagate.
 func MaterializeBlobs(ctx context.Context, q BlobQuerier, attemptID string) (Blobs, error) {
 	rows, err := q.QueryContext(ctx,
-		`SELECT question_id, module_id, CAST(response AS CHAR) FROM attempt_responses_v2 WHERE attempt_id = ? ORDER BY question_id`,
+		`SELECT r.question_id, r.module_id, COALESCE(s.section_key, ''), CAST(r.response AS CHAR)
+		 FROM attempt_responses_v2 r
+		 LEFT JOIN assessment_modules m ON m.id = r.module_id
+		 LEFT JOIN assessment_sections s ON s.id = m.section_id
+		 WHERE r.attempt_id = ? ORDER BY r.question_id`,
 		attemptID)
 	if err != nil {
 		return Blobs{}, err
@@ -42,11 +46,11 @@ func MaterializeBlobs(ctx context.Context, q BlobQuerier, attemptID string) (Blo
 	defer rows.Close()
 	var cells []answerblobs.Cell
 	for rows.Next() {
-		var questionID, moduleID, raw string
-		if err := rows.Scan(&questionID, &moduleID, &raw); err != nil {
+		var questionID, moduleID, sectionKey, raw string
+		if err := rows.Scan(&questionID, &moduleID, &sectionKey, &raw); err != nil {
 			return Blobs{}, err
 		}
-		cells = append(cells, answerblobs.Cell{QuestionID: questionID, ModuleID: moduleID, Canonical: json.RawMessage(raw)})
+		cells = append(cells, answerblobs.Cell{QuestionID: questionID, ModuleID: moduleID, SectionKey: sectionKey, Canonical: json.RawMessage(raw)})
 	}
 	if err := rows.Err(); err != nil {
 		return Blobs{}, err
@@ -65,12 +69,12 @@ type rowFlag = answerblobs.Flag
 // write + seal paths). Stored rows are canonical payloads, so the leaf's
 // raw "answer" extraction equals the old re-canonicalization byte-wise.
 func projectRowAnswer(questionID, moduleID string, canonical json.RawMessage) (rowAnswer, rowFlag, error) {
-	ans, flag := answerblobs.Project(moduleID, canonical)
+	ans, flag := answerblobs.Project(moduleID, "", canonical)
 	return ans, flag, nil
 }
 
 // isWritingModule matches saveInTx's writing-module rule (leaf-shared).
-func isWritingModule(moduleID string) bool { return answerblobs.IsWritingModule(moduleID) }
+func isWritingModule(moduleID string) bool { return answerblobs.IsWritingResponse(moduleID, "") }
 
 // FlushDB is the read+write surface FlushStaleBlobs needs (*sql.DB).
 type FlushDB interface {

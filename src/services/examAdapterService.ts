@@ -884,11 +884,12 @@ export function getQuestionAnswer(
     return answer;
   }
 
-  if (!Array.isArray(answer)) {
-    return undefined;
+  if (Array.isArray(answer) && answer[question.answerIndex] !== undefined) {
+    return answer[question.answerIndex];
   }
 
-  return answer[question.answerIndex];
+  // Grading projections store individual blank IDs; live delivery stores arrays.
+  return answers[question.id];
 }
 
 export function getAnsweredSlotCount(

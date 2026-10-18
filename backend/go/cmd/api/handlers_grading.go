@@ -541,6 +541,14 @@ func gradingWritingTasksHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
+		if err := rows.Close(); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if err := recoverSealedWritingForReview(r.Context(), app.DB, submissionID, out); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
 }

@@ -381,14 +381,18 @@ function getExportCorrectAnswerDisplay(
   questionResult: ObjectiveQuestionResult | undefined,
   options: AnswerDisplayOptions = {},
 ): string {
-  if (questionResult?.hasOverride && questionResult.correctAnswer.trim() !== '') {
+  const snapshotAnswer = getCorrectAnswerDisplay(descriptor, options);
+  if (
+    (questionResult?.hasOverride || snapshotAnswer.trim() === '') &&
+    typeof questionResult?.correctAnswer === 'string' && questionResult.correctAnswer.trim() !== ''
+  ) {
     return getCorrectAnswerDisplay(descriptor, {
       ...options,
       correctAnswerOverride: questionResult.correctAnswer,
     });
   }
 
-  return getCorrectAnswerDisplay(descriptor, options);
+  return snapshotAnswer;
 }
 
 function getQuestionSkillCategory(
@@ -614,6 +618,18 @@ export function buildQuestionTracebackGroups(
     results,
   );
   const correctnessByDescriptor = resolveSentenceCompletionCorrectness(descriptors, answerMap);
+  // Some sealed keys live in normalized assessment rows, outside the builder
+  // snapshot. Resolve those verdicts before shared/grouped slot aggregation.
+  for (const descriptor of descriptors) {
+    if (getCorrectAnswerDisplay(descriptor).trim() !== '') continue;
+    const result = results.get(descriptor.id);
+    correctnessByDescriptor.set(descriptor.id,
+      getExportCorrectAnswerDisplay(descriptor, result).trim() !== '' &&
+      hasPersistedAnswer(getQuestionAnswer(descriptor, answerMap))
+        ? result?.isCorrect ?? null
+        : null,
+    );
+  }
   const groups = new Map<string, ObjectiveTracebackGroup>();
   const groupedSlotsByGroup = new Map<string, Map<string, StudentQuestionDescriptor[]>>();
 

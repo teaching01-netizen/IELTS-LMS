@@ -88,13 +88,14 @@ func init() {
 		"POST /schedules/{scheduleID}/submit":                        {Bearer: true, Scope: ScopeAttemptOwner},
 		// student sessions: session-or-bearer STUDENT paths (handler:
 		// requireV1StudentIdentity / requireStudentDeps + resolve check).
-		"GET /{scheduleID}":            {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{scheduleID}/static":     {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/precheck":  {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/bootstrap": {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{scheduleID}/live":       {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{scheduleID}/runtime":    {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/heartbeat": {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}":                              {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/static":                       {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/precheck":                    {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/sections/{sectionKey}/ready": {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/bootstrap":                   {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/live":                         {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/runtime":                      {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/heartbeat":                   {Bearer: true, Scope: ScopeAttemptOwner},
 		// mutations:batch + submit are registered via r.Method with an
 		// absolute-ish annotated template ("POST /{scheduleID}/..."):
 		// these verbatim keys let CtxRouteTemplate resolve.

@@ -6,6 +6,7 @@ import {
   getEnabledModules,
 } from "@student/application/studentExamContentFacade";
 import { Button } from "../ui/Button";
+import { LoadingMark } from "../ui/LoadingMark";
 import { AlertTriangle } from "lucide-react";
 import { AccessibilitySettings } from "./AccessibilitySettings";
 import { StudentExamPhaseRenderer } from "./StudentExamPhaseRenderer";
@@ -50,6 +51,8 @@ import { useZoomScrollAnchoring } from "./useZoomScrollAnchoring";
 import { emitAnswerMutationDebugLog } from "./answerMutationDebug";
 import { isStudentHighlightToolContextActive } from "./studentHighlightToolContext";
 import type { StudentAnswerMutationMeta, StudentAnswerValue } from "../../types/studentAttempt";
+import { ensureBrowserClientSessionIdForAttempt } from '@student/api/studentAttemptGateway';
+import { useIeltsCohortReadiness } from '@student/hooks/useIeltsCohortReadiness';
 
 import { StudentExamHeaderClock } from "./StudentExamHeaderClock";
 import { StudentExamClockEffects } from "./StudentExamClockEffects";
@@ -91,16 +94,16 @@ function getBlockingCopy(
       };
     case "waiting_for_runtime":
       return {
-        title: "Waiting for runtime",
-        message: "The exam runtime is synchronizing before the next section can continue.",
+        title: "Preparing your section",
+        message: "The timer will start when every student’s section is ready.",
         badge: "Waiting",
         contextLabel: "Session Runtime",
       };
     case "time_expired":
       return {
-        title: "Time is up",
+        title: "Saving your answers",
         message:
-          "This section is closed for new answers. Your saved work is being finalized before the cohort advances.",
+          "This section is complete. Please wait while your saved work is finalized and the exam continues.",
         badge: "Time",
         contextLabel: "Authoritative Clock",
       };
@@ -152,12 +155,14 @@ interface StudentAppProps {
   showSubmitControls?: boolean | undefined;
   allowPreviewStart?: boolean | undefined;
   allowExitDuringExam?: boolean | undefined;
+  onRuntimeRefresh?: (() => Promise<void>) | undefined;
 }
 
 export function StudentApp({
   showSubmitControls = true,
   allowPreviewStart = false,
   allowExitDuringExam = false,
+  onRuntimeRefresh,
 }: StudentAppProps) {
   void allowExitDuringExam;
   const {
@@ -167,6 +172,19 @@ export function StudentApp({
     onExit: onExit,
   } = useStudentRuntimeSession();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
+  const readinessSection = runtimeState.runtimeSnapshot?.sections.find(
+    (section) => section.sectionKey === runtimeState.runtimeSnapshot?.currentSectionKey,
+  );
+  const readinessError = useIeltsCohortReadiness({
+    scheduleId: attemptState.attempt?.scheduleId,
+    attemptId: attemptState.attempt?.id ?? null,
+    clientSessionId: attemptState.attempt ? ensureBrowserClientSessionIdForAttempt(attemptState.attempt) : null,
+    sectionKey: runtimeState.runtimeSnapshot?.currentSectionKey ?? null,
+    pending: Boolean(onRuntimeRefresh) && examState.type !== 'ACT' && runtimeState.runtimeBacked &&
+      runtimeState.phase === 'exam' && Boolean(readinessSection && !readinessSection.actualStartAt &&
+      readinessSection.status !== 'completed'),
+    refreshRuntime: onRuntimeRefresh,
+  });
   const examSessionCommands = useExamCommands();
   const examSessionStore = useStudentExamSessionStore();
   const { state: uiState, actions: uiActions } = useStudentUI();
@@ -777,13 +795,21 @@ export function StudentApp({
             {blockingCopy.title}
           </h2>
           <p className="text-sm text-gray-700 leading-6">
-            {runtimeState.proctorNote ??
+            {runtimeState.proctorNote ?? (runtimeState.blocking.reason === 'waiting_for_runtime' ? readinessError : null) ??
               (runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus === "submitting"
                 ? "Saving your answers now. Keep this page open; it will continue automatically when they are saved."
                 : runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus === "failed"
                   ? moduleSubmitError ?? "We could not confirm that your answers were saved. Please retry."
                   : blockingCopy.message)}
           </p>
+          {(runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus !== "failed") ||
+          runtimeState.blocking.reason === "waiting_for_runtime" ||
+          runtimeState.blocking.reason === "waiting_for_advance" ? (
+            <div role="status" aria-label="Loading section" className="mt-6 flex items-center justify-center gap-3 text-sm text-gray-700">
+              <LoadingMark className="bg-gray-600" />
+              <span>Loading…</span>
+            </div>
+          ) : (
           <div className="mt-6 flex items-center justify-center gap-3">
             <div className="px-3 py-1 rounded-sm bg-gray-50 border border-gray-100 text-xs font-bold uppercase tracking-widest text-gray-700">
               Remaining {formatRuntimeTime(runtimeState.blocking.timeRemaining)}
@@ -792,6 +818,7 @@ export function StudentApp({
               {blockingCopy.badge}
             </div>
           </div>
+          )}
           {runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus === "failed" ? (
             <Button
               variant="primary"

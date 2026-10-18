@@ -17,11 +17,11 @@ func TestMaterializeBlobsFromRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery("FROM attempt_responses_v2 WHERE attempt_id").
+	mock.ExpectQuery("LEFT JOIN assessment_sections s ON s.id = m.section_id").
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response"}).
-			AddRow("q-1", "mod-reading", `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`).
-			AddRow("q-2", "mod-writing-task", `{"answer":"essay","markedForReview":true,"eliminatedOptions":[],"annotations":[]}`))
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}).
+			AddRow("q-1", "mod-reading", "", `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`).
+			AddRow("q-2", "mod-writing-task", "", `{"answer":"essay","markedForReview":true,"eliminatedOptions":[],"annotations":[]}`))
 	blobs, err := MaterializeBlobs(context.Background(), db, "att-1")
 	if err != nil {
 		t.Fatalf("MaterializeBlobs: %v", err)
@@ -58,6 +58,28 @@ func TestMaterializeBlobsFromRows(t *testing.T) {
 	}
 }
 
+func TestMaterializeBlobsKeepsNormalizedWritingResponses(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("LEFT JOIN assessment_sections s ON s.id = m.section_id").
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}).
+			AddRow("task1", "d8b6426d-2698-49ee-a072-4552810c741e", "writing", `{"answer":"A complete saved essay.","markedForReview":false}`))
+	blobs, err := MaterializeBlobs(context.Background(), db, "att-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blobs.WritingAnswers != `{"task1":"A complete saved essay."}` || blobs.Answers != "{}" {
+		t.Fatalf("the writing section must own a UUID-module essay: %+v", blobs)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // B3 RED: empty row set materializes empty objects (never NULL, never error).
 func TestMaterializeBlobsEmpty(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -65,9 +87,9 @@ func TestMaterializeBlobsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery("FROM attempt_responses_v2 WHERE attempt_id").
+	mock.ExpectQuery("LEFT JOIN assessment_sections s ON s.id = m.section_id").
 		WithArgs("att-9").
-		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response"}))
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}))
 	blobs, err := MaterializeBlobs(context.Background(), db, "att-9")
 	if err != nil {
 		t.Fatalf("MaterializeBlobs: %v", err)

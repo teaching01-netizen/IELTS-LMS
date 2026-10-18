@@ -820,6 +820,7 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 		}
 		if nextIdx >= 0 {
 			next := secs[nextIdx]
+			adv.prepare = pk == "ielts"
 			adv.nextKey = next.key
 			adv.nextRemaining = (next.planned + next.ext) * 60
 			adv.startAt = now

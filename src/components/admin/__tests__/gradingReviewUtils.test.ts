@@ -122,6 +122,58 @@ function createSectionSubmission(
   } as any;
 }
 
+test('IELTS note review shows canonical saved blanks and the sealed answer key', () => {
+  const examState = createInitialExamState('IELTS', 'Academic');
+  examState.listening.parts = [{
+    id: 'part-1', title: 'Part 1', blocks: [{
+      id: 'note-block', type: 'NOTE_COMPLETION', instruction: 'Complete the notes.',
+      questions: [{
+        id: 'note-1', noteText: 'Venue: ____', answerRule: 'TWO_WORDS',
+        blanks: [{ id: 'blank-1', correctAnswer: '', position: 0 }],
+      }],
+    }],
+  }] as any;
+  const section = createSectionSubmission('sub-1', 'listening', {
+    'note-1:blank-1': 'Garden hall',
+  }, [{
+    ...createQuestionResult('note-1:blank-1', true, 1),
+    studentAnswer: '', correctAnswer: 'Garden hall',
+  }]);
+
+  const item = buildQuestionTracebackGroups(examState, section, 'listening')[0]?.items[0];
+  expect(item).toMatchObject({
+    studentAnswer: 'Garden hall', correctAnswer: 'Garden hall',
+    correctness: true, awardedScore: 1,
+  });
+});
+
+test.each([
+  { name: 'shared answer pool', acceptAnyAnswerKey: true, scoreGroupId: undefined },
+  { name: 'grouped scoring slot', acceptAnyAnswerKey: false, scoreGroupId: 'group-1' },
+])('IELTS sentence review uses the sealed key for a $name missing snapshot keys', ({ acceptAnyAnswerKey, scoreGroupId }) => {
+  const examState = createInitialExamState('IELTS', 'Academic');
+  examState.reading.passages = [{
+    id: 'passage-1', title: 'Passage 1', content: 'Content', images: [], wordCount: 1,
+    blocks: [{
+      id: 'sentence-block', type: 'SENTENCE_COMPLETION', instruction: 'Complete the sentence.',
+      questions: [{
+        id: 'sentence-1', sentence: 'Venue: ____', answerRule: 'TWO_WORDS', acceptAnyAnswerKey,
+        blanks: [{ id: 'blank-1', correctAnswer: '', position: 0, scoreGroupId }],
+      }],
+    }],
+  }] as any;
+  const section = createSectionSubmission('sub-1', 'reading', {
+    'sentence-1:blank-1': 'Garden hall',
+  }, [{
+    ...createQuestionResult('sentence-1:blank-1', true, 1),
+    studentAnswer: 'Garden hall', correctAnswer: 'Garden hall',
+  }]);
+  expect(buildQuestionTracebackGroups(examState, section, 'reading')[0]?.items[0]).toMatchObject({
+    studentAnswer: 'Garden hall', correctAnswer: 'Garden hall',
+    correctness: true, awardedScore: 1, maxScore: 1,
+  });
+});
+
 test('exports ACT Science answers with category totals and correct counts', () => {
   const examState = createInitialExamState('ACT Science Practice', 'ACT', 'ACT Science');
   examState.science.stimuli = [

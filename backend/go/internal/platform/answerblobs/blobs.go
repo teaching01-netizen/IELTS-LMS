@@ -25,12 +25,13 @@ type Blobs struct {
 type Cell struct {
 	QuestionID string
 	ModuleID   string
+	SectionKey string
 	Canonical  json.RawMessage
 }
 
-// Assemble projects cells into the legacy triple. Writing-module cells
-// (module_id containing "writing", case-insensitive — the saveInTx rule)
-// land in writing_answers; all others land in answers. The stored value is
+// Assemble projects cells into the legacy triple. The normalized section owns
+// the writing/answer split; snapshot-backed cells fall back to their module key.
+// Writing cells land in writing_answers; all others land in answers. The stored value is
 // the canonical payload's "answer" field (mergeProjection's payloadAnswer
 // extraction); markedForReview sets flags. Empty input yields "{}" triple
 // (never NULL). Malformed cells fall back to the raw value as the answer.
@@ -39,7 +40,7 @@ func Assemble(cells []Cell) (Blobs, error) {
 	writing := map[string]json.RawMessage{}
 	flags := map[string]json.RawMessage{}
 	for _, c := range cells {
-		ans, fset := Project(c.ModuleID, c.Canonical)
+		ans, fset := Project(c.ModuleID, c.SectionKey, c.Canonical)
 		if ans.IsAnswer {
 			answers[c.QuestionID] = ans.Value
 		} else {
@@ -85,16 +86,16 @@ type payload struct {
 // Project applies the legacy mergeProjection semantics to one stored
 // canonical payload: extract the "answer" field, split answers vs
 // writing_answers by module, set flags iff markedForReview.
-func Project(moduleID string, canonical json.RawMessage) (Answer, Flag) {
+func Project(moduleID, sectionKey string, canonical json.RawMessage) (Answer, Flag) {
 	var p payload
 	if err := json.Unmarshal(canonical, &p); err != nil || len(p.Answer) == 0 {
-		if IsWritingModule(moduleID) {
+		if IsWritingResponse(moduleID, sectionKey) {
 			return Answer{Value: canonical}, Flag{}
 		}
 		return Answer{IsAnswer: true, Value: canonical}, Flag{}
 	}
 	ans := Answer{Value: p.Answer}
-	if !IsWritingModule(moduleID) {
+	if !IsWritingResponse(moduleID, sectionKey) {
 		ans.IsAnswer = true
 	}
 	var flag Flag
@@ -104,7 +105,11 @@ func Project(moduleID string, canonical json.RawMessage) (Answer, Flag) {
 	return ans, flag
 }
 
-// IsWritingModule matches saveInTx's writing-module rule.
-func IsWritingModule(moduleID string) bool {
+// IsWritingResponse uses section identity for normalized modules (whose IDs
+// are opaque), retaining module-key compatibility for legacy snapshots.
+func IsWritingResponse(moduleID, sectionKey string) bool {
+	if sectionKey = strings.TrimSpace(sectionKey); sectionKey != "" {
+		return strings.EqualFold(sectionKey, "writing")
+	}
 	return strings.Contains(strings.ToLower(moduleID), "writing")
 }

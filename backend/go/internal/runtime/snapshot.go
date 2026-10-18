@@ -53,6 +53,7 @@ type Snapshot struct {
 	// poll can discover a correctly-timed transition only after the next
 	// section has already lost visible time in the browser.
 	SectionDeadlineAt *time.Time
+	SectionStartAt    *time.Time
 	SectionLive       bool
 	SectionPaused     bool
 	SectionStarted    bool
@@ -232,6 +233,9 @@ func LoadSnapshot(ctx context.Context, q SnapshotQuerier, scheduleID string, now
 			// locked section, so the gate refuses a write on a section that has
 			// not begun instead of reading the row's mere existence as a start.
 			snap.SectionStarted, snap.SectionLive, snap.SectionPaused = SectionLiveness(secStatus.String)
+			if actualStart.Valid {
+				snap.SectionStartAt = &actualStart.Time
+			}
 			if snap.SectionLive && actualStart.Valid && plannedMinutes.Valid && !pausedAt.Valid {
 				extension := int64(0)
 				if extensionMinutes.Valid {

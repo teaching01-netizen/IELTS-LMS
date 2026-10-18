@@ -1,0 +1,21 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "incremental": false,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "portal/**/*.ts",
+    "web/**/*.ts",
+    "web/**/*.tsx",
+    "vitest.portal.config.ts",
+    "vite.portal.config.ts"
+  ],
+  "exclude": ["portal-web", "node_modules"]
+}

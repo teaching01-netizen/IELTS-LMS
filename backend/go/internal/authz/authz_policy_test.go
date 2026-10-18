@@ -73,7 +73,7 @@ var expectedAnnotated = []string{
 	"POST /schedules/{scheduleID}/submit", "POST /schedules/{scheduleID}/start-with-code",
 	"GET /versions/{versionID}",
 	"GET /{id}/runtime", "POST /{id}/runtime/commands", "POST /{id}/register",
-	"GET /{scheduleID}", "GET /{scheduleID}/static", "POST /{scheduleID}/precheck",
+	"GET /{scheduleID}", "GET /{scheduleID}/static", "POST /{scheduleID}/precheck", "POST /{scheduleID}/sections/{sectionKey}/ready",
 	"POST /{scheduleID}/bootstrap", "GET /{scheduleID}/live", "GET /{scheduleID}/runtime",
 	"POST /{scheduleID}/heartbeat", "POST /{scheduleID}/mutations:batch",
 	"POST /{scheduleID}/audit", "POST /{scheduleID}/submit",

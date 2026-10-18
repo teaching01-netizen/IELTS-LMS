@@ -699,6 +699,7 @@ func BuildRouter(app *App) http.Handler {
 				// control effects land within pollAfterSecs; write gates
 				// enforce regardless of poll lag.
 				authzRoute(r, "GET", "/{scheduleID}/runtime", runtimePollHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/sections/{sectionKey}/ready", ieltsCohortReadyHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierHeartbeat, attemptKey())).Group(func(r chi.Router) {
 				authzRoute(r, "POST", "/{scheduleID}/heartbeat", v1HeartbeatHandler(app))

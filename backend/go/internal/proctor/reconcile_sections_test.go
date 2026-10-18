@@ -161,6 +161,8 @@ func TestReconcileExpiredSectionsEntersWaitingWindowDuringGap(t *testing.T) {
 		{key: "reading-writing", order: 1, planned: 64, gap: 10, status: "live", startedAt: &base},
 		{key: "math", order: 2, planned: 35, status: "locked"},
 	})
+	mock.ExpectQuery("SELECT UTC_TIMESTAMP").
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(asOf))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections")).
 		WithArgs(responseDeadline, "time_expired", "rt-1", "reading-writing").
 		WillReturnResult(sqlmock.NewResult(0, 1))

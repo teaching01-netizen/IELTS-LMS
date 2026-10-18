@@ -106,6 +106,7 @@ export function StudentAppWrapper({
       >
         <KeyboardProvider>
           <StudentApp
+            onRuntimeRefresh={onRuntimeRefresh}
             showSubmitControls={showSubmitControls}
             allowPreviewStart={allowPreviewStart}
             allowExitDuringExam={allowExitDuringExam}

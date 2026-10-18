@@ -378,6 +378,26 @@ describe('StudentRuntimeProvider', () => {
     vi.useRealTimers();
   });
 
+  it('holds the full allotment until the synchronized cohort start', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const runtime = createRuntimeSnapshot('writing');
+    runtime.serverNow = '2026-01-01T00:00:00Z';
+    runtime.currentSectionRemainingSeconds = 3600;
+    runtime.sections[0]!.actualStartAt = '2026-01-01T00:00:02Z';
+    runtime.currentSectionDeadlineAt = '2026-01-01T01:00:02Z';
+    const { result, unmount } = renderRuntime({
+      attemptSnapshot: { ...baseAttempt, phase: 'exam' }, runtimeBacked: true, runtimeSnapshot: runtime,
+    });
+    expect(result.current.state.blocking.reason).toBe('waiting_for_runtime');
+    expect(result.current.state.displayTimeRemaining).toBe(3600);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2100); });
+    expect(result.current.state.blocking.active).toBe(false);
+    expect(result.current.state.displayTimeRemaining).toBe(3600);
+    unmount();
+    vi.useRealTimers();
+  });
+
   it('treats reconnect/device continuity transitions as non-blocking runtime signals', () => {
     const { result } = renderRuntime();
 

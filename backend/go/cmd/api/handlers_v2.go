@@ -479,7 +479,7 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 	}
 	if active.Valid && active.String != "" {
 		var secStatus sql.NullString
-		serr := q.QueryRowContext(ctx, `SELECT status FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR SHARE`, id, active.String).Scan(&secStatus)
+		serr := q.QueryRowContext(ctx, `SELECT CASE WHEN actual_start_at > UTC_TIMESTAMP(6) THEN 'locked' ELSE status END AS status FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR SHARE`, id, active.String).Scan(&secStatus)
 		if serr != nil && serr != sql.ErrNoRows {
 			return attempts.RuntimeGate{}, serr
 		}
@@ -978,7 +978,6 @@ func studentEntryBucket(key string) httpx.RateLimitResult {
 	return studentEntryRateLimiter.Allow(httpx.RateLimitConfig{MaxRequests: 30, Window: time.Minute, Tier: "student-entry"}, key)
 }
 
-
 // studentEntryNotFound is the 404-collapse envelope for student entry:
 // unknown/closed schedules and unknown/expired/paused links render
 // identically so probes cannot distinguish them (same message as the
@@ -1200,8 +1199,8 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			att = &minted
 		}
 		writeStudentEntry(w, r, app, studentEntryIdentity{
-			UserID:userID, DisplayName:displayName, Email:email, ScheduleID:scheduleID,
-			Code:wcode, AttemptID:att.AttemptID, ClientSessionID:clientSessionID, Proof:proof,
+			UserID: userID, DisplayName: displayName, Email: email, ScheduleID: scheduleID,
+			Code: wcode, AttemptID: att.AttemptID, ClientSessionID: clientSessionID, Proof: proof,
 		})
 	}
 }

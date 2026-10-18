@@ -442,6 +442,10 @@ func (s *Service) insertLiveRuntimeTx(ctx context.Context, q tx.Tx, sch *StartSc
 			status = SectionLive
 			availExpr = "UTC_TIMESTAMP(6)"
 			startExpr = "UTC_TIMESTAMP(6)"
+			if providerKey == "ielts" {
+				status = SectionLocked
+				startExpr = "NULL"
+			}
 		} else {
 			availExpr = "NULL"
 			startExpr = "NULL"

@@ -21,10 +21,11 @@ func TestGetSessionRowFirstReadThrough(t *testing.T) {
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id", "phase", "answers", "protocol_version"}).
 			AddRow("att-1", "sched-1", "exam", "{}", 2))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_responses_v2 WHERE attempt_id")).
+	mock.ExpectQuery(regexp.QuoteMeta("LEFT JOIN assessment_sections s ON s.id = m.section_id")).
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response"}).
-			AddRow("q-1", "mod-reading", `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`))
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}).
+			AddRow("q-1", "mod-reading", "reading", `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`).
+			AddRow("task1", "d8b6426d-2698-49ee-a072-4552810c741e", "writing", `{"answer":"Saved essay","markedForReview":false}`))
 	sess, err := svc.GetSession(context.Background(), "att-1")
 	if err != nil {
 		t.Fatalf("GetSession: %v", err)

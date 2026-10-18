@@ -498,6 +498,6 @@ export function isStudentAnswerCorrect(
 
   const correctText = normalizeComparable(formatAnswerValue(correct));
   const studentText = normalizeComparable(formatAnswerValue(student));
-  if (correctText === '' && studentText === '') return true;
-  return correctText !== '' && correctText === studentText;
+  if (correctText === '') return null;
+  return correctText === studentText;
 }

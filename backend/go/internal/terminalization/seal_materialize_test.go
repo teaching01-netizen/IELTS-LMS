@@ -36,12 +36,13 @@ func TestSealMaterializesBlobsForV2(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).
 		WillReturnRows(lockAttemptRowV2())
 	// Row-first materialization: cells SELECT then blob UPDATE.
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_responses_v2 WHERE attempt_id")).
+	mock.ExpectQuery(regexp.QuoteMeta("LEFT JOIN assessment_sections s ON s.id = m.section_id")).
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response"}).
-			AddRow("q-1", "mod-reading", `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`))
+		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "section_key", "response"}).
+			AddRow("q-1", "mod-reading", "", `{"answer":"A","markedForReview":false,"eliminatedOptions":[],"annotations":[]}`).
+			AddRow("task1", "d8b6426d-2698-49ee-a072-4552810c741e", "writing", `{"answer":"Saved essay","markedForReview":false}`))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET answers=?, writing_answers=?, flags=? WHERE id=?")).
-		WithArgs(`{"q-1":"A"}`, "{}", "{}", "att-1").
+		WithArgs(`{"q-1":"A"}`, `{"task1":"Saved essay"}`, "{}", "att-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	sealExpectProvider(mock, "ielts")
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_terminalizations WHERE attempt_id")).

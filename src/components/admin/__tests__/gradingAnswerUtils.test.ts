@@ -49,6 +49,27 @@ function buildSentenceDescriptor(
 }
 
 describe('gradingAnswerUtils', () => {
+  test('reads a persisted note blank by its canonical question id', () => {
+    const descriptor = buildSentenceDescriptor('sentence-1:blank-1', 0, false);
+    expect(getStudentAnswerDisplay(descriptor, {
+      'sentence-1:blank-1': 'alpha',
+    })).toBe('alpha');
+    // A live array slot, including a deliberate clear, stays authoritative.
+    expect(getStudentAnswerDisplay(descriptor, {
+      'sentence-1': [''],
+      'sentence-1:blank-1': 'alpha',
+    })).toBe('');
+  });
+
+  test('does not mark an empty response and an empty answer key correct', () => {
+    const descriptor = buildSentenceDescriptor('sentence-1:blank-1', 0, false);
+    if (descriptor.question && 'blanks' in descriptor.question) {
+      descriptor.question.blanks[0]!.correctAnswer = '';
+    }
+    expect(isStudentAnswerCorrect(descriptor, {})).toBeNull();
+    expect(isStudentAnswerCorrect(descriptor, { 'sentence-1': ['alpha'] })).toBeNull();
+  });
+
   test('grades a shared sentence permutation once across its blanks', () => {
     const descriptors = [
       buildSentenceDescriptor('sentence-1:blank-1', 0, true),

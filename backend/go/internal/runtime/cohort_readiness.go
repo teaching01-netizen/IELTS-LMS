@@ -1,0 +1,114 @@
+package runtime
+
+import (
+	"context"
+	"database/sql"
+	"time"
+
+	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/tx"
+)
+
+type CohortReadiness struct {
+	StartedAt         *time.Time `json:"startedAt"`
+	ServerNow         time.Time  `json:"serverNow"`
+	RemainingStudents int        `json:"remainingStudents"`
+}
+
+// cohortStartLead covers one readiness poll and delivery of the armed clock.
+// It follows measured transport latency instead of spending exam time loading.
+func cohortStartLead(roundTripMS int) time.Duration {
+	if roundTripMS < 0 {
+		roundTripMS = 0
+	}
+	if roundTripMS > 10000 {
+		roundTripMS = 10000
+	}
+	return time.Duration(1000+3*roundTripMS) * time.Millisecond
+}
+
+// ReadyCohortSection is idempotent and serializes with admission, proctor
+// commands, and response writes through the existing global lock order.
+func (s *Service) ReadyCohortSection(ctx context.Context, scheduleID, sectionKey, attemptID, actorUserID string, roundTripMS *int) (CohortReadiness, error) {
+	var out CohortReadiness
+	changed := false
+	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+		sch, err := LockScheduleRow(ctx, q, scheduleID)
+		if err != nil {
+			return err
+		}
+		if sch.ProviderKey != "ielts" {
+			return apperrors.New(apperrors.CodeConflict, "Cohort readiness is only available for IELTS.")
+		}
+		if err := LockScheduleAttemptsInTx(ctx, q, scheduleID); err != nil {
+			return err
+		}
+		rt, err := lockRuntime(ctx, q, scheduleID)
+		if err != nil {
+			return err
+		}
+		if rt.ActiveSectionKey == nil || *rt.ActiveSectionKey != sectionKey || (rt.Status != StatusLive && rt.Status != StatusPaused) {
+			return apperrors.New(apperrors.CodeConflict, "The exam section has changed. Refresh the exam.")
+		}
+		var admitted int
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM student_attempts WHERE id = ? AND schedule_id = ? AND COALESCE(user_id, '') = ? AND submitted_at IS NULL AND COALESCE(delivery_status, 'running') NOT IN ('submitted','terminated','locked','cancelled')`, attemptID, scheduleID, actorUserID).Scan(&admitted); err != nil {
+			return err
+		}
+		if admitted != 1 {
+			return apperrors.New(apperrors.CodeNotFound, "Active student attempt not found.")
+		}
+		var status string
+		var start sql.NullTime
+		if err := q.QueryRowContext(ctx, `SELECT status, actual_start_at FROM exam_session_runtime_sections WHERE runtime_id = ? AND section_key = ? FOR UPDATE`, rt.ID, sectionKey).Scan(&status, &start); err != nil {
+			return err
+		}
+		if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&out.ServerNow); err != nil {
+			return err
+		}
+		if start.Valid {
+			out.StartedAt = &start.Time
+			return nil
+		}
+		if status != SectionLocked && status != SectionLive && status != SectionPaused {
+			return apperrors.New(apperrors.CodeConflict, "Section is no longer preparing.")
+		}
+		if roundTripMS != nil {
+			ms := *roundTripMS
+			if ms < 0 || ms > 10000 {
+				return apperrors.New(apperrors.CodeValidation, "roundTripMs must be between 0 and 10000.")
+			}
+			if _, err := q.ExecContext(ctx, `INSERT INTO ielts_section_readiness (runtime_id, section_key, attempt_id, round_trip_ms) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE round_trip_ms = GREATEST(round_trip_ms, VALUES(round_trip_ms))`, rt.ID, sectionKey, attemptID, ms); err != nil {
+				return err
+			}
+		}
+		var maxRTT int
+		if err := q.QueryRowContext(ctx, `SELECT COALESCE(SUM(r.attempt_id IS NULL), 0), COALESCE(MAX(r.round_trip_ms), 0)
+   FROM student_attempts a LEFT JOIN ielts_section_readiness r ON r.attempt_id = a.id AND r.runtime_id = ? AND r.section_key = ?
+   WHERE a.schedule_id = ? AND a.submitted_at IS NULL AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted','terminated','locked','cancelled')`, rt.ID, sectionKey, scheduleID).Scan(&out.RemainingStudents, &maxRTT); err != nil {
+			return err
+		}
+		if roundTripMS == nil || out.RemainingStudents > 0 || rt.Status != StatusLive {
+			return nil
+		}
+		startAt := out.ServerNow.Add(cohortStartLead(maxRTT))
+		if _, err := q.ExecContext(ctx, `UPDATE exam_session_runtime_sections SET status = 'live', actual_start_at = ?, paused_at = NULL WHERE runtime_id = ? AND section_key = ? AND actual_start_at IS NULL`, startAt, rt.ID, sectionKey); err != nil {
+			return err
+		}
+		if _, err := q.ExecContext(ctx, `UPDATE exam_session_runtimes SET waiting_for_next_section = false, revision = revision + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = ?`, rt.ID); err != nil {
+			return err
+		}
+		if err := SyncV2TimingInTx(ctx, q, scheduleID, rt.ID, sectionKey, strptr("running")); err != nil {
+			return err
+		}
+		if err := s.emitRuntimeChanged(ctx, q, scheduleID, rt.Revision+1, "cohort_section_ready"); err != nil {
+			return err
+		}
+		changed = true
+		out.StartedAt = &startAt
+		return nil
+	})
+	if err == nil && changed {
+		s.invalidated(scheduleID)
+	}
+	return out, err
+}
