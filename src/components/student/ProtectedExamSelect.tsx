@@ -96,7 +96,7 @@ function RadixOptionItem({ value, disabled, children }: SelectItemProps) {
 export function ProtectedExamSelect({
   ariaLabel,
   value,
-  options,
+  options: rawOptions,
   placeholder,
   onValueChange,
   onLiveValueChange,
@@ -110,6 +110,10 @@ export function ProtectedExamSelect({
   const triggerId = useId();
   const listLabelId = useId();
   const ownerTestId = testId ?? 'protected-exam-select';
+
+  // '' is the cleared state, not a choice; authored blanks (e.g. an empty
+  // category row) would otherwise crash Radix's Select.Item.
+  const options = useMemo(() => rawOptions.filter((option) => option.value !== ''), [rawOptions]);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;

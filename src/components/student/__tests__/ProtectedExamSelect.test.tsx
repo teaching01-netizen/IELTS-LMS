@@ -235,3 +235,14 @@ describe('ProtectedExamSelect lifecycle registration (P3.3)', () => {
     expect(onValueChange).not.toHaveBeenCalled();
   });
 });
+
+describe('ProtectedExamSelect authored blank options', () => {
+  it('opens the desktop menu without crashing when an option value is empty', () => {
+    renderSelect({ options: [{ value: '', label: '' }, ...OPTIONS] });
+    const trigger = screen.getByTestId('protected-exam-select-trigger');
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    expect(screen.getByTestId('protected-exam-select-menu')).toBeInTheDocument();
+    expect(screen.queryByTestId('protected-exam-select-item-')).not.toBeInTheDocument();
+  });
+});
