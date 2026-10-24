@@ -269,6 +269,17 @@ function emitFence(rail, { provenance, palette }) {
   const paletteLines = palette
     .map((entry) => `  ${entry.token}: ${entry.hex};`)
     .join("\n");
+  const paletteByToken = new Map(palette.map(({ token, hex }) => [token, hex]));
+  const rects = rail.runs
+    .filter((run) => run.token !== GAP.token)
+    .map((run) => {
+      const fill = paletteByToken.get(run.token);
+      if (!fill) throw new Error(`Rail run has no palette colour: ${run.token}`);
+      return `<rect x="${run.from}" y="0" width="${run.to - run.from}" height="3" fill="${fill}"/>`;
+    })
+    .join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${patternLength}" height="3" viewBox="0 0 ${patternLength} 3">${rects}</svg>`;
+  const printPattern = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
   return `${BEGIN}
   /* Written by scripts/sat-rail-pattern.mjs — do not hand-edit inside the fence.
    * ${provenance}
@@ -279,6 +290,7 @@ function emitFence(rail, { provenance, palette }) {
 ${paletteLines}
   --sat-rail-height: ${RAIL_HEIGHT};
   --sat-rail-pattern-length: ${patternLength}px;
+  --sat-rail-print-pattern: ${printPattern};
   --sat-rail-pattern:
     linear-gradient(
       90deg,

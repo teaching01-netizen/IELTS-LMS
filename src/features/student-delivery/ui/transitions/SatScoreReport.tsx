@@ -433,7 +433,6 @@ export function AnsweredExamPaper({
   const complete = printable.size === administered.size;
   const answers = new Map<string, string>();
   const markedForReview = new Set<string>();
-  const eliminatedOptions = new Map<string, string[]>();
   for (const response of exam.attempt.responses) {
     const moduleId = moduleIdByAttempt.get(response.moduleAttemptId);
     const value =
@@ -442,7 +441,6 @@ export function AnsweredExamPaper({
         : "";
     if (moduleId && value) answers.set(`${moduleId}:${response.examQuestionId}`, value);
     if (moduleId && response.markedForReview) markedForReview.add(`${moduleId}:${response.examQuestionId}`);
-    if (moduleId) eliminatedOptions.set(`${moduleId}:${response.examQuestionId}`, response.eliminatedOptions ?? []);
   }
   const printableModules: { section: (typeof exam.sections)[number]; sectionNo: number; module: AssessmentDeliverySection["modules"][number] }[] = [];
   exam.sections.forEach((section, sectionIndex) => {
@@ -572,7 +570,6 @@ export function AnsweredExamPaper({
                         sectionKey={section.sectionKey}
                         answer={answer}
                         markedForReview={marked}
-                        eliminatedOptionIds={eliminatedOptions.get(`${module.id}:${question.examQuestionId}`) ?? []}
                         loadMediaUrl={loadMediaUrl}
                         onMediaFailure={mediaFailure}
                       />

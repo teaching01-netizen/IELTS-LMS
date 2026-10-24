@@ -54,7 +54,11 @@ function answeredExam(figureAsset: string) {
       id: "attempt-print",
       moduleAttempts: modules.map((module, index) => ({ id: `ma${index}`, moduleId: module.id, startedAt: "2026-10-07T09:03:00Z" })),
       responses: [
-        { moduleAttemptId: "ma0", examQuestionId: "m1-q0", response: "m1-0-b" },
+        {
+          moduleAttemptId: "ma0", examQuestionId: "m1-q0", response: "m1-0-b",
+          eliminatedOptions: ["m1-0-a", "m1-0-c", "m1-0-d"],
+        },
+        { moduleAttemptId: "ma0", examQuestionId: "m1-q2", response: "", eliminatedOptions: ["m1-2-a", "m1-2-c"] },
         { moduleAttemptId: "ma0", examQuestionId: "m1-q1", response: "3/4" },
         { moduleAttemptId: "ma1", examQuestionId: "m2-q1", response: "-12.5" },
       ],
@@ -210,6 +214,33 @@ test("print route fits every question to one A4 landscape page", async ({ page, 
       clipped: [...paper.querySelectorAll<HTMLElement>("article, article *")].filter((element) => element.getBoundingClientRect().right > width + 0.5).length,
       overflow: paper.scrollWidth - paper.clientWidth,
       selected: paper.querySelectorAll("[data-selected]").length,
+      eliminatedChoiceState: [1, 3].map((questionNumber) => {
+        const question = paper.querySelector(`[data-review-question="${questionNumber}"]`)!;
+        const choices = [...question.querySelectorAll<HTMLElement>(".sat-answer-choice")];
+        return {
+          selected: question.querySelectorAll("[data-selected]").length,
+          strikeThroughs: question.querySelectorAll("[data-sat-elimination-line]").length,
+          undoControls: [...question.querySelectorAll("button")].filter((button) => button.textContent?.trim() === "Undo").length,
+          eliminatorToggle: question.querySelector("[data-sat-eliminator-toggle]") !== null,
+          choiceColors: choices.map((choice) => getComputedStyle(choice.querySelector(".sat-type-body")!).color),
+        };
+      }),
+      printRail: (() => {
+        const backgroundImage = getComputedStyle(paper.querySelector("[data-sat-color-rail]")!).backgroundImage;
+        const marker = "data:image/svg+xml,";
+        const start = backgroundImage.indexOf(marker);
+        if (start < 0) return { dataUrl: false, width: null, height: null, rects: 0, fills: [] as string[] };
+        const encoded = backgroundImage.slice(start + marker.length).replace(/["')]+$/, "");
+        const svg = new DOMParser().parseFromString(decodeURIComponent(encoded), "image/svg+xml").documentElement;
+        const rects = [...svg.querySelectorAll("rect")];
+        return {
+          dataUrl: svg.localName === "svg",
+          width: svg.getAttribute("width"),
+          height: svg.getAttribute("height"),
+          rects: rects.length,
+          fills: [...new Set(rects.map((rect) => rect.getAttribute("fill") ?? ""))].sort(),
+        };
+      })(),
       text: paper.textContent ?? "",
       footerVisible: getComputedStyle(paper.querySelector("tfoot .sat-paper-footer")!).visibility,
       unfit,
@@ -240,6 +271,20 @@ test("print route fits every question to one A4 landscape page", async ({ page, 
   // Every question, choices included, fits under its runhead and footer.
   expect(layout.unfit).toEqual([]);
   expect(layout.selected).toBe(1);
+  expect(layout.eliminatedChoiceState).toHaveLength(2);
+  expect(layout.eliminatedChoiceState[0]?.selected).toBe(1);
+  expect(layout.eliminatedChoiceState[1]?.selected).toBe(0);
+  for (const question of layout.eliminatedChoiceState) {
+    expect(question.strikeThroughs).toBe(0);
+    expect(question.undoControls).toBe(0);
+    expect(question.eliminatorToggle).toBe(false);
+    expect(new Set(question.choiceColors).size).toBe(1);
+  }
+  expect(layout.printRail.dataUrl).toBe(true);
+  expect(layout.printRail.width).toBe("1104");
+  expect(layout.printRail.height).toBe("3");
+  expect(layout.printRail.rects).toBeGreaterThan(80);
+  expect(layout.printRail.fills).toEqual(["#70B7E1", "#808080", "#D0D0D0", "#FAE570"]);
   expect(layout.text).toContain("Exam review");
   expect(layout.text).toContain("Correct answers are not shown");
   expect(layout.text).toContain("3/4");

@@ -161,6 +161,13 @@
   }
   .sat-paper-question .sat-answer-choice,
   .sat-paper-question [data-review-spr] { break-inside: avoid; }
+  /* Keep the authored rail as vector rectangles. The multi-stop CSS gradient
+     becomes a nested PDF shading pattern that is slow to redraw on iPad. */
+  .sat-answered-paper .sat-paper-question .sat-color-rail {
+    background-image: var(--sat-rail-print-pattern);
+    background-size: var(--sat-rail-pattern-length) 100%;
+    background-repeat: repeat-x;
+  }
   .sat-paper-response-note { margin-top: 2mm; font-size: 8pt; color: var(--paper-muted); }
 
   .sat-paper-footer { padding-top: 4mm; }
@@ -234,4 +241,11 @@
   }
   .sat-answered-paper figure { max-width: 100%; break-inside: avoid; }
   .sat-answered-paper figure img { max-width: 100% !important; height: auto !important; }
+}
+
+@media print and (forced-colors: active) {
+  .sat-answered-paper .sat-paper-question .sat-color-rail {
+    background-image: none;
+    background-color: CanvasText;
+  }
 }

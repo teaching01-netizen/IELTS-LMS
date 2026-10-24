@@ -1,6 +1,6 @@
-# IELTS Go/DB throughput: implementation-ready core plan
+# IELTS Go/DB throughput: core plan and verification
 
-Date: 2026-10-24, Asia/Bangkok. Mode: design; no application source changes made for this plan.
+Date: 2026-10-24, Asia/Bangkok. Execution status: the core implementation and qualification harness described here are already present in the checkout. This update records local MySQL E2E evidence; no application source changes were needed in this pass.
 
 Decision: retain the existing Go monolith and transaction boundaries. First measure the current implementation, qualify its existing row-first and driver options, and remove repeated work from the IELTS answer resolver. Then optimize the SQL, allocations, or contention that the measured profile identifies. Higher RPS is useful only while accepted answers remain durable and exam controls remain correct.
 
@@ -15,7 +15,9 @@ Paths below are relative to `backend/go/` unless they begin with `src/`, `k6/`, 
 | `cmd/api/handlers_v2.go`: `v2BatchHandler` → `attempts.Service.SaveResponses` → `saveInTx` → `saveIO` | Verified | Keep the existing mutation loop and its error precedence. Both single and batch saves use it. |
 | `internal/attempts/service.go`: payload canonicalization happens before the transaction; request hashes are transaction-local and lazy | Verified | Already implemented. Do not introduce a second serialization or hashing path. |
 | `internal/attempts/batch_io.go`: `bulkWriteThreshold = 1`, exact ledger keys, staged projections, set-based reads/writes | Verified | Two or more commands already use bulk I/O. Remaining work needs a measured improvement over this version. |
-| `cmd/api/handlers_v2.go`: `ResolveMany` loads one snapshot, then calls `snapshotOwnerFor` separately for every missing question | Verified | Remaining worst-case traversal is O(B × N), for B requested IDs and N snapshot nodes. This is an algorithmic cost; its share of production latency is unknown. |
+| `cmd/api/handlers_v2.go`: `ResolveMany` uses `snapshotOwnersFor` for multiple missing IDs and retains `snapshotOwnerFor` for a single fallback | Verified | Batch snapshot traversal is O(N+B), while the single-question fast path avoids building lookup maps. Its share of production latency is still unknown. |
+| `cmd/api/handlers_v2_test.go`, `handlers_v2_snapshot_bench_test.go` | Verified | Batch traversal has equivalence, input non-mutation and generated-tree tests plus a benchmark against the unchanged per-question oracle. Local benchmark evidence is recorded in section 8. |
+| `cmd/api/ielts_statement_budget_mysql_test.go`, `ielts_rowfirst_equivalence_mysql_test.go`, `ielts_throughput_mysql_test.go` | Verified | Real-MySQL statement counts, persisted row-first equivalence and guarded 500-candidate throughput E2E coverage exist. They are opt-in through `TEST_MYSQL_DSN` and explicit k6 confirmation guards. |
 | `internal/runtime/cohort_readiness.go`, `ielts_personal.go`: personal readiness locks the requesting attempt, uses bounded RC retries, returns persisted start/deadline, and avoids rewriting an active timeline on retry | Verified | Preserve this path. The legacy cohort branch still has broader locking; existing sessions retain their captured timing model. |
 | `internal/proctor/ielts_personal_status.go`: page hydration uses three bounded reads | Verified | The earlier correlated-query rewrite is already implemented. Measure the complete page, including its base query and runtime reads. |
 | `internal/attempts/materialize.go`, `internal/student/readthrough.go`, terminalization and submit paths | Verified | Protocol-2 row materialization and seal-time answer assembly already exist. Grading/submission compatibility must remain intact. |
@@ -78,9 +80,9 @@ The new ownership lookup below is a temporary derived value, not a new entity or
 
 ### Core change A: one snapshot traversal per batch
 
-Verified edit target: `cmd/api/handlers_v2.go`.
+Implemented in `cmd/api/handlers_v2.go`.
 
-Proposed helper, not yet present:
+The batch helper is:
 
 ```go
 func snapshotOwnersFor(
@@ -98,7 +100,7 @@ Contract:
 - Returns no new errors. Decode, provider and SQL failures remain owned by existing callers. It never decides whether the question is currently writable.
 - Lifetime is one resolver call inside one transaction attempt. No process cache and no shared mutable map.
 
-Change `ResolveMany`: after its existing normalized lookup, provider restriction, snapshot load and `loadIELTSTimelines`, call `snapshotOwnersFor(root, missing)` once. For each missing ID, attach the current transaction's timeline with `applyIELTSTimeline`, or retain `errQuestionNotInExam()` if absent. Keep normalized-row precedence and the SAT no-fallback rule unchanged.
+`ResolveMany` applies the existing normalized lookup, provider restriction, snapshot load and `loadIELTSTimelines`, then calls `snapshotOwnersFor(root, missing)` once when more than one fallback ID is missing. For each missing ID it attaches the current transaction's timeline with `applyIELTSTimeline`, or retains `errQuestionNotInExam()` if absent. Normalized-row precedence and the SAT no-fallback rule remain unchanged.
 
 Keep `snapshotOwnerFor` and `snapshotContainsQuestion` unchanged for the existing single-question hot path and as the independent equivalence oracle. Their callers in `resolveSnapshotQuestion` and `Resolve`, and the Writing task-ID tests in `handlers_v2_test.go`, remain compatible. This avoids adding two lookup maps to every interactive one-question save. Compare the new batch helper against these unchanged functions; do not compare it with a wrapper around itself. If a bulk request has only one missing fallback ID, retain the original one-ID branch rather than building an unnecessary batch lookup.
 
@@ -124,7 +126,7 @@ Configuration promotion is conditional on equivalent persisted values and an equ
 
 ## 5. Core algorithm, transaction and error behavior
 
-Proposed Go implementation sketch for change A; this code is not applied:
+The implementation uses a `snapshotOwnerWalker` to carry the current root owner through the traversal. Its core flow is:
 
 ```go
 func snapshotOwnersFor(root map[string]any, ids []string) map[string]attempts.QuestionOwner {
@@ -190,15 +192,15 @@ Existing identity/unique indexes remain: response `(attempt_id, question_id)`, l
 
 | Step | Files / deliverable | Exit criterion |
 | --- | --- | --- |
-| 0 | Proposed `verification/performance/<run-id>/`: build/diff identity, engine/version, quotas, topology, flags, schema, fixture seed, workload mix, baseline profiles and raw summaries | Repeated baseline runs agree sufficiently to distinguish a real improvement. Include normal/max supported payloads, long Writing, historical ledger growth, one large room and many rooms. |
-| 1 | Proposed `cmd/api/ielts_statement_budget_mysql_test.go`; reuse `measureStatements`/`measuredPool` in the inspected `sat_statement_budget_mysql_test.go` | Real handler and service budgets for readiness first/retry, 1/2/100-command saves, replay, submit, poll and roster. Count domain queries/execs separately from prepares, begin/commit and connection setup. Existing helper swaps the global registry: serialize these tests or isolate their registry; no `t.Parallel`. |
-| 2 | `cmd/api/handlers_v2.go`, existing resolver test files; proposed `handlers_v2_snapshot_bench_test.go` | Implement the helper and its `ResolveMany` integration; preserve the existing single-question branch. Equivalence against the old algorithm, no extra SQL, Writing/task IDs and SAT exclusion pass. Benchmark requested sizes 1/2/20/100 against small/large snapshots, including misses. |
-| 3 | Existing DB binding tests, row-first read/seal tests, configuration/runbook | Qualify row-first and driver options independently, then together. Compare returned/persisted cells, hashes, flags, final submission and grading/export views. Use a consistent fleet configuration. |
-| 4 | Profile-selected owner from section 4; only the required migration/config or telemetry edit | One isolated change yields a measured operation-level win and passes its invariant tests. No schema addition solely because a candidate index appears in this plan. |
-| 5 | Keep `k6/ielts-personal-timing-500.js` as the existing localhost flow gate. Add proposed `k6/ielts-throughput.js` and an IELTS fixture/verifier in `cmd/api/ielts_throughput_mysql_test.go` | Explicit synthetic target/credentials, configurable 500/2,000 cohorts, arrival-rate save traffic, full completion verification, and mixed staff/poll/worker load. Retain guards against accidental real-exam mutation. |
-| 6 | Proposed `docs/runbooks/ielts-capacity.md`, raw repeatable reports | Publish the measured capacity envelope, latency/accuracy results, connection limits, flags, and rollback steps for the actual deployment. |
+| 0 | `verification/performance/2026-10-24-ielts-local/results.md` | A 500-candidate, 50-ops/s E2E point passed once. Higher tested rates failed proposed latency gates, and the shared laptop was heavily loaded. Repeated comparable baselines, 2,000 users, multi-room, replica-loss and target-topology qualification remain open. |
+| 1 | `cmd/api/ielts_statement_budget_mysql_test.go`; reuses `measureStatements`/`measuredPool` from `sat_statement_budget_mysql_test.go` | Implemented and run against isolated MySQL for readiness first/retry, 1/2/100-command saves, replay, submit, poll and roster. The helper swaps the global registry; keep these tests serialized. |
+| 2 | `cmd/api/handlers_v2.go`, `handlers_v2_test.go`, `handlers_v2_snapshot_bench_test.go` | Implemented and verified: equivalence against the unchanged per-question algorithm, duplicate/legacy IDs, input non-mutation, generated trees, Writing/task IDs and SAT exclusion. The single-question path remains unchanged. |
+| 3 | Existing DB binding tests, `ielts_rowfirst_equivalence_mysql_test.go`, statement-budget tests and runbook | Row-first persistence equivalence and all four statement-budget combinations passed on local MySQL. Row-first did not pass the 250-ops/s load gates in this environment; no configuration promotion is justified. Driver interpolation passed statement-budget coverage, but a high-load paired run remains open. |
+| 4 | Profile-selected owner from section 4; only the required migration/config or telemetry edit | No additional code change was selected. Current local load evidence is noisy and does not isolate a safe follow-on optimization. No schema addition was made. |
+| 5 | `k6/ielts-throughput.js`, `cmd/api/ielts_throughput_mysql_test.go`; existing `k6/ielts-personal-timing-500.js` remains the localhost flow gate | Implemented and guarded for synthetic targets. The complete 500-candidate E2E flow passed at 50 ops/s; 150 and 250 ops/s failed the proposed p99 gates, and the 250 runs also dropped iterations. No 2,000-candidate run was attempted. |
+| 6 | `docs/runbooks/ielts-capacity.md`, `verification/performance/2026-10-24-ielts-local/results.md` | Runbook now contains local diagnostic outcomes, tested commands, connection limits, flag posture and rollback guidance. No deployment capacity envelope is published because the target topology is unknown and the local point was not repeated. |
 
-Steps 0–3 are the initial core implementation scope. Step 4 is conditional on evidence; steps 5–6 qualify the resulting capacity. No source implementation is claimed in this document.
+The code implementation is already in the checkout; this plan records that state and the evidence. Profile-selected follow-on changes remain unimplemented until a stable target-representative profile identifies an owner.
 
 Fleet budget:
 
@@ -273,21 +275,23 @@ go test ./cmd/api -run '^$' -bench '^BenchmarkSnapshotOwners' -benchmem -count=1
 go test ./internal/platform/telemetry -run '^$' -bench '^BenchmarkObserveSeconds' -benchmem -count=10 -cpu=1,4
 ```
 
-`TestIELTSStatementBudgetMySQL` and `BenchmarkSnapshotOwners*` are proposed tests, not existing coverage. Set `TEST_MYSQL_DSN` to an isolated, correctly migrated qualification database for DB tests; check skipped tests explicitly. The integration README's `docker compose up tidb mysql` instruction does not match the current compose file, which defines only TiDB. Pin and provision the intended engine rather than assuming that command supplies MySQL.
+Set `TEST_MYSQL_DSN` to an isolated, correctly migrated qualification database for DB tests; check skipped tests explicitly. The integration README's `docker compose up tidb mysql` instruction does not match the current compose file, which defines only TiDB. Pin and provision the intended engine rather than assuming that command supplies MySQL.
 
 Already executed while preparing this plan:
 
 - Targeted `internal/attempts` tests: prepared hash equivalence, staged same-question ordering, pending version collision, two-answer bulk path, bulk statement counts/replay, and batch strategy equivalence: passed.
 - Targeted `internal/runtime` tests: persisted IELTS readiness times and read-only active retry: passed.
-- Five `cmd/api` resolver tests: set-based resolution, SAT batch fallback exclusion, valid snapshot fallback, SAT single fallback exclusion and unknown-question behavior: passed.
+- Resolver tests: set-based resolution, SAT batch fallback exclusion, valid snapshot fallback, SAT single fallback exclusion and unknown-question behavior: passed. `TestSnapshotOwners*` and `BenchmarkSnapshotOwners` also passed on 2026-10-24; see the benchmark values below.
 - `go test ./internal/platform/db ./internal/platform/telemetry -count=1`: passed. An explicit verbose run of `TestDriverBindingModesRoundTripMySQL` confirmed it was skipped: `TEST_MYSQL_DSN not set; requires isolated MySQL`. Real-DB binding and capacity remain unverified.
 - Existing telemetry benchmarks, Go 1.26.3, darwin/arm64, Apple M1, `-benchtime=200ms -count=3 -cpu=1,4`: ordinary observation 352 B/op, 15 allocs/op; one CPU 829.9–884.8 ns/op; four CPUs 246.8–429.4 ns/op aggregate benchmark time. Scrape mixture 693–694 B/op and 18 allocs/op. These short local samples measure instrumentation cost, not API RPS, DB capacity, lock dominance or a performance improvement.
 
-No new snapshot benchmark, production profile, database execution-plan comparison, 500/2,000-user run or capacity certification was performed for this plan.
+The current snapshot-walk benchmark (`go test ./cmd/api -run '^TestSnapshotOwners' -bench '^BenchmarkSnapshotOwners$' -benchmem -benchtime=200ms -count=1`, Apple M1) found the batch traversal's intended crossover: for 20 requested IDs it took 124.5 µs vs 1.65 ms on the small snapshot and 1.16 ms vs 23.08 ms on the large snapshot; for 100 IDs, 128.3 µs vs 7.19 ms and 1.17 ms vs 76.46 ms. At one requested ID the direct batch helper allocated more (992 B/8 allocs vs 336 B/3 allocs), which is why `ResolveMany` retains the per-question branch for one missing fallback ID. This microbenchmark does not establish API RPS.
+
+Local MySQL verification and throughput runs are summarized in [the run report](../../verification/performance/2026-10-24-ielts-local/results.md). The statement-budget and row-first-equivalence suites passed; the complete 500-candidate E2E passed once at 50 offered logical operations/s. Runs at 150 and 250 ops/s failed latency gates; the 250 runs also dropped iterations. A host-load sample outside the passing run read 13.94/10.70/6.94 on 8 cores with unrelated desktop processes active. Per-run CPU/load was not captured, so no repeatable capacity baseline or production profile was established. No 2,000-candidate run, production profile, database execution-plan comparison, target-topology test or capacity certification was performed.
 
 ## 9. Rollout, extensibility and remaining risks
 
-Ship the resolver change as a small independent patch. It needs no migration or new feature flag; rollback restores the prior traversal without changing stored data. Reject promotion for any hash/ACK/authorization mismatch, lost answer, changed timer, or repeatable latency regression at equal offered load.
+The resolver change is already present in the checkout as a small, flagless code path with no migration. Rollback restores the prior traversal without changing stored data. Any later promotion still requires no hash/ACK/authorization mismatch, lost answer, changed timer, or repeatable latency regression at equal offered load.
 
 Treat row-first rollout as a data-compatibility change. Use fresh synthetic/practice cohorts and consistent API/worker/reader settings before wider use. Do not run mixed old blob-authoritative readers/writers against newly row-first attempts without proving compatibility. Turning the flag off alone is not a safe rollback: compatibility blobs may be stale. Keep row-aware reads/seals, or materialize and verify affected protocol-2 blobs under the existing attempt lock before restoring blob-dependent paths. Preserve rows/ledger throughout.
 

@@ -12,6 +12,7 @@ import type { LoadMediaUrl } from '../SatScoreReport';
 
 const PRINT_READING_PREFERENCES = createSatReadingPreferences();
 const ignoreAction = () => undefined;
+const NO_ELIMINATED_OPTIONS: ReadonlySet<string> = new Set();
 
 /** The actual exam components, frozen for paper; metadata sits outside the
  * workspace. No alternate answer-card/header implementation to drift from it. */
@@ -22,7 +23,6 @@ export function SatPrintedQuestion({
   sectionKey,
   answer,
   markedForReview,
-  eliminatedOptionIds,
   loadMediaUrl,
   onMediaFailure,
 }: {
@@ -32,7 +32,6 @@ export function SatPrintedQuestion({
   sectionKey: string;
   answer: string | null;
   markedForReview: boolean;
-  eliminatedOptionIds: string[];
   loadMediaUrl?: LoadMediaUrl | undefined;
   onMediaFailure?: (() => void) | undefined;
 }) {
@@ -76,7 +75,7 @@ export function SatPrintedQuestion({
             <SatQuestionHeader
               questionNumber={questionNumber}
               markedForReview={markedForReview}
-              eliminationAvailable={question.answer.kind === 'single_choice'}
+              eliminationAvailable={false}
               eliminationMode={false}
               disabled={false}
               onToggleReview={ignoreAction}
@@ -94,7 +93,7 @@ export function SatPrintedQuestion({
                     questionId={printQuestionId}
                     options={question.answer.options}
                     value={answer ?? undefined}
-                    eliminatedOptionIds={new Set(eliminatedOptionIds.filter(id => id !== answer))}
+                    eliminatedOptionIds={NO_ELIMINATED_OPTIONS}
                     eliminationMode={false}
                     disabled={false}
                     onChange={ignoreAction}

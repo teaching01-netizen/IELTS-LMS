@@ -3,13 +3,15 @@
 This runbook covers qualifying the IELTS answer path (readiness, durable saves,
 runtime polls, submit and staff roster reads) on a fixed topology, choosing the
 database flags, and rolling a change back. It implements section 6 of
-`docs/plans/2026-10-24-ielts-go-db-throughput-core-plan.md`. Raw local results
-are in `verification/performance/2026-10-24-ielts-local/`.
+`docs/plans/2026-10-24-ielts-go-db-throughput-core-plan.md`. Local run summaries
+are in `verification/performance/2026-10-24-ielts-local/results.md`.
 
-**Status:** only a local laptop has been measured. Those numbers are
-diagnostics, not a supported headcount. No target-topology envelope exists
-yet; until one does, do not announce a capacity, and do not change deployment
-flags because of the local results.
+**Status:** one 500-candidate E2E run passed at 50 logical operations/s. Tested
+runs at 150 and 250 operations/s failed the stricter save/flush/replay p99
+gates; the 250 runs also dropped iterations. The shared laptop was heavily
+loaded, and the 50-ops/s point was not repeated. These are diagnostics, not a
+supported headcount. No target-topology envelope exists yet; do not announce a
+capacity or change deployment flags from these local results.
 
 ## Safety
 
@@ -156,7 +158,28 @@ Apple M1, 8 cores, 8 GiB, shared desktop (load average 6–16), MySQL 9.6.0 over
 a unix socket with a 128 MiB buffer pool, `innodb_flush_log_at_trx_commit=1`,
 `sync_binlog=1`. One API process (pool 80) and one in-process worker.
 
-RESULTS_PLACEHOLDER
+The passing 50-ops/s run completed readiness, steady saves/replays/polls,
+submit/resubmit and independent database reconciliation for all 500 candidates:
+10,225 answer rows were accepted and there were zero sealed-answer mismatches,
+operation failures, unexpected 5xx responses, dropped iterations or API pool
+waits. Steady p99 was 167 ms for single saves, 145 ms for flushes and 58 ms for
+replays. Ready p99 was 148 ms and submit p99 was 73 ms.
+
+| Offered rate | API pool | Row-first | Logical ops/s | Dropped iterations | Save / flush / replay p99 | API pool waits | Result |
+| ---: | ---: | :---: | ---: | ---: | --- | --- | --- |
+| 50/s | 80 | off | 49.59 | 0 | 167 / 145 / 58 ms | 0 / 0 s | Full E2E pass; 500 candidates reconciled |
+| 150/s | 80 | off | 148.76 | 0 | 2.90 / 3.01 / 2.25 s | 9,141 / 40m00s | Failed p99 gates |
+| 250/s | 80 | off | 242.81 | 618 | 4.05 / 4.42 / 3.00 s | 9,494 / 24m44s | Failed p99 and dropped-iteration gates |
+| 250/s | 120 | off | 242.81 | 620 | 4.38 / 4.89 / 2.02 s | 3,301 / 12m13s | Failed p99 and dropped-iteration gates |
+| 250/s | 120 | on | 237.80 | 1,222 | 5.28 / 6.80 / 3.72 s | 13,899 / 1h10m13s | Failed; row-first did not improve this run |
+
+The local MySQL was 9.6.0 with `max_connections=151`, a 128 MiB InnoDB buffer
+pool, `innodb_flush_log_at_trx_commit=1`, and `sync_binlog=1`. A host-load
+sample outside the passing run read 13.94/10.70/6.94 on 8 cores while unrelated
+desktop processes were active; per-run CPU/load was not captured. See the run
+report for exact test commands, full readiness/submit results and limits. The
+50/s run is the only tested passing point, not a repeatable capacity baseline
+or deployment envelope.
 
 ## Not yet qualified
 
