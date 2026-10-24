@@ -172,7 +172,7 @@ func TestTimingContractPreStartAgreesWithProctorProjection(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"sat_timing_model"}).AddRow(nil))
 	// Proctor detail path: schedule link, then the same absent runtime row.
 	mock.ExpectQuery("SELECT id, exam_id, provider_key").WithArgs("schedule").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model"}).AddRow("schedule", "exam-1", "sat", nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "ielts_timing_model"}).AddRow("schedule", "exam-1", "sat", nil, nil))
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").WithArgs("schedule").WillReturnError(sql.ErrNoRows)
 
 	ctx := context.Background()

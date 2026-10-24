@@ -15,8 +15,10 @@ export type AttemptSyncState =
   | 'idle'
   | 'saving'
   | 'saved'
+  | 'saved_locally'
   | 'offline'
   | 'syncing_reconnect'
+  | 'needs_recovery'
   | 'error';
 
 export type StudentAttemptMutationType =

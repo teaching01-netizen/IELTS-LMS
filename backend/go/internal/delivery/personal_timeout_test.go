@@ -34,6 +34,7 @@ func personalReconcileHarness(mock sqlmock.Sqlmock, runtimeStatus string, breakR
 	mock.ExpectQuery("SELECT COALESCE\\(sat_handoff_mode").WillReturnRows(sqlmock.NewRows([]string{"mode"}).AddRow("server_start"))
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
+	deliverySATPolicyRead(mock, "att-1")
 	// Personal + live: the break sweep runs first (own deadline, no grace).
 	mock.ExpectExec("UPDATE assessment_attempt_breaks").
 		WillReturnResult(sqlmock.NewResult(0, breakRows))
@@ -68,6 +69,7 @@ func TestPersonalUnconfirmedOfferIsNotExpiredByTimeout(t *testing.T) {
 	// Armed, never confirmed: started_at IS NULL, no entry marks. The authored
 	// allotment must not be read as an expired module.
 	personalOfferRow(mock, "not_started", nil, nil, nil)
+	deliverySATPolicyRead(mock, "att-1")
 	mock.ExpectCommit()
 
 	changed, err := svc.ReconcileAttemptTimeout(context.Background(), "sched-1", "att-1", time.Now().UTC())
@@ -108,6 +110,7 @@ func expectPersonalModuleExpires(t *testing.T, started time.Time, enteredAt any)
 	// Past the authored 120s allotment: the module closes like any other
 	// per-module clock.
 	personalOfferRow(mock, "active", started, started, enteredAt)
+	deliverySATPolicyRead(mock, "att-1")
 	// finalizeModuleTx: scoring rows (none), UPDATE 1 row, section lookup,
 	// next module none (last open -> arms completion).
 	mock.ExpectQuery("FROM assessment_exam_questions eq").

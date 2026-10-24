@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/assessmentforms/definition"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/proctor"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/schedules"
 	"github.com/google/uuid"
 )
@@ -133,6 +135,9 @@ func loadStudentScheduleVersion(ctx context.Context, db *sql.DB, scheduleID stri
 	if err != nil {
 		return nil, nil, "", err
 	}
+	// Form definitions reach students only through purpose-specific DTOs
+	// (public registrationForm, Eva state), never the raw config.
+	delete(config, definition.SnapshotKey)
 	version := map[string]any{
 		"id": versionID.String, "examId": examID.String, "versionNumber": versionNumber,
 		"contentSnapshot": content, "configSnapshot": config,
@@ -399,7 +404,7 @@ func redactAnswerValue(raw any) (any, error) {
 	return out, nil
 }
 
-func loadStudentRuntimeContext(ctx context.Context, db *sql.DB, scheduleID string) (map[string]any, error) {
+func loadStudentRuntimeContext(ctx context.Context, db *sql.DB, scheduleID string, attemptIDs ...string) (map[string]any, error) {
 	runtime, err := proctor.LoadSessionRuntimeBySchedule(ctx, db, scheduleID)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -415,7 +420,195 @@ func loadStudentRuntimeContext(ctx context.Context, db *sql.DB, scheduleID strin
 	if err := json.Unmarshal(encoded, &out); err != nil {
 		return nil, err
 	}
+	if examruntime.IsIELTSPersonal(runtime.TimingModel) && len(attemptIDs) > 0 && strings.TrimSpace(attemptIDs[0]) != "" {
+		if err := projectIELTSPersonalRuntime(ctx, db, runtime.ID, attemptIDs[0], out); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
+}
+
+type ieltsRuntimeSectionProjection struct {
+	key, label, state                                   string
+	order, minutes, gap, extension, pausedSeconds       int
+	start, deadline, expected, preparationEnd, pausedAt sql.NullTime
+}
+
+func projectIELTSPersonalRuntime(ctx context.Context, db *sql.DB, runtimeID, attemptID string, view map[string]any) error {
+	rows, err := db.QueryContext(ctx, `
+		SELECT rs.section_key, rs.label, rs.section_order, rs.planned_duration_minutes,
+		       rs.gap_after_minutes, rs.extension_minutes, rs.accumulated_paused_seconds,
+		       COALESCE(t.state, ''), t.started_at, t.deadline_at,
+		       t.expected_start_at, t.preparation_deadline_at, t.paused_at
+		FROM exam_session_runtime_sections rs
+		LEFT JOIN ielts_attempt_section_timelines t
+		  ON t.runtime_id = rs.runtime_id AND t.attempt_id = ? AND t.section_key = rs.section_key
+		WHERE rs.runtime_id = ?
+	ORDER BY rs.section_order, rs.section_key`, attemptID, runtimeID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	sections := make([]ieltsRuntimeSectionProjection, 0, 3)
+	for rows.Next() {
+		var section ieltsRuntimeSectionProjection
+		if err := rows.Scan(&section.key, &section.label, &section.order, &section.minutes,
+			&section.gap, &section.extension, &section.pausedSeconds, &section.state,
+			&section.start, &section.deadline, &section.expected, &section.preparationEnd, &section.pausedAt); err != nil {
+			return err
+		}
+		if section.key == "listening" || section.key == "reading" || section.key == "writing" {
+			sections = append(sections, section)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(sections) == 0 {
+		return nil
+	}
+	var roomStatus string
+	var completionReason sql.NullString
+	var prepSeconds int
+	var actualStart sql.NullTime
+	var now time.Time
+	if err := db.QueryRowContext(ctx, `SELECT status, completion_reason, ielts_preparation_seconds, actual_start_at, UTC_TIMESTAMP(6)
+		FROM exam_session_runtimes WHERE id = ?`, runtimeID).Scan(&roomStatus, &completionReason, &prepSeconds, &actualStart, &now); err != nil {
+		return err
+	}
+	now = now.UTC()
+	if prepSeconds < 0 || prepSeconds > 3600 {
+		prepSeconds = 120
+	}
+	selected := len(sections) - 1
+	activeIndex := -1
+	for i := range sections {
+		section := &sections[i]
+		if section.state == "active" && section.deadline.Valid {
+			cutoff := now
+			if section.pausedAt.Valid {
+				cutoff = section.pausedAt.Time.UTC()
+			}
+			if cutoff.Before(section.deadline.Time.UTC()) {
+				selected, activeIndex = i, i
+				break
+			}
+			section.state = "completed"
+		}
+		if section.state == "unable" || section.state == "preparing" || section.state == "" {
+			selected = i
+			break
+		}
+	}
+	selectedSection := sections[selected]
+	sectionMaps := make([]map[string]any, 0, len(sections))
+	for i, section := range sections {
+		status := "locked"
+		var startAt, endAt *time.Time
+		if section.state == "active" && section.deadline.Valid {
+			cutoff := now
+			if section.pausedAt.Valid {
+				cutoff = section.pausedAt.Time.UTC()
+			}
+			if cutoff.Before(section.deadline.Time.UTC()) {
+				status = "live"
+				if section.start.Valid {
+					v := section.start.Time.UTC()
+					startAt = &v
+				}
+			} else {
+				status = "completed"
+				v := section.deadline.Time.UTC()
+				endAt = &v
+			}
+		} else if section.state == "completed" {
+			status = "completed"
+			if section.deadline.Valid {
+				v := section.deadline.Time.UTC()
+				endAt = &v
+			}
+		}
+		if i == activeIndex && roomStatus == "paused" {
+			status = "paused"
+		}
+		sectionDuration := section.minutes + section.extension
+		if section.start.Valid && section.deadline.Valid {
+			d := int(section.deadline.Time.Sub(section.start.Time).Seconds())
+			if d > 0 {
+				sectionDuration = (d + 59) / 60
+			}
+		}
+		sectionMaps = append(sectionMaps, map[string]any{
+			"sectionKey": section.key, "label": section.label, "sectionOrder": section.order,
+			"plannedDurationMinutes": sectionDuration, "gapAfterMinutes": section.gap,
+			"extensionMinutes": 0, "accumulatedPausedSeconds": 0, "status": status,
+			"actualStartAt": startAt, "actualEndAt": endAt, "pausedAt": studentNullTimePtr(section.pausedAt),
+			"projectedStartAt": nil, "projectedEndAt": nil, "completionReason": nil,
+		})
+	}
+	deadline := (*time.Time)(nil)
+	remaining := 0
+	if activeIndex >= 0 && sections[activeIndex].deadline.Valid {
+		v := sections[activeIndex].deadline.Time.UTC()
+		deadline = &v
+		base := now
+		if sections[activeIndex].pausedAt.Valid {
+			base = sections[activeIndex].pausedAt.Time.UTC()
+		}
+		if v.After(base) {
+			remaining = int(v.Sub(base).Seconds())
+			if v.Sub(base)%time.Second != 0 {
+				remaining++
+			}
+		}
+	}
+	if roomStatus == "completed" {
+		if completionReason.String == "time_expired" {
+			roomStatus = "live"
+		} else {
+			roomStatus = "completed"
+		}
+	}
+	view["status"] = roomStatus
+	view["activeSectionKey"] = selectedSection.key
+	view["currentSectionKey"] = selectedSection.key
+	view["currentSectionDeadlineAt"] = deadline
+	view["currentSectionRemainingSeconds"] = remaining
+	view["sections"] = sectionMaps
+	view["waitingForNextSection"] = activeIndex < 0
+	view["serverNow"] = now
+	if !selectedSection.expected.Valid {
+		if selected == 0 {
+			selectedSection.expected = actualStart
+		} else if sections[selected-1].deadline.Valid {
+			v := sections[selected-1].deadline.Time.Add(time.Duration(sections[selected-1].gap) * time.Minute)
+			selectedSection.expected = sql.NullTime{Time: v, Valid: true}
+		}
+	}
+	if !selectedSection.preparationEnd.Valid && selectedSection.expected.Valid {
+		selectedSection.preparationEnd = sql.NullTime{
+			Time: selectedSection.expected.Time.Add(time.Duration(prepSeconds) * time.Second), Valid: true,
+		}
+	}
+	view["personalSectionState"] = selectedSection.state
+	view["personalExpectedStartAt"] = studentNullTimePtr(selectedSection.expected)
+	view["personalPreparationEndsAt"] = studentNullTimePtr(selectedSection.preparationEnd)
+	if selectedSection.state == "unable" {
+		view["personalPreparationMessage"] = "Could not start this section. Your completed work and saved answers are preserved. Contact the proctor for help."
+	}
+	if selectedSection.expected.Valid && activeIndex < 0 {
+		v := selectedSection.expected.Time.UTC()
+		view["nextSectionStartAt"] = v
+	}
+	return nil
+}
+
+func studentNullTimePtr(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Time.UTC()
+	return &v
 }
 
 func loadStaffRuntimeContext(ctx context.Context, db *sql.DB, scheduleID string) (map[string]any, error) {
@@ -526,7 +719,7 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 	if err := fenceStudentVersionForStartCode(ctx, app, scheduleID, attemptID, version); err != nil {
 		return nil, err
 	}
-	runtime, err := loadStudentRuntimeContext(ctx, app.DB, scheduleID)
+	runtime, err := loadStudentRuntimeContext(ctx, app.DB, scheduleID, attemptID)
 	if err != nil {
 		return nil, err
 	}
@@ -572,7 +765,7 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 	// Credential issue/refresh goes through the same admission boundary as
 	// entry: authoritative lease, and no writer credential (nor protected
 	// content) for a session competing with the current owner.
-	admission, err := admitStudentSession(ctx, app, sess.UserID, scheduleID, attemptID, clientSessionID)
+	admission, err := admitStudentSession(ctx, app, sess.UserID, scheduleID, attemptID, clientSessionID, nil)
 	if err != nil {
 		return nil, err
 	}

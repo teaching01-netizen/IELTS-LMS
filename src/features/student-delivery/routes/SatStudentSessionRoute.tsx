@@ -1,3 +1,4 @@
+import { SatSectionEntryScreen } from "../ui/SatSectionEntryScreen";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 
 /**
@@ -49,7 +50,9 @@ import { SatScheduledBreakScreen } from "../ui/break/SatScheduledBreakScreen";
 import { SatPresenceSurface } from "../ui/motion/SatPresenceSurface";
 import { SatStudentStageHost } from "../ui/stage/SatStudentStageHost";
 import { SatAwaitingRouteScreen, SatCompleteScreen, SatTerminatedScreen } from "../ui/transitions/SatCompleteScreen";
+import { SatEvaCompletionGate } from "../ui/transitions/SatEvaCompletion";
 import { SatPreStartScreen } from "../ui/transitions/SatPreStartScreen";
+import { SatRecoveryExceptionScreen } from "../ui/transitions/SatRecoveryExceptionScreen";
 import { SatStartCodeScreen } from "../ui/transitions/SatStartCodeScreen";
 import { SatWriterTransferControl } from "../ui/entry/SatWriterTransferControl";
 import { useStudentExamPageLock } from "@components/student/layout/useStudentExamPageLock";
@@ -200,6 +203,9 @@ export function SatStudentSessionRoute({
   const initialEntry = Boolean(
     data && state.phase === "directions" && isSatInitialEntry(data, exam.pendingModule),
   );
+  const recoveryBoundaryAttempt = data?.attempt.moduleAttempts.find((item) =>
+    item.satBoundary?.phase === "blocked" && !item.satBoundary.resolution,
+  ) ?? null;
   const prevIdentityKeyRef = useRef<string | null>(null);
   if (prevIdentityKeyRef.current !== identityKey) {
     prevIdentityKeyRef.current = identityKey;
@@ -279,10 +285,15 @@ export function SatStudentSessionRoute({
   ) : null;
 
   const releaseCompletedMedia = useCallback(() => releaseAssessmentDeliveryMedia(scheduleId, attemptId), [scheduleId, attemptId]);
-  const stageHost = (target: SatStudentStage, children: ReactNode) => (
+  const stageHost = (target: Pick<SatStudentStage, "kind" | "key"> | { kind: "section-entry-form"; key: string }, children: ReactNode) => (
     <>
       <SatTemporalRuntime model={exam.temporalModel ?? null} onBoundary={exam.onTemporalBoundary}>
-        <SatStudentStageHost stage={target} instant={attemptChanged} onExitComplete={target.kind === "complete" ? releaseCompletedMedia : undefined}>
+        <SatStudentStageHost
+          stage={target}
+          focusKey={target.kind === "exam" ? `${target.key}:${moduleAttemptKey}` : target.key}
+          instant={attemptChanged}
+          onExitComplete={target.kind === "complete" ? releaseCompletedMedia : undefined}
+        >
           {children}
         </SatStudentStageHost>
       </SatTemporalRuntime>
@@ -402,6 +413,7 @@ export function SatStudentSessionRoute({
     hasResult: Boolean(data?.result) || Boolean(result),
     terminated,
     terminatedByProctor: data?.proctorStatus === "terminated",
+    recoveryModuleAttemptId: recoveryBoundaryAttempt?.id ?? null,
     finalizationFailed: Boolean(error),
     awaitingStaffRoute: Boolean(data?.awaitingStaffRoute),
     allModulesFinal,
@@ -420,6 +432,7 @@ export function SatStudentSessionRoute({
             ),
           }
         : null,
+    explicitModuleEntryRequired: exam.entryRequiresConfirmation,
     hasExamFrame: heldFrame !== null,
     frameFresh: heldFrameFresh,
     moduleResolved: Boolean(exam.stateModule && exam.stateModuleAttempt && exam.stateSection),
@@ -428,6 +441,14 @@ export function SatStudentSessionRoute({
     pendingSectionWaitSeconds: exam.pendingSectionWaitSeconds,
     attemptKey: identityKey,
   });
+  const completionRecoveryExceptions = data?.attempt.moduleAttempts.flatMap((moduleAttempt) => {
+    const boundary = moduleAttempt.satBoundary;
+    const receipt = boundary?.resolutionReceipt;
+    if (boundary?.resolution !== "continue_confirmed" || !receipt) return [];
+    const module = data.sections.flatMap((section) => section.modules)
+      .find((candidate) => candidate.id === moduleAttempt.moduleId);
+    return [{ moduleTitle: module ? studentModuleTitle(module) : "SAT module", receipt }];
+  }) ?? [];
 
   if (!data) {
     if (stage.kind === "error") {
@@ -460,22 +481,50 @@ export function SatStudentSessionRoute({
     // quarantined or still-pending draft could decorate a clean sitting with a
     // proctor-contact warning. The durability engine still holds and retries
     // those drafts; that signal is not part of the student's terminal surface.
+    // Eva SIM is an independent post-completion surface: its own polling,
+    // never a new exam stage, and the same group in both report branches.
     return stageHost(
       stage,
-      <SatCompleteScreen
-        result={data.result ?? result}
-        onExit={onExit}
-        answered={{
-          key: `student:${scheduleId}:${attemptId}`,
-          sections: data.sections,
-          preparePdf: (request, signal) => assessmentDeliveryApi.answeredExamPdf(scheduleId, attemptId, request, signal),
-        }}
+      <SatEvaCompletionGate
+        scheduleId={scheduleId}
+        attemptId={attemptId}
+        recoveryException={completionRecoveryExceptions.length > 0}
+        renderComplete={(eva) => (
+          <SatCompleteScreen
+            result={data.result ?? result}
+            onExit={onExit}
+            recoveryExceptions={completionRecoveryExceptions}
+            eva={eva}
+            answered={{
+              key: `student:${scheduleId}:${attemptId}`,
+              sections: data.sections,
+              preparePdf: (request, signal) => assessmentDeliveryApi.answeredExamPdf(scheduleId, attemptId, request, signal),
+            }}
+          />
+        )}
       />,
     );
   }
   if (stage.kind === "awaiting-route") {
     lastValidFrameRef.current = null;
     return stageHost(stage, <SatAwaitingRouteScreen onExit={onExit} />);
+  }
+  if (stage.kind === "recovery-exception") {
+    lastValidFrameRef.current = null;
+    const module = data.sections.flatMap((section) => section.modules)
+      .find((candidate) => candidate.id === recoveryBoundaryAttempt?.moduleId);
+    return stageHost(
+      stage,
+      <SatRecoveryExceptionScreen
+        mode={data.satSessionMode === "practice" ? "practice" : "classroom"}
+        kind={recoveryBoundaryAttempt?.state === "not_started" && !recoveryBoundaryAttempt.startedAt ? "entry" : "work"}
+        moduleTitle={module ? studentModuleTitle(module) : "This module"}
+        moduleAttemptId={stage.moduleAttemptId}
+        boundaryRevision={recoveryBoundaryAttempt?.satBoundary?.revision ?? 0}
+        onRetry={commands.refreshRecoveryState}
+        onResolve={commands.resolveRecovery}
+      />,
+    );
   }
   if (stage.kind === "terminated") {
     lastValidFrameRef.current = null;
@@ -547,7 +596,11 @@ export function SatStudentSessionRoute({
           role="alert"
         >
           <div className="w-full max-w-md text-center">
-            <h1 className="text-[20px] font-semibold tracking-tight">
+            <h1
+              data-sat-stage-heading="true"
+              tabIndex={-1}
+              className="text-[20px] font-semibold tracking-tight"
+            >
               {exam.answersRecorded
                 ? "Your answers are recorded — finishing the result…"
                 : "Submission interrupted — your answers are safe"}
@@ -585,6 +638,29 @@ export function SatStudentSessionRoute({
     );
   }
 
+  const sectionFormBoundary = stage.kind === "pre-start" || (
+    stage.kind === "scheduled-break" && exam.pendingBreakSeconds <= 0 &&
+    exam.pendingSectionWaitSeconds <= 0 && exam.sectionEntry?.state?.state !== "waiting"
+  );
+  if (sectionFormBoundary && exam.sectionEntry && !exam.sectionEntry.ready) {
+    return stageHost(
+      { kind: "section-entry-form", key: `${identityKey}:form:${exam.pendingModule?.id ?? "pending"}` },
+      <SatSectionEntryScreen
+        key={`${identityKey}:${exam.pendingModule?.id}`}
+        scheduleId={scheduleId}
+        attemptId={attemptId}
+        sectionKey={pendingSection ? toSatSectionKey(pendingSection.sectionKey) : undefined}
+        state={exam.sectionEntry.state}
+        loading={exam.sectionEntry.loading}
+        error={exam.sectionEntry.error}
+        onRefresh={exam.sectionEntry.refresh}
+        footer={data.attempt.moduleAttempts.every(attempt => !attempt.startedAt) ? (
+          <SatWriterTransferControl scheduleId={scheduleId} attemptId={attemptId} />
+        ) : null}
+      />,
+    );
+  }
+
   if (stage.kind === "scheduled-break") {
     // One break surface: the same card stays mounted until the next active
     // module replaces it — never "Opening Math…".
@@ -594,6 +670,8 @@ export function SatStudentSessionRoute({
         phase={stage.phase}
         nextSectionKey={stage.nextSectionKey}
         remainingSeconds={stage.remainingSeconds}
+        nextHasForm={exam.sectionEntry?.state?.state === "waiting"}
+        requiresEntryConfirmation={Boolean(data.satDeliveryPolicy)}
       />,
     );
   }
@@ -623,6 +701,13 @@ export function SatStudentSessionRoute({
           runtimeStatus={data.scheduleRuntimeStatus}
           proctorStatus={data.proctorStatus}
           stageReady={exam.pendingStageReady}
+          {...(exam.pendingModule ? { moduleTitle: studentModuleTitle(exam.pendingModule) } : {})}
+          startingEntry={exam.isStarting}
+          {...(stage.reason === "module-entry"
+            ? { onStartModule: () => { void commands.startPendingModule(); } }
+            : {})}
+          entryWindowExpired={exam.entryWindowExpired}
+          onCheckEntryStatus={() => { void commands.refreshRecoveryState(); }}
           startingModuleTwo={Boolean(exam.pendingModule && data.attempt.moduleAttempts.some(
             (attempt) => attempt.moduleId === exam.pendingModule?.id && attempt.state === "not_started" && attempt.autoStartAt,
           ))}
@@ -737,6 +822,7 @@ export function SatStudentSessionRoute({
             onRetrySave={() => void persistence.retryFailed()}
             closeStalled={exam.timeoutCloseStalled}
             onRetryClose={commands.retryTimeoutClose}
+            recoveryMode={data.satDeliveryPolicy?.version === "sat_recovery_v1"}
           />
         ) : null}
         <SatReviewPage
@@ -833,6 +919,7 @@ export function SatStudentSessionRoute({
           onRetrySave={() => void persistence.retryFailed()}
           closeStalled={exam.timeoutCloseStalled}
           onRetryClose={commands.retryTimeoutClose}
+          recoveryMode={data.satDeliveryPolicy?.version === "sat_recovery_v1"}
         />
       ) : null}
       {/* Integrity hold sits above every tool and dialog (blocking layer): a

@@ -1,3 +1,4 @@
+import { useSatSectionEntry } from "./useSatSectionEntry";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { resolveAuthoritativeRemainingSeconds } from "@shared/hooks/useAuthoritativeDeadlineClock";
 import { emitStudentObservabilityMetric } from "../../../utils/studentObservability";
@@ -10,8 +11,11 @@ import type {
   AssessmentDeliveryBootstrap,
   AssessmentDeliveryModule,
   AssessmentModuleEntryStateAck,
+  AssessmentModuleCloseIntentRequest,
   AssessmentResult,
   AssessmentTimingSnapshot,
+  SATRecoveryResolutionReceipt,
+  SATRecoveryResolutionRequest,
 } from "../contracts/assessmentDelivery";
 import type { StudentAttempt } from "../../../types/studentAttempt";
 import {
@@ -70,8 +74,10 @@ import {
   satStageReady,
 } from "../application/satTimingPolicy";
 import { satPollDelayMs } from "../application/satPollCadence";
+import type { PreparedScopeClose } from "@shared/durability/DurableResponseEngine";
 import {
   classifySatCloseRejection,
+  isSatEntryWindowExpiredRejection,
   isSectionClosingRejection,
   isControlEpochStaleRejection,
   isStaleConflictRejection,
@@ -89,6 +95,8 @@ import {
 } from "../application/satRuntimeSelectors";
 import {
   deriveSatEntryDecision,
+  isSatStartCodePending,
+  previousTimedOutModuleDeadlineAt,
   previousModuleTimedOut as previousModuleEndedByClock,
   type SatEntryOutcome,
 } from "../application/satEntry";
@@ -120,6 +128,9 @@ const SAT_BREAK_END_PULL_WINDOW_MS = 2_000;
  * routed module before the steady recovery poll takes over.
  */
 const SAT_CLOSE_BUDGET_MS = 20_000;
+const SAT_RECOVERY_CLOSE_MAX_BACKOFF_MS = 15_000;
+const SAT_CLOSE_CHUNK_BODY_BUDGET_BYTES = 192 << 10;
+const SAT_RECOVERY_CLOSE_OFFLINE_WAIT_MS = 30_000;
 const SAT_CLOSE_FALLBACK_READS = 8;
 /**
  * How long the timeout overlay may wait for the server to report the expired
@@ -128,6 +139,73 @@ const SAT_CLOSE_FALLBACK_READS = 8;
  * close that is merely slow never shows it.
  */
 const SAT_TIMEOUT_STALL_MS = 60_000;
+
+type SatRefreshOutcomeCallback = (ok: boolean, retryAfterMs?: number) => void;
+
+interface SatRefreshBatch {
+  surfaceError: boolean;
+  outcomeCallbacks: SatRefreshOutcomeCallback[];
+}
+
+interface SatRefreshFlight {
+  key: string;
+  first: SatRefreshBatch;
+  followUp: SatRefreshBatch | null;
+  followUpStarted: boolean;
+  promise: Promise<AssessmentDeliveryBootstrap | null>;
+}
+
+function waitForCloseRetry(milliseconds: number, wakeOnOnline: boolean): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("online", finish);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, Math.max(0, milliseconds));
+    if (wakeOnOnline) window.addEventListener("online", finish, { once: true });
+  });
+}
+
+function splitFrozenCloseCommands(
+  prepared: PreparedScopeClose,
+): Array<typeof prepared.finalCommands> {
+  const moduleClose = { moduleAttemptId: prepared.scopeId, manifestHash: prepared.manifestHash };
+  const chunks: Array<typeof prepared.finalCommands> = [];
+  let current: typeof prepared.finalCommands = [];
+  for (const command of prepared.finalCommands) {
+    const candidate = [...current, command];
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      leaseEpoch: prepared.leaseEpoch,
+      controlEpoch: prepared.controlEpoch,
+      moduleClose,
+      commands: candidate,
+    })).byteLength;
+    if (bytes > SAT_CLOSE_CHUNK_BODY_BUDGET_BYTES) {
+      if (current.length === 0) {
+        throw new Error("One answer is too large to recover safely. Keep this screen open and contact your proctor.");
+      }
+      chunks.push(current);
+      current = [command];
+      const singleBytes = new TextEncoder().encode(JSON.stringify({
+        leaseEpoch: prepared.leaseEpoch,
+        controlEpoch: prepared.controlEpoch,
+        moduleClose,
+        commands: current,
+      })).byteLength;
+      if (singleBytes > SAT_CLOSE_CHUNK_BODY_BUDGET_BYTES) {
+        throw new Error("One answer is too large to recover safely. Keep this screen open and contact your proctor.");
+      }
+    } else {
+      current = candidate;
+    }
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
 
 /**
  * The control-epoch fence is optional on the wire: with
@@ -146,6 +224,17 @@ function currentControlEpochFromConflict(error: unknown): number | null {
   if (typeof details !== "object" || details === null) return null;
   const epoch = (details as { currentControlEpoch?: unknown }).currentControlEpoch;
   return typeof epoch === "number" && Number.isSafeInteger(epoch) && epoch > 0 ? epoch : null;
+}
+
+function retryAfterMsFromError(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const record = error as { details?: unknown; backendDetails?: unknown };
+  const details = record.details ?? record.backendDetails;
+  if (typeof details !== "object" || details === null) return undefined;
+  const rawSeconds = (details as { retryAfterSeconds?: unknown; retryAfterSecs?: unknown })
+    .retryAfterSeconds ?? (details as { retryAfterSecs?: unknown }).retryAfterSecs;
+  const seconds = typeof rawSeconds === "number" ? rawSeconds : Number(rawSeconds);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1_000 : undefined;
 }
 
 export interface UseSatExamControllerOptions {
@@ -197,7 +286,8 @@ export function useSatExamController({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
-  const entryAuthorizedAtRef = useRef<{ moduleId: string; at: number } | null>(null);
+  const [expiredEntryModuleId, setExpiredEntryModuleId] = useState<string | null>(null);
+  const entryAuthorizedAtRef = useRef<{ moduleId: string; at: number; transitionDeadlineAt?: number } | null>(null);
   const uncertainCodeStartGenerationRef = useRef<number | null>(null);
   const reportedAnswerableModulesRef = useRef(new Set<string>());
   const now = Date.now();
@@ -259,6 +349,7 @@ export function useSatExamController({
   // SAT-005: module-response hydration for a startModule commit. Stored in a
   // ref because hydrateModuleResponses changes with visibleDrafts/state and
   // must not destabilize the commit layer's identity (bootstrap/poll deps).
+  const refreshFlightRef = useRef<SatRefreshFlight | null>(null);
   const hydrateModuleResponsesRef = useRef<
     ((payload: AssessmentDeliveryBootstrap, module: AssessmentDeliveryModule) => void) | null
   >(null);
@@ -269,6 +360,7 @@ export function useSatExamController({
     setError(null);
     setIsSubmitting(false);
     setIsStarting(false);
+    setExpiredEntryModuleId(null);
     setTimeoutTransitionStarted(false);
     setTimeoutTransitionKey(null);
     setAnswersRecorded(false);
@@ -442,7 +534,7 @@ export function useSatExamController({
   );
 
   const refresh = useCallback(
-    async (
+    (
       surfaceError = false,
       /**
        * Transport-outcome probe. `refresh` resolves for a failed fetch (every
@@ -450,9 +542,41 @@ export function useSatExamController({
        * recovery loop cannot infer success from the resolution: poll failures
        * have to be reported out of band or the backoff never engages.
        */
-      onTransportOutcome?: (ok: boolean) => void,
-    ) => {
-      try {
+      onTransportOutcome?: SatRefreshOutcomeCallback,
+    ): Promise<AssessmentDeliveryBootstrap | null> => {
+      const flightKey = `${identityKey}:${renderIdentityGeneration}`;
+      const existing = refreshFlightRef.current;
+      if (existing?.key === flightKey) {
+        const batch = existing.followUp ?? {
+          surfaceError: false,
+          outcomeCallbacks: [],
+        };
+        if (!existing.followUp) existing.followUp = batch;
+        batch.surfaceError ||= surfaceError;
+        if (onTransportOutcome) batch.outcomeCallbacks.push(onTransportOutcome);
+        emitStudentObservabilityMetric("sat_lifecycle_refresh_coalesced", {
+          reason: existing.followUpStarted ? "active_follow_up" : "queued_follow_up",
+        });
+        return existing.promise;
+      }
+
+      const flight: SatRefreshFlight = {
+        key: flightKey,
+        first: {
+          surfaceError,
+          outcomeCallbacks: onTransportOutcome ? [onTransportOutcome] : [],
+        },
+        followUp: null,
+        followUpStarted: false,
+        promise: Promise.resolve(null),
+      };
+      refreshFlightRef.current = flight;
+
+      const runBatch = async (batch: SatRefreshBatch): Promise<AssessmentDeliveryBootstrap | null> => {
+        const reportTransportOutcome = (ok: boolean, retryAfterMs?: number) => {
+          for (const callback of batch.outcomeCallbacks) callback(ok, retryAfterMs);
+        };
+        try {
         // Unconditional read: the bootstrap payload is LIVE attempt state
         // (module attempts, the adaptive route, responses, timers, result), so
         // there is no attempt-state validator to send. A version-scoped
@@ -464,7 +588,7 @@ export function useSatExamController({
         // decision.
         //
         // Recovery polling prefers the mutable-only state endpoint (no
-        // immutable question tree retransmit). When state reveals a module
+        // immutable question tree or answer projection retransmit). When state reveals a module
         // attempt for a module absent from the retained sections (adaptive
         // routing just seeded a branch), fall back to a full bootstrap to
         // learn its sections/content. The state endpoint remains the cheap
@@ -484,28 +608,56 @@ export function useSatExamController({
           });
           payload = needsSections
             ? await satDeliveryGateway.bootstrap(scheduleId, attemptId)
-            : {
-                ...state,
-                sections: current.sections,
-              };
+            : (() => {
+                // Lifecycle reads intentionally omit response rows. Keep the
+                // latest in-memory answer projection while replacing mutable
+                // module/timer facts; a slow poll must not erase newer local UI
+                // state that was committed while the request was in flight.
+                const retained = dataRef.current ?? current;
+                return {
+                  ...state,
+                  sections: retained.sections,
+                  attempt: {
+                    ...state.attempt,
+                    responses: retained.attempt.responses,
+                  },
+                };
+              })();
         } else {
           payload = await satDeliveryGateway.bootstrap(scheduleId, attemptId);
         }
-        onTransportOutcome?.(true);
+        reportTransportOutcome(true);
         // Phase 04: poll-hint commit — stale and equivalent payloads surface
         // as null (no-change).
         return acceptPayloadAndRoute(payload, { kind: "poll" }) ? payload : null;
       } catch (loadError) {
-        onTransportOutcome?.(false);
-        if (surfaceError && identityGenerationRef.current === renderIdentityGeneration) {
+        reportTransportOutcome(false, retryAfterMsFromError(loadError));
+        if (batch.surfaceError && identityGenerationRef.current === renderIdentityGeneration) {
           setError(
             loadError instanceof Error ? loadError.message : "Unable to load the SAT attempt."
           );
         }
         return null;
-      }
+        }
+      };
+
+      flight.promise = Promise.resolve()
+        .then(async () => {
+          let latest = await runBatch(flight.first);
+          if (flight.followUp) {
+            flight.followUpStarted = true;
+            const followUpResult = await runBatch(flight.followUp);
+            latest = followUpResult ?? latest;
+          }
+          return latest;
+        })
+        .finally(() => {
+          if (refreshFlightRef.current === flight) refreshFlightRef.current = null;
+        });
+
+      return flight.promise;
     },
-    [acceptPayloadAndRoute, attemptId, renderIdentityGeneration, scheduleId]
+    [acceptPayloadAndRoute, attemptId, identityKey, renderIdentityGeneration, scheduleId]
   );
 
   /**
@@ -523,18 +675,130 @@ export function useSatExamController({
       const pause = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
       const closeModule = satDeliveryGateway.closeModule;
       const closeId = globalThis.crypto?.randomUUID?.() ?? `close-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const giveUpAt = Date.now() + SAT_CLOSE_BUDGET_MS;
+      const initialSnapshot = dataRef.current;
+      const recoveryPolicy = initialSnapshot?.satDeliveryPolicy?.version === "sat_recovery_v1"
+        ? initialSnapshot.satDeliveryPolicy
+        : null;
+      const recoveryClose = recoveryPolicy !== null;
+      const recoveryWindowMs = recoveryPolicy ? recoveryPolicy.recoverySeconds * 1_000 : 0;
+      const workDeadlineAt = initialSnapshot?.attempt.moduleAttempts.find((item) => item.id === moduleAttemptId)?.deadlineAt;
+      const workDeadlineMs = workDeadlineAt ? Date.parse(workDeadlineAt) : Number.NaN;
+      const serverClockOffsetMs = satClockOffsetMs(
+        initialSnapshot?.serverNow ?? initialSnapshot?.timing.serverNow ?? null,
+        snapshotReceivedAt,
+      );
+      // The browser uses the same deadline anchor as the server for its retry
+      // bound; the server still makes the final admission decision with DB time.
+      const recoveryDeadline = Number.isFinite(workDeadlineMs)
+        ? workDeadlineMs + recoveryWindowMs - serverClockOffsetMs
+        : Date.now() + recoveryWindowMs;
+      const giveUpAt = recoveryClose ? recoveryDeadline : Date.now() + SAT_CLOSE_BUDGET_MS;
       let retries = 0;
-      await persistenceRef.current.flush().catch(() => undefined);
-      while (closeModule && live() && Date.now() < giveUpAt) {
+      let preparedClose: Awaited<ReturnType<NonNullable<typeof persistenceRef.current.prepareScopeClose>>> | null = null;
+      if (recoveryClose) {
+        persistenceRef.current.freezeScope?.(moduleAttemptId);
         try {
-          const ack = await closeModule(scheduleId, attemptId, {
-            moduleId,
-            moduleAttemptId,
-            closeId,
-            answers: await persistenceRef.current.closeManifest?.(moduleAttemptId) ?? [],
-          });
+          preparedClose = await persistenceRef.current.prepareScopeClose?.(moduleAttemptId, closeId) ?? null;
+        } catch {
+          // Keep the answer scope frozen even when this device cannot safely
+          // prepare its recovery envelope. A retry can reuse the local draft.
+        }
+      } else {
+        await persistenceRef.current.flush().catch(() => undefined);
+      }
+      if (recoveryClose && live()) {
+        // Spread synchronized classroom deadlines so every browser does not
+        // contend for the close path in the same instant.
+        await waitForCloseRetry(Math.floor(Math.random() * 2_000), false);
+      }
+      while (closeModule && live() && Date.now() < giveUpAt) {
+        if (recoveryClose && window.navigator.onLine === false) {
+          await waitForCloseRetry(
+            Math.min(SAT_RECOVERY_CLOSE_OFFLINE_WAIT_MS, Math.max(0, giveUpAt - Date.now())),
+            true,
+          );
+          if (!live() || Date.now() >= giveUpAt) break;
+        }
+        try {
+          if (recoveryClose && preparedClose === null) {
+            preparedClose = await persistenceRef.current.prepareScopeClose?.(moduleAttemptId, closeId) ?? null;
+            if (preparedClose === null) throw new Error("SAT recovery envelope is unavailable.");
+          }
+          let ack: Awaited<ReturnType<NonNullable<typeof closeModule>>> | null = null;
+          if (!preparedClose) {
+            ack = await closeModule(scheduleId, attemptId, {
+              moduleId,
+              moduleAttemptId,
+              closeId,
+              answers: await persistenceRef.current.closeManifest?.(moduleAttemptId) ?? [],
+            });
+          } else {
+            const closeIdentity = {
+              moduleId,
+              moduleAttemptId,
+              closeId: preparedClose.closeId,
+              answers: preparedClose.manifest,
+              protocol: "sat_recovery_v1" as const,
+              leaseEpoch: preparedClose.leaseEpoch,
+              controlEpoch: preparedClose.controlEpoch,
+            };
+            const atomicRequest = {
+              ...closeIdentity,
+              finalCommands: preparedClose.finalCommands,
+            };
+            const atomicBytes = new TextEncoder().encode(JSON.stringify(atomicRequest)).byteLength;
+            if (atomicBytes <= SAT_CLOSE_CHUNK_BODY_BUDGET_BYTES) {
+              ack = await closeModule(scheduleId, attemptId, atomicRequest);
+            } else {
+              const settledRequest = { ...closeIdentity, finalCommands: [] };
+              let alreadySettled = false;
+              try {
+                // A lost close reply is discovered before chunk replay; a settled
+                // boundary no longer accepts chunks.
+                ack = await closeModule(scheduleId, attemptId, settledRequest);
+                alreadySettled = true;
+              } catch (probeError) {
+                if (classifySatCloseRejection(probeError).kind !== "flush") throw probeError;
+              }
+              if (!alreadySettled) {
+                const registerCloseIntent = satDeliveryGateway.registerCloseIntent;
+                if (!registerCloseIntent) throw new Error("This session cannot safely recover a large frozen answer set.");
+                const intentRequest: AssessmentModuleCloseIntentRequest = {
+                  protocol: "sat_recovery_v1",
+                  moduleId,
+                  moduleAttemptId,
+                  registrationId: preparedClose.closeId,
+                  leaseEpoch: preparedClose.leaseEpoch,
+                  controlEpoch: preparedClose.controlEpoch,
+                  answers: preparedClose.manifest,
+                };
+                const registration = await registerCloseIntent(scheduleId, attemptId, intentRequest);
+                if (registration.manifestHash !== preparedClose.manifestHash ||
+                    registration.registrationId !== preparedClose.closeId ||
+                    registration.moduleAttemptId !== moduleAttemptId) {
+                  throw new Error("The server registered a different SAT answer frontier.");
+                }
+                const chunks = splitFrozenCloseCommands(preparedClose);
+                const uploadChunk = persistenceRef.current.uploadScopeCloseChunk;
+                if (chunks.length > 0 && !uploadChunk) {
+                  throw new Error("This device cannot safely upload the registered SAT answer frontier.");
+                }
+                for (const chunk of chunks) {
+                  await uploadChunk!(moduleAttemptId, preparedClose.closeId, preparedClose.manifestHash, chunk);
+                }
+                ack = await closeModule(scheduleId, attemptId, settledRequest);
+              }
+            }
+          }
+          if (!ack) throw new Error("The SAT close did not return a completion receipt.");
           if (!live()) return;
+          if (preparedClose) {
+            await persistenceRef.current.acknowledgeScopeClose?.(
+              moduleAttemptId,
+              preparedClose.closeId,
+              ack.finalAcks ?? [],
+            );
+          }
           const base = dataRef.current;
           const merged = base ? applyCloseAck(base, ack) : null;
           if (!merged) break;
@@ -553,15 +817,26 @@ export function useSatExamController({
           const next = classifySatCloseRejection(closeError);
           if (next.kind === "stop") break;
           retries += 1;
-          await pause(
-            next.kind === "wait"
+          if (recoveryClose) {
+            const exponent = Math.min(Math.max(0, retries - 1), 4);
+            const backoffCap = Math.min(SAT_RECOVERY_CLOSE_MAX_BACKOFF_MS, 1_000 * 2 ** exponent);
+            const jitteredBackoff = Math.floor(backoffCap * (0.75 + Math.random() * 0.5));
+            const retryAfterMs = next.kind === "backoff" ? next.retryAfterMs : undefined;
+            const retryDelay = next.kind === "wait"
               ? next.delayMs
-              : next.kind === "flush"
-                ? 300
-                : 500 + Math.floor(Math.random() * 500),
-          );
+              : Math.max(jitteredBackoff, retryAfterMs ?? 0);
+            await waitForCloseRetry(retryDelay, retryAfterMs === undefined);
+          } else {
+            await pause(
+              next.kind === "wait"
+                ? next.delayMs
+                : next.kind === "flush"
+                  ? 300
+                  : 500 + Math.floor(Math.random() * 500),
+            );
+          }
           if (!live()) return;
-          await persistenceRef.current.flush().catch(() => undefined);
+          if (!recoveryClose) await persistenceRef.current.flush().catch(() => undefined);
         }
       }
       for (let read = 0; read < SAT_CLOSE_FALLBACK_READS && live(); read += 1) {
@@ -571,7 +846,16 @@ export function useSatExamController({
         await pause(Math.min(3_000, 1_000 * (read + 1)) + Math.floor(Math.random() * 500));
       }
     },
-    [acceptPayloadAndRoute, attemptId, refresh, scheduleId],
+    [acceptPayloadAndRoute, attemptId, refresh, scheduleId, snapshotReceivedAt],
+  );
+
+  const resolveRecovery = useCallback(
+    async (request: SATRecoveryResolutionRequest): Promise<SATRecoveryResolutionReceipt> => {
+      const receipt = await satDeliveryGateway.resolveRecovery(scheduleId, attemptId, request);
+      await refresh(false);
+      return receipt;
+    },
+    [attemptId, refresh, scheduleId],
   );
 
   // Phase 02 bootstrap effect (singleflight per identity+version): the only
@@ -645,19 +929,22 @@ export function useSatExamController({
   // Recovery cadence now uses the mutable-only state endpoint. The immutable
   // question tree is retained from cold start and never retransmitted here.
   const pollFailuresRef = useRef(0);
+  const retryAfterMsRef = useRef<number | null>(null);
   useEffect(() => {
     if (phaseRef.current === "complete") return;
     let stopped = false;
     let timer = 0;
     let onOnline: (() => void) | null = null;
-    const recordTransportOutcome = (ok: boolean) => {
+    const recordTransportOutcome = (ok: boolean, retryAfterMs?: number) => {
       pollFailuresRef.current = ok ? 0 : pollFailuresRef.current + 1;
+      retryAfterMsRef.current = ok ? null : retryAfterMs ?? null;
     };
     const schedule = () => {
       if (!stopped) timer = window.setTimeout(tick, satPollDelayMs({
         liveSocketConnected,
         failures: pollFailuresRef.current,
         random: Math.random(),
+        ...(retryAfterMsRef.current !== null ? { retryAfterMs: retryAfterMsRef.current } : {}),
       }));
     };
     const tick = () => {
@@ -665,6 +952,7 @@ export function useSatExamController({
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         onOnline = () => {
           pollFailuresRef.current = 0;
+          retryAfterMsRef.current = null;
           void refresh(false, recordTransportOutcome).finally(schedule);
         };
         window.addEventListener("online", onOnline, { once: true });
@@ -682,8 +970,16 @@ export function useSatExamController({
     };
   }, [liveSocketConnected, refresh]);
 
+  // A SAT personal-timing attempt still needs this refresh to observe the
+  // proctor's room start; its module clock remains attempt-owned in the payload.
   useEffect(() => {
-    if (!runtimeSnapshot?.revision || !isCohortTimingModel(data?.timing.timingModel)) return;
+    if (
+      !runtimeSnapshot?.revision ||
+      (!isCohortTimingModel(data?.timing.timingModel) &&
+        !isSatPersonalTimingModel(data?.timing.timingModel))
+    ) {
+      return;
+    }
     void refresh(false);
   }, [data?.timing.timingModel, refresh, runtimeSnapshot?.revision]);
 
@@ -940,6 +1236,9 @@ export function useSatExamController({
       : Math.max(1, personalBreak.state === "active" ? pendingBreakSeconds : personalBreak.durationSeconds)
     : pendingBreakSeconds;
   const pendingSection = data && pendingModule ? sectionForModule(data, pendingModule.id) : null;
+  const sectionEntry = useSatSectionEntry(scheduleId, attemptId, pendingModule?.id ?? null,
+    pendingSection?.sectionKey === "math" || pendingSection?.sectionKey === "reading-writing" ? pendingSection.sectionKey : null,
+    satDeliveryGateway.sectionEntry);
   const pendingExpectedStageKey = satExpectedStageKey({
     timingModel: effectiveTiming?.timingModel,
     sectionKey: pendingSection?.sectionKey ?? null,
@@ -1052,10 +1351,18 @@ export function useSatExamController({
    * browser (client_start handoff); other progression is server-driven.
    */
   const startPendingModule = useCallback(async (): Promise<SatEntryOutcome> => {
-    if (!data || !pendingModule || isStarting) return "noop";
+    if (!data || !pendingModule || isStarting || !sectionEntry.ready) return "noop";
     const generation = identityGenerationRef.current;
     if (entryAuthorizedAtRef.current?.moduleId !== pendingModule.id) {
-      entryAuthorizedAtRef.current = { moduleId: pendingModule.id, at: Date.now() };
+      const previousDeadline = previousTimedOutModuleDeadlineAt(data, pendingModule);
+      const transitionDeadlineAt = previousDeadline
+        ? Date.parse(previousDeadline) - serverClockOffsetMs
+        : Number.NaN;
+      entryAuthorizedAtRef.current = {
+        moduleId: pendingModule.id,
+        at: Date.now(),
+        ...(Number.isFinite(transitionDeadlineAt) ? { transitionDeadlineAt } : {}),
+      };
     }
     setIsStarting(true);
     setError(null);
@@ -1102,6 +1409,13 @@ export function useSatExamController({
       return "opened";
     } catch (startError) {
       if (identityGenerationRef.current === generation) {
+        if (isSatEntryWindowExpiredRejection(startError)) {
+          setExpiredEntryModuleId(pendingModule.id);
+          // The server commits the blocked boundary with this conflict. Read
+          // its authoritative state now instead of waiting for steady polling.
+          await refresh(false);
+          return "expired";
+        }
         // Phase 3: a conflict on entry means the server is still advancing the
         // section this module belongs to (SECTION_NOT_ACTIVE / RUNTIME_NOT_LIVE
         // at a transition). The attempt stays retryable, so say nothing and let
@@ -1131,10 +1445,13 @@ export function useSatExamController({
     data,
     isStarting,
     pendingModule,
+    sectionEntry.ready,
     pendingSection,
     previousModuleTimedOut,
+    refresh,
     resolveEntryPayload,
     scheduleId,
+    serverClockOffsetMs,
     withEntryControlEpoch,
   ]);
 
@@ -1149,7 +1466,7 @@ export function useSatExamController({
     if (!code) {
       return { ok: false, refusal: classifyStartCodeError({ details: { reason: "START_CODE_FORMAT_INVALID" } }) };
     }
-    if (!data || isStarting) return { ok: false, refusal: null };
+    if (!data || isStarting || !sectionEntry.ready) return { ok: false, refusal: null };
     const generation = identityGenerationRef.current;
     setIsStarting(true);
     setError(null);
@@ -1205,7 +1522,7 @@ export function useSatExamController({
     } finally {
       if (identityGenerationRef.current === generation) setIsStarting(false);
     }
-  }, [acceptPayloadAndRoute, attemptId, data, isStarting, refresh, resolveEntryPayload, scheduleId, withEntryControlEpoch]);
+  }, [acceptPayloadAndRoute, attemptId, data, isStarting, sectionEntry.ready, refresh, resolveEntryPayload, scheduleId, withEntryControlEpoch]);
 
   // Server-driven break lifecycle: the server starts the scheduled break at
   // section finalization and activates the next-section Module 1 at break
@@ -1228,7 +1545,13 @@ export function useSatExamController({
     breakSeconds: breakGateSeconds,
     sectionWaitSeconds: pendingSectionWaitSeconds,
     phase: state.phase,
+    explicitEntryRequired: data?.satDeliveryPolicy?.version === "sat_recovery_v1" &&
+      Boolean(pendingModule) &&
+      data.attempt.moduleAttempts.some((attempt) =>
+        attempt.moduleId !== pendingModule?.id && matchesFinalModuleState(attempt.state),
+      ),
   });
+  const entryRequiresConfirmation = entryDecision.reason === "explicit-module-entry";
 
   // Client-started entry: the proctor's Start, cohort/legacy later modules,
   // and a personal routed module waiting for this browser (deriveSatEntryDecision
@@ -1236,7 +1559,10 @@ export function useSatExamController({
   // with jitter behind it.
   useSatModuleEntry({
     identity: identityKey,
-    enabled: entryDecision.shouldStart,
+    enabled: sectionEntry.ready && (entryDecision.shouldStart || (
+      sectionEntry.state?.state === "submitted" && sectionEntry.state.canStart && !isSatStartCodePending(data) &&
+      sectionEntry.state.moduleId === pendingModule?.id && breakGateSeconds <= 0 && pendingSectionWaitSeconds <= 0
+    )),
     entryKey: pendingModule ? `${attemptId}:${pendingModule.id}` : null,
     startModule: startPendingModule,
   });
@@ -1556,6 +1882,10 @@ export function useSatExamController({
           emitStudentObservabilityMetric("sat_first_answerable_frame_at", {
             scheduleId, attemptId, moduleId: stateModule.id,
             at, authorizedAt: authorized.at, latencyMs: at - authorized.at,
+            ...(authorized.transitionDeadlineAt !== undefined ? {
+              transitionDeadlineAt: authorized.transitionDeadlineAt,
+              deadlineToAnswerableMs: at - authorized.transitionDeadlineAt,
+            } : {}),
             ...(stateModule.adaptiveRole !== "base" && stateModuleAttempt.startedAt ? {
               m2AllotmentDeltaSeconds: Math.max(0, (at + serverClockOffsetMs - Date.parse(stateModuleAttempt.startedAt)) / 1000 - stateModuleAttempt.accumulatedPausedSeconds),
             } : {}),
@@ -1838,6 +2168,7 @@ export function useSatExamController({
     setError,
     isSubmitting,
     isStarting,
+    sectionEntry,
     pendingModule,
     pendingModuleWindow,
     pendingBreakSeconds,
@@ -1845,6 +2176,8 @@ export function useSatExamController({
     pendingStageReady,
     entryReason: entryDecision.reason,
     entryAutoStartPending: entryDecision.autoStartPending,
+    entryRequiresConfirmation,
+    entryWindowExpired: expiredEntryModuleId === pendingModule?.id,
     /** SAT access-code start entry object (null for non-SAT / older servers). */
     startPolicy: data?.satStartPolicy ?? null,
     effectiveTiming,
@@ -1872,6 +2205,8 @@ export function useSatExamController({
     commands: {
       startPendingModule,
       startWithCode,
+      resolveRecovery,
+      refreshRecoveryState: () => refresh(false),
       retryFinalization,
       retryTimeoutClose,
       takeOverDurabilityLease: persistence.takeOverLease,

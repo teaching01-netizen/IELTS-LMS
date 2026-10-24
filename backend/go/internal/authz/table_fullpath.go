@@ -46,10 +46,22 @@ func init() {
 		"PATCH /api/v1/assessment-authoring/question-revisions/{revisionID}":                       {MinRoles: writeStaff},
 		"PATCH /api/v1/assessment-authoring/exams/{examID}/sections/{sectionID}/delivery-settings": {MinRoles: writeStaff},
 		"POST /api/v1/assessment-authoring/exams/{examID}/validate":                                {MinRoles: readStaff},
-		"GET /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":                       {MinRoles: readStaff},
-		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":                       {MinRoles: writeStaff},
-		"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":                      {MinRoles: readStaff},
-		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":                      {MinRoles: writeStaff},
+		// SAT configurable registration/Eva SIM forms (draft-owned config).
+		"GET /api/v1/assessment-authoring/exams/{examID}/forms": {MinRoles: readStaff},
+		"PUT /api/v1/assessment-authoring/exams/{examID}/forms": {MinRoles: writeStaff},
+		// Student Eva state/native submit: attempt bearer, handler binds owner.
+		"GET /api/v1/assessment-forms/schedules/{scheduleID}/attempts/{attemptID}/eva-sim":                    {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /api/v1/assessment-forms/schedules/{scheduleID}/attempts/{attemptID}/section-entry/{sectionKey}": {Bearer: true, Scope: ScopeAttemptOwner},
+		"PUT /api/v1/assessment-forms/schedules/{scheduleID}/attempts/{attemptID}/eva-sim":                    {Bearer: true, Scope: ScopeAttemptOwner},
+		"PUT /api/v1/assessment-forms/schedules/{scheduleID}/attempts/{attemptID}/section-entry/{sectionKey}": {Bearer: true, Scope: ScopeAttemptOwner},
+		// Staff form responses: admin, or a proctor for assigned rooms (the
+		// handler applies the assignment predicate before paging).
+		"GET /api/v1/assessment-forms/responses":                                {MinRoles: []string{RoleAdmin, RoleProctor}},
+		"GET /api/v1/assessment-forms/attempts/{attemptID}/responses/{formKey}": {MinRoles: []string{RoleAdmin, RoleProctor}},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":    {MinRoles: readStaff},
+		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":    {MinRoles: writeStaff},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":   {MinRoles: readStaff},
+		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":   {MinRoles: writeStaff},
 		// SAT one-action room creation (internal/satrooms): admin/builder write;
 		// the receipt lookup is the actor's own operation key.
 		"POST /api/v1/sat/exams/{id}/rooms":              {MinRoles: writeStaff},

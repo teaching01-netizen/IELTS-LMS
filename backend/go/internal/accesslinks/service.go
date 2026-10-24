@@ -903,6 +903,9 @@ func insertBackingScheduleTx(ctx context.Context, q tx.Tx, scheduleID, examID st
 	if err := schedules.PersistSatTimingChoice(ctx, q, scheduleID, pin.providerKey); err != nil {
 		return err
 	}
+	if err := schedules.PersistIeltsTimingChoice(ctx, q, scheduleID, pin.providerKey); err != nil {
+		return err
+	}
 	// Link-backed SAT sessions follow the same start-mode rollout as normal
 	// sessions; the code is created atomically with the backing schedule.
 	mode, err := satstartcode.ResolveCreateMode(pin.providerKey, cohort, "")

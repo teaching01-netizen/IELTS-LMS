@@ -6,6 +6,7 @@ package tx
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"math/rand/v2"
 	"sync/atomic"
@@ -20,6 +21,13 @@ import (
 // worker mains), tests inject a counter. Sync-atomic: retries happen on
 // arbitrary request goroutines.
 var retryHook atomic.Pointer[func(error)]
+
+// DurationHook observes one completed database transaction attempt, including
+// pool acquisition, setup, callback work, and commit/rollback. Outcome values
+// are a fixed low-cardinality set owned by this package.
+type DurationHook func(time.Duration, string)
+
+var durationHook atomic.Pointer[DurationHook]
 
 // SetRetryHook installs the retry reporter, returning a restore func.
 // Passing nil silences reporting (default). Safe for concurrent use.
@@ -44,6 +52,25 @@ func noteRetry(err error) {
 	}
 }
 
+// SetDurationHook installs the transaction-duration reporter, returning a
+// restore func. Passing nil silences reporting (default). Safe for concurrent
+// use; serving binaries install this once during startup.
+func SetDurationHook(hook DurationHook) func() {
+	if hook == nil {
+		durationHook.Store(nil)
+		return func() {}
+	}
+	h := hook
+	durationHook.Store(&h)
+	return func() { durationHook.Store(nil) }
+}
+
+func observeDuration(observer *DurationHook, startedAt time.Time, outcome string) {
+	if observer != nil {
+		(*observer)(time.Since(startedAt), outcome)
+	}
+}
+
 // RetriesForTest is intentionally absent: retry counts are observed via
 // the hook in tests (each noteRetry = one absorbed transient), never via
 // production return values that would widen the Runner API.
@@ -61,10 +88,48 @@ type DB interface {
 	BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error)
 }
 
-// Runner runs application use cases in transactions.
-type Runner struct{ db DB }
+// SessionUTCDriver marks a driver whose every physical connection starts with
+// time_zone = '+00:00' (platform/db pools apply it through the DSN).
+type SessionUTCDriver interface{ SessionUTC() }
 
-func NewRunner(db DB) *Runner { return &Runner{db: db} }
+// SessionReady reports whether db's connections are UTC-initialized by the
+// pool itself. Pools that cannot prove it (sqlmock, externally opened pools)
+// need the explicit per-transaction SET.
+func SessionReady(db any) bool {
+	d, ok := db.(interface{ Driver() driver.Driver })
+	if !ok {
+		return false
+	}
+	_, ok = d.Driver().(SessionUTCDriver)
+	return ok
+}
+
+const setUTC = "SET time_zone = '+00:00'"
+
+// Begin starts a transaction for manual callers with the same session
+// contract as Runner: an explicit UTC statement only for pools that do not
+// initialize it per connection.
+func Begin(ctx context.Context, db DB, opts *sql.TxOptions) (*sql.Tx, error) {
+	sqlTx, err := db.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	if !SessionReady(db) {
+		if _, err := sqlTx.ExecContext(ctx, setUTC); err != nil {
+			_ = sqlTx.Rollback()
+			return nil, err
+		}
+	}
+	return sqlTx, nil
+}
+
+// Runner runs application use cases in transactions.
+type Runner struct {
+	db         DB
+	sessionUTC bool
+}
+
+func NewRunner(db DB) *Runner { return &Runner{db: db, sessionUTC: SessionReady(db)} }
 
 // WithTx runs fn in a REPEATABLE READ transaction.
 func (r *Runner) WithTx(ctx context.Context, fn func(ctx context.Context, tx Tx) error) error {
@@ -82,18 +147,35 @@ func (r *Runner) WithTxRC(ctx context.Context, fn func(ctx context.Context, tx T
 }
 
 func (r *Runner) withTxLevel(ctx context.Context, level sql.IsolationLevel, fn func(ctx context.Context, tx Tx) error) error {
+	observer := durationHook.Load()
+	startedAt := time.Time{}
+	if observer != nil {
+		startedAt = time.Now()
+	}
+	outcome := "rolled_back"
+	defer func() { observeDuration(observer, startedAt, outcome) }()
+
 	sqlTx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: level})
 	if err != nil {
+		outcome = "begin_error"
 		return err
 	}
 	defer func() { _ = sqlTx.Rollback() }()
-	if _, err := sqlTx.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-		return err
+	if !r.sessionUTC {
+		if _, err := sqlTx.ExecContext(ctx, setUTC); err != nil {
+			outcome = "setup_error"
+			return err
+		}
 	}
 	if err := fn(ctx, sqlTx); err != nil {
 		return err
 	}
-	return sqlTx.Commit()
+	if err := sqlTx.Commit(); err != nil {
+		outcome = "commit_error"
+		return err
+	}
+	outcome = "committed"
+	return nil
 }
 
 // WithTxRetry retries only transient failures (deadlock / lock wait timeout /
@@ -168,13 +250,23 @@ func transient(err error) bool {
 // leave an open commit. Callers that need retries use WithTxRetry on the
 // write path; read snapshots are cheap to re-run at the caller.
 func (r *Runner) WithTxReadOnly(ctx context.Context, fn func(ctx context.Context, tx Tx) error) error {
+	observer := durationHook.Load()
+	startedAt := time.Time{}
+	if observer != nil {
+		startedAt = time.Now()
+	}
+	outcome := "read_error"
+	defer func() { observeDuration(observer, startedAt, outcome) }()
+
 	sqlTx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
+		outcome = "begin_error"
 		return err
 	}
 	defer func() { _ = sqlTx.Rollback() }()
 	if err := fn(ctx, sqlTx); err != nil {
 		return err
 	}
+	outcome = "read_only"
 	return nil
 }

@@ -119,9 +119,11 @@ func TestVersionCacheHerd(t *testing.T) {
 func TestVersionCacheGetChecked(t *testing.T) {
 	c := NewVersionCache(50)
 	var calls atomic.Int64
+	var observed atomic.Int64
+	observed.Store(7)
 	load := func() ([]DeliverySection, int64, error) {
 		calls.Add(1)
-		return fixtureSections(), 0, nil // rev ignored: probedRev wins
+		return fixtureSections(), observed.Load(), nil
 	}
 	ctx := context.Background()
 	if _, err := c.GetChecked(ctx, "v-1", 7, load); err != nil {
@@ -133,6 +135,7 @@ func TestVersionCacheGetChecked(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("same-rev hit must not reload, calls=%d", calls.Load())
 	}
+	observed.Store(8)
 	if _, err := c.GetChecked(ctx, "v-1", 8, load); err != nil {
 		t.Fatal(err)
 	}
@@ -159,5 +162,129 @@ func TestVersionCacheEvicts(t *testing.T) {
 	}
 	if c.Len() != 2 {
 		t.Fatalf("len = %d, want cap 2", c.Len())
+	}
+}
+
+// A load that observes a different revision than the one probed (a publish
+// raced the probe) serves its content but is never stored under either label.
+func TestVersionCacheGetCheckedNeverMislabelsRevision(t *testing.T) {
+	c := NewVersionCache(50)
+	var calls atomic.Int64
+	load := func() ([]DeliverySection, int64, error) {
+		calls.Add(1)
+		return fixtureSections(), 8, nil
+	}
+	sections, err := c.GetChecked(context.Background(), "v-1", 7, load)
+	if err != nil || len(sections) != 1 {
+		t.Fatalf("mismatched load must still serve current content: %v %v", sections, err)
+	}
+	if _, ok := c.PeekRevision("v-1"); ok {
+		t.Fatal("a tree observed at rev 8 must not be cached for a rev-7 probe")
+	}
+	if _, err := c.GetChecked(context.Background(), "v-1", 7, load); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("unpublished load must not satisfy a later probe, calls=%d", calls.Load())
+	}
+}
+
+// An Invalidate that lands while a load is in flight stops that load from
+// repopulating the cache.
+func TestVersionCacheInvalidateDuringLoadSkipsPublish(t *testing.T) {
+	c := NewVersionCache(50)
+	release := make(chan struct{})
+	started := make(chan struct{})
+	load := func() ([]DeliverySection, int64, error) {
+		close(started)
+		<-release
+		return fixtureSections(), 7, nil
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.GetChecked(context.Background(), "v-1", 7, load)
+		done <- err
+	}()
+	<-started
+	c.Invalidate("v-1")
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.PeekRevision("v-1"); ok {
+		t.Fatal("a load that began before Invalidate must not publish")
+	}
+}
+
+// Flights are per (version, revision): a newer probe never waits on, or
+// receives, an older probe's load.
+func TestVersionCacheFlightsAreRevisionScoped(t *testing.T) {
+	c := NewVersionCache(50)
+	release := make(chan struct{})
+	started := make(chan struct{})
+	slow := func() ([]DeliverySection, int64, error) {
+		close(started)
+		<-release
+		return fixtureSections(), 7, nil
+	}
+	go func() { _, _ = c.GetChecked(context.Background(), "v-1", 7, slow) }()
+	<-started
+	fast := func() ([]DeliverySection, int64, error) { return fixtureSections(), 8, nil }
+	if _, err := c.GetChecked(context.Background(), "v-1", 8, fast); err != nil {
+		t.Fatal(err)
+	}
+	if rev, ok := c.PeekRevision("v-1"); !ok || rev != 8 {
+		t.Fatalf("rev-8 load must publish independently, got rev=%d ok=%v", rev, ok)
+	}
+	close(release)
+}
+
+// A waiting follower honours its own context instead of the leader's load.
+func TestVersionCacheFollowerHonoursItsContext(t *testing.T) {
+	c := NewVersionCache(50)
+	release := make(chan struct{})
+	started := make(chan struct{})
+	slow := func() ([]DeliverySection, int64, error) {
+		close(started)
+		<-release
+		return fixtureSections(), 7, nil
+	}
+	go func() { _, _ = c.GetChecked(context.Background(), "v-1", 7, slow) }()
+	<-started
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.GetChecked(ctx, "v-1", 7, slow); err != context.Canceled {
+		t.Fatalf("canceled follower must return its own ctx error, got %v", err)
+	}
+	close(release)
+}
+
+// When the leader's request ends mid-load, a live follower retries under its
+// own loader rather than inheriting the cancellation.
+func TestVersionCacheFollowerRetriesAfterLeaderCancellation(t *testing.T) {
+	c := NewVersionCache(50)
+	release := make(chan struct{})
+	started := make(chan struct{})
+	leader := func() ([]DeliverySection, int64, error) {
+		close(started)
+		<-release
+		return nil, 0, context.Canceled
+	}
+	go func() { _, _ = c.GetChecked(context.Background(), "v-1", 7, leader) }()
+	<-started
+	result := make(chan error, 1)
+	go func() {
+		_, err := c.GetChecked(context.Background(), "v-1", 7, func() ([]DeliverySection, int64, error) {
+			return fixtureSections(), 7, nil
+		})
+		result <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	close(release)
+	if err := <-result; err != nil {
+		t.Fatalf("live follower must retry after the leader's cancellation: %v", err)
+	}
+	if rev, ok := c.PeekRevision("v-1"); !ok || rev != 7 {
+		t.Fatalf("follower retry must publish, rev=%d ok=%v", rev, ok)
 	}
 }

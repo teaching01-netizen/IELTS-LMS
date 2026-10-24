@@ -95,19 +95,25 @@ type builderManifest struct {
 }
 
 type studentManifest struct {
-	ExamID                    string `json:"examId"`
-	ExamSlug                  string `json:"examSlug"`
-	PublishedVersionID        string `json:"publishedVersionId"`
-	ScheduleID                string `json:"scheduleId"`
-	PrecheckScheduleID        string `json:"precheckScheduleId"`
-	ProctorWorkflowScheduleID string `json:"proctorWorkflowScheduleId"`
-	FlushScheduleID           string `json:"flushScheduleId"`
-	SubmissionScheduleID      string `json:"submissionScheduleId"`
-	LifecycleScheduleID       string `json:"lifecycleScheduleId"`
-	CandidateID               string `json:"candidateId"`
-	QuestionID                string `json:"questionId"`
-	ExpectedAnswer            string `json:"expectedAnswer"`
-	StorageStatePath          string `json:"storageStatePath"`
+	ExamID                            string `json:"examId"`
+	ExamSlug                          string `json:"examSlug"`
+	PublishedVersionID                string `json:"publishedVersionId"`
+	ScheduleID                        string `json:"scheduleId"`
+	IELTSPersonalTimingScheduleID     string `json:"ieltsPersonalTimingScheduleId"`
+	IELTSPersonalLoadScheduleID       string `json:"ieltsPersonalLoadScheduleId"`
+	IELTSPersonalRecoveryScheduleID   string `json:"ieltsPersonalRecoveryScheduleId"`
+	IELTSPersonalResilienceScheduleID string `json:"ieltsPersonalResilienceScheduleId"`
+	IELTSPersonalSubmissionScheduleID string `json:"ieltsPersonalSubmissionScheduleId"`
+	IELTSPersonalControlsScheduleID   string `json:"ieltsPersonalControlsScheduleId"`
+	PrecheckScheduleID                string `json:"precheckScheduleId"`
+	ProctorWorkflowScheduleID         string `json:"proctorWorkflowScheduleId"`
+	FlushScheduleID                   string `json:"flushScheduleId"`
+	SubmissionScheduleID              string `json:"submissionScheduleId"`
+	LifecycleScheduleID               string `json:"lifecycleScheduleId"`
+	CandidateID                       string `json:"candidateId"`
+	QuestionID                        string `json:"questionId"`
+	ExpectedAnswer                    string `json:"expectedAnswer"`
+	StorageStatePath                  string `json:"storageStatePath"`
 }
 
 type actManifest struct {
@@ -235,10 +241,16 @@ func run(ctx context.Context) error {
 		},
 		Student: studentManifest{
 			ExamID: studentFixture.examID, ExamSlug: studentSlug, PublishedVersionID: studentFixture.publishedVersionID,
-			ScheduleID: studentFixture.liveScheduleID, ProctorWorkflowScheduleID: studentFixture.proctorWorkflowScheduleID,
-			PrecheckScheduleID:   studentFixture.precheckScheduleID,
-			FlushScheduleID:      studentFixture.flushScheduleID,
-			SubmissionScheduleID: studentFixture.submissionScheduleID, LifecycleScheduleID: studentFixture.lifecycleScheduleID,
+			ScheduleID: studentFixture.liveScheduleID, IELTSPersonalTimingScheduleID: studentFixture.ieltsPersonalTimingScheduleID,
+			IELTSPersonalLoadScheduleID:       studentFixture.ieltsPersonalLoadScheduleID,
+			IELTSPersonalRecoveryScheduleID:   studentFixture.ieltsPersonalRecoveryScheduleID,
+			IELTSPersonalResilienceScheduleID: studentFixture.ieltsPersonalResilienceScheduleID,
+			IELTSPersonalSubmissionScheduleID: studentFixture.ieltsPersonalSubmissionScheduleID,
+			IELTSPersonalControlsScheduleID:   studentFixture.ieltsPersonalControlsScheduleID,
+			ProctorWorkflowScheduleID:         studentFixture.proctorWorkflowScheduleID,
+			PrecheckScheduleID:                studentFixture.precheckScheduleID,
+			FlushScheduleID:                   studentFixture.flushScheduleID,
+			SubmissionScheduleID:              studentFixture.submissionScheduleID, LifecycleScheduleID: studentFixture.lifecycleScheduleID,
 			CandidateID: studentCandidateID, QuestionID: listeningQuestionID,
 			ExpectedAnswer: expectedAnswer, StorageStatePath: args.studentStoragePath,
 		},
@@ -561,7 +573,7 @@ func mintOpenLink(ctx context.Context, db *sql.DB, examID, publishedVersionID, s
 }
 
 type studentFixture struct {
-	examID, publishedVersionID, liveScheduleID, precheckScheduleID, proctorWorkflowScheduleID, flushScheduleID, submissionScheduleID, lifecycleScheduleID, selfPacedScheduleID string
+	examID, publishedVersionID, liveScheduleID, ieltsPersonalTimingScheduleID, ieltsPersonalLoadScheduleID, ieltsPersonalRecoveryScheduleID, ieltsPersonalResilienceScheduleID, ieltsPersonalSubmissionScheduleID, ieltsPersonalControlsScheduleID, precheckScheduleID, proctorWorkflowScheduleID, flushScheduleID, submissionScheduleID, lifecycleScheduleID, selfPacedScheduleID string
 }
 
 type publishedFixtureExam struct {
@@ -682,6 +694,36 @@ func seedStudent(ctx context.Context, db *sql.DB, examService *exams.Service, sc
 	if err != nil {
 		return studentFixture{}, err
 	}
+	ieltsPersonalTiming, err := createAssignedSchedule("Backend E2E IELTS Personal Timing", false)
+	if err != nil {
+		return studentFixture{}, err
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE exam_schedules SET ielts_timing_model = 'ielts_cohort_personal_v2' WHERE id = ?", ieltsPersonalTiming.ID); err != nil {
+		return studentFixture{}, fmt.Errorf("select IELTS personal timing for E2E schedule: %w", err)
+	}
+	ieltsPersonalLoad, err := createAssignedSchedule("Backend E2E IELTS Personal Timing Load", false)
+	if err != nil {
+		return studentFixture{}, err
+	}
+	ieltsPersonalRecovery, err := createAssignedSchedule("Backend E2E IELTS Personal Timing Recovery", false)
+	if err != nil {
+		return studentFixture{}, err
+	}
+	ieltsPersonalResilience, err := createAssignedSchedule("Backend E2E IELTS Personal Resilience", false)
+	if err != nil {
+		return studentFixture{}, err
+	}
+	ieltsPersonalSubmission, err := createAssignedSchedule("Backend E2E IELTS Personal Submission", false)
+	if err != nil {
+		return studentFixture{}, err
+	}
+	ieltsPersonalControls, err := createAssignedSchedule("Backend E2E IELTS Personal Controls", false)
+	if err != nil {
+		return studentFixture{}, err
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE exam_schedules SET ielts_timing_model = 'ielts_cohort_personal_v2' WHERE id IN (?, ?, ?, ?, ?)", ieltsPersonalLoad.ID, ieltsPersonalRecovery.ID, ieltsPersonalResilience.ID, ieltsPersonalSubmission.ID, ieltsPersonalControls.ID); err != nil {
+		return studentFixture{}, fmt.Errorf("select IELTS personal timing for E2E load and recovery schedules: %w", err)
+	}
 	selfPacedRequest := common
 	selfPacedRequest.CohortName = "Backend E2E Self-paced"
 	selfPaced, err := scheduleService.Create(ctx, selfPacedRequest)
@@ -693,9 +735,14 @@ func seedStudent(ctx context.Context, db *sql.DB, examService *exams.Service, sc
 	}
 	return studentFixture{
 		examID: examID, publishedVersionID: publishedVersionID, liveScheduleID: live.ID,
-		precheckScheduleID:        precheck.ID,
-		proctorWorkflowScheduleID: proctorWorkflow.ID,
-		flushScheduleID:           flush.ID, submissionScheduleID: submission.ID,
+		ieltsPersonalTimingScheduleID: ieltsPersonalTiming.ID, ieltsPersonalLoadScheduleID: ieltsPersonalLoad.ID,
+		ieltsPersonalRecoveryScheduleID:   ieltsPersonalRecovery.ID,
+		ieltsPersonalResilienceScheduleID: ieltsPersonalResilience.ID,
+		ieltsPersonalSubmissionScheduleID: ieltsPersonalSubmission.ID,
+		ieltsPersonalControlsScheduleID:   ieltsPersonalControls.ID,
+		precheckScheduleID:                precheck.ID,
+		proctorWorkflowScheduleID:         proctorWorkflow.ID,
+		flushScheduleID:                   flush.ID, submissionScheduleID: submission.ID,
 		lifecycleScheduleID: lifecycle.ID, selfPacedScheduleID: selfPaced.ID,
 	}, nil
 }

@@ -92,6 +92,7 @@ func TestEndSectionNowLiveSectionEnqueuesModuleHandover(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT ma.attempt_id")).
 		WithArgs("sched-1", "reading-writing").
 		WillReturnRows(sqlmock.NewRows([]string{"attempt_id"}).AddRow("att-1"))
+	expectRuntimeTimingModelRead(mock, "rt-1", "cohort_section_v3")
 	// Successor starts now; runtime row clears the waiting window.
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections")).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "rt-1", "math").
@@ -166,6 +167,7 @@ func TestEndSectionNowBetweenSectionsAdvancesWithoutRewriting(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO session_audit_logs")).
 		WithArgs(sqlmock.AnyArg(), "sched-1", "admin-1", "SECTION_END", nil, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	expectRuntimeTimingModelRead(mock, "rt-1", "cohort_section_v3")
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections")).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "rt-1", "math").
 		WillReturnResult(sqlmock.NewResult(0, 1))

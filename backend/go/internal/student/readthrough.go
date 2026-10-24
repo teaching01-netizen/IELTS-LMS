@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 
-	"example.com/ielts-proctoring/internal/platform/answerblobs"
+	"example.com/ielts-proctoring/internal/attempts"
 )
 
 // getSessionRowFirst serves GetSession under the B3 row-first posture:
@@ -29,7 +29,7 @@ func (s *Service) getSessionRowFirst(ctx context.Context, attemptID string) (Ses
 		}
 		return out, nil
 	}
-	blobs, err := materializeAttempt(ctx, s.db, attemptID)
+	blobs, err := attempts.MaterializeBlobs(ctx, s.db, attemptID)
 	if err != nil {
 		return Session{}, err
 	}
@@ -60,38 +60,10 @@ func (s *Service) getBootstrapRowFirst(ctx context.Context, attemptID string) (B
 		}
 		return out, nil
 	}
-	blobs, err := materializeAttempt(ctx, s.db, attemptID)
+	blobs, err := attempts.MaterializeBlobs(ctx, s.db, attemptID)
 	if err != nil {
 		return Bootstrap{}, err
 	}
 	out.Flags = json.RawMessage(blobs.Flags)
 	return out, nil
-}
-
-// materializeAttempt rebuilds the legacy triple from response rows via the
-// shared leaf codec (same bytes as the seal-time materialization).
-func materializeAttempt(ctx context.Context, db *sql.DB, attemptID string) (answerblobs.Blobs, error) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT r.question_id, r.module_id, COALESCE(s.section_key, ''), CAST(r.response AS CHAR)
-		 FROM attempt_responses_v2 r
-		 LEFT JOIN assessment_modules m ON m.id = r.module_id
-		 LEFT JOIN assessment_sections s ON s.id = m.section_id
-		 WHERE r.attempt_id = ? ORDER BY r.question_id`,
-		attemptID)
-	if err != nil {
-		return answerblobs.Blobs{}, err
-	}
-	defer rows.Close()
-	var cells []answerblobs.Cell
-	for rows.Next() {
-		var questionID, moduleID, sectionKey, raw string
-		if err := rows.Scan(&questionID, &moduleID, &sectionKey, &raw); err != nil {
-			return answerblobs.Blobs{}, err
-		}
-		cells = append(cells, answerblobs.Cell{QuestionID: questionID, ModuleID: moduleID, SectionKey: sectionKey, Canonical: json.RawMessage(raw)})
-	}
-	if err := rows.Err(); err != nil {
-		return answerblobs.Blobs{}, err
-	}
-	return answerblobs.Assemble(cells)
 }

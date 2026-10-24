@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, RefreshCw } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuthSession } from "../../auth/api/authSession";
@@ -17,6 +17,7 @@ import {
   SatEntryStatus,
   SatEntrySubmit,
   focusFirstInvalidField,
+  satCheckInStep,
 } from "../../student-delivery/api/satEntryPortal";
 import { resumeSatStudentSession } from "../../student-delivery/api/satResume";
 import {
@@ -29,6 +30,12 @@ import {
   restoreClientSessionIdForStudentKey,
   satWriterStudentKey,
 } from "@student/application/studentAttemptFacade";
+import {
+  SatRegistrationGroup,
+  useRegistrationAnswers,
+  type PublicRegistrationForm,
+  type RegistrationSubmission,
+} from "@/src/features/assessment-forms/api/assessmentForms";
 
 interface EntryFormData {
   wcode: string;
@@ -36,6 +43,8 @@ interface EntryFormData {
   studentName: string;
   nickname: string;
   ieltsCourse: string;
+  /** Exact registration submission carried through queue retries. */
+  registrationForm?: RegistrationSubmission | undefined;
 }
 
 const LAST_WCODE_STORAGE_PREFIX = "ielts-student-last-wcode:";
@@ -153,7 +162,11 @@ function queueEtaSeconds(retryAfterMs: number): number {
 }
 
 type ScheduleAvailability =
-  | { state: "ready"; providerKey: "ielts" | "sat" | "act" }
+  | {
+      state: "ready";
+      providerKey: "ielts" | "sat" | "act";
+      registrationForm?: PublicRegistrationForm | null;
+    }
   | {
       state: "unavailable";
       title: string;
@@ -218,7 +231,11 @@ async function loadScheduleAvailability(scheduleId: string): Promise<ScheduleAva
         ...scheduleStatusCopy(schedule.status),
       };
     }
-    return { state: "ready", providerKey: schedule.providerKey };
+    return {
+      state: "ready",
+      providerKey: schedule.providerKey,
+      registrationForm: schedule.registrationForm ?? null,
+    };
   } catch (error) {
     if (isScheduleBlockedError(error)) {
       return { state: "unavailable", ...scheduleBlockedCopy() };
@@ -417,6 +434,16 @@ export function StudentEntryRoute() {
         : "",
   }));
   const [errors, setErrors] = useState<Partial<Record<keyof EntryFormData, string>>>({});
+  const registration = useRegistrationAnswers(
+    isSat && scheduleAvailability.state === "ready"
+      ? (scheduleAvailability.registrationForm ?? null)
+      : null
+  );
+  const reloadRegistrationForm = useCallback(async () => {
+    if (!scheduleId) return null;
+    return (await getStudentEntrySchedule(scheduleId)).registrationForm ?? null;
+  }, [scheduleId]);
+  const handleRegistrationError = registration.handleError;
   const [isLoading, setIsLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [queuedAdmission, setQueuedAdmission] = useState(false);
@@ -514,11 +541,13 @@ export function StudentEntryRoute() {
       }
     }
 
-    if (Object.keys(newErrors).length > 0) {
+    const prepared = isSat ? registration.prepare() : { valid: true };
+    if (Object.keys(newErrors).length > 0 || !prepared.valid) {
       setErrors(newErrors);
       if (isSat) focusFirstInvalidField(e.currentTarget as HTMLFormElement);
       return;
     }
+    const registrationForm = prepared.submission;
 
     if (!scheduleId) {
       setSubmitError("Invalid schedule id");
@@ -549,6 +578,7 @@ export function StudentEntryRoute() {
         email: normalizedEmail,
         studentName: normalizedName,
         ...(clientSessionId ? { clientSessionId } : {}),
+        ...(registrationForm ? { registrationForm } : {}),
         ...(isSat ? {} : { nickname: normalizedNickname, ieltsCourse: normalizedIeltsCourse }),
       });
 
@@ -559,6 +589,7 @@ export function StudentEntryRoute() {
           studentName: normalizedName,
           nickname: normalizedNickname,
           ieltsCourse: normalizedIeltsCourse,
+          registrationForm,
         };
         pollAttemptsRef.current = 0;
         setQueuedAdmission(true);
@@ -605,12 +636,17 @@ export function StudentEntryRoute() {
           studentName: normalizedName,
           nickname: normalizedNickname,
           ieltsCourse: normalizedIeltsCourse,
+          registrationForm,
         };
         pollAttemptsRef.current = 0;
         setQueuedAdmission(true);
         setQueuedPayload(payload);
         setQueueRetryAfterMs(entryQueueDelayMs(queue.retryAfterSecs));
         setSubmitError(null);
+      } else if (isSat && (await registration.handleError(error, reloadRegistrationForm))) {
+        setSubmitError(null);
+        const form = (e.target as HTMLElement | null)?.closest("form");
+        if (form) focusFirstInvalidField(form);
       } else {
         setSubmitError(
           error instanceof Error ? error.message : "Check-in failed. Please try again."
@@ -663,6 +699,9 @@ export function StudentEntryRoute() {
           email: queuedPayload.email,
           studentName: queuedPayload.studentName,
           ...(clientSessionId ? { clientSessionId } : {}),
+          ...(queuedPayload.registrationForm
+            ? { registrationForm: queuedPayload.registrationForm }
+            : {}),
           ...(isSat
             ? {}
             : { nickname: queuedPayload.nickname, ieltsCourse: queuedPayload.ieltsCourse }),
@@ -713,6 +752,15 @@ export function StudentEntryRoute() {
             setSubmitError(null);
             return;
           }
+          if (isSat && (await handleRegistrationError(error, reloadRegistrationForm))) {
+            // The queued answers no longer match the form: return to the
+            // card for review instead of retrying a stale submission.
+            setQueuedAdmission(false);
+            setQueuedPayload(null);
+            setQueuePollFailure(null);
+            setSubmitError(null);
+            return;
+          }
           const message =
             error instanceof Error ? error.message : "Admission retry failed. Please retry.";
           // A non-rate-limit poll failure must not dead-lock the form. Clear
@@ -730,12 +778,14 @@ export function StudentEntryRoute() {
       window.clearTimeout(timer);
     };
   }, [
+    handleRegistrationError,
     isSat,
     navigate,
     queuePollFailure,
     queueRetryAfterMs,
     queuedAdmission,
     queuedPayload,
+    reloadRegistrationForm,
     scheduleId,
     studentEntry,
   ]);
@@ -790,7 +840,13 @@ export function StudentEntryRoute() {
   if (isSat) {
     const locked = isLoading || Boolean(queuedAdmission);
     return (
-      <SatEntryLayout title="Exam Check-in">
+      <SatEntryLayout
+        title="Exam Check-in"
+        checkInStep={satCheckInStep({
+          code: true,
+          examDetails: (registration.form?.fields.length ?? 0) > 0,
+        })}
+      >
         {submitError ? <SatEntryNotice tone="error">{submitError}</SatEntryNotice> : null}
 
         {queuedAdmission ? (
@@ -861,6 +917,11 @@ export function StudentEntryRoute() {
             error={errors.email}
             placeholder="you@example.com"
             autoComplete="email"
+            disabled={locked}
+          />
+          <SatRegistrationGroup
+            registration={registration}
+            idPrefix="entry-registration"
             disabled={locked}
           />
           <SatEntrySubmit disabled={locked} busy={isLoading || Boolean(queuedAdmission)}>

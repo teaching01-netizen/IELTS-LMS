@@ -126,15 +126,15 @@ func startModuleCohortWindowFixture(
 	defer db.Close()
 	svc := deliverySvc(db)
 
-	deliverySaveBinding(mock)
+	deliveryStartModuleBinding(mock)
 	deliveryReconcileDrained(mock)
 	deliverySaveBegin(mock)
-	deliveryModuleWorkableTx(mock)
+	deliveryModuleStartWorkableTx(mock, examruntime.TimingModelCohortSection, "reading-writing")
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ? FOR UPDATE")).
 		WithArgs("att-1", "mod-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason"}).
 			AddRow("ma-1", "mod-1", "not_started", storedAllocated, sectionStart, nil, nil, 0, 0, nil))
-	deliveryCohortRuntimeAndModule(mock, "reading-writing", "reading-writing", adaptiveRole, authoredSeconds)
+	deliveryCohortModuleMetadata(mock, "reading-writing", adaptiveRole, authoredSeconds)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtime_sections rs JOIN exam_session_runtimes r")).
 		WithArgs("sched-1", "reading-writing").
 		WillReturnRows(sqlmock.NewRows([]string{"status", "actual_start_at", "paused_at", "planned_duration_minutes", "extension_minutes", "accumulated_paused_seconds"}).
@@ -150,8 +150,8 @@ func startModuleCohortWindowFixture(
 		WithArgs("att-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	deliveryMaxRevision(mock, 7)
-	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+	deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+		"schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
 	deliveryBootstrapLoads(mock, gateNow)
 
@@ -229,16 +229,16 @@ func TestAssembleBootstrapPublishesTheLateArrivalsEntryWindow(t *testing.T) {
 	}
 	defer db.Close()
 
-	// LoadSections (the nested read the post-commit assembly uses): one
+	// LoadSections (the tree read the post-commit assembly uses): one
 	// 64-minute section holding one 32-minute base module with no questions.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id")).WithArgs("pv-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions"}).
 			AddRow("sec-1", "reading-writing", "Reading & Writing", 0, 3840, 600, nil))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules WHERE section_id = ?")).WithArgs("sec-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
-			AddRow("mod-1", "rw-m1", "Module 1", 0, 1920, 27, "base", nil, nil))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions qr")).WithArgs("mod-1").
-		WillReturnRows(sqlmock.NewRows([]string{"exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE s.exam_version_id = ?")).WithArgs("pv-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "section_id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
+			AddRow("mod-1", "sec-1", "rw-m1", "Module 1", 0, 1920, 27, "base", nil, nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_modules m")).WithArgs("pv-1").
+		WillReturnRows(sqlmock.NewRows([]string{"module_id", "exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}))
 	deliveryUnscopedLink(mock)
 	// The candidate's own row: seeded, still unstarted, full authored allotment.
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_module_attempts WHERE attempt_id = ?")).WithArgs("att-1").
@@ -259,7 +259,7 @@ func TestAssembleBootstrapPublishesTheLateArrivalsEntryWindow(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT status FROM exam_session_runtimes")).WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, exam_id, provider_key")).WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model"}).AddRow("sched-1", "exam-1", "sat", nil))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "ielts_timing_model"}).AddRow("sched-1", "exam-1", "sat", nil, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id")).WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "schedule_id", "exam_id", "provider_key", "status",

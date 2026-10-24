@@ -118,7 +118,7 @@ A–D become the four choices. Response Type controls whether students see those
 MATH, FORMATTING, AND FIGURES
 Keep inline mathematics in the same sentence using \( ... \). Use \[ ... \] only for mathematics displayed on its own line in the source. Preserve signs, fractions, radicals, subscripts, superscripts, and inequalities. For mathematical subscripts and superscripts, use LaTeX inside math (for example \(x_2\) and \(x^2\)); do not use Markdown sub/superscript syntax.
 
-Use supported inline formatting in cell text: **bold**, *italic*, ++underlined text++, `+"`inline code`"+`, and \( LaTeX \). Use supported block formatting: level-2 and level-3 headings, bulleted and numbered lists, blockquotes, fenced code blocks, display math, and Markdown tables. For example, type ++key term++ to underline it in a Prompt, Stimulus, choice, or Rationale cell. The importer reads cell text only, so Excel's visual cell formatting (bold/italic/underline buttons or font styles) alone does not preserve underlining or other formatting; type the markers in the cell.
+Use supported inline formatting in cell text: **bold**, *italic*, ++underlined text++, ` + "`inline code`" + `, and \( LaTeX \). Use supported block formatting: level-2 and level-3 headings, bulleted and numbered lists, blockquotes, fenced code blocks, display math, and Markdown tables. For example, type ++key term++ to underline it in a Prompt, Stimulus, choice, or Rationale cell. The importer reads cell text only, so Excel's visual cell formatting (bold/italic/underline buttons or font styles) alone does not preserve underlining or other formatting; type the markers in the cell.
 
 Do not use raw HTML, Markdown links, strikethrough (~~text~~), or opaque JSON: they import as plain text, not formatting.
 
@@ -376,7 +376,7 @@ func satWorkbookInstructionsSheet() string {
 		{"RULE ID", "CATEGORY", "REQUIREMENT / CHECK"},
 		{"R01", "Source fidelity", "Only source material may justify original wording; never fabricate missing content."},
 		{"R02", "Workbook integrity", "Preserve all five sheet names, 16 Questions headers, six module labels, and 147 row positions."},
-		{"R03", "Inline formatting and LaTeX", `Use \( ... \) on the same line as prose; do not insert a newline around inline equations. Inline marks in cell text: **bold**, *italic*, ++underlined text++ (example ++key term++), `+"`code`"+`, and \\( LaTeX \\). The importer reads cell text only; Excel visual formatting alone does not preserve underlining. For math sub/superscripts use LaTeX, e.g. \\(x_2\\) and \\(x^2\\).`},
+		{"R03", "Inline formatting and LaTeX", `Use \( ... \) on the same line as prose; do not insert a newline around inline equations. Inline marks in cell text: **bold**, *italic*, ++underlined text++ (example ++key term++), ` + "`code`" + `, and \\( LaTeX \\). The importer reads cell text only; Excel visual formatting alone does not preserve underlining. For math sub/superscripts use LaTeX, e.g. \\(x_2\\) and \\(x^2\\).`},
 		{"R04", "Block formatting", `Use \[ ... \] only for standalone math shown separately in the source. Blocks: level-2/3 headings, lists, blockquotes, fenced code blocks, tables. Do not use raw HTML, Markdown links, or strikethrough (~~text~~); they import as plain text.`},
 		{"R05", "Choices", "Multiple Choice uses A–D and Correct A/B/C/D from the supplied answer key."},
 		{"R06", "Student Response", "Math only; leave choices and Correct blank; list verified accepted numeric responses."},

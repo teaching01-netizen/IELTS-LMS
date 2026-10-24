@@ -259,14 +259,11 @@ func (s *Service) ApplyMutationBatch(ctx context.Context, req V1MutationBatchReq
 	}
 	// B1: attempt-locked batch write on one PK row + idempotency probes
 	// (RC-safe; serialization comes from the attempt FOR UPDATE, not RR).
-	sqlTx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	sqlTx, err := tx.Begin(ctx, s.db, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return V1MutationBatchResponse{}, err
 	}
 	defer func() { _ = sqlTx.Rollback() }()
-	if _, err := sqlTx.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-		return V1MutationBatchResponse{}, err
-	}
 	out, err := s.ApplyMutationBatchInTx(ctx, sqlTx, req)
 	if err != nil {
 		return V1MutationBatchResponse{}, err

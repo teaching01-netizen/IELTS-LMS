@@ -40,7 +40,6 @@ func TestSubmitWithoutExpectedRevisionWritesReceipt(t *testing.T) {
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnRows(sessionRows())
 	mock.ExpectQuery("FROM attempt_submissions_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT attempt_id FROM attempt_submissions_v2 WHERE submission_id").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	// Digest: two stored responses.
 	mock.ExpectQuery("FROM attempt_responses_v2").WillReturnRows(
 		sqlmock.NewRows([]string{"question_id", "response_hash"}).

@@ -463,11 +463,9 @@ export function StudentAttemptProvider({
       onStatusChange: (status, error) => {
         if (v2EngineRef.current !== engine || v2IdentityGenerationRef.current !== generation)
           return;
-        // Shared WP4/WP5 vocabulary: blocked_attention is honest-but-not-saved
-        // work that must stay visible. Map through the shared mapper so IELTS
-        // and SAT cannot drift. "blocked_attention" => AttemptSyncState "offline"
-        // (kept, visible, needs attention) and explicitly NOT the
-        // lease-conflict overlay (no setDurabilityLeaseConflict(true) here).
+        // Preserve the engine's distinct local-save and recovery states in the
+        // student UI. A local durable copy is not server-confirmed; a blocked
+        // draft needs recovery and must not be presented as ordinary offline.
         const display = mapEngineStatus(status, engine.getBlockedCount());
         const blockedIds = (() => {
           try {
@@ -500,10 +498,12 @@ export function StudentAttemptProvider({
                       : status === "saving"
                         ? "saving"
                         : status === "saved_locally"
-                          ? "offline"
+                          ? "saved_locally"
                           : display === "blocked_attention"
-                            ? "offline"
-                            : "error",
+                            ? "needs_recovery"
+                            : display === "conflict"
+                              ? "needs_recovery"
+                              : "error",
               },
             })
           );
@@ -514,8 +514,8 @@ export function StudentAttemptProvider({
         if (status === "blocked_attention") {
           // Drafts are kept on this device and visible; they are not
           // acknowledged, so never report "saved" and never raise the
-          // lease-takeover overlay. "offline" syncState above keeps them
-          // honest; do not touch durabilityLeaseConflict here.
+          // lease-takeover overlay. Keep recovery guidance separate from
+          // ordinary network loss.
         }
         if (status === "conflict_fenced") {
           setDurabilityLeaseConflict(true);

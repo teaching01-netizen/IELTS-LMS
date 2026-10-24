@@ -51,6 +51,15 @@ type ModuleSubmitRequest struct {
 	ModuleID string `json:"moduleId"`
 }
 
+type startModuleBindingResult struct {
+	scheduleID             string
+	examID                 string
+	providerKey            string
+	versionID              string
+	preflightedModuleState bool
+	moduleAwaitingStart    bool
+}
+
 // Live event names mirror the Rust route dual-publish
 // (backend/crates/api/src/routes/assessment_delivery.rs:152-218).
 const (
@@ -82,22 +91,42 @@ func (s *Service) StartModuleOffer(ctx context.Context, bearerScheduleID, bearer
 // attempt projection to cold load and recovery.
 func (s *Service) StartModuleOfferAck(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID string, generation, controlEpoch *int, needContent bool, writerBinding ...string) (*SatModuleEntryAck, error) {
 	var content *DeliverySection
+	var binding *startModuleBindingResult
 	if needContent {
 		if urlScheduleID != bearerScheduleID {
 			return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
 		}
-		_, _, _, versionID, err := s.startScheduleBinding(ctx, bearerScheduleID)
+		prepared, selected, found, err := s.startModuleContentPreflight(ctx, bearerScheduleID, bearerAttemptID, moduleID)
 		if err != nil {
 			return nil, err
 		}
-		// Warm the immutable content before starting the clock. It is only returned
-		// after the owned module has passed the start transaction's writer gates.
-		content, err = s.selectedModuleSection(ctx, bearerAttemptID, bearerScheduleID, versionID, moduleID)
-		if err != nil {
-			return nil, err
+		if found {
+			binding, content = &prepared, selected
+		} else {
+			// Preserve the established not-found/provider/ownership errors when a
+			// single joined preflight cannot identify the content path.
+			scheduleID, examID, providerKey, versionID, err := s.startModuleBinding(ctx, bearerScheduleID, bearerAttemptID)
+			if err != nil {
+				return nil, err
+			}
+			binding = &startModuleBindingResult{
+				scheduleID: scheduleID, examID: examID, providerKey: providerKey, versionID: versionID,
+			}
+			// Content is only returned after the owned module passes the start
+			// transaction's writer gates.
+			content, err = s.selectedModuleSection(ctx, bearerAttemptID, bearerScheduleID, versionID, moduleID)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
-	_, ack, err := s.startModuleWithResponse(ctx, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID, generation, controlEpoch, true, writerBinding...)
+	var ack *SatModuleEntryAck
+	var err error
+	if binding == nil {
+		_, ack, err = s.startModuleWithResponse(ctx, bearerScheduleID, bearerAttemptID, urlScheduleID, moduleID, generation, controlEpoch, true, writerBinding...)
+	} else {
+		_, ack, err = s.startModuleWithBinding(ctx, *binding, bearerAttemptID, moduleID, generation, controlEpoch, true, writerBinding...)
+	}
 	if err == nil {
 		ack.SelectedSection = content
 	}
@@ -113,16 +142,20 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 	if urlScheduleID != bearerScheduleID {
 		return nil, nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
 	}
-	scheduleID, examID, providerKey, versionID, err := s.startScheduleBinding(ctx, bearerScheduleID)
+	scheduleID, examID, providerKey, versionID, err := s.startModuleBinding(ctx, bearerScheduleID, bearerAttemptID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if providerKey != "sat" {
-		return nil, nil, apperrors.New(apperrors.CodeUnsupportedProvider, "The assessment provider is not supported.")
-	}
-	if err := s.saveAttemptBinding(ctx, scheduleID, bearerAttemptID, examID); err != nil {
-		return nil, nil, err
-	}
+	return s.startModuleWithBinding(ctx, startModuleBindingResult{
+		scheduleID: scheduleID, examID: examID, providerKey: providerKey, versionID: versionID,
+	}, bearerAttemptID, moduleID, generation, controlEpoch, compact, writerBinding...)
+}
+
+// startModuleWithBinding lets a cold-content entry reuse its successful-path
+// ownership/content preflight. All mutable writer, control-epoch, module, and
+// timing gates remain inside the start transaction.
+func (s *Service) startModuleWithBinding(ctx context.Context, binding startModuleBindingResult, bearerAttemptID, moduleID string, generation, controlEpoch *int, compact bool, writerBinding ...string) (*Bootstrap, *SatModuleEntryAck, error) {
+	scheduleID, examID, providerKey, versionID := binding.scheduleID, binding.examID, binding.providerKey, binding.versionID
 	// Module entry is not a reconciliation trigger for a module that is
 	// already seeded and waiting to start. Reconcile holds attempt + runtime +
 	// module FOR UPDATE locks, while a not_started module has no clock and
@@ -135,23 +168,35 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 	// active (a reload whose expired clock may need finalizing). The worker
 	// sweep and every bootstrap read reconcile the attempt independently, so
 	// entry traffic is no longer the primary driver of timeout work.
-	if seeded, probeErr := s.moduleEntryAwaitingStart(ctx, bearerAttemptID, moduleID); probeErr != nil || !seeded {
+	seeded, probeErr := binding.moduleAwaitingStart, error(nil)
+	if !binding.preflightedModuleState {
+		seeded, probeErr = s.moduleEntryAwaitingStart(ctx, bearerAttemptID, moduleID)
+	}
+	if probeErr != nil || !seeded {
 		if _, err := s.ReconcileAttemptTimeout(ctx, scheduleID, bearerAttemptID, time.Now().UTC()); err != nil {
 			return nil, nil, err
 		}
 	}
 	var m2StartLag *float64
 	var hubEvents []liveupdates.Event
+	var entryWindowExpired bool
+	var entryTransition satBoundaryTransition
+	var runtimeSnapshot moduleTimingRuntimeSnapshot
+	var authoritySnapshot attemptAuthoritySnapshot
 	// B1: module CAS + writer fence are point writes (RC-safe).
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		m2StartLag = nil
-		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
+		entryWindowExpired = false
+		entryTransition = satBoundaryTransition{}
+		runtimeSnapshot = moduleTimingRuntimeSnapshot{}
+		authoritySnapshot = attemptAuthoritySnapshot{}
+		if err := s.ensureAttemptCanStartModuleWithAuthorityTx(ctx, t, scheduleID, bearerAttemptID, &runtimeSnapshot, &authoritySnapshot); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, writerBinding...); err != nil {
+		if err := enforceWriterSessionWithAuthorityTx(ctx, t, scheduleID, bearerAttemptID, writerBinding, &authoritySnapshot); err != nil {
 			return err
 		}
-		if err := enforceControlEpochTx(ctx, t, bearerAttemptID, controlEpoch); err != nil {
+		if err := enforceControlEpochSnapshot(bearerAttemptID, &authoritySnapshot, controlEpoch); err != nil {
 			return err
 		}
 		module, err := lockModuleAttemptTx(ctx, t, bearerAttemptID, moduleID)
@@ -161,7 +206,7 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 		// SAT-006: the gate reads the authoritative DB time after the runtime
 		// and section rows are locked; that instant — not the pre-tx wall
 		// clock — judges both the cohort deadline and the personal window.
-		gated, err := s.moduleTimingGateTx(ctx, t, scheduleID, module.moduleID)
+		gated, err := s.moduleTimingGateWithRuntimeTx(ctx, t, scheduleID, module.moduleID, runtimeSnapshot)
 		if err != nil {
 			return err
 		}
@@ -174,14 +219,18 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 			// resume, terminal→resume (bootstrap shows terminal). Generation is
 			// accepted but ignored: retries resume authoritative state.
 			_ = generation
-			var pendingBreak bool
-			if err := t.QueryRowContext(ctx,
-				"SELECT EXISTS(SELECT 1 FROM assessment_attempt_breaks WHERE attempt_id = ? AND state <> 'completed')",
-				bearerAttemptID).Scan(&pendingBreak); err != nil {
-				return err
-			}
-			if pendingBreak {
+			if runtimeSnapshot.pendingBreak {
 				return assessmentConflict("PERSONAL_BREAK_PENDING", "The scheduled break must finish before the next SAT module can start.")
+			}
+			// A module can already be active when this idempotent entry path is
+			// reached (for example after a runtime-start/recovery race). Ensure
+			// the durable policy boundary exists before treating that activation
+			// as a resume; otherwise the timeout worker would only see legacy
+			// module state and could auto-close it.
+			if module.state == "active" || module.state == "review" {
+				if _, err := ensureSatModuleBoundaryAndLockTx(ctx, t, bearerAttemptID, module.id, runtimeSnapshot.recoveryPolicy); err != nil {
+					return err
+				}
 			}
 			if module.availableAt != nil && gateNow.Before(*module.availableAt) {
 				return apperrors.New(apperrors.CodeAssessmentConflict, "This SAT module is not available until the scheduled break ends.")
@@ -205,9 +254,16 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 					m2StartLag = &lag
 				}
 			}
-			events, err := s.activatePersonalModuleTx(ctx, t, scheduleID, bearerAttemptID, module, gateNow)
+			events, expired, transition, err := s.activatePersonalModuleWithPolicyTx(
+				ctx, t, scheduleID, bearerAttemptID, module, gateNow, true, runtimeSnapshot.recoveryPolicy,
+			)
 			if err != nil {
 				return err
+			}
+			if expired {
+				entryWindowExpired = true
+				entryTransition = transition
+				return nil
 			}
 			hubEvents = events
 			return nil
@@ -239,7 +295,7 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 			allocatedSeconds = cohortModuleWindowSeconds(allocatedSeconds, gated.roomWindowEnd, gateNow)
 		}
 		res, err := t.ExecContext(ctx,
-			"UPDATE assessment_module_attempts SET state = 'active', allocated_seconds = ?, available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'",
+			"UPDATE assessment_module_attempts SET state = 'active', allocated_seconds = ?, available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'"+sectionEntryActivationSQL("assessment_module_attempts"),
 			allocatedSeconds, gateNow, gateNow, module.id)
 		if err != nil {
 			return err
@@ -266,6 +322,12 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 	}); err != nil {
 		return nil, nil, err
 	}
+	if entryTransition.from != "" {
+		recordSATRecoveryBoundaryTransition(entryTransition)
+	}
+	if entryWindowExpired {
+		return nil, nil, assessmentConflict("SAT_ENTRY_WINDOW_EXPIRED", "The module entry window expired. Ask your proctor for recovery options.")
+	}
 	if m2StartLag != nil {
 		telemetry.ObserveSeconds(telemetry.MSATM2StartLagSeconds, *m2StartLag, "starter", "client")
 	}
@@ -286,6 +348,94 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 	return out, nil, nil
 }
 
+const startModuleContentPreflightQuery = `
+	SELECT s.id, s.exam_id, e.provider_key, s.published_version_id, e.exam_type,
+		v.revision, v.sat_publish_scope, l.enabled_sections, m.state
+	FROM exam_schedules s
+	JOIN exam_entities e ON e.id = s.exam_id
+	JOIN student_attempts a ON a.schedule_id = s.id AND a.exam_id = s.exam_id
+	JOIN assessment_module_attempts m ON m.attempt_id = a.id AND m.module_id = ?
+	JOIN exam_versions v ON v.id = a.published_version_id AND v.id = s.published_version_id
+	LEFT JOIN assessment_access_links l ON l.schedule_id = s.id
+	WHERE s.id = ? AND a.id = ?`
+
+// startModuleContentPreflight folds the successful needContent pre-reads into
+// one indexed query: schedule/attempt binding, selected-module ownership and
+// state, and the section-scope facts used to select immutable content. The
+// transaction still rechecks every mutable write gate and locks the module.
+func (s *Service) startModuleContentPreflight(ctx context.Context, scheduleID, attemptID, moduleID string) (startModuleBindingResult, *DeliverySection, bool, error) {
+	var binding startModuleBindingResult
+	var examType, moduleState string
+	var revision int64
+	var publishScope, linkScope sql.NullString
+	err := s.db.QueryRowContext(ctx, startModuleContentPreflightQuery, moduleID, scheduleID, attemptID).Scan(
+		&binding.scheduleID, &binding.examID, &binding.providerKey, &binding.versionID, &examType,
+		&revision, &publishScope, &linkScope, &moduleState,
+	)
+	if err == sql.ErrNoRows {
+		return startModuleBindingResult{}, nil, false, nil
+	}
+	if err != nil {
+		return startModuleBindingResult{}, nil, false, err
+	}
+	binding.providerKey = examdomain.EffectiveProviderKey(binding.providerKey, examType)
+	if binding.providerKey != "sat" {
+		return startModuleBindingResult{}, nil, false, apperrors.New(apperrors.CodeUnsupportedProvider, "The assessment provider is not supported.")
+	}
+	sections, err := s.cachedSections(ctx, binding.versionID, revision)
+	if err != nil {
+		return startModuleBindingResult{}, nil, false, err
+	}
+	scope := examdomain.IntersectSectionScopes(
+		examdomain.ParseSATPublishScope(publishScope.String),
+		examdomain.ParseStoredSectionScope(linkScope),
+	)
+	selected, err := selectedModuleFromSections(sections, scope, moduleID)
+	if err != nil {
+		return startModuleBindingResult{}, nil, false, err
+	}
+	binding.preflightedModuleState = true
+	binding.moduleAwaitingStart = moduleState == "not_started"
+	return binding, selected, true, nil
+}
+
+// startModuleBinding combines the common schedule/provider and attempt-owner
+// preflight into one indexed read. Keep the older reads as a no-row fallback:
+// they preserve the existing not-found, unsupported-provider, and ownership
+// errors without adding latency to the valid synchronized-entry path.
+func (s *Service) startModuleBinding(ctx context.Context, scheduleID, attemptID string) (id, examID, providerKey, versionID string, err error) {
+	var examType string
+	err = s.db.QueryRowContext(ctx, `
+		SELECT s.id, s.exam_id, e.provider_key, s.published_version_id, e.exam_type
+		FROM exam_schedules s
+		JOIN exam_entities e ON e.id = s.exam_id
+		JOIN student_attempts a ON a.schedule_id = s.id AND a.exam_id = s.exam_id
+		WHERE s.id = ? AND a.id = ?`, scheduleID, attemptID).
+		Scan(&id, &examID, &providerKey, &versionID, &examType)
+	if err == nil {
+		providerKey = examdomain.EffectiveProviderKey(providerKey, examType)
+		if providerKey != "sat" {
+			return "", "", "", "", apperrors.New(apperrors.CodeUnsupportedProvider, "The assessment provider is not supported.")
+		}
+		return id, examID, providerKey, versionID, nil
+	}
+	if err != sql.ErrNoRows {
+		return "", "", "", "", err
+	}
+
+	id, examID, providerKey, versionID, err = s.startScheduleBinding(ctx, scheduleID)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	if providerKey != "sat" {
+		return "", "", "", "", apperrors.New(apperrors.CodeUnsupportedProvider, "The assessment provider is not supported.")
+	}
+	if err := s.saveAttemptBinding(ctx, id, attemptID, examID); err != nil {
+		return "", "", "", "", err
+	}
+	return id, examID, providerKey, versionID, nil
+}
+
 // activatePersonalModuleTx is the single personal-model activation write: a
 // not_started module becomes active with its full authored allocation and
 // started_at at the authoritative in-transaction DB instant, the attempt moves
@@ -293,28 +443,48 @@ func (s *Service) startModuleWithResponse(ctx context.Context, bearerScheduleID,
 // appended. Both the per-module StartModule and the SAT code-start first entry
 // call it while holding the attempt and module row locks; a concurrent
 // activation loses the CAS and is reported as a refresh conflict.
-func (s *Service) activatePersonalModuleTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, module saveActiveModule, now time.Time) ([]liveupdates.Event, error) {
+func (s *Service) activatePersonalModuleTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, module saveActiveModule, now time.Time, enforceEntryWindow bool) ([]liveupdates.Event, bool, satBoundaryTransition, error) {
+	policy, err := satRecoveryPolicyTx(ctx, t, attemptID)
+	if err != nil {
+		return nil, false, satBoundaryTransition{}, err
+	}
+	return s.activatePersonalModuleWithPolicyTx(ctx, t, scheduleID, attemptID, module, now, enforceEntryWindow, policy)
+}
+
+// activatePersonalModuleWithPolicyTx reuses the transaction's runtime snapshot
+// when module entry already read the schedule-pinned delivery policy.
+func (s *Service) activatePersonalModuleWithPolicyTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, module saveActiveModule, now time.Time, enforceEntryWindow bool, policy *attempts.SATDeliveryPolicy) ([]liveupdates.Event, bool, satBoundaryTransition, error) {
+	if _, err := ensureSatModuleBoundaryAndLockTx(ctx, t, attemptID, module.id, policy); err != nil {
+		return nil, false, satBoundaryTransition{}, err
+	}
+	expired, transition, err := beginSatModuleBoundaryTx(ctx, t, attemptID, module.id, policy, module.allocatedSeconds, now, enforceEntryWindow)
+	if err != nil {
+		return nil, false, satBoundaryTransition{}, err
+	}
+	if expired {
+		return nil, true, transition, nil
+	}
 	res, err := t.ExecContext(ctx,
-		"UPDATE assessment_module_attempts SET state = 'active', allocated_seconds = ?, available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'",
+		"UPDATE assessment_module_attempts SET state = 'active', allocated_seconds = ?, available_at = COALESCE(available_at, ?), started_at = ?, paused_at = NULL, revision = revision + 1 WHERE id = ? AND state = 'not_started'"+sectionEntryActivationSQL("assessment_module_attempts"),
 		module.allocatedSeconds, now, now, module.id)
 	if err != nil {
-		return nil, err
+		return nil, false, satBoundaryTransition{}, err
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, false, satBoundaryTransition{}, err
 	}
 	if n != 1 {
-		return nil, apperrors.New(apperrors.CodeAssessmentConflict, "The SAT module was started by another request. Refresh and continue.")
+		return nil, false, satBoundaryTransition{}, assessmentConflict("SECTION_FORM_REQUIRED", "Complete this section form before starting, or refresh to resume an already started module.")
 	}
 	if err := markProviderAttemptExamPhaseInTx(ctx, t, attemptID); err != nil {
-		return nil, err
+		return nil, false, satBoundaryTransition{}, err
 	}
 	rev, err := s.appendModuleEventsTx(ctx, t, scheduleID, attemptID, liveEventModuleStarted)
 	if err != nil {
-		return nil, err
+		return nil, false, satBoundaryTransition{}, err
 	}
-	return dualModuleEvents(scheduleID, attemptID, rev, liveEventModuleStarted), nil
+	return dualModuleEvents(scheduleID, attemptID, rev, liveEventModuleStarted), false, satBoundaryTransition{}, nil
 }
 
 // armPersonalModuleOfferTx is deprecated: the normal path now activates
@@ -452,13 +622,14 @@ func (s *Service) enterModuleWithResponse(ctx context.Context, scheduleID, attem
 	}
 	var hubEvents []liveupdates.Event
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
-		if err := s.ensureAttemptCanWorkTx(ctx, t, boundSchedule, attemptID); err != nil {
+		var authority attemptAuthoritySnapshot
+		if err := s.ensureAttemptCanWorkWithAuthorityTx(ctx, t, boundSchedule, attemptID, nil, &authority); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, boundSchedule, attemptID, writerBinding...); err != nil {
+		if err := enforceWriterSessionWithAuthorityTx(ctx, t, boundSchedule, attemptID, writerBinding, &authority); err != nil {
 			return err
 		}
-		if err := enforceControlEpochTx(ctx, t, attemptID, req.ControlEpoch); err != nil {
+		if err := enforceControlEpochSnapshot(attemptID, &authority, req.ControlEpoch); err != nil {
 			return err
 		}
 		module, err := lockModuleAttemptTx(ctx, t, attemptID, req.ModuleID)
@@ -507,7 +678,7 @@ func (s *Service) enterModuleWithResponse(ctx context.Context, scheduleID, attem
 			    entry_confirmed_at = UTC_TIMESTAMP(6), available_at = COALESCE(available_at, entry_starts_at),
 			    paused_at = NULL, revision = revision + 1
 			WHERE id = ? AND state = 'not_started' AND entry_generation = ?
-			  AND entry_starts_at = ? AND entry_confirmed_at IS NULL AND entry_entered_at IS NULL`,
+			  AND entry_starts_at = ? AND entry_confirmed_at IS NULL AND entry_entered_at IS NULL`+sectionEntryActivationSQL("assessment_module_attempts"),
 			module.id, generation, startsAt.Time)
 		if err != nil {
 			return err
@@ -568,13 +739,14 @@ func (s *Service) MarkStageVisible(ctx context.Context, scheduleID, attemptID, u
 	}
 	ack := &SatStageVisibleAck{ModuleID: req.ModuleID}
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
-		if err := s.ensureAttemptCanWorkTx(ctx, t, boundSchedule, attemptID); err != nil {
+		var authority attemptAuthoritySnapshot
+		if err := s.ensureAttemptCanWorkWithAuthorityTx(ctx, t, boundSchedule, attemptID, nil, &authority); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, boundSchedule, attemptID, writerBinding...); err != nil {
+		if err := enforceWriterSessionWithAuthorityTx(ctx, t, boundSchedule, attemptID, writerBinding, &authority); err != nil {
 			return err
 		}
-		if err := enforceControlEpochTx(ctx, t, attemptID, req.ControlEpoch); err != nil {
+		if err := enforceControlEpochSnapshot(attemptID, &authority, req.ControlEpoch); err != nil {
 			return err
 		}
 		module, err := lockModuleAttemptTx(ctx, t, attemptID, req.ModuleID)
@@ -646,10 +818,11 @@ func (s *Service) SubmitModule(ctx context.Context, bearerScheduleID, bearerAtte
 	var hubEvents []liveupdates.Event
 	// B1: module CAS + writer fence are point writes (RC-safe).
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
-		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
+		var authority attemptAuthoritySnapshot
+		if err := s.ensureAttemptCanWorkWithAuthorityTx(ctx, t, scheduleID, bearerAttemptID, nil, &authority); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, writerBinding...); err != nil {
+		if err := enforceWriterSessionWithAuthorityTx(ctx, t, scheduleID, bearerAttemptID, writerBinding, &authority); err != nil {
 			return err
 		}
 		active, err := lockModuleAttemptTx(ctx, t, bearerAttemptID, moduleID)
@@ -794,10 +967,8 @@ func (s *Service) appendModuleEventsTx(ctx context.Context, t tx.Tx, scheduleID,
 	if s != nil && s.liveDirect {
 		return rev, nil
 	}
-	if err := liveupdates.AppendInTx(ctx, t, s.liveOrigin, liveupdates.KindAttempt, attemptID, rev, name, nil); err != nil {
-		return 0, err
-	}
-	if err := liveupdates.AppendInTx(ctx, t, s.liveOrigin, liveupdates.KindScheduleRoster, scheduleID, rev, name, nil); err != nil {
+	events := dualModuleEvents(scheduleID, attemptID, rev, name)
+	if err := liveupdates.AppendPairInTx(ctx, t, s.liveOrigin, events[0], events[1]); err != nil {
 		return 0, err
 	}
 	return rev, nil
@@ -950,6 +1121,16 @@ type nextModuleRow struct {
 	awaitingRoute bool
 }
 
+// moduleFollowupContext reuses values already read under the owning
+// transaction's runtime/policy fences when a module close opens its follow-up.
+// Callers without those authoritative snapshots pass nil and keep the lookup
+// path below.
+type moduleFollowupContext struct {
+	timingModel    string
+	handoffMode    string
+	recoveryPolicy *attempts.SATDeliveryPolicy
+}
+
 // Route basis values recorded on assessment_route_decisions.route_basis: what
 // closed the base module whose score chose the branch.
 const (
@@ -975,12 +1156,13 @@ type routeAudit struct {
 // follow-up module attempt. Historical student_submit rows stay readable, but
 // new finalizations accept only timeout or authorized proctor reasons.
 func (s *Service) finalizeModuleTx(ctx context.Context, t tx.Tx, attemptID string, active saveActiveModule, completionReason string) (*nextModuleRow, error) {
-	return s.finalizeModuleWithBasisTx(ctx, t, attemptID, active, completionReason, routeBasisWindowClosed)
+	return s.finalizeModuleWithBasisTx(ctx, t, attemptID, active, completionReason, routeBasisWindowClosed, nil)
 }
 
 // finalizeModuleWithBasisTx is finalizeModuleTx with the route basis the
-// caller observed (a confirmed close, the close window, a completed room).
-func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemptID string, active saveActiveModule, completionReason, basis string) (*nextModuleRow, error) {
+// caller observed (a confirmed close, the close window, a completed room) and
+// the already-validated context for opening the selected follow-up module.
+func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemptID string, active saveActiveModule, completionReason, basis string, followup *moduleFollowupContext) (*nextModuleRow, error) {
 	switch completionReason {
 	case "time_expired", "proctor_end", "proctor_terminate":
 	case "student_submit":
@@ -1031,7 +1213,7 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 	if next.awaitingRoute {
 		return next, nil
 	}
-	if err := s.openFollowUpModuleTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, next, audit, basis); err != nil {
+	if err := s.openFollowUpModuleTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, next, audit, basis, followup); err != nil {
 		return nil, err
 	}
 	return next, nil
@@ -1040,7 +1222,7 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 // openFollowUpModuleTx inserts the module attempt for the module a route
 // decision (or the next-section handoff) selected, honouring cohort/personal
 // timing, the scheduled break and the personal handoff mode.
-func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, currentSectionID string, breakAfterSeconds int, next *nextModuleRow, audit routeAudit, basis string) error {
+func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, currentSectionID string, breakAfterSeconds int, next *nextModuleRow, audit routeAudit, basis string, followup *moduleFollowupContext) error {
 	now, err := dbTimeTx(ctx, t)
 	if err != nil {
 		return err
@@ -1049,23 +1231,77 @@ func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, 
 		telemetry.ObserveSeconds(telemetry.MSATRouteLagSeconds, now.Sub(*audit.deadline).Seconds(), "basis", basis)
 	}
 
-	var cohortTimed, personalTimed int
-	if err := t.QueryRowContext(ctx,
-		"SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model IN ("+examruntime.CohortTimingModelsSQL+")), EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model = '"+examruntime.TimingModelPersonal+"')",
-		attemptID, attemptID).Scan(&cohortTimed, &personalTimed); err != nil {
-		return err
+	var cohortTimed, personalTimed bool
+	if followup != nil {
+		cohortTimed = examruntime.IsCohortTimed(followup.timingModel)
+		personalTimed = examruntime.IsSatPersonal(followup.timingModel)
+	} else {
+		var cohort, personal int
+		if err := t.QueryRowContext(ctx,
+			"SELECT EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model IN ("+examruntime.CohortTimingModelsSQL+")), EXISTS(SELECT 1 FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ? AND r.timing_model = '"+examruntime.TimingModelPersonal+"')",
+			attemptID, attemptID).Scan(&cohort, &personal); err != nil {
+			return err
+		}
+		cohortTimed, personalTimed = cohort != 0, personal != 0
+	}
+
+	// Cross-section entry is separate from ordinary adaptive Module 2 handoff.
+	if personalTimed && currentSectionID != next.sectionID {
+		gated, err := hasSectionEntryFormTx(ctx, t, attemptID, next.sectionKey)
+		if err != nil {
+			return err
+		}
+		if gated {
+			if breakAfterSeconds > 0 {
+				if err := createActivePersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, now); err != nil {
+					return err
+				}
+			}
+			return insertModuleAttemptTx(ctx, t, attemptID, next, nil)
+		}
 	}
 	availableAt := nextModuleAvailableAt(now, currentSectionID, next.sectionID, breakAfterSeconds)
-	if cohortTimed != 0 {
+	if cohortTimed {
 		availableAt = now
 	}
 	var handoffMode string
-	if personalTimed != 0 {
-		if err := t.QueryRowContext(ctx, "SELECT COALESCE(r.sat_handoff_mode, 'server_start') FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ?", attemptID).Scan(&handoffMode); err != nil {
-			return err
+	if personalTimed {
+		if followup != nil {
+			handoffMode = followup.handoffMode
+		} else {
+			if err := t.QueryRowContext(ctx, "SELECT COALESCE(r.sat_handoff_mode, 'server_start') FROM student_attempts sa JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id WHERE sa.id = ?", attemptID).Scan(&handoffMode); err != nil {
+				return err
+			}
 		}
 	}
-	if personalTimed != 0 {
+	var recoveryPolicy *attempts.SATDeliveryPolicy
+	if personalTimed {
+		if followup != nil {
+			recoveryPolicy = followup.recoveryPolicy
+		} else {
+			recoveryPolicy, err = satRecoveryPolicyTx(ctx, t, attemptID)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if personalTimed {
+		if recoveryPolicy != nil {
+			// Recovery-policy handoff never starts a working clock in routing or
+			// in the timeout worker. The selected module stays withheld and
+			// not_started until its owner explicitly enters it.
+			if currentSectionID != next.sectionID && breakAfterSeconds > 0 {
+				if err := createActivePersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, now); err != nil {
+					return err
+				}
+				availableAt = now.Add(time.Duration(breakAfterSeconds) * time.Second)
+			}
+			if err := insertModuleAttemptTx(ctx, t, attemptID, next, &availableAt); err != nil {
+				return err
+			}
+			telemetry.IncCounter(telemetry.MSATAdaptiveModuleOpenTotal, "role", next.adaptiveRole)
+			return nil
+		}
 		// Server-driven progression (product contract 2026-09-24):
 		// - Same-section adaptive (M1→M2): route selection + selected M2
 		//   creation happen atomically here.
@@ -1086,7 +1322,7 @@ func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, 
 			}
 			breakDeadline := now.Add(time.Duration(breakAfterSeconds) * time.Second)
 			availableAt = breakDeadline
-			if err := insertModuleAttemptTx(ctx, t, attemptID, next, availableAt); err != nil {
+			if err := insertModuleAttemptTx(ctx, t, attemptID, next, &availableAt); err != nil {
 				return err
 			}
 		} else if currentSectionID == next.sectionID && handoffMode == attempts.HandoffModeClientStart {
@@ -1098,7 +1334,7 @@ func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, 
 				return err
 			}
 		}
-	} else if err := insertModuleAttemptTx(ctx, t, attemptID, next, availableAt); err != nil {
+	} else if err := insertModuleAttemptTx(ctx, t, attemptID, next, &availableAt); err != nil {
 		return err
 	}
 	telemetry.IncCounter(telemetry.MSATAdaptiveModuleOpenTotal, "role", next.adaptiveRole)
@@ -1144,9 +1380,27 @@ func createActivePersonalBreakTx(ctx context.Context, t tx.Tx, attemptID, afterS
 // ACTIVE with started_at=DB NOW (server-driven M1→M2). The unique
 // (attempt_id, module_id) constraint keeps it idempotent.
 func insertActiveModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string, module *nextModuleRow, now time.Time) error {
-	_, err := t.ExecContext(ctx,
-		"INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, available_at, started_at, tool_state) VALUES (?, ?, ?, 'active', ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
-		uuid.NewString(), attemptID, module.id, module.durationSeconds, now, now, module.toolPolicy.String)
+	moduleAttemptID := uuid.NewString()
+	result, err := t.ExecContext(ctx,
+		`INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, available_at, started_at, tool_state)
+         SELECT candidate.id, candidate.attempt_id, candidate.module_id, 'active', candidate.seconds, candidate.available_at, candidate.started_at, candidate.tool_state
+         FROM (SELECT ? AS id, ? AS attempt_id, ? AS module_id, ? AS seconds, ? AS available_at, ? AS started_at, ? AS tool_state) candidate
+         WHERE 1=1`+sectionEntryActivationSQL("candidate")+` ON DUPLICATE KEY UPDATE id = assessment_module_attempts.id`,
+		moduleAttemptID, attemptID, module.id, module.durationSeconds, now, now, module.toolPolicy.String)
+	if err != nil {
+		return err
+	}
+	inserted, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if inserted == 0 {
+		// A staff-forced predecessor close may reach a section before its
+		// form was accepted. Seed a waiting module; never start it unseen.
+		// An existing module is retained by the same identity constraint.
+		return insertModuleAttemptTx(ctx, t, attemptID, module, nil)
+	}
+	_, err = ensureSatModuleBoundaryTx(ctx, t, attemptID, moduleAttemptID)
 	return err
 }
 
@@ -1156,9 +1410,14 @@ func insertActiveModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string,
 // StartModule — when the browser receives the module — or at auto_start_at.
 // The unique (attempt_id, module_id) constraint keeps it idempotent.
 func insertAwaitingModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string, module *nextModuleRow, now, autoStartAt time.Time) error {
+	moduleAttemptID := uuid.NewString()
 	_, err := t.ExecContext(ctx,
 		"INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, available_at, auto_start_at, tool_state) VALUES (?, ?, ?, 'not_started', ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
-		uuid.NewString(), attemptID, module.id, module.durationSeconds, now, autoStartAt, module.toolPolicy.String)
+		moduleAttemptID, attemptID, module.id, module.durationSeconds, now, autoStartAt, module.toolPolicy.String)
+	if err != nil {
+		return err
+	}
+	_, err = ensureSatModuleBoundaryTx(ctx, t, attemptID, moduleAttemptID)
 	return err
 }
 
@@ -1646,9 +1905,14 @@ func nextModuleAvailableAt(now time.Time, currentSectionID, nextSectionID string
 // insertModuleAttemptTx mirrors insert_module_attempt_tx (Rust
 // assessment_delivery.rs:1399): the unique (attempt_id, module_id) constraint
 // is the identity fence (ON DUPLICATE KEY UPDATE id = id).
-func insertModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string, module *nextModuleRow, availableAt time.Time) error {
+func insertModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string, module *nextModuleRow, availableAt *time.Time) error {
+	moduleAttemptID := uuid.NewString()
 	_, err := t.ExecContext(ctx,
 		"INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, available_at, started_at, tool_state) VALUES (?, ?, ?, 'not_started', ?, ?, NULL, ?) ON DUPLICATE KEY UPDATE id = id",
-		uuid.NewString(), attemptID, module.id, module.durationSeconds, availableAt, module.toolPolicy.String)
+		moduleAttemptID, attemptID, module.id, module.durationSeconds, availableAt, module.toolPolicy.String)
+	if err != nil {
+		return err
+	}
+	_, err = ensureSatModuleBoundaryTx(ctx, t, attemptID, moduleAttemptID)
 	return err
 }

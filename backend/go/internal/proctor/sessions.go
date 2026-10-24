@@ -75,6 +75,7 @@ type SessionSchedule struct {
 	ExamID                 string                     `json:"examId"`
 	ProviderKey            string                     `json:"providerKey"`
 	SatTimingModel         *string                    `json:"satTimingModel,omitempty"`
+	IeltsTimingModel       *string                    `json:"ieltsTimingModel,omitempty"`
 	OrganizationID         *string                    `json:"organizationId"`
 	ExamTitle              string                     `json:"examTitle"`
 	ProctorDisplayName     string                     `json:"proctorDisplayName"`
@@ -245,9 +246,15 @@ type StudentSessionSummary struct {
 	// "granted" (a proctor already re-armed it) — because both failures the
 	// candidate sees tell them to "ask the proctor to re-arm", and the proctor can
 	// only act on a stage they can see and name.
-	RuntimeEntryModuleAttemptID *string `json:"runtimeEntryModuleAttemptId"`
-	RuntimeEntryModuleTitle     *string `json:"runtimeEntryModuleTitle"`
-	RuntimeEntryState           *string `json:"runtimeEntryState"`
+	RuntimeEntryModuleAttemptID *string    `json:"runtimeEntryModuleAttemptId"`
+	RuntimeEntryModuleTitle     *string    `json:"runtimeEntryModuleTitle"`
+	RuntimeEntryState           *string    `json:"runtimeEntryState"`
+	SATRecoveryModuleAttemptID  *string    `json:"satRecoveryModuleAttemptId,omitempty"`
+	SATRecoveryModuleTitle      *string    `json:"satRecoveryModuleTitle,omitempty"`
+	SATRecoveryPhase            *string    `json:"satRecoveryPhase,omitempty"`
+	SATRecoveryKind             *string    `json:"satRecoveryKind,omitempty"`
+	SATRecoveryDeadlineAt       *time.Time `json:"satRecoveryDeadlineAt,omitempty"`
+	SATRecoveryBoundaryRevision *uint64    `json:"satRecoveryBoundaryRevision,omitempty"`
 	// Runtime identity fence (SAT adaptive routing). Heartbeat/`lastActivity`
 	// orders presence, not exam state: two projections of one candidate can
 	// share a heartbeat instant while describing different adaptive modules, so
@@ -258,17 +265,21 @@ type StudentSessionSummary struct {
 	// adaptive role) — the same row the delivery service and the final result
 	// read, so staff, student and result cannot disagree about which Module 2
 	// the candidate is sitting.
-	RuntimeAttemptRevision       *int64          `json:"attemptRevision"`
-	RuntimeCurrentModuleID       *string         `json:"runtimeCurrentModuleId"`
-	RuntimeModuleAttemptID       *string         `json:"runtimeModuleAttemptId"`
-	RuntimeModuleAttemptRevision *int            `json:"runtimeModuleAttemptRevision"`
-	RuntimeSectionStatus         *string         `json:"runtimeSectionStatus"`
-	RuntimeWaiting               bool            `json:"runtimeWaiting"`
-	Violations                   json.RawMessage `json:"violations"`
-	Warnings                     int             `json:"warnings"`
-	LastActivity                 time.Time       `json:"lastActivity"`
-	ExamID                       string          `json:"examId"`
-	ExamName                     string          `json:"examName"`
+	RuntimeAttemptRevision            *int64          `json:"attemptRevision"`
+	RuntimeCurrentModuleID            *string         `json:"runtimeCurrentModuleId"`
+	RuntimeModuleAttemptID            *string         `json:"runtimeModuleAttemptId"`
+	RuntimeModuleAttemptRevision      *int            `json:"runtimeModuleAttemptRevision"`
+	RuntimeSectionStatus              *string         `json:"runtimeSectionStatus"`
+	RuntimeWaiting                    bool            `json:"runtimeWaiting"`
+	IELTSPersonalStatus               *string         `json:"ieltsPersonalStatus,omitempty"`
+	IELTSPersonalSectionKey           *string         `json:"ieltsPersonalSectionKey,omitempty"`
+	IELTSPersonalDeadlineAt           *time.Time      `json:"ieltsPersonalDeadlineAt,omitempty"`
+	IELTSPersonalTimeRemainingSeconds *int            `json:"ieltsPersonalTimeRemainingSeconds,omitempty"`
+	Violations                        json.RawMessage `json:"violations"`
+	Warnings                          int             `json:"warnings"`
+	LastActivity                      time.Time       `json:"lastActivity"`
+	ExamID                            string          `json:"examId"`
+	ExamName                          string          `json:"examName"`
 	// SatStartState is the SAT access-code start disposition for code-start
 	// sessions: "waiting_for_code" (admitted, not started), "started", or
 	// "never_started" (closed without a start; no result). Null for proctor
@@ -397,7 +408,7 @@ func requireSessionReader(actor Actor) error {
 
 // sessionScheduleColumns is the explicit exam_schedules projection (never
 // SELECT *), mirroring the Rust ExamSchedule field set.
-const sessionScheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, status, created_at, created_by, updated_at, revision, (SELECT sat_publish_scope FROM exam_versions WHERE id = exam_schedules.published_version_id), sat_timing_model, COALESCE(sat_start_mode, 'proctor')"
+const sessionScheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, proctor_display_name, grading_display_name, published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, status, created_at, created_by, updated_at, revision, (SELECT sat_publish_scope FROM exam_versions WHERE id = exam_schedules.published_version_id), sat_timing_model, ielts_timing_model, COALESCE(sat_start_mode, 'proctor')"
 
 func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSchedule, error) {
 	var s SessionSchedule
@@ -406,13 +417,13 @@ func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSched
 	var bufBefore, bufAfter sql.NullInt64
 	var autoStart, autoStop sql.NullBool
 	var planned, recInterval, revision int64
-	var publishScope, satTimingModel sql.NullString
+	var publishScope, satTimingModel, ieltsTimingModel sql.NullString
 	if err := row.Scan(
 		&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle,
 		&s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName,
 		&institution, &s.StartTime, &s.EndTime, &planned, &s.DeliveryMode,
 		&s.RecurrenceType, &recInterval, &recEnd, &bufBefore, &bufAfter,
-		&autoStart, &autoStop, &s.Status, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &revision, &publishScope, &satTimingModel, &s.SatStartMode,
+		&autoStart, &autoStop, &s.Status, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &revision, &publishScope, &satTimingModel, &ieltsTimingModel, &s.SatStartMode,
 	); err != nil {
 		return SessionSchedule{}, err
 	}
@@ -428,6 +439,7 @@ func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSched
 	s.Revision = revision
 	s.PublishScope = examdomain.SATPublishScope(publishScope.String)
 	s.SatTimingModel = nullStringPtr(satTimingModel)
+	s.IeltsTimingModel = nullStringPtr(ieltsTimingModel)
 	if s.PublishScope != examdomain.SATPublishScopeFull && s.PublishScope != examdomain.SATPublishScopeReadingWriting && s.PublishScope != examdomain.SATPublishScopeMath {
 		s.PublishScope = examdomain.SATPublishScopeFull
 	}
@@ -682,7 +694,9 @@ func hydrateSessionRuntime(row sessionRuntimeRow, sections []SessionRuntimeSecti
 // doc): empty plan/sections arrays keep the wire shape.
 func notStartedSessionRuntime(schedule SessionSchedule, now time.Time) SessionRuntime {
 	choice := ""
-	if schedule.SatTimingModel != nil {
+	if strings.EqualFold(schedule.ProviderKey, "ielts") && schedule.IeltsTimingModel != nil {
+		choice = *schedule.IeltsTimingModel
+	} else if schedule.SatTimingModel != nil {
 		choice = *schedule.SatTimingModel
 	}
 	return NotStartedRuntimeWithChoice(schedule.ID, schedule.ExamID, schedule.ProviderKey, choice, now)
@@ -995,14 +1009,15 @@ func filterSessionPlanScope(plan []SessionPlanSection, scope map[string]bool) []
 // persisted remaining-seconds value instead of the live clock/deadline.
 func LoadSessionRuntimeBySchedule(ctx context.Context, db *sql.DB, scheduleID string) (SessionRuntime, error) {
 	var schedule SessionSchedule
-	var satTimingModel sql.NullString
+	var satTimingModel, ieltsTimingModel sql.NullString
 	if err := db.QueryRowContext(ctx, `
-		SELECT id, exam_id, provider_key, sat_timing_model
+		SELECT id, exam_id, provider_key, sat_timing_model, ielts_timing_model
 		FROM exam_schedules
-		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel); err != nil {
+		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel, &ieltsTimingModel); err != nil {
 		return SessionRuntime{}, err
 	}
 	schedule.SatTimingModel = nullStringPtr(satTimingModel)
+	schedule.IeltsTimingModel = nullStringPtr(ieltsTimingModel)
 	return loadSessionRuntime(ctx, db, schedule, time.Now().UTC())
 }
 
@@ -1032,14 +1047,15 @@ func LoadExamPlanBySchedule(ctx context.Context, db *sql.DB, scheduleID string) 
 // status comes from the pre-probed row the caller already holds.
 func LoadSessionRuntimeByStatus(ctx context.Context, db sessionQuerier, scheduleID, status string) (SessionRuntime, error) {
 	var schedule SessionSchedule
-	var satTimingModel sql.NullString
+	var satTimingModel, ieltsTimingModel sql.NullString
 	if err := db.QueryRowContext(ctx, `
-		SELECT id, exam_id, provider_key, sat_timing_model
+		SELECT id, exam_id, provider_key, sat_timing_model, ielts_timing_model
 		FROM exam_schedules
-		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel); err != nil {
+		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel, &ieltsTimingModel); err != nil {
 		return SessionRuntime{}, err
 	}
 	schedule.SatTimingModel = nullStringPtr(satTimingModel)
+	schedule.IeltsTimingModel = nullStringPtr(ieltsTimingModel)
 	now := time.Now().UTC()
 	var row sessionRuntimeRow
 	if err := db.QueryRowContext(ctx,
@@ -1073,32 +1089,35 @@ func hydrateSessionRuntimeByRow(ctx context.Context, db sessionQuerier, row sess
 
 // studentSessionRow is the raw detail projection row.
 type studentSessionRow struct {
-	id, candidateID, candidateName, candidateEmail, scheduleID string
-	currentModule, phase                                       string
-	integrity, violations                                      sql.NullString
-	examID, examTitle                                          string
-	updatedAt                                                  time.Time
-	proctorStatus                                              string
-	lastWarningID                                              sql.NullString
-	presenceHBAt                                               sql.NullTime
-	presenceHBStatus                                           sql.NullString
-	providerKey                                                string
-	satModuleTitle, satModuleKey, satModuleRole                sql.NullString
-	satStartedAt, satPausedAt                                  sql.NullTime
-	satAllocated, satExtension, satAccum                       sql.NullInt64
-	attemptRevision                                            int64
-	satModuleAttemptID, satModuleID                            sql.NullString
-	satModuleAttemptRevision                                   sql.NullInt64
-	satBreakID, satBreakState                                  sql.NullString
-	satBreakDuration, satBreakAccum                            sql.NullInt64
-	satBreakStartsAt, satBreakPausedAt                         sql.NullTime
-	satBreakEntryStartsAt, satBreakDeadlineAt                  sql.NullTime
-	satEntryModuleAttemptID, satEntryModuleID, satEntryTitle   sql.NullString
-	satEntryGeneration                                         sql.NullInt64
-	satEntryStartsAt, satEntryProctorRearmAt                   sql.NullTime
-	satEntryAutoStartAt                                        sql.NullTime
-	satStartCodeRequired                                       bool
-	satStartCodeAcceptedAt                                     sql.NullTime
+	id, candidateID, candidateName, candidateEmail, scheduleID                            string
+	currentModule, phase                                                                  string
+	integrity, violations                                                                 sql.NullString
+	examID, examTitle                                                                     string
+	updatedAt                                                                             time.Time
+	proctorStatus                                                                         string
+	lastWarningID                                                                         sql.NullString
+	presenceHBAt                                                                          sql.NullTime
+	presenceHBStatus                                                                      sql.NullString
+	providerKey                                                                           string
+	satModuleTitle, satModuleKey, satModuleRole                                           sql.NullString
+	satStartedAt, satPausedAt                                                             sql.NullTime
+	satAllocated, satExtension, satAccum                                                  sql.NullInt64
+	attemptRevision                                                                       int64
+	satModuleAttemptID, satModuleID                                                       sql.NullString
+	satModuleAttemptRevision                                                              sql.NullInt64
+	satBreakID, satBreakState                                                             sql.NullString
+	satBreakDuration, satBreakAccum                                                       sql.NullInt64
+	satBreakStartsAt, satBreakPausedAt                                                    sql.NullTime
+	satBreakEntryStartsAt, satBreakDeadlineAt                                             sql.NullTime
+	satEntryModuleAttemptID, satEntryModuleID, satEntryTitle                              sql.NullString
+	satEntryGeneration                                                                    sql.NullInt64
+	satEntryStartsAt, satEntryProctorRearmAt                                              sql.NullTime
+	satEntryAutoStartAt                                                                   sql.NullTime
+	satStartCodeRequired                                                                  bool
+	satStartCodeAcceptedAt                                                                sql.NullTime
+	satRecoveryModuleAttemptID, satRecoveryModuleTitle, satRecoveryPhase, satRecoveryKind sql.NullString
+	satRecoveryDeadlineAt                                                                 sql.NullTime
+	satRecoveryBoundaryRevision                                                           sql.NullInt64
 }
 
 // studentSessionColumns mirrors Rust load_student_sessions (explicit list).
@@ -1116,10 +1135,19 @@ const studentSessionColumns = "sa.id, sa.candidate_id, sa.candidate_name, sa.can
 	"sat_break.starts_at, sat_break.paused_at, sat_break.entry_starts_at, sat_break.deadline_at, " +
 	"sat_entry.id, sat_entry.module_id, sat_entry_module.title, sat_entry.entry_generation, " +
 	"sat_entry.entry_starts_at, sat_entry.entry_proctor_rearm_at, sat_entry.auto_start_at, " +
-	"sa.sat_start_code_required, sa.sat_start_code_accepted_at"
+	"sa.sat_start_code_required, sa.sat_start_code_accepted_at, " +
+	"COALESCE(sat_module_boundary.module_attempt_id, sat_entry_boundary.module_attempt_id), " +
+	"COALESCE(sat_module.title, sat_entry_module.title), " +
+	"COALESCE(sat_module_boundary.phase, sat_entry_boundary.phase), " +
+	"CASE WHEN sat_module_boundary.module_attempt_id IS NOT NULL THEN 'work' " +
+	"WHEN sat_entry_boundary.module_attempt_id IS NOT NULL THEN 'entry' END, " +
+	"COALESCE(sat_module_boundary.recovery_deadline_at, sat_entry_boundary.entry_deadline_at), " +
+	"COALESCE(sat_module_boundary.revision, sat_entry_boundary.revision)"
 
-const studentSessionFrom = "FROM student_attempts sa " +
-	"JOIN exam_entities e ON e.id = sa.exam_id " +
+const studentSessionFrom = "FROM student_attempts sa " + studentSessionJoins
+
+// studentSessionJoins hydrates each selected attempt row `sa`.
+const studentSessionJoins = "JOIN exam_entities e ON e.id = sa.exam_id " +
 	"LEFT JOIN student_attempt_presence presence ON presence.attempt_id = sa.id " +
 	"LEFT JOIN assessment_module_attempts sat_attempt ON sat_attempt.id = (" +
 	"SELECT ma2.id FROM assessment_module_attempts ma2 " +
@@ -1127,6 +1155,7 @@ const studentSessionFrom = "FROM student_attempts sa " +
 	"ORDER BY ma2.created_at DESC, ma2.id DESC LIMIT 1" +
 	") " +
 	"LEFT JOIN assessment_modules sat_module ON sat_module.id = sat_attempt.module_id " +
+	"LEFT JOIN assessment_module_boundaries sat_module_boundary ON sat_module_boundary.module_attempt_id = sat_attempt.id " +
 	// The attempt-owned SAT break stage, oldest unfinished row only: a break is
 	// created when the section before it finalizes, so an unfinished one is what
 	// the candidate is waiting on right now (and the row the module arm path
@@ -1144,7 +1173,8 @@ const studentSessionFrom = "FROM student_attempts sa " +
 	"WHERE ma3.attempt_id = sa.id AND ma3.state = 'not_started' AND ma3.entry_entered_at IS NULL " +
 	"ORDER BY ma3.created_at ASC, ma3.id ASC LIMIT 1" +
 	") " +
-	"LEFT JOIN assessment_modules sat_entry_module ON sat_entry_module.id = sat_entry.module_id"
+	"LEFT JOIN assessment_modules sat_entry_module ON sat_entry_module.id = sat_entry.module_id " +
+	"LEFT JOIN assessment_module_boundaries sat_entry_boundary ON sat_entry_boundary.module_attempt_id = sat_entry.id"
 
 func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSessionRow, error) {
 	var r studentSessionRow
@@ -1164,6 +1194,8 @@ func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSes
 		&r.satEntryModuleAttemptID, &r.satEntryModuleID, &r.satEntryTitle, &r.satEntryGeneration,
 		&r.satEntryStartsAt, &r.satEntryProctorRearmAt, &r.satEntryAutoStartAt,
 		&r.satStartCodeRequired, &r.satStartCodeAcceptedAt,
+		&r.satRecoveryModuleAttemptID, &r.satRecoveryModuleTitle, &r.satRecoveryPhase, &r.satRecoveryKind,
+		&r.satRecoveryDeadlineAt, &r.satRecoveryBoundaryRevision,
 	); err != nil {
 		return studentSessionRow{}, err
 	}
@@ -1541,6 +1573,33 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		}
 		satStartState = &state
 	}
+	var recoveryModuleAttemptID, recoveryModuleTitle, recoveryPhase, recoveryKind *string
+	var recoveryDeadline *time.Time
+	var recoveryRevision *uint64
+	if row.satRecoveryModuleAttemptID.Valid {
+		value := row.satRecoveryModuleAttemptID.String
+		recoveryModuleAttemptID = &value
+	}
+	if row.satRecoveryPhase.Valid {
+		value := row.satRecoveryPhase.String
+		recoveryPhase = &value
+	}
+	if row.satRecoveryModuleTitle.Valid {
+		value := row.satRecoveryModuleTitle.String
+		recoveryModuleTitle = &value
+	}
+	if row.satRecoveryKind.Valid {
+		value := row.satRecoveryKind.String
+		recoveryKind = &value
+	}
+	if row.satRecoveryDeadlineAt.Valid {
+		value := row.satRecoveryDeadlineAt.Time.UTC()
+		recoveryDeadline = &value
+	}
+	if row.satRecoveryBoundaryRevision.Valid && row.satRecoveryBoundaryRevision.Int64 > 0 {
+		value := uint64(row.satRecoveryBoundaryRevision.Int64)
+		recoveryRevision = &value
+	}
 	return StudentSessionSummary{
 		SatStartState:                 satStartState,
 		AttemptID:                     row.id,
@@ -1568,6 +1627,12 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		RuntimeEntryModuleAttemptID:   entryModuleAttemptID,
 		RuntimeEntryModuleTitle:       entryModuleTitle,
 		RuntimeEntryState:             entryState,
+		SATRecoveryModuleAttemptID:    recoveryModuleAttemptID,
+		SATRecoveryModuleTitle:        recoveryModuleTitle,
+		SATRecoveryPhase:              recoveryPhase,
+		SATRecoveryKind:               recoveryKind,
+		SATRecoveryDeadlineAt:         recoveryDeadline,
+		SATRecoveryBoundaryRevision:   recoveryRevision,
 		RuntimeAttemptRevision:        &attemptRevision,
 		RuntimeCurrentModuleID:        runtimeCurrentModuleID,
 		RuntimeModuleAttemptID:        runtimeModuleAttemptID,
@@ -2014,6 +2079,9 @@ func (s *Service) GetSessionDetail(ctx context.Context, actor Actor, scheduleID 
 	sessions := []StudentSessionSummary{}
 	for _, row := range rows {
 		sessions = append(sessions, attemptRowToSession(row, runtime))
+	}
+	if err := attachIELTSPersonalRosterStates(ctx, q, runtime, sessions); err != nil {
+		return ProctorSessionDetail{}, err
 	}
 	auditLogs, err := loadAuditLogs(ctx, q, scheduleID, auditLimit)
 	if err != nil {

@@ -74,6 +74,9 @@ describe("bluebook bans (Phase 0 skeleton)", () => {
   // the assert bans only REAL hardcoded styling (background: #3154d7 etc).
   it("has no hardcoded Bluebook hexes outside src/index.css", () => {
     for (const file of sources) {
+      // The answered exam paper is a separate @media print theme, portaled
+      // outside the live exam's token scope so printed copies remain legible.
+      if (file.endsWith("ui/transitions/score-report/sat-answered-paper.css")) continue;
       const text = readText(file)
         .replace(/var\([^()]*\)/g, "var()")
         .replace(/\/\/[^\n]*/g, "")

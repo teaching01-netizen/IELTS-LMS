@@ -14,7 +14,7 @@ import {
  * text ever reaches a command.
  */
 
-export const CATALOG_REVISION = '2026-10-18.1';
+export const CATALOG_REVISION = '2026-10-21.1';
 
 export type CommandResultKind = 'exit' | 'gofmt' | 'playwright' | 'k6' | 'browser-summary';
 
@@ -263,6 +263,7 @@ const SUITES: SuiteDefinition[] = [
       ['sat-answered-print', 'SAT answered print'],
       ['sat-code-start', 'SAT code start'],
       ['sat-staff-ux', 'SAT staff UX'],
+      ['sat-forms', 'SAT forms and Eva SIM'],
       ['coedit-live', 'Coedit live collaboration'],
     ] as const
   ).map(([config, title]) =>
@@ -461,6 +462,34 @@ const SUITES: SuiteDefinition[] = [
     capacity: { apiCandidates: 2000, nativeProof: true },
   }),
   commandSuite({
+    id: 'staging.sat.k6.recovery-lifecycle',
+    title: 'Staging SAT recovery lifecycle',
+    description: 'Read-only lifecycle-state projection under up to 2,000 synthetic SAT candidates.',
+    family: 'staging',
+    environments: STAGING,
+    controlOwner: 'k6',
+    steps: [K6('k6/sat-recovery-lifecycle-2000.js')],
+    requires: ['k6', 'target:staging', 'prepared:sat-recovery-lifecycle', 'staging-capacity'],
+    deadlineMinutes: 120,
+    parameters: ['apiCandidates'],
+    capacity: { apiCandidates: 2000, nativeProof: true },
+    effects: ['Reads SAT lifecycle state only; requires distinct synthetic attempt credentials.'],
+  }),
+  commandSuite({
+    id: 'staging.sat.k6.recovery-close',
+    title: 'Staging SAT recovery close',
+    description: 'Rehearses SAT answer freeze, recovery replay, and next-module entry at up to 2,000 synthetic candidates.',
+    family: 'staging',
+    environments: STAGING,
+    controlOwner: 'k6',
+    steps: [K6('k6/sat-recovery-close-2000.js')],
+    requires: ['k6', 'target:staging', 'prepared:sat-recovery-close', 'staging-capacity'],
+    deadlineMinutes: 120,
+    parameters: ['apiCandidates'],
+    capacity: { apiCandidates: 2000, nativeProof: true },
+    effects: ['Writes synthetic SAT answers and advances only explicitly prepared SAT recovery fixtures.'],
+  }),
+  commandSuite({
     id: 'staging.sat.k6.m1-m2-handoff',
     title: 'Staging SAT M1/M2 handoff',
     description: 'Staging-only SAT module handoff scenario.',
@@ -535,6 +564,53 @@ const SUITES: SuiteDefinition[] = [
     requires: ['node', 'bun'],
     deadlineMinutes: 60,
     runAll: false,
+  }),
+  commandSuite({
+    id: 'isolated.ielts.k6.personal-timing',
+    title: 'Local IELTS personal timing rehearsal',
+    description: 'Local-only 500-candidate readiness, reconnect, section-transition, and submission rehearsal.',
+    family: 'isolated-load',
+    environments: ISOLATED,
+    controlOwner: 'k6',
+    steps: [K6('k6/ielts-personal-timing-500.js')],
+    requires: ['k6', 'target:local', 'prepared:ielts-personal-load', 'credentials:staff'],
+    deadlineMinutes: 30,
+    capacity: { apiCandidates: 500, nativeProof: true },
+    effects: ['Starts a prepared local IELTS schedule, writes synthetic answers, and submits 500 synthetic candidates.'],
+    runAll: false,
+    exclusionReason: 'Excluded from Run all: the local rehearsal runs complete section timers and submits its prepared 500-candidate schedule.',
+  }),
+  commandSuite({
+    id: 'isolated.ielts.k6.throughput',
+    title: 'Local IELTS throughput rehearsal',
+    description: 'Local-only open-arrival IELTS answer and runtime throughput scenario against explicitly prepared synthetic attempts.',
+    family: 'isolated-load',
+    environments: ISOLATED,
+    controlOwner: 'k6',
+    steps: [K6('k6/ielts-throughput.js')],
+    requires: ['k6', 'target:local', 'prepared:ielts-throughput', 'credentials:staff'],
+    deadlineMinutes: 60,
+    parameters: ['apiCandidates'],
+    capacity: { apiCandidates: 2000, nativeProof: true },
+    effects: ['Writes synthetic IELTS answers and submits only explicitly prepared attempts.'],
+    runAll: false,
+    exclusionReason: 'Excluded from Run all: requires a prepared synthetic IELTS cohort and mutates its attempts.',
+  }),
+  commandSuite({
+    id: 'isolated.sat.k6.throughput',
+    title: 'Local SAT throughput rehearsal',
+    description: 'Local-only open-arrival SAT answer, replay, and state-read throughput scenario against explicitly prepared synthetic attempts.',
+    family: 'isolated-load',
+    environments: ISOLATED,
+    controlOwner: 'k6',
+    steps: [K6('k6/sat-throughput.js')],
+    requires: ['k6', 'target:local', 'prepared:sat-throughput', 'credentials:staff'],
+    deadlineMinutes: 60,
+    parameters: ['apiCandidates'],
+    capacity: { apiCandidates: 2000, nativeProof: true },
+    effects: ['Writes synthetic SAT answers only for explicitly prepared attempts.'],
+    runAll: false,
+    exclusionReason: 'Excluded from Run all: requires a prepared synthetic SAT cohort and mutates its attempts.',
   }),
 ];
 
@@ -629,6 +705,7 @@ export const PACKAGE_SCRIPT_COVERAGE: Readonly<Record<string, EntrypointCoverage
   'e2e:prod-smoke': { source: 'package.json', classification: 'alias', suiteId: 'prod.smoke', note: 'playwright config' },
   'e2e:prod-load': { source: 'package.json', classification: 'alias', suiteId: 'prod.ielts.browser.control', note: 'playwright config' },
   'e2e:sat-a11y': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-a11y', note: 'playwright config' },
+  'e2e:sat-forms': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-forms', note: 'playwright config' },
   'e2e:sat-spectrum': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-spectrum', note: 'playwright config' },
   'e2e:sat-annotations': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-annotations', note: 'playwright config' },
   'e2e:sat-auto-fit': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-auto-fit', note: 'playwright config' },
@@ -639,6 +716,8 @@ export const PACKAGE_SCRIPT_COVERAGE: Readonly<Record<string, EntrypointCoverage
   'playwright': { source: 'package.json', classification: 'alias', suiteId: 'browser.local', note: 'playwright config' },
   'k6:exam-day': { source: 'package.json', classification: 'alias', suiteId: 'prod.ielts.k6.exam-day', note: 'script' },
   'k6:sat-exam-day': { source: 'package.json', classification: 'alias', suiteId: 'staging.sat.k6.exam-day', note: 'script' },
+  'k6:sat-lifecycle': { source: 'package.json', classification: 'alias', suiteId: 'staging.sat.k6.recovery-lifecycle', note: 'script' },
+  'k6:sat-close': { source: 'package.json', classification: 'alias', suiteId: 'staging.sat.k6.recovery-close', note: 'script' },
   'k6:start-exam': { source: 'package.json', classification: 'alias', suiteId: 'prod.ielts.k6.start-exam', note: 'script' },
   'k6:section-transition': { source: 'package.json', classification: 'alias', suiteId: 'prod.ielts.k6.section-transition', note: 'script' },
   'k6:submit-storm': { source: 'package.json', classification: 'alias', suiteId: 'prod.ielts.k6.submit-storm', note: 'script' },
@@ -664,6 +743,7 @@ export const PACKAGE_SCRIPT_COVERAGE: Readonly<Record<string, EntrypointCoverage
   'portal:start': { source: 'package.json', classification: 'operational', suiteId: null, note: 'portal process' },
   'portal:typecheck': { source: 'package.json', classification: 'operational', suiteId: null, note: 'dedicated portal typecheck' },
   'portal:test': { source: 'package.json', classification: 'alias', suiteId: 'unit.portal', note: 'portal tests' },
+  'portal:hash-password': { source: 'package.json', classification: 'helper', suiteId: null, note: 'local credential-hash utility' },
 });
 
 export const PLAYWRIGHT_CONFIG_COVERAGE: Readonly<Record<string, EntrypointCoverage>> = Object.freeze({
@@ -673,6 +753,7 @@ export const PLAYWRIGHT_CONFIG_COVERAGE: Readonly<Record<string, EntrypointCover
   'playwright.remote.config.ts': { source: 'playwright.remote.config.ts', classification: 'legacy', suiteId: 'legacy.remote', note: 'destructive seed setup' },
   'playwright.coedit-live.config.ts': { source: 'playwright.coedit-live.config.ts', classification: 'executable', suiteId: 'browser.specialized.coedit-live', note: 'pre-provisioned DB required' },
   'playwright.sat-a11y.config.ts': { source: 'playwright.sat-a11y.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-a11y', note: 'specialized' },
+  'playwright.sat-forms.config.ts': { source: 'playwright.sat-forms.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-forms', note: 'specialized' },
   'playwright.sat-adaptive-reading.config.ts': { source: 'playwright.sat-adaptive-reading.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-adaptive-reading', note: 'specialized' },
   'playwright.sat-annotations.config.ts': { source: 'playwright.sat-annotations.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-annotations', note: 'specialized' },
   'playwright.sat-answered-print.config.ts': { source: 'playwright.sat-answered-print.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-answered-print', note: 'specialized' },
@@ -688,6 +769,9 @@ export const PLAYWRIGHT_CONFIG_COVERAGE: Readonly<Record<string, EntrypointCover
 });
 
 export const K6_COVERAGE: Readonly<Record<string, EntrypointCoverage>> = Object.freeze({
+  'k6/ielts-personal-timing-500.js': { source: 'k6/ielts-personal-timing-500.js', classification: 'executable', suiteId: 'isolated.ielts.k6.personal-timing', note: 'local-only 500-candidate timing scenario' },
+  'k6/ielts-throughput.js': { source: 'k6/ielts-throughput.js', classification: 'executable', suiteId: 'isolated.ielts.k6.throughput', note: 'local-only open-arrival throughput scenario' },
+  'k6/sat-throughput.js': { source: 'k6/sat-throughput.js', classification: 'executable', suiteId: 'isolated.sat.k6.throughput', note: 'local-only open-arrival throughput scenario' },
   'k6/prod-exam-day.js': { source: 'k6/prod-exam-day.js', classification: 'executable', suiteId: 'prod.ielts.k6.exam-day', note: 'scenario' },
   'k6/prod-start-exam-200.js': { source: 'k6/prod-start-exam-200.js', classification: 'executable', suiteId: 'prod.ielts.k6.start-exam', note: 'scenario' },
   'k6/prod-section-transition-200.js': { source: 'k6/prod-section-transition-200.js', classification: 'executable', suiteId: 'prod.ielts.k6.section-transition', note: 'scenario' },
@@ -697,6 +781,8 @@ export const K6_COVERAGE: Readonly<Record<string, EntrypointCoverage>> = Object.
   'k6/practice-entry.js': { source: 'k6/practice-entry.js', classification: 'helper', suiteId: null, note: 'scenario module used by SAT scenarios' },
   'k6/prod-load-helpers.js': { source: 'k6/prod-load-helpers.js', classification: 'helper', suiteId: null, note: 'shared helpers' },
   'k6/sat-exam-day.js': { source: 'k6/sat-exam-day.js', classification: 'executable', suiteId: 'staging.sat.k6.exam-day', note: 'staging scenario' },
+  'k6/sat-recovery-lifecycle-2000.js': { source: 'k6/sat-recovery-lifecycle-2000.js', classification: 'executable', suiteId: 'staging.sat.k6.recovery-lifecycle', note: '2,000-candidate lifecycle projection scenario' },
+  'k6/sat-recovery-close-2000.js': { source: 'k6/sat-recovery-close-2000.js', classification: 'executable', suiteId: 'staging.sat.k6.recovery-close', note: '2,000-candidate frozen-answer recovery scenario' },
   'k6/sat-device-transfer.js': { source: 'k6/sat-device-transfer.js', classification: 'executable', suiteId: 'staging.sat.k6.device-transfer', note: 'staging scenario' },
   'k6/sat-module-entry-2000.js': { source: 'k6/sat-module-entry-2000.js', classification: 'executable', suiteId: 'staging.sat.k6.module-entry', note: 'staging scenario' },
   'k6/sat-m1-m2-handoff.js': { source: 'k6/sat-m1-m2-handoff.js', classification: 'executable', suiteId: 'staging.sat.k6.m1-m2-handoff', note: 'staging scenario' },

@@ -19,6 +19,10 @@ describe('parseLiveSatControlConfig', () => {
   it('validates settings and resolves the roster from the workspace', () => {
     expect(parseLiveSatControlConfig(valid, root)).toEqual({
       ...valid,
+      runMode: 'headless',
+      k6Students: 1,
+      k6StudentOffset: 0,
+      confirmK6Sat: false,
       usersFile: path.join(root, valid.usersFile),
       accessLinkId: 'link-123',
     });

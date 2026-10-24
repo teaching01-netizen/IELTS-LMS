@@ -1155,13 +1155,26 @@ describe("useStudentSessionRouteData backend mode", () => {
   it("re-bootstrap static payload when live publishedVersionId changes", async () => {
     vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
     vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(buildStaticSessionContext("ver-1")))
-      .mockResolvedValueOnce(jsonResponse(buildLiveSessionContext(buildAttempt("ver-2"), "ver-2")))
-      .mockResolvedValueOnce(jsonResponse(buildStaticSessionContext("ver-2")))
-      .mockResolvedValueOnce(jsonResponse(buildLiveSessionContext(buildAttempt("ver-2"), "ver-2")))
-      .mockResolvedValue(jsonResponse(buildLiveSessionContext(buildAttempt("ver-2"), "ver-2")));
+    const staticUrl = "/api/v1/student/sessions/sched-1/static?candidateId=W250334";
+    const liveUrl = "/api/v1/student/sessions/sched-1/live?candidateId=W250334";
+    const staticResponses = [
+      jsonResponse(buildStaticSessionContext("ver-1")),
+      jsonResponse(buildStaticSessionContext("ver-2")),
+    ];
+    const liveResponse = () =>
+      jsonResponse(buildLiveSessionContext(buildAttempt("ver-2"), "ver-2"));
+    const fetchMock = vi.fn((url: string) => {
+      if (url === staticUrl) {
+        return Promise.resolve(
+          staticResponses.shift() ?? jsonResponse(buildStaticSessionContext("ver-2"))
+        );
+      }
+      if (url === liveUrl) return Promise.resolve(liveResponse());
+      if (url.startsWith("/api/v1/student/sessions/sched-1/runtime?")) {
+        return Promise.resolve(new Response(null, { status: 304 }));
+      }
+      return Promise.resolve(liveResponse());
+    });
     global.fetch = fetchMock as typeof fetch;
 
     const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
@@ -1173,12 +1186,8 @@ describe("useStudentSessionRouteData backend mode", () => {
       expect(result.current.attemptSnapshot?.publishedVersionId).toBe("ver-2");
     });
 
-    const staticCalls = fetchMock.mock.calls.filter(
-      ([url]) => url === "/api/v1/student/sessions/sched-1/static?candidateId=W250334"
-    );
-    const liveCalls = fetchMock.mock.calls.filter(
-      ([url]) => url === "/api/v1/student/sessions/sched-1/live?candidateId=W250334"
-    );
+    const staticCalls = fetchMock.mock.calls.filter(([url]) => url === staticUrl);
+    const liveCalls = fetchMock.mock.calls.filter(([url]) => url === liveUrl);
 
     expect(staticCalls.length).toBeGreaterThanOrEqual(2);
     expect(liveCalls.length).toBeGreaterThanOrEqual(2);
@@ -1404,9 +1413,17 @@ describe("useStudentSessionRouteData backend mode", () => {
         wrapper: createWrapper(),
       });
       await waitFor(() => expect(result.current.isLoading).toBe(false));
-      await waitFor(() => expect(MockSocket.instances.length).toBeGreaterThan(0));
+      await waitFor(() =>
+        expect(
+          MockSocket.instances.some((candidate) =>
+            new URL(candidate.url).searchParams.has("attemptId")
+          )
+        ).toBe(true)
+      );
 
-      const socket = MockSocket.instances[MockSocket.instances.length - 1]!;
+      const socket = MockSocket.instances.find((candidate) =>
+        new URL(candidate.url).searchParams.has("attemptId")
+      )!;
       expect(socket.url).toContain("scheduleId=sched-1");
       expect(socket.url).toContain("attemptId=attempt-1");
       // The reconnect gap closer: the client tells the server what it has.

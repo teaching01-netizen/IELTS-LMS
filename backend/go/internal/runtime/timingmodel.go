@@ -23,7 +23,16 @@ const (
 	// future start lets the browser load the next surface before its clock
 	// begins; a missed start is rearmed before the surface becomes active.
 	TimingModelPersonal = "sat_personal_v1"
+	// TimingModelIELTSPersonalV1 retains the first IELTS personal-timing
+	// behavior for sessions already created under that rollout.
+	TimingModelIELTSPersonalV1 = "ielts_personal_v1"
+	// TimingModelIELTSPersonal keeps the shared room section release while
+	// giving each attempt its own preparation and working deadlines.
+	TimingModelIELTSPersonal = "ielts_cohort_personal_v2"
 )
+
+// IELTSPersonalTimingModelsSQL is the SQL IN-list matching IsIELTSPersonal.
+const IELTSPersonalTimingModelsSQL = "'" + TimingModelIELTSPersonalV1 + "', '" + TimingModelIELTSPersonal + "'"
 
 // CohortTimingModelsSQL is the IN-list matching [IsCohortTimed]. Interpolate it
 // into a query instead of re-spelling the pair, so a query and the Go
@@ -55,6 +64,17 @@ func IsSatPersonal(model string) bool {
 	return model == TimingModelPersonal
 }
 
+func IsIELTSPersonal(model string) bool {
+	return model == TimingModelIELTSPersonalV1 || model == TimingModelIELTSPersonal
+}
+
+// IsIELTSCohortPersonal reports whether the attempt-owned IELTS clocks also
+// obey the room's shared section release. The earlier v1 rollout remains
+// attempt-owned but did not gate transitions on the room timeline.
+func IsIELTSCohortPersonal(model string) bool {
+	return model == TimingModelIELTSPersonal
+}
+
 // ProviderTimingModel resolves the timing model a schedule runs under BEFORE
 // any exam_session_runtimes row exists (the pre-start projection).
 //
@@ -80,6 +100,11 @@ func ProviderTimingModel(providerKey string) string {
 func ResolveTimingModel(providerKey, scheduleChoice string) string {
 	choice := strings.TrimSpace(scheduleChoice)
 	switch choice {
+	case TimingModelIELTSPersonalV1, TimingModelIELTSPersonal:
+		if strings.EqualFold(strings.TrimSpace(providerKey), "ielts") {
+			return choice
+		}
+		return ProviderTimingModel(providerKey)
 	case TimingModelPersonal, TimingModelCohortSection, TimingModelCohortStage, TimingModelLegacy:
 		// Only SAT may select the personal model; other providers keep their
 		// default even if a stale choice names it.

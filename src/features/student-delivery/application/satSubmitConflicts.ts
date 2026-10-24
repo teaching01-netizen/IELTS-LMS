@@ -110,6 +110,11 @@ export function isWriterSupersededRejection(error: unknown): boolean {
   return reason === "ACTIVE_SESSION_SUPERSEDED" || reason === "SESSION_ALREADY_ACTIVE";
 }
 
+/** The server durably closed the separate SAT module-entry allowance. */
+export function isSatEntryWindowExpiredRejection(error: unknown): boolean {
+  return backendErrorReason(error) === "SAT_ENTRY_WINDOW_EXPIRED";
+}
+
 /**
  * A pause/resume (or runtime bump) crossed this command in flight. The correct
  * recovery is to refetch the runtime/control epoch and send one more attempt,
@@ -156,7 +161,7 @@ export type SatCloseRetry =
   | { kind: "wait"; delayMs: number }
   | { kind: "flush" }
   | { kind: "stop" }
-  | { kind: "backoff" };
+  | { kind: "backoff"; retryAfterMs?: number };
 
 const CLOSE_STOP_REASONS: Record<string, true> = {
   CLOSE_UNSUPPORTED: true,
@@ -164,6 +169,7 @@ const CLOSE_STOP_REASONS: Record<string, true> = {
   MODULE_ATTEMPT_MISMATCH: true,
   ATTEMPT_TERMINAL: true,
   ATTEMPT_PROCTOR_BLOCKED: true,
+  RECOVERY_EXPIRED: true,
 };
 
 /** Bound on one skew wait: never park the transition longer than this. */
@@ -188,6 +194,17 @@ export function classifySatCloseRejection(error: unknown): SatCloseRetry {
   if (reason !== null && CLOSE_STOP_REASONS[reason]) return { kind: "stop" };
   const code = backendErrorCode(error);
   const status = typeof error === "object" && error !== null && "status" in error ? error.status : undefined;
+  const details = typeof error === "object" && error !== null
+    ? ((error as { details?: unknown; backendDetails?: unknown }).details ??
+      (error as { backendDetails?: unknown }).backendDetails)
+    : undefined;
+  const retryAfterSeconds = typeof details === "object" && details !== null
+    ? (details as { retryAfterSeconds?: unknown; retryAfterSecs?: unknown }).retryAfterSeconds ??
+      (details as { retryAfterSecs?: unknown }).retryAfterSecs
+    : undefined;
+  if (typeof retryAfterSeconds === "number" && Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+    return { kind: "backoff", retryAfterMs: Math.ceil(retryAfterSeconds) * 1_000 };
+  }
   if (
     code === "ATTEMPT_TOKEN_INVALID" ||
     code === "FORBIDDEN" ||

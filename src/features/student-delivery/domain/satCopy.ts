@@ -134,6 +134,8 @@ export const SAT_COPY = {
     title: "Time is up",
     recordingAnswers: "Your saved answers are being recorded.",
     offline: "We could not confirm your latest save. Keep this screen open while you reconnect.",
+    recoveryOffline:
+      "Your answers stay on this device while you reconnect. Reconnect within 2 minutes; the next module stays locked until this module is confirmed.",
     failed: "We could not confirm your latest save. Keep this screen open and retry the save.",
     // The server has not confirmed the module closed well past the deadline.
     stalled: "This module has not finished closing. Your saved answers are safe. Try again, or tell your proctor.",
@@ -164,7 +166,10 @@ export const SAT_COPY = {
     // sentence case as a deliberate CTA-bare/H1-pronoun exception) — so the
     // complete H1 reads as a Title Case fragment.
     completeTitle: "SAT Complete",
-    completeSubtitle: "All responses submitted.",
+    completeSubtitle: "Submission confirmed.",
+    completeRecoveryTitle: "Submission confirmed with a recovery exception",
+    completeRecoverySubtitle:
+      "Some answers saved only on the original device were not confirmed by the exam and were excluded from scoring and routing.",
     finalizingResult: "Finalizing SAT result" + "\u2026",
     backToDashboard: "Back to dashboard",
   },

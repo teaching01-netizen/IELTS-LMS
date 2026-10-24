@@ -40,6 +40,7 @@ describe("SatStudentProducedAnswer (validate-then-announce)", () => {
       <SatStudentProducedAnswer questionId="q1" value="" disabled={false} onChange={vi.fn()} />
     );
     const input = screen.getByRole("textbox", { name: "Enter your answer" });
+    expect(input).toHaveAttribute("data-testid", "sat-answer-control");
     expect(input).toHaveAttribute("aria-describedby", expect.stringContaining("help"));
     expect(input).toHaveAttribute("inputmode", "text");
     expect(input).toHaveAttribute("enterkeyhint", "done");

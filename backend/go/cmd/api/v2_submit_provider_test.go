@@ -19,15 +19,15 @@ import (
 
 const submitTestSecret = "test-secret-32-bytes-long--------"
 
-// submitAttemptRows is the attempt lock projection lockAttempt scans
-// (16 columns + the runtime timing model).
+// submitAttemptRows is the attempt lock projection lockAttempt scans,
+// including the active writer session used by the mutation fence.
 func submitAttemptRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
-		"response_revision", "deadline_at", "closing_grace_until",
+		"active_client_session_id", "response_revision", "deadline_at", "closing_grace_until",
 		"submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
-	}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 3, 7, 9, nil, nil, nil, nil, "active", "", "")
+	}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 3, 7, "sess-1", 9, nil, nil, nil, nil, "active", "", "")
 }
 
 func submitBearer(t *testing.T) string {
@@ -64,8 +64,6 @@ func TestV2SubmitLegacyNullProviderKeySeals(t *testing.T) {
 			AddRow("att-1", "sess-1", nil, nil))
 	mock.ExpectQuery("FROM attempt_submissions_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT attempt_id FROM attempt_submissions_v2 WHERE submission_id").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	// Runtime locker is nil here, so the gate takes its own db time.
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery("FROM attempt_responses_v2").
@@ -122,8 +120,6 @@ func TestV2SubmitSATSealsAfterTopologyGate(t *testing.T) {
 			AddRow("att-1", "sess-1", nil, nil))
 	mock.ExpectQuery("FROM attempt_submissions_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT attempt_id FROM attempt_submissions_v2 WHERE submission_id").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectQuery("SELECT l.enabled_sections, v.sat_publish_scope FROM student_attempts a JOIN exam_versions").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("FROM assessment_module_attempts").

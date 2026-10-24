@@ -198,6 +198,10 @@ type BackendExamSessionRuntime = {
   currentSectionKey?: ModuleType | null | undefined;
   currentSectionRemainingSeconds: number;
   currentSectionDeadlineAt?: string | null | undefined;
+  personalSectionState?: ExamSessionRuntime['personalSectionState'];
+  personalPreparationMessage?: string | undefined;
+  personalExpectedStartAt?: string | null | undefined;
+  personalPreparationEndsAt?: string | null | undefined;
   nextSectionStartAt?: string | null | undefined;
   serverNow?: string | undefined;
   waitingForNextSection: boolean;
@@ -654,6 +658,10 @@ export function mapBackendRuntime(
     currentSectionKey: payload.currentSectionKey ?? null,
     currentSectionRemainingSeconds: payload.currentSectionRemainingSeconds,
     currentSectionDeadlineAt: payload.currentSectionDeadlineAt ?? null,
+    personalSectionState: payload.personalSectionState,
+    personalPreparationMessage: payload.personalPreparationMessage,
+    personalExpectedStartAt: payload.personalExpectedStartAt,
+    personalPreparationEndsAt: payload.personalPreparationEndsAt,
     // Preserve undefined versus null: undefined means an older/partial
     // projection omitted the field, while null is the authoritative signal
     // that the between-sections window has ended.

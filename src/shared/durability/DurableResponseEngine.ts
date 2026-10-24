@@ -22,8 +22,11 @@ import type {
   SubmitAttemptV2Request,
   SubmitAttemptV2Response,
 } from "./types";
+import { hashFrozenResponseManifest, hashResponsePayload } from "./responseCanonicalHash";
+import type { FrozenResponseManifestEntry } from "./responseCanonicalHash";
 import {
   clearDurableDraft,
+  loadDurableDraft,
   listDurableDrafts,
   saveDurableDraft,
 } from "../../utils/durableDraftStore";
@@ -66,6 +69,18 @@ export interface ScopeManifestEntry {
   questionId: string;
   writeId: string;
   clientVersion: number;
+  contentHash?: string;
+}
+
+export interface PreparedScopeClose {
+  attemptId: string;
+  scopeId: string;
+  closeId: string;
+  leaseEpoch: number;
+  controlEpoch: number;
+  manifest: Array<ScopeManifestEntry & { contentHash: string }>;
+  manifestHash: string;
+  finalCommands: ResponseCommandV2[];
 }
 
 /** Server refusals that belong to one module, not to the attempt. */
@@ -84,6 +99,7 @@ export interface AcceptResponseOptions {
 const CHECKPOINT_PREFIX = "response-checkpoint:v2:";
 const DURABLE_DRAFT_PREFIX = "v2_attempt_";
 const QUARANTINE_PREFIX = "v2_quarantine:";
+const SCOPE_CLOSE_PREFIX = "v2_scope_close:";
 const MAX_RETRY_ATTEMPTS_PER_DRAIN = 8;
 /**
  * Control-epoch self-heal budget. The server bumps `control_epoch` on every
@@ -175,6 +191,10 @@ function durableDraftKey(attemptId: string, questionId: string): string {
 
 function quarantineDraftKey(attemptId: string, writeId: string): string {
   return `${QUARANTINE_PREFIX}${attemptId}:${writeId}`;
+}
+
+function scopeCloseDraftKey(attemptId: string, scope: string): string {
+  return `${SCOPE_CLOSE_PREFIX}${attemptId}:${scope}`;
 }
 
 function randomWriteId(): string {
@@ -281,6 +301,28 @@ function isResponsePayload(value: unknown): value is ResponsePayload {
     eliminatedOptions.every((item) => typeof item === "string") &&
     Array.isArray(annotations) &&
     annotations.every((annotation) => isRecord(annotation) && typeof annotation["id"] === "string")
+  );
+}
+
+function isPreparedScopeClose(value: unknown): value is PreparedScopeClose {
+  if (!isRecord(value)) return false;
+  const manifest = value["manifest"];
+  const commands = value["finalCommands"];
+  return (
+    typeof value["attemptId"] === "string" &&
+    typeof value["scopeId"] === "string" &&
+    typeof value["closeId"] === "string" &&
+    typeof value["leaseEpoch"] === "number" && Number.isSafeInteger(value["leaseEpoch"]) && value["leaseEpoch"] > 0 &&
+    typeof value["controlEpoch"] === "number" && Number.isSafeInteger(value["controlEpoch"]) && value["controlEpoch"] > 0 &&
+    typeof value["manifestHash"] === "string" && /^[0-9a-f]{64}$/.test(value["manifestHash"]) &&
+    Array.isArray(manifest) && manifest.every((entry) => isRecord(entry) &&
+      typeof entry["questionId"] === "string" && typeof entry["writeId"] === "string" &&
+      typeof entry["clientVersion"] === "number" && Number.isSafeInteger(entry["clientVersion"]) && entry["clientVersion"] > 0 &&
+      typeof entry["contentHash"] === "string" && /^[0-9a-f]{64}$/.test(entry["contentHash"])) &&
+    Array.isArray(commands) && commands.every((command) => isRecord(command) &&
+      typeof command["writeId"] === "string" && typeof command["questionId"] === "string" &&
+      typeof command["clientVersion"] === "number" && Number.isSafeInteger(command["clientVersion"]) && command["clientVersion"] > 0 &&
+      isResponsePayload(command["response"]))
   );
 }
 
@@ -417,6 +459,8 @@ export class DurableResponseEngine {
   private readonly scopeOf: ((questionId: string) => string | null) | undefined;
   /** Scopes the server closed (scope -> reason). Their drafts never fly. */
   private readonly closedScopes = new Map<string, string>();
+  /** Frozen scopes cannot accept new edits while their boundary is settling. */
+  private readonly frozenScopes = new Set<string>();
   /** Incremented in destroy(); async archive/tombstone work aborts when it moves. */
   private engineGeneration = 0;
   /** Per-question reconcile mutex: one reconcileBlocked per question at a time. */
@@ -558,6 +602,179 @@ export class DurableResponseEngine {
       throw new Error("The final answer identity is not yet confirmed by the server.");
     }
     return manifest;
+  }
+
+  /** Synchronously stop accepting edits for a module before async close work. */
+  public freezeScope(scope: string): void {
+    this.frozenScopes.add(scope);
+  }
+
+  /**
+   * Freeze and durably prepare the exact retry envelope for one module close.
+   * The envelope is written before a request can be sent, so reloads replay
+   * the same operation ID and payload after an uncertain outcome.
+   */
+  public async prepareScopeClose(scope: string, proposedCloseId: string): Promise<PreparedScopeClose> {
+    if (!scope.trim() || !proposedCloseId.trim()) throw new Error("A SAT module close identity is required.");
+    this.freezeScope(scope);
+    await Promise.all([...this.pendingAcceptances]);
+
+    const key = scopeCloseDraftKey(this.attemptId, scope);
+    const existing = await loadDurableDraft<unknown>(key);
+    if (existing !== null) {
+      if (!isPreparedScopeClose(existing) || existing.attemptId !== this.attemptId || existing.scopeId !== scope) {
+        throw new Error("The saved SAT recovery envelope is invalid and needs support.");
+      }
+      return existing;
+    }
+
+    for (const [questionId, state] of this.states) {
+      if (this.scopeOf?.(questionId) !== scope || !state.pending) continue;
+      if (state.pending.blocked) throw new Error("A blocked answer needs review before this module can close.");
+      if (state.pending.clientVersion <= 0) throw new Error("The final answer is still being prepared on this device.");
+    }
+
+    const baseManifest = await this.prepareScopeManifest(scope);
+    const commands = this.collectPendingCommands()
+      .filter((command) => this.scopeOf?.(command.questionId) === scope)
+      .map((command) => ({ ...command, response: clonePayload(command.response) }));
+    const commandsByQuestion = new Map(commands.map((command) => [command.questionId, command]));
+    const manifest: Array<ScopeManifestEntry & { contentHash: string }> = [];
+    for (const entry of baseManifest) {
+      const command = commandsByQuestion.get(entry.questionId);
+      const state = this.states.get(entry.questionId);
+      const payload = command?.response ?? state?.confirmed?.payload;
+      if (!payload) throw new Error("A final answer is missing its frozen content on this device.");
+      if (command && (command.writeId !== entry.writeId || command.clientVersion !== entry.clientVersion)) {
+        throw new Error("The pending answer does not match the frozen answer identity.");
+      }
+      const contentHash = await hashResponsePayload(payload);
+      if (!command && state?.confirmed?.contentHash && state.confirmed.contentHash !== contentHash) {
+        throw new Error("A confirmed answer failed its local integrity check.");
+      }
+      manifest.push({ ...entry, contentHash });
+    }
+    const manifestHash = await hashFrozenResponseManifest(manifest as FrozenResponseManifestEntry[]);
+    const manifestByQuestion = new Map(manifest.map((entry) => [entry.questionId, entry]));
+    for (const command of commands) {
+      const latest = manifestByQuestion.get(command.questionId);
+      if (!latest || command.clientVersion > latest.clientVersion ||
+          command.clientVersion !== latest.clientVersion || command.writeId !== latest.writeId ||
+          latest.contentHash !== await hashResponsePayload(command.response)) {
+        throw new Error("The final answer set could not be safely matched to its saved versions.");
+      }
+    }
+    for (const [questionId, state] of this.states) {
+      if (this.scopeOf?.(questionId) !== scope || !state.pending) continue;
+      const latest = manifestByQuestion.get(questionId);
+      if (!latest || latest.writeId !== state.pending.writeId || latest.clientVersion !== state.pending.clientVersion) {
+        throw new Error("A visible answer is missing from the final recovery set.");
+      }
+    }
+
+    const prepared: PreparedScopeClose = {
+      attemptId: this.attemptId,
+      scopeId: scope,
+      closeId: proposedCloseId,
+      leaseEpoch: this.leaseEpoch,
+      controlEpoch: this.controlEpoch,
+      manifest,
+      manifestHash,
+      finalCommands: commands,
+    };
+    await saveDurableDraft(key, prepared);
+    return prepared;
+  }
+
+  /** Upload one bounded replayable part of a registered SAT frozen frontier. */
+  public async uploadScopeCloseChunk(
+    scope: string,
+    closeId: string,
+    manifestHash: string,
+    commands: readonly ResponseCommandV2[],
+  ): Promise<void> {
+    if (!commands.length) return;
+    const key = scopeCloseDraftKey(this.attemptId, scope);
+    const preparedValue = await loadDurableDraft<unknown>(key);
+    if (!isPreparedScopeClose(preparedValue) || preparedValue.closeId !== closeId ||
+        preparedValue.scopeId !== scope || preparedValue.manifestHash !== manifestHash) {
+      throw new Error("The SAT recovery chunk does not match the saved close operation.");
+    }
+    if (this.isDestroyed) throw new Error("The response recovery engine is no longer active.");
+    const expectedCommands = new Map(preparedValue.finalCommands.map((command) => [command.writeId, command]));
+    const expectedManifest = new Map(preparedValue.manifest.map((entry) => [entry.questionId, entry]));
+    for (const command of commands) {
+      const expected = expectedCommands.get(command.writeId);
+      const entry = expectedManifest.get(command.questionId);
+      if (!expected || !entry || expected.questionId !== command.questionId ||
+          expected.clientVersion !== command.clientVersion || entry.writeId !== command.writeId ||
+          entry.clientVersion !== command.clientVersion || entry.contentHash !== await hashResponsePayload(command.response)) {
+        throw new Error("A SAT recovery chunk differs from the saved answer frontier.");
+      }
+    }
+    const result = await this.transport.sendBatch(this.attemptId, {
+      leaseEpoch: preparedValue.leaseEpoch,
+      controlEpoch: preparedValue.controlEpoch,
+      commands: commands.map((command) => ({ ...command, response: clonePayload(command.response) })),
+      moduleClose: { moduleAttemptId: scope, manifestHash },
+    });
+    if (this.isDestroyed) return;
+    this.attemptRevision = Math.max(this.attemptRevision, result.attemptRevision);
+    const expectedAcks = new Map(commands.map((command) => [command.writeId, command]));
+    const seen = new Set<string>();
+    for (const acknowledgement of result.acknowledgements) {
+      const command = expectedAcks.get(acknowledgement.writeId);
+      const manifestEntry = expectedManifest.get(acknowledgement.questionId);
+      if (!command || !manifestEntry || seen.has(acknowledgement.writeId) ||
+          acknowledgement.questionId !== command.questionId ||
+          acknowledgement.clientVersion !== command.clientVersion ||
+          acknowledgement.contentHash !== manifestEntry.contentHash) {
+        throw new Error("The server acknowledgement did not match the frozen SAT answer.");
+      }
+      seen.add(acknowledgement.writeId);
+      const alreadyInstalled = this.confirmedWriteIds.get(acknowledgement.questionId) === acknowledgement.writeId &&
+        (this.confirmedVersions.get(acknowledgement.questionId) ?? 0) >= acknowledgement.clientVersion;
+      if (!this.handleAcknowledgement(acknowledgement) && !alreadyInstalled) {
+        throw new Error("The SAT recovery acknowledgement could not be applied to this device.");
+      }
+    }
+    if (seen.size !== commands.length) {
+      throw new Error("The server did not confirm every answer in the SAT recovery chunk.");
+    }
+  }
+
+  /** Install acknowledgements only when they match the durable close envelope. */
+  public async applyScopeCloseAcknowledgement(
+    scope: string,
+    closeId: string,
+    acknowledgements: readonly ResponseAcknowledgementV2[],
+  ): Promise<void> {
+    const key = scopeCloseDraftKey(this.attemptId, scope);
+    const preparedValue = await loadDurableDraft<unknown>(key);
+    if (preparedValue !== null &&
+        (!isPreparedScopeClose(preparedValue) || preparedValue.closeId !== closeId || preparedValue.scopeId !== scope)) {
+      throw new Error("The SAT recovery acknowledgement does not match the saved close operation.");
+    }
+    for (const acknowledgement of acknowledgements) {
+      if (this.issuedCommands.has(acknowledgement.writeId)) {
+        if (!this.handleAcknowledgement(acknowledgement)) {
+          throw new Error("The SAT recovery acknowledgement did not match a saved answer.");
+        }
+        continue;
+      }
+      const alreadyInstalled = this.confirmedWriteIds.get(acknowledgement.questionId) === acknowledgement.writeId &&
+        (this.confirmedVersions.get(acknowledgement.questionId) ?? 0) >= acknowledgement.clientVersion;
+      if (!alreadyInstalled) throw new Error("The SAT recovery acknowledgement could not be applied to this device.");
+    }
+    this.frozenScopes.add(scope);
+    this.closedScopes.set(scope, "MODULE_CLOSED");
+    await clearDurableDraft(key).catch(() => undefined);
+    this.notifyStateChange();
+    if (this.getPendingCount() === 0 && !this.hasUnacknowledgedIntent()) {
+      this.syncStatus = "synced";
+      this.lastError = null;
+      this.notifyStatusChange();
+    }
   }
 
   public getPendingCount(): number {
@@ -781,6 +998,10 @@ export class DurableResponseEngine {
       return Promise.reject(
         new Error(this.lastError ?? "This attempt is fenced by a newer session or terminal state.")
       );
+    }
+    const acceptedScope = this.scopeOf?.(questionId) ?? null;
+    if (acceptedScope !== null && this.frozenScopes.has(acceptedScope)) {
+      return Promise.reject(new Error("This module has ended and its final answers are being protected."));
     }
 
     // Update the visible state synchronously and checkpoint the intent

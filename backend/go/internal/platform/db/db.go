@@ -59,13 +59,8 @@ func OpenRole(cfg config.Config, role Role) (*sql.DB, error) {
 		pool.Close()
 		return nil, err
 	}
-	// Session discipline: UTC on every connection checkout path is enforced
-	// by running it once here and by migrations requiring TIMESTAMP(6) UTC.
-	if _, err := pool.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-		// Not fatal on pooled SESSION var setups that reset per checkout;
-		// callers must still read UTC_TIMESTAMP(6) inside transactions.
-		_ = err
-	}
+	// Session discipline: normalizeMySQLDSN's time_zone parameter runs on
+	// every new physical connection, so this pool is tx.SessionReady.
 	return pool, nil
 }
 
@@ -94,11 +89,17 @@ func ReportPoolStats(role Role, st sql.DBStats) {
 	telemetry.SetGauge(telemetry.MPoolOpen, float64(st.OpenConnections), "role", label)
 	telemetry.SetGauge(telemetry.MPoolInUse, float64(st.InUse), "role", label)
 	telemetry.SetGauge(telemetry.MPoolWait, float64(st.WaitCount), "role", label)
+	telemetry.SetGauge(telemetry.MPoolIdle, float64(st.Idle), "role", label)
+	telemetry.SetGauge(telemetry.MPoolMaxOpen, float64(st.MaxOpenConnections), "role", label)
+	telemetry.SetCounter(telemetry.MPoolWaitSeconds, st.WaitDuration.Seconds(), "role", label)
+	telemetry.SetCounter(telemetry.MPoolClosed, float64(st.MaxIdleClosed), "role", label, "reason", "max_idle")
+	telemetry.SetCounter(telemetry.MPoolClosed, float64(st.MaxIdleTimeClosed), "role", label, "reason", "max_idle_time")
+	telemetry.SetCounter(telemetry.MPoolClosed, float64(st.MaxLifetimeClosed), "role", label, "reason", "max_lifetime")
 }
 
 // newPool builds an unconnected pool with bounded settings (sql.Open is
 // lazy: no connection is attempted, so role sizing is assertable without
-// a live DB). Callers ping + set UTC discipline explicitly (OpenRole).
+// a live DB). OpenRole pings it; UTC session setup lives in the DSN.
 func newPool(databaseURL string, maxOpen, maxIdle int) (*sql.DB, error) {
 	dsn, err := normalizeMySQLDSN(databaseURL)
 	if err != nil {
@@ -107,10 +108,15 @@ func newPool(databaseURL string, maxOpen, maxIdle int) (*sql.DB, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
-	pool, err := sql.Open("mysql", dsn)
+	mysqlConfig, err := mysql.ParseDSN(dsn)
 	if err != nil {
 		return nil, err
 	}
+	connector, err := mysql.NewConnector(mysqlConfig)
+	if err != nil {
+		return nil, err
+	}
+	pool := sql.OpenDB(&measuredConnector{inner: connector})
 	pool.SetMaxOpenConns(maxOpen)
 	pool.SetMaxIdleConns(maxIdle)
 	pool.SetConnMaxLifetime(25 * time.Minute)

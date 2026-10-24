@@ -13,8 +13,8 @@ import {
 } from "../collaboration/coeditNavigationGate";
 import { useAuthoringShellLifecycle } from "../../application/authoringShellLifecycle";
 import { classifySatRoomError } from "../../application/satRoomErrorMapper";
-import { useOptionalAuthSession } from "../../../auth/authSession";
-import { clearSatRoomAttempt, readSatRoomAttempt, retainSatRoomAttempt, satRoomAttemptScope, type PendingSatRoomAttempt } from "../../application/satRoomPendingAttempt";
+import { useOptionalAuthSession } from "../../../auth/api/authSession";
+import { clearSatRoomAttempt, readSatRoomAttempt, retainSatRoomAttempt, satRoomAttemptScope, type PendingSatRoomAttempt } from "../../infrastructure/satRoomPendingAttempt";
 
 /** The submission whose outcome is unknown: its key and body are reused verbatim. */
 interface PendingAttempt {

@@ -10,6 +10,7 @@ import type {
   StructuredContent,
 } from "../../exam-authoring/api/assessmentContracts";
 import type { TimingModel } from "../../../types/domain";
+import type { ResponseAcknowledgementV2, ResponseCommandV2 } from "../../../shared/durability/types";
 
 export type { DeliveredAnswerDefinition, DeliveredQuestion };
 
@@ -47,10 +48,24 @@ export interface AssessmentModuleAttemptSnapshot {
    * it; the server starts its clock at this instant if the browser never does.
    */
   autoStartAt?: string | null;
+  satBoundary?: AssessmentSATModuleBoundarySnapshot | null;
   completionReason: string | null;
   rawCorrect: number | null;
   operationalQuestionCount: number | null;
   toolState: Record<string, boolean>;
+  revision: number;
+}
+
+export interface AssessmentSATModuleBoundarySnapshot {
+  phase: "preparing" | "working" | "collecting" | "blocked" | "settled" | "ended" | string;
+  policyVersion: string;
+  workDeadlineAt: string | null;
+  entryDeadlineAt: string | null;
+  recoveryDeadlineAt: string | null;
+  nextActionAt: string | null;
+  resolution: "continue_confirmed" | "ended" | null;
+  resolvedAt: string | null;
+  resolutionReceipt?: SATRecoveryResolutionReceipt | null;
   revision: number;
 }
 
@@ -172,6 +187,37 @@ export interface AssessmentDeliveryBootstrap {
   satStartPolicy?: SatStartPolicy | null;
   /** Classroom staff_selects: Module 1 is closed and staff have not chosen Easy/Hard yet. */
   awaitingStaffRoute?: boolean;
+  satDeliveryPolicy?: SATDeliveryPolicy | null;
+  satSessionMode?: "practice" | "classroom";
+}
+
+export interface SATRecoveryResolutionRequest {
+  resolutionId: string;
+  moduleAttemptId: string;
+  expectedBoundaryRevision: number;
+  action: "continue_confirmed" | "activate_entry";
+  reason?: string;
+}
+
+export interface SATRecoveryResolutionReceipt {
+  receiptId: string;
+  resolutionId: string;
+  scheduleId: string;
+  attemptId: string;
+  moduleAttemptId: string;
+  moduleId: string;
+  action: "continue_confirmed" | "activate_entry";
+  actorType: "student" | "staff";
+  resolvedAt: string;
+  excludedAnswers: string;
+  replayed?: boolean;
+}
+
+export interface SATDeliveryPolicy {
+  version: "sat_recovery_v1";
+  recoverySeconds: 120;
+  entryRecoverySeconds: 120;
+  lateAnswerPolicy: "frozen_arrival_window";
 }
 
 export type SatStartState = "code_required" | "started" | "closed";
@@ -304,6 +350,28 @@ export interface AssessmentModuleCloseAnswer {
   questionId: string;
   writeId: string;
   clientVersion: number;
+  /** Required for sat_recovery_v1; SHA-256 of the canonical response payload. */
+  contentHash?: string;
+}
+
+export interface AssessmentModuleCloseIntentRequest {
+  protocol: "sat_recovery_v1";
+  moduleId: string;
+  moduleAttemptId: string;
+  registrationId: string;
+  leaseEpoch: number;
+  controlEpoch: number;
+  answers: Array<AssessmentModuleCloseAnswer & { contentHash: string }>;
+}
+
+export interface AssessmentModuleCloseIntentAck {
+  registrationId: string;
+  moduleAttemptId: string;
+  manifestHash: string;
+  boundaryPhase: "collecting";
+  boundaryRevision: number;
+  registeredAt: string;
+  replayed?: boolean;
 }
 
 /**
@@ -315,6 +383,10 @@ export interface AssessmentModuleCloseRequest {
   moduleAttemptId: string;
   closeId: string;
   answers: AssessmentModuleCloseAnswer[];
+  protocol?: "sat_recovery_v1";
+  leaseEpoch?: number;
+  controlEpoch?: number;
+  finalCommands?: ResponseCommandV2[];
 }
 
 /**
@@ -333,6 +405,9 @@ export interface AssessmentModuleCloseAck {
   nextModuleId: string | null;
   selectedSection?: AssessmentDeliverySection;
   serverNow: string;
+  finalAcks?: ResponseAcknowledgementV2[];
+  responseRevision?: number;
+  boundaryPhase?: string;
 }
 
 /** Answers kept on the device after their module closed (review evidence only). */

@@ -38,19 +38,19 @@ func satPersonalAttemptRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
-		"response_revision", "deadline_at", "closing_grace_until",
+		"active_client_session_id", "response_revision", "deadline_at", "closing_grace_until",
 		"submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
-	}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 3, 7, 9, nil, nil, nil, nil, "active", "sat", "sat_personal_v1")
+	}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 3, 7, "sess-1", 9, nil, nil, nil, nil, "active", "sat", "sat_personal_v1")
 }
 
 // satPersonalRuntime stages v2Locker.Lock for a live personal runtime with no
-// active section cursor: the runtime row (lock-free section liveness is skipped
-// because active_section_key is NULL) followed by the authoritative DB clock.
+// active section cursor: the runtime row, the authoritative DB clock, then the
+// personal handoff mode (lock-free section liveness is skipped for a NULL key).
 func satPersonalRuntime(mock sqlmock.Sqlmock, now time.Time) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, timing_model, active_section_key, waiting_for_next_section FROM exam_session_runtimes")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, timing_model, active_section_key, waiting_for_next_section, COALESCE(completion_reason, '') FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key", "waiting_for_next_section"}).
-			AddRow("rt-1", "live", "sat_personal_v1", nil, false))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key", "waiting_for_next_section", "completion_reason"}).
+			AddRow("rt-1", "live", "sat_personal_v1", nil, false, ""))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(now))
 	mock.ExpectQuery("SELECT COALESCE\\(sat_handoff_mode").WithArgs("sched-1").WillReturnRows(sqlmock.NewRows([]string{"mode"}).AddRow("server_start"))
@@ -65,8 +65,8 @@ func satPersonalOwnerRow(mock sqlmock.Sqlmock, questionID string, startedAt any)
 		WillReturnRows(sqlmock.NewRows([]string{
 			"eq_id", "question_id", "module_id", "section_key", "state", "provider_key",
 			"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
-			"timing_model", "entry_confirmed_at", "entry_entered_at",
-		}).AddRow(questionID, "bank-"+questionID, "mod-1", "reading-writing", "active", "sat", startedAt, 120, 0, 0, "sat_personal_v1", nil, nil))
+			"timing_model", "entry_confirmed_at", "entry_entered_at", "timeline_state", "timeline_started_at", "timeline_deadline_at", "timeline_paused_at",
+		}).AddRow(questionID, "bank-"+questionID, "mod-1", "reading-writing", "active", "sat", startedAt, 120, 0, 0, "sat_personal_v1", nil, nil, "", nil, nil, nil))
 }
 
 func TestSATModuleActiveWithoutEntryConfirmationAcceptsBatchWrite(t *testing.T) {
@@ -107,13 +107,9 @@ func TestSATModuleActiveWithoutEntryConfirmationAcceptsBatchWrite(t *testing.T) 
 			satPersonalOwnerRow(mock, tc.questionID, started)
 			// Exact-replay probe: nothing stored for this write id.
 			mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
-			mock.ExpectQuery("SELECT active_client_session_id").
-				WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 			satPersonalRuntime(mock, now)
-			// Per-command loop: ledger probe, then writability, then owner
-			// resolution (the production resolver), then the write.
-			mock.ExpectQuery("SELECT request_hash, response_hash").
-				WillReturnError(sql.ErrNoRows)
+			// Per-command loop: the ledger probe reuses the replay miss, then
+			// writability, owner resolution (the production resolver), the write.
 			mock.ExpectQuery("SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id").
 				WillReturnError(sql.ErrNoRows)
 			mock.ExpectQuery("SELECT lease_epoch, client_version, server_revision FROM attempt_responses_v2").
@@ -174,10 +170,7 @@ func TestSATModuleWithoutStartedAtStillRefuses(t *testing.T) {
 					AddRow("att-1", "sess-1", nil, nil))
 			satPersonalOwnerRow(mock, "q-m1", tc.start)
 			mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
-			mock.ExpectQuery("SELECT active_client_session_id").
-				WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 			satPersonalRuntime(mock, now)
-			mock.ExpectQuery("SELECT request_hash, response_hash").WillReturnError(sql.ErrNoRows)
 			mock.ExpectRollback()
 
 			cmd := attempts.SaveResponsesCommand{AttemptID: "att-1", LeaseEpoch: 3, ControlEpoch: 7,

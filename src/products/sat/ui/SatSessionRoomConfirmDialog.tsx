@@ -4,11 +4,29 @@ export const SAT_SESSION_WARN_MESSAGE = 'Please return your attention to the exa
 
 export type SatSessionRoomConfirmation =
   | { kind: 'start'; joinedCount: number; readyCount: number | null; sectionsLabel: string; perCandidateTiming: boolean | null }
-  | { kind: 'complete' }
+  | { kind: 'complete'; evaMode: 'native' | 'embed' | null; runtimeCompleted: boolean }
   | { kind: 'terminate'; studentId: string; studentName: string }
   | { kind: 'warn'; studentId: string; studentName: string }
   | { kind: 'extend-session'; minutes: number; stage: string; sectionKey: string; runtimeRevision: number; remainingLabel: string }
   | { kind: 'extend-student'; minutes: number; moduleId: string; studentId: string; studentName: string; remainingLabel: string };
+
+const IRREVERSIBLE = 'This cannot be undone.';
+
+/** End exam copy names exactly what closes: the exam, and Eva SIM by mode. */
+function completeDescription(confirm: Extract<SatSessionRoomConfirmation, { kind: 'complete' }>): string {
+  if (confirm.runtimeCompleted) {
+    return confirm.evaMode === 'embed'
+      ? `The exam is already completed. Ending it now closes Eva SIM access here; no SAT answers are submitted again. External tabs or previously opened links may still accept responses. ${IRREVERSIBLE}`
+      : `The exam is already completed. Ending it now closes Eva SIM: students can no longer submit or edit Eva SIM, and no SAT answers are submitted again. Recorded responses remain available. ${IRREVERSIBLE}`;
+  }
+  if (confirm.evaMode === 'native') {
+    return `This ends the exam for everyone in this room and closes Eva SIM. Students can no longer submit or edit Eva SIM. Recorded responses remain available. ${IRREVERSIBLE}`;
+  }
+  if (confirm.evaMode === 'embed') {
+    return `This ends the exam for everyone in this room and closes Eva SIM access here. External tabs or previously opened links may still accept responses. ${IRREVERSIBLE}`;
+  }
+  return 'Affects every student in this room. The exam is completed for the whole room. Use this only when testing is finished; it cannot be undone.';
+}
 
 export function SatSessionRoomConfirmDialog({
   confirm,
@@ -28,7 +46,7 @@ export function SatSessionRoomConfirmDialog({
   const title = confirm.kind === 'start'
     ? 'Start the exam for this room?'
     : confirm.kind === 'complete'
-    ? 'End the exam for everyone in this room?'
+    ? confirm.runtimeCompleted ? 'End the exam and close Eva SIM for this room?' : 'End the exam for everyone in this room?'
     : confirm.kind === 'terminate'
       ? `End ${confirm.studentName}’s attempt?`
       : confirm.kind === 'warn'
@@ -39,7 +57,7 @@ export function SatSessionRoomConfirmDialog({
   const description = confirm.kind === 'start'
     ? `${confirm.joinedCount} joined${confirm.readyCount === null ? '' : ` · ${confirm.readyCount} ready`}. ${confirm.sectionsLabel} begins for students who have joined. ${confirm.perCandidateTiming === null ? 'Timing is shown in the run sheet once the exam starts.' : confirm.perCandidateTiming ? 'Each student receives the full configured time; late arrivals start their own clock.' : 'Students share the room clock; late arrivals receive the time left in the current window.'} Starting cannot be undone.`
     : confirm.kind === 'complete'
-    ? 'Affects every student in this room. The exam is completed for the whole room. Use this only when testing is finished; it cannot be undone.'
+    ? completeDescription(confirm)
     : confirm.kind === 'terminate'
       ? `Affects only ${confirm.studentName}. Their current attempt ends now and their recorded answers remain available. Other students are not affected.`
       : confirm.kind === 'warn'

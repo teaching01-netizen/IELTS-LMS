@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,6 +29,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	platformdb "example.com/ielts-proctoring/internal/platform/db"
+	"example.com/ielts-proctoring/internal/platform/httpx"
 	"github.com/google/uuid"
 )
 
@@ -36,21 +39,45 @@ func TestBoundaryAPIProcess(t *testing.T) {
 	if os.Getenv("SAT_TEST_HTTP_PROCESS") != "1" {
 		return
 	}
-	dsn, err := platformdb.NormalizeDSN(os.Getenv("TEST_MYSQL_DSN"))
+	cfg := config.Load()
+	cfg.DatabaseURL = os.Getenv("TEST_MYSQL_DSN")
+	db, err := platformdb.OpenRole(cfg, platformdb.RoleAPI)
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		t.Fatal(err)
+	if os.Getenv("SAT_RECOVERY_K6_USERS") != "" {
+		// Match the API pool configuration unless a pool sweep is explicitly
+		// under test; a hard-coded test-only pool can misstate server behavior.
+		apiPool := cfg.DBPoolMaxAPI
+		if raw := os.Getenv("SAT_RECOVERY_K6_API_POOL"); raw != "" {
+			apiPool, err = strconv.Atoi(raw)
+			if err != nil || apiPool < 1 || apiPool > 200 {
+				t.Fatal("SAT_RECOVERY_K6_API_POOL must be from 1 through 200")
+			}
+		}
+		db.SetMaxOpenConns(apiPool)
+		db.SetMaxIdleConns(apiPool)
 	}
 	defer db.Close()
-	cfg := config.Load()
+	defer installTxRetryHook()()
+	defer installTxDurationHook()()
 	cfg.AuthSecret = submitTestSecret
 	cfg.SATPersonalCloseWindowSecs = 60
 	cfg.OutboxExecOnly = true
+	if os.Getenv("SAT_RECOVERY_K6_USERS") != "" {
+		// Keep synthetic load diagnostics actionable without logging database
+		// errors from normal API processes.
+		httpx.SetUnknownHook(func(r *http.Request, err error) {
+			log.Printf("SAT load untyped API error request_id=%s error=%q", httpx.RequestIDFrom(r.Context(), r), err)
+		})
+	}
 	router := BuildRouter(BuildApp(cfg, db))
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if os.Getenv("SAT_TEST_HTTP_PROCESS") == "1" && r.Method == http.MethodGet && r.URL.Path == "/__test/db-pool-stats" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(db.Stats())
+			return
+		}
 		if os.Getenv("SAT_TEST_DROP_ACK") == "1" && strings.HasSuffix(r.URL.Path, "/responses:batch") {
 			recorder := httptest.NewRecorder()
 			router.ServeHTTP(recorder, r)
@@ -83,10 +110,25 @@ func TestBoundaryAPIProcess(t *testing.T) {
 }
 
 func startBoundaryAPI(t *testing.T, dropAck bool) (*exec.Cmd, string) {
+	return startBoundaryAPIWithEnv(t, dropAck, nil)
+}
+
+func startBoundaryAPIWithEnv(t *testing.T, dropAck bool, extraEnv map[string]string) (*exec.Cmd, string) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestBoundaryAPIProcess$")
-	cmd.Env = append(os.Environ(), "SAT_TEST_HTTP_PROCESS=1", fmt.Sprintf("SAT_TEST_DROP_ACK=%d", map[bool]int{true: 1, false: 0}[dropAck]))
-	cmd.Stderr = os.Stderr
+	childEnv := map[string]string{
+		"SAT_TEST_HTTP_PROCESS": "1",
+		"SAT_TEST_DROP_ACK":     fmt.Sprintf("%d", map[bool]int{true: 1, false: 0}[dropAck]),
+	}
+	for key, value := range extraEnv {
+		childEnv[key] = value
+	}
+	cmd.Env = withTestEnv(os.Environ(), childEnv)
+	if os.Getenv("SAT_RECOVERY_K6_USERS") != "" || childEnv["SAT_RECOVERY_K6_USERS"] != "" {
+		cmd.Stderr = &boundedTailBuffer{maxBytes: 32 * 1024}
+	} else {
+		cmd.Stderr = os.Stderr
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -111,6 +153,71 @@ func startBoundaryAPI(t *testing.T, dropAck bool) (*exec.Cmd, string) {
 		t.Fatal("SAT rehearsal API did not become ready")
 		return nil, ""
 	}
+}
+
+type boundedTailBuffer struct {
+	mu          sync.Mutex
+	maxBytes    int
+	data        []byte
+	serverError []byte
+}
+
+func (b *boundedTailBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := len(p)
+	if containsUnexpected5xxStatus(p) ||
+		bytes.Contains(p, []byte("unknown error masked as 500")) ||
+		bytes.Contains(p, []byte("SAT load untyped API error")) {
+		const maxServerErrorBytes = 8 * 1024
+		if n >= maxServerErrorBytes {
+			b.serverError = append(b.serverError[:0], p[n-maxServerErrorBytes:]...)
+		} else {
+			if overflow := len(b.serverError) + n - maxServerErrorBytes; overflow > 0 {
+				b.serverError = append(b.serverError[:0], b.serverError[overflow:]...)
+			}
+			b.serverError = append(b.serverError, p...)
+		}
+	}
+	if n >= b.maxBytes {
+		b.data = append(b.data[:0], p[n-b.maxBytes:]...)
+		return n, nil
+	}
+	if overflow := len(b.data) + n - b.maxBytes; overflow > 0 {
+		b.data = append(b.data[:0], b.data[overflow:]...)
+	}
+	b.data = append(b.data, p...)
+	return n, nil
+}
+
+func containsUnexpected5xxStatus(p []byte) bool {
+	marker := []byte(`"status":`)
+	for len(p) > 0 {
+		index := bytes.Index(p, marker)
+		if index < 0 {
+			return false
+		}
+		status := p[index+len(marker):]
+		if len(status) < 3 {
+			return false
+		}
+		if status[0] == '5' && !(status[1] == '0' && status[2] == '3') {
+			return true
+		}
+		p = status[3:]
+	}
+	return false
+}
+
+func (b *boundedTailBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	output := append([]byte(nil), b.data...)
+	if len(b.serverError) > 0 {
+		output = append(output, []byte("\n--- API request logs for unexpected 5xx responses ---\n")...)
+		output = append(output, b.serverError...)
+	}
+	return string(output)
 }
 
 func boundaryHTTP(client *http.Client, method, url, bearer string, payload any, result any) error {

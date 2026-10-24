@@ -9,6 +9,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
 // Module 2 (the adaptive branch module) has to be startable through the same
@@ -22,20 +23,13 @@ import (
 // the branch role passes the gate under a live section, and the same call is
 // still refused when the section is not the active one.
 
-// deliveryCohortRuntimeAndModule stages the first half of moduleTimingGateTx for
-// a cohort_section_v3 runtime: the runtime row names `activeSection`, and the
-// module join reports its section key and adaptive role. The stage identity is
-// decided here — `activeSection` must equal the module's section key for a
-// section-keyed model — so a mismatch ends the gate without further reads.
-func deliveryCohortRuntimeAndModule(
+// deliveryCohortModuleMetadata stages the module metadata read after the start
+// transaction has already locked and captured the cohort runtime snapshot.
+func deliveryCohortModuleMetadata(
 	mock sqlmock.Sqlmock,
-	activeSection, moduleSectionKey, adaptiveRole string,
+	moduleSectionKey, adaptiveRole string,
 	authoredSeconds int,
 ) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
-		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key"}).
-			AddRow("cohort_section_v3", activeSection))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT s.section_key, m.adaptive_role, m.duration_seconds FROM assessment_modules m JOIN assessment_sections s")).
 		WithArgs("mod-1").
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "adaptive_role", "duration_seconds"}).
@@ -65,12 +59,12 @@ func TestDeliveryStartBranchModuleUnderLiveCohortSection(t *testing.T) {
 	svc := deliverySvc(db)
 	now := time.Now().UTC()
 
-	deliverySaveBinding(mock)
+	deliveryStartModuleBinding(mock)
 	deliveryReconcileDrained(mock)
 	deliverySaveBegin(mock)
-	deliveryModuleWorkableTx(mock)
+	deliveryModuleStartWorkableTx(mock, examruntime.TimingModelCohortSection, "reading-writing")
 	deliveryModuleRow(mock, "not_started", now)
-	deliveryCohortRuntimeAndModule(mock, "reading-writing", "reading-writing", "higher_branch", 1920)
+	deliveryCohortModuleMetadata(mock, "reading-writing", "higher_branch", 1920)
 	deliveryCohortSectionGate(mock, "live", "reading-writing", now.Add(-time.Minute))
 	// The CAS is the assertion: sqlmock fails the test unless this statement was
 	// actually issued with the module row's id, i.e. the branch module passed the
@@ -85,8 +79,8 @@ func TestDeliveryStartBranchModuleUnderLiveCohortSection(t *testing.T) {
 		WithArgs("att-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	deliveryMaxRevision(mock, 7)
-	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+	deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+		"schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
 	deliveryBootstrapLoads(mock, now)
 
@@ -114,14 +108,14 @@ func TestDeliveryStartBranchModuleRefusedWhenSectionNotActive(t *testing.T) {
 	svc := deliverySvc(db)
 	now := time.Now().UTC()
 
-	deliverySaveBinding(mock)
+	deliveryStartModuleBinding(mock)
 	deliveryReconcileDrained(mock)
 	deliverySaveBegin(mock)
-	deliveryModuleWorkableTx(mock)
+	deliveryModuleStartWorkableTx(mock, examruntime.TimingModelCohortSection, "math")
 	deliveryModuleRow(mock, "not_started", now)
 	// The module belongs to reading-writing while math is the active stage: the
 	// gate refuses before it ever reads the section clock.
-	deliveryCohortRuntimeAndModule(mock, "math", "reading-writing", "lower_branch", 1920)
+	deliveryCohortModuleMetadata(mock, "reading-writing", "lower_branch", 1920)
 	// No clock read, no CAS, no phase update, no events: the tx rolls back with
 	// the module still not_started.
 	mock.ExpectRollback()

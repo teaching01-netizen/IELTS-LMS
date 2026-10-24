@@ -41,6 +41,12 @@ func expectRuntimeRevisionRead(mock sqlmock.Sqlmock, revision int64) {
 		WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(revision))
 }
 
+func expectRuntimeTimingModelRead(mock sqlmock.Sqlmock, runtimeID, timingModel string) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model FROM exam_session_runtimes WHERE id = ?")).
+		WithArgs(runtimeID).
+		WillReturnRows(sqlmock.NewRows([]string{"timing_model"}).AddRow(timingModel))
+}
+
 type sectionSeed struct {
 	key       string
 	order     int64
@@ -109,8 +115,8 @@ func expectScheduleTxOpen(mock sqlmock.Sqlmock, scheduleID, runtimeID, status, a
 	// Schedule row first (global lock order: schedule -> attempts -> runtime).
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id = ? FOR UPDATE")).
 		WithArgs(scheduleID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
-			AddRow(scheduleID, "exam-1", "sat", "", "proctor", "ver-1", "live", 3, 64))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
+			AddRow(scheduleID, "exam-1", "sat", "", "", "proctor", "ver-1", "live", 3, 64))
 	mock.ExpectQuery(attemptsLock).
 		WithArgs(scheduleID).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
@@ -215,6 +221,7 @@ func TestReconcileExpiredSectionsStartsNextSectionWhenGapElapsed(t *testing.T) {
 		{key: "reading-writing", order: 1, planned: 64, gap: 10, status: "completed", startedAt: &base, endedAt: &endedAt},
 		{key: "math", order: 2, planned: 35, status: "locked"},
 	})
+	expectRuntimeTimingModelRead(mock, "rt-1", "cohort_section_v3")
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections")).
 		WithArgs(startAt, startAt, "rt-1", "math").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -270,6 +277,7 @@ func TestReconcileExpiredSectionsCatchesUpAcrossSections(t *testing.T) {
 		WithArgs("sched-1", "reading-writing").
 		WillReturnRows(sqlmock.NewRows([]string{"attempt_id"}).AddRow("att-1"))
 	// Section 2 starts when section 1's response-save window ends.
+	expectRuntimeTimingModelRead(mock, "rt-1", "cohort_section_v3")
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections")).
 		WithArgs(section2Start, section2Start, "rt-1", "math").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -290,8 +298,11 @@ func TestReconcileExpiredSectionsCatchesUpAcrossSections(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT ma.attempt_id")).
 		WithArgs("sched-1", "math").
 		WillReturnRows(sqlmock.NewRows([]string{"attempt_id"}).AddRow("att-1"))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(timing_model, '') FROM exam_session_runtimes WHERE id = ? FOR UPDATE")).
+		WithArgs("rt-1").
+		WillReturnRows(sqlmock.NewRows([]string{"timing_model"}).AddRow("cohort_section_v3"))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtimes")).
-		WithArgs(asOf, "rt-1").
+		WithArgs(asOf, "time_expired", "rt-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	expectRuntimeRevisionRead(mock, 9)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules")).

@@ -26,6 +26,10 @@ func TestStudentEntryScheduleHealsLegacyACTProvider(t *testing.T) {
 	mock.ExpectQuery(`SELECT exam_type FROM exam_entities WHERE id = \?`).
 		WithArgs("exam-act").
 		WillReturnRows(sqlmock.NewRows([]string{"exam_type"}).AddRow("ACT"))
+	// Legacy version: no forms subtree, so no registrationForm projection.
+	mock.ExpectQuery(`FROM exam_schedules s JOIN exam_versions v`).
+		WithArgs("schedule-act-legacy").
+		WillReturnRows(sqlmock.NewRows([]string{"published_version_id", "config", "enabled_sections", "sat_publish_scope"}).AddRow("ver-1", `{}`, nil, nil))
 
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("id", "schedule-act-legacy")
@@ -64,11 +68,11 @@ func legacyScheduleRow(providerKey string) *sqlmock.Rows {
 		"planned_duration_minutes", "delivery_mode", "status", "revision",
 		"recurrence_type", "recurrence_interval", "recurrence_end_date",
 		"buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop",
-		"created_at", "created_by", "updated_at", "sat_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy",
+		"created_at", "created_by", "updated_at", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy",
 	}).AddRow(
 		"schedule-act-legacy", "exam-act", providerKey, nil, "ACT Science",
 		"ACT Science", "ACT Science", "version-act-1", "cohort", nil,
 		start, end, 60, "proctor_start", "scheduled", 0,
-		"none", 1, nil, nil, nil, false, false, start, "admin", start, nil, "proctor", "practice", nil,
+		"none", 1, nil, nil, nil, false, false, start, "admin", start, nil, nil, "proctor", "practice", nil,
 	)
 }

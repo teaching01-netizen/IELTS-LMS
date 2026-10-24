@@ -9,6 +9,7 @@ import {
   deriveSatEntryDecision,
   isSatInitialEntry,
   moduleAttemptEndedByOwnClock,
+  previousTimedOutModuleDeadlineAt,
   previousModuleTimedOut,
   type SatEntryDecisionInput,
 } from '../application/satEntry';
@@ -434,9 +435,11 @@ describe('SAT delivery domain', () => {
     } as unknown as AssessmentDeliveryBootstrap);
 
     expect(previousModuleTimedOut(payloadAt('2026-09-19T09:32:05Z', 'submitted', deadlineAt), branchModule)).toBe(true);
+    expect(previousTimedOutModuleDeadlineAt(payloadAt('2026-09-19T09:32:05Z', 'submitted', deadlineAt), branchModule)).toBe(deadlineAt);
     // Submitted with time to spare: the finished module's own deadline is still
     // ahead, so the student owns the Module 2 entry.
     expect(previousModuleTimedOut(payloadAt('2026-09-19T09:20:00Z', 'submitted', deadlineAt), branchModule)).toBe(false);
+    expect(previousTimedOutModuleDeadlineAt(payloadAt('2026-09-19T09:20:00Z', 'submitted', deadlineAt), branchModule)).toBeNull();
     // A module that never started, or carries no deadline, proves nothing.
     expect(previousModuleTimedOut(payloadAt('2026-09-19T09:40:00Z', 'not_started', deadlineAt), branchModule)).toBe(false);
     expect(previousModuleTimedOut(payloadAt('2026-09-19T09:40:00Z', 'submitted', null), branchModule)).toBe(false);

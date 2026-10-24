@@ -185,6 +185,7 @@ func TestValidateDraftCountsEveryQuestionAsOperational(t *testing.T) {
 			AddRow("q2", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
 	policy := converterJSON(t, map[string]map[string]string{"math": {"m2_higher_only": "s"}}, map[string]int{"s": 2})
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"p"}).AddRow(policy))
+	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 	if err != nil {
 		t.Fatal(err)
@@ -208,6 +209,7 @@ func TestValidateDraftRequiresAllThreeModulesInSelectedSection(t *testing.T) {
 			AddRow("q1", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")).
 			AddRow("q2", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"p"}))
+	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeReadingWriting)
 	if err != nil {
 		t.Fatal(err)

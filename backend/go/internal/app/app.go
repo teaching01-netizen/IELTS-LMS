@@ -10,6 +10,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"example.com/ielts-proctoring/internal/assessmentforms"
 	"time"
 
 	"example.com/ielts-proctoring/internal/accesslinks"
@@ -59,6 +60,7 @@ type Services struct {
 	Library       *library.Service
 	AnswerHistory *answerhistory.Service
 	Authoring     *authoring.Service
+	Forms         *assessmentforms.Service
 	SatScoring    *satscoring.Service
 	AccessLinks   *accesslinks.Service
 	SatRooms      *satrooms.Service
@@ -102,6 +104,7 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 		return s
 	}
 	s.Tx = tx.NewRunner(pool)
+	s.Forms = assessmentforms.New(pool, s.Tx)
 	s.Secret = []byte(cfg.AuthSecret)
 	s.Outbox = outbox.NewRepository(pool)
 	s.Terminal = terminalization.NewService(s.Tx, nil, nil).SetOutboxExecOnly(cfg.OutboxExecOnly)

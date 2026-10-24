@@ -73,7 +73,13 @@ interface AccountActivationPayload {
   displayName?: string | undefined;
 }
 
-interface StudentEntryPayload {
+/** Configurable SAT registration answers, keyed by field ID, plus the form version the student saw. */
+export interface StudentRegistrationFormSubmission {
+  versionId: string;
+  answers: Record<string, string | number>;
+}
+
+export interface StudentEntryPayload {
   scheduleId?: string | undefined;
   accessLinkId?: string | undefined;
   wcode: string;
@@ -84,6 +90,8 @@ interface StudentEntryPayload {
   clientSessionId?: string | undefined;
   /** An explicit practice recovery capability, never an identity label. */
   entrySession?: string | undefined;
+  /** Omitted for legacy/unconfigured forms. */
+  registrationForm?: StudentRegistrationFormSubmission | undefined;
 }
 
 function extractEnvelopeData<T>(response: { data?: BackendEnvelope<T> | T | undefined }): T {

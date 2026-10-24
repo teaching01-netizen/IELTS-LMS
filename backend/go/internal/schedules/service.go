@@ -119,6 +119,7 @@ type Schedule struct {
 	ExamID                 string     `json:"examId"`
 	ProviderKey            string     `json:"providerKey"`
 	SatTimingModel         *string    `json:"satTimingModel,omitempty"`
+	IeltsTimingModel       *string    `json:"ieltsTimingModel,omitempty"`
 	SatStartMode           string     `json:"satStartMode"`             // "proctor" | "access_code" (SAT code start)
 	SatSessionMode         string     `json:"satSessionMode"`           // "practice" | "classroom"
 	SatRoutePolicy         *string    `json:"satRoutePolicy,omitempty"` // classroom Module 2 policy; nil = adaptive
@@ -249,14 +250,14 @@ func conflictError(msg string) *apperrors.Error {
 	return apperrors.New(apperrors.CodeConflict, msg)
 }
 
-const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, created_at, created_by, updated_at, sat_timing_model, sat_start_mode, COALESCE(sat_session_mode, 'practice'), sat_route_policy"
+const scheduleColumns = "id, exam_id, provider_key, organization_id, exam_title, COALESCE(proctor_display_name, exam_title), COALESCE(grading_display_name, exam_title), published_version_id, cohort_name, institution, start_time, end_time, planned_duration_minutes, delivery_mode, status, revision, recurrence_type, recurrence_interval, recurrence_end_date, buffer_before_minutes, buffer_after_minutes, auto_start, auto_stop, created_at, created_by, updated_at, sat_timing_model, ielts_timing_model, sat_start_mode, COALESCE(sat_session_mode, 'practice'), sat_route_policy"
 
 func scanSchedule(row interface {
 	Scan(dest ...any) error
 }) (Schedule, error) {
 	var s Schedule
-	var orgID, institution, timingModel sql.NullString
-	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision, &s.RecurrenceType, &s.RecurrenceInterval, &s.RecurrenceEndDate, &s.BufferBeforeMinutes, &s.BufferAfterMinutes, &s.AutoStart, &s.AutoStop, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &timingModel, &s.SatStartMode, &s.SatSessionMode, &s.SatRoutePolicy); err != nil {
+	var orgID, institution, timingModel, ieltsTimingModel sql.NullString
+	if err := row.Scan(&s.ID, &s.ExamID, &s.ProviderKey, &orgID, &s.ExamTitle, &s.ProctorDisplayName, &s.GradingDisplayName, &s.PublishedVersionID, &s.CohortName, &institution, &s.StartTime, &s.EndTime, &s.PlannedDurationMinutes, &s.DeliveryMode, &s.Status, &s.Revision, &s.RecurrenceType, &s.RecurrenceInterval, &s.RecurrenceEndDate, &s.BufferBeforeMinutes, &s.BufferAfterMinutes, &s.AutoStart, &s.AutoStop, &s.CreatedAt, &s.CreatedBy, &s.UpdatedAt, &timingModel, &ieltsTimingModel, &s.SatStartMode, &s.SatSessionMode, &s.SatRoutePolicy); err != nil {
 		return Schedule{}, err
 	}
 	if orgID.Valid {
@@ -273,6 +274,10 @@ func scanSchedule(row interface {
 	if timingModel.Valid && strings.TrimSpace(timingModel.String) != "" {
 		v := timingModel.String
 		s.SatTimingModel = &v
+	}
+	if ieltsTimingModel.Valid && strings.TrimSpace(ieltsTimingModel.String) != "" {
+		v := ieltsTimingModel.String
+		s.IeltsTimingModel = &v
 	}
 	return s, nil
 }
@@ -317,9 +322,39 @@ func PersistSatTimingChoice(ctx context.Context, q tx.Tx, scheduleID, providerKe
 		return nil
 	}
 	if !satPersonalTimingEnabled() {
+		var schemaVersion int
+		if err := q.QueryRowContext(ctx, `SELECT COALESCE(JSON_EXTRACT(v.config_snapshot,'$.forms.schemaVersion'),0) FROM exam_schedules s JOIN exam_versions v ON v.id=s.published_version_id WHERE s.id=?`, scheduleID).Scan(&schemaVersion); err != nil {
+			return err
+		}
+		if schemaVersion == 2 {
+			err := apperrors.New(apperrors.CodeConflict, "Separate section forms require individual SAT timers. Enable SAT personal timing before creating this room.")
+			err.Details = map[string]any{"reason": "SECTION_FORMS_REQUIRE_PERSONAL_TIMING"}
+			return err
+		}
 		return nil
 	}
 	_, err := q.ExecContext(ctx, "UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?", examruntime.TimingModelPersonal, scheduleID)
+	return err
+}
+
+const ieltsPersonalTimingEnv = "IELTS_PERSONAL_TIMING"
+
+var ieltsPersonalTimingEnabled = func() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(ieltsPersonalTimingEnv))) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
+// PersistIeltsTimingChoice opts only new IELTS schedules into attempt-owned
+// section clocks. The schedule row captures rollout policy for the session.
+func PersistIeltsTimingChoice(ctx context.Context, q tx.Tx, scheduleID, providerKey string) error {
+	if !strings.EqualFold(strings.TrimSpace(providerKey), "ielts") || !ieltsPersonalTimingEnabled() {
+		return nil
+	}
+	_, err := q.ExecContext(ctx, "UPDATE exam_schedules SET ielts_timing_model = ? WHERE id = ?", examruntime.TimingModelIELTSPersonal, scheduleID)
 	return err
 }
 
@@ -412,6 +447,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Schedule, erro
 		// New SAT schedules select the attempt-owned timing model. Old rows
 		// (NULL) keep the deployed cohort model; never rewrite in flight.
 		if err := PersistSatTimingChoice(ctx, q, id, providerKey); err != nil {
+			return err
+		}
+		if err := PersistIeltsTimingChoice(ctx, q, id, providerKey); err != nil {
 			return err
 		}
 		// Start mode is resolved and persisted with the schedule: code mode
@@ -731,6 +769,7 @@ func (s *Service) startPlanner() examruntime.StartPlanner {
 			ID:                     sch.ID,
 			ProviderKey:            sch.ProviderKey,
 			SatTimingModel:         optionalScheduleModel(sch.SatTimingModel),
+			IeltsTimingModel:       optionalScheduleModel(sch.IeltsTimingModel),
 			PublishedVersionID:     sch.PublishedVersionID,
 			PlannedDurationMinutes: sch.PlannedDurationMinutes,
 		})
@@ -849,7 +888,9 @@ func runtimePlanIn(ctx context.Context, q planQuerier, sch Schedule) ([]examrunt
 	// model (cohort_section_v3 for SAT, legacy otherwise). Never reinterpret
 	// an in-progress attempt's model here — this runs only at Start.
 	choice := ""
-	if sch.SatTimingModel != nil {
+	if strings.EqualFold(sch.ProviderKey, "ielts") && sch.IeltsTimingModel != nil {
+		choice = *sch.IeltsTimingModel
+	} else if sch.SatTimingModel != nil {
 		choice = *sch.SatTimingModel
 	}
 	timingModel := examruntime.ResolveTimingModel(sch.ProviderKey, choice)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ func TestBuildAppRuntimeSnapshotWiring(t *testing.T) {
 	now := time.Now().UTC()
 	live := "live"
 	seedLive := func(c *runtime.SnapshotCache) {
-		if _, err := c.Get("sched-1", now, func() (runtime.Snapshot, error) {
+		if _, err := c.Get(context.Background(), "sched-1", now, func() (runtime.Snapshot, error) {
 			return runtime.Snapshot{Status: runtime.StatusLive, ActiveSectionKey: &live, Revision: 1, TimingModel: "legacy_section_v1", SectionLive: true, SectionStarted: true, LoadedAt: now}, nil
 		}); err != nil {
 			t.Fatal(err)

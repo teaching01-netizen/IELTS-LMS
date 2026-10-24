@@ -67,8 +67,9 @@ type saveExpectation struct {
 	attempt  func() *sqlmock.Rows
 	// rowFirst selects the B3 cell projection; false drives the legacy answer
 	// blob (the second shape the strategies must answer identically).
-	rowFirst   bool
-	unwritable bool
+	rowFirst       bool
+	unwritable     bool
+	personalTiming bool
 }
 
 func bulkCommands(n int) []ResponseCommand {
@@ -84,7 +85,7 @@ func bulkCommands(n int) []ResponseCommand {
 	return cmds
 }
 
-// commandWriteIDs / commandQuestionIDs / commandVersions are the read keys the
+// commandWriteIDs / commandQuestionIDs are the read keys the
 // set-based strategy builds from a batch: unique, in first-seen order (so a
 // batch that repeats a question reads it once, as the code does).
 func commandWriteIDs(commands []ResponseCommand) []string {
@@ -106,18 +107,6 @@ func commandQuestionIDs(commands []ResponseCommand) []string {
 		if !seen[c.QuestionID] {
 			seen[c.QuestionID] = true
 			out = append(out, c.QuestionID)
-		}
-	}
-	return out
-}
-
-func commandVersions(commands []ResponseCommand) []uint64 {
-	out := make([]uint64, 0, len(commands))
-	seen := make(map[uint64]bool, len(commands))
-	for _, c := range commands {
-		if !seen[c.ClientVersion] {
-			seen[c.ClientVersion] = true
-			out = append(out, c.ClientVersion)
 		}
 	}
 	return out
@@ -219,8 +208,11 @@ func stageSingle(mock sqlmock.Sqlmock, exp saveExpectation) int {
 	}
 	// Replay phase: probe each write id until the first unseen one; a stored row
 	// with different content fails the batch here (its own 409, no details).
+	// The loop below reuses every verdict probed here (transaction-local memo).
+	probed := 0
 	for i, c := range exp.commands {
 		plan := exp.plans[i]
+		probed++
 		if plan.dup == nil {
 			mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WithArgs("att-1", c.WriteID).WillReturnRows(missRows())
 			count()
@@ -234,26 +226,27 @@ func stageSingle(mock sqlmock.Sqlmock, exp saveExpectation) int {
 		}
 	}
 	if allReplayed(exp) {
-		// The batch is entirely stored: stored acks plus the attempt revision.
-		mock.ExpectQuery("SELECT response_revision FROM student_attempts").WithArgs("att-1").
-			WillReturnRows(sqlmock.NewRows([]string{"response_revision"}).AddRow(uint64(9)))
-		count()
+		// The batch is entirely stored: stored acks at the locked attempt
+		// revision, with no further statement.
 		mock.ExpectCommit()
 		return staged
 	}
-	mock.ExpectQuery("SELECT active_client_session_id").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	count()
 
 	revisions := appliedRevisions(exp.plans)
 	for i, c := range exp.commands {
 		plan := exp.plans[i]
 		if plan.dup != nil {
-			mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WithArgs("att-1", c.WriteID).WillReturnRows(ledgerRows(*plan.dup))
-			count()
+			if i >= probed {
+				mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WithArgs("att-1", c.WriteID).WillReturnRows(ledgerRows(*plan.dup))
+				count()
+			}
 			continue
 		}
-		mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WithArgs("att-1", c.WriteID).WillReturnRows(missRows())
-		count()
+		if i >= probed {
+			mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WithArgs("att-1", c.WriteID).WillReturnRows(missRows())
+			count()
+		}
 		if exp.unwritable {
 			// ensureWritable refuses the first new write; nothing is written.
 			mock.ExpectRollback()
@@ -349,14 +342,10 @@ func stageBatch(mock sqlmock.Sqlmock, exp saveExpectation) int {
 	}
 	if allReplayed(exp) {
 		// A whole-batch replay mutates nothing: the stored acks come back with
-		// the attempt's current revision, and the loop never runs.
-		mock.ExpectQuery("SELECT response_revision FROM student_attempts").WithArgs("att-1").
-			WillReturnRows(sqlmock.NewRows([]string{"response_revision"}).AddRow(uint64(9)))
-		count()
+		// the locked attempt revision, and the loop never runs.
 		mock.ExpectCommit()
 		return staged
 	}
-	mock.ExpectQuery("SELECT active_client_session_id").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	count()
 	if exp.unwritable {
 		// ensureWritable refuses the first new write, before any projection read
@@ -364,26 +353,23 @@ func stageBatch(mock sqlmock.Sqlmock, exp saveExpectation) int {
 		mock.ExpectRollback()
 		return staged
 	}
-	// The in-loop read re-reads those rows and adds the version keys; the loop
-	// asks for it at the first command that clears the fences, once.
+	// The in-loop read asks only for the exact (question, clientVersion) keys
+	// of the commands not already stored, at the batch lease; the write-id rows
+	// come from the pre-fence read. The loop issues it once, at the first
+	// command that clears the fences.
 	versionRows := sqlmock.NewRows(ledgerColumnNames())
+	versionArgs := []driver.Value{"att-1", uint64(3)}
 	for i, c := range exp.commands {
 		plan := exp.plans[i]
 		if plan.dup != nil {
-			versionRows.AddRow(c.WriteID, c.QuestionID, c.ClientVersion, uint64(3), plan.dup.reqHash, plan.dup.hash, "applied", plan.dup.revision, storedRawJSON)
+			continue
 		}
+		versionArgs = append(versionArgs, c.QuestionID, c.ClientVersion)
 		if plan.collision != "" {
 			versionRows.AddRow(plan.collision, c.QuestionID, c.ClientVersion, uint64(3), "other", "other", "applied", uint64(4), storedRawJSON)
 		}
 	}
-	versionArgs := []driver.Value{"att-1"}
-	versionArgs = append(versionArgs, anyStrings(commandWriteIDs(exp.commands))...)
-	versionArgs = append(versionArgs, uint64(3))
-	versionArgs = append(versionArgs, anyStrings(commandQuestionIDs(exp.commands))...)
-	for _, v := range commandVersions(exp.commands) {
-		versionArgs = append(versionArgs, v)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta("WHERE attempt_id=? AND (client_write_id IN (")).WithArgs(versionArgs...).WillReturnRows(versionRows)
+	mock.ExpectQuery(regexp.QuoteMeta("WHERE attempt_id=? AND lease_epoch=? AND ((question_id=? AND client_version=?)")).WithArgs(versionArgs...).WillReturnRows(versionRows)
 	count()
 	projectionRows := sqlmock.NewRows([]string{"question_id", "lease_epoch", "client_version", "server_revision", "response", "response_hash"})
 	for i, c := range exp.commands {
@@ -416,18 +402,35 @@ func stageBatch(mock sqlmock.Sqlmock, exp saveExpectation) int {
 		mock.ExpectExec("UPDATE student_attempts SET answers=").WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "att-1").WillReturnResult(sqlmock.NewResult(0, 1))
 		count()
 	}
+	if exp.personalTiming && len(revisions) > 0 {
+		mock.ExpectExec("UPDATE assessment_module_attempts SET entry_entered_at").WithArgs("att-1", "m-listening").WillReturnResult(sqlmock.NewResult(0, 1))
+		count()
+	}
 	if len(revisions) > 0 {
-		responseArgs := make([]driver.Value, 0, len(revisions)*12)
+		// One cell row per question, holding the last applied command, at the
+		// question's first position.
+		var rowArgs [][]driver.Value
+		rowAt := map[string]int{}
 		for i, c := range exp.commands {
 			rev, ok := revisions[i]
 			if !ok {
 				continue
 			}
-			responseArgs = append(responseArgs,
+			row := []driver.Value{
 				"att-1", c.QuestionID, "m-listening", uint64(3), uint64(7), c.ClientVersion, c.WriteID,
-				sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), rev, sqlmock.AnyArg())
+				sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), rev, sqlmock.AnyArg()}
+			if at, seen := rowAt[c.QuestionID]; seen {
+				rowArgs[at] = row
+				continue
+			}
+			rowAt[c.QuestionID] = len(rowArgs)
+			rowArgs = append(rowArgs, row)
 		}
-		mock.ExpectExec("INSERT INTO attempt_responses_v2").WithArgs(responseArgs...).WillReturnResult(sqlmock.NewResult(1, int64(len(revisions))))
+		responseArgs := make([]driver.Value, 0, len(rowArgs)*12)
+		for _, row := range rowArgs {
+			responseArgs = append(responseArgs, row...)
+		}
+		mock.ExpectExec("INSERT INTO attempt_responses_v2").WithArgs(responseArgs...).WillReturnResult(sqlmock.NewResult(1, int64(len(rowArgs))))
 		count()
 	}
 	ledgerWriteArgs := make([]driver.Value, 0, len(exp.commands)*13)
@@ -486,10 +489,18 @@ func runSave(t *testing.T, exp saveExpectation, stage func(mock sqlmock.Sqlmock,
 	bearer := mintToken(t, []byte(batchSecret), baseClaims())
 	// A fixed gate timestamp: both strategies must report the same ServerTime.
 	qr, _ := liveStubs()
+	if exp.personalTiming {
+		qr.owner.TimingModel = "sat_personal_v1"
+		started := fixedGateTime.Add(-time.Second)
+		qr.owner.ModuleStartedAt = &started
+	}
 	rl := stubLocker{gate: RuntimeGate{Status: "live", ActiveSectionKey: "*", SectionLive: true, SectionStarted: true, Now: fixedGateTime}}
 	res, saveErr := svc.SaveResponses(context.Background(), bearer, SaveResponsesCommand{
 		AttemptID: "att-1", LeaseEpoch: 3, ControlEpoch: 7, Commands: exp.commands,
 	}, qr, rl)
+	if saveErr != nil {
+		t.Logf("SaveResponses error: %v", saveErr)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
@@ -506,7 +517,7 @@ var fixedGateTime = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 // (including a flush at MaxBatchCommands, so both strategies can be measured on
 // the same batch).
 const (
-	batchStrategyThreshold      = 4
+	batchStrategyThreshold      = 1
 	perCommandStrategyThreshold = MaxBatchCommands + 1
 )
 
@@ -564,6 +575,44 @@ func TestBulkBatchStatementCountIsConstant(t *testing.T) {
 		if ack.WriteID != fmt.Sprintf("w-%d", i) || ack.QuestionID != fmt.Sprintf("q-%d", i) {
 			t.Fatalf("ack %d must follow command order, got %+v", i, ack)
 		}
+	}
+}
+
+// TestTwoAnswerSaveUsesSetBasedIO guards the common SAT autosave shape. A
+// two-answer request is small in payload size but still arrives as one of
+// thousands of synchronized transactions; keeping per-command reads under
+// each attempt lock needlessly multiplies the database round trips.
+func TestTwoAnswerSaveUsesSetBasedIO(t *testing.T) {
+	commands := bulkCommands(2)
+	exp := saveExpectation{commands: commands, plans: plansFor(len(commands)), attempt: attemptRows, rowFirst: true}
+	batched, batchedStatements, err := runSave(t, exp, stageBatch, 0)
+	if err != nil {
+		t.Fatalf("two-answer set-based save must commit, got %v", err)
+	}
+	perCommand, perCommandStatements, err := runSave(t, exp, stageSingle, perCommandStrategyThreshold)
+	if err != nil {
+		t.Fatalf("two-answer per-command save must commit, got %v", err)
+	}
+	if !reflect.DeepEqual(batched.Acks, perCommand.Acks) || batched.ResponseRevision != perCommand.ResponseRevision || batched.Replayed != perCommand.Replayed {
+		t.Fatalf("two-answer save results differ: set-based=%+v, per-command=%+v", batched, perCommand)
+	}
+	if batchedStatements >= perCommandStatements {
+		t.Fatalf("two-answer set-based path must reduce statements under the attempt lock: set-based=%d per-command=%d", batchedStatements, perCommandStatements)
+	}
+}
+
+func TestPersonalTwoAnswerBatchMarksEntryOnce(t *testing.T) {
+	commands := bulkCommands(2)
+	exp := saveExpectation{
+		commands: commands, plans: plansFor(len(commands)), attempt: attemptRows,
+		rowFirst: true, personalTiming: true,
+	}
+	result, _, err := runSave(t, exp, stageBatch, 0)
+	if err != nil {
+		t.Fatalf("personal two-answer set-based save must commit, got %v", err)
+	}
+	if len(result.Acks) != len(commands) || result.ResponseRevision != 9+uint64(len(commands)) {
+		t.Fatalf("save acknowledgment changed while marking first entry: %+v", result)
 	}
 }
 

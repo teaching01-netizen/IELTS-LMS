@@ -15,6 +15,7 @@ import {
   authService,
   type AuthSession,
   type AuthUserRole,
+  type StudentEntryPayload,
   type StudentEntryResult,
   type StudentEntrySuccess,
 } from './api/authGateway';
@@ -28,16 +29,7 @@ interface AuthSessionContextValue {
   session: AuthSession | null;
   status: AuthStatus;
   login: (email: string, password: string) => Promise<AuthSession>;
-  studentEntry: (payload: {
-    scheduleId?: string | undefined;
-    accessLinkId?: string | undefined;
-    wcode: string;
-    email: string;
-    studentName: string;
-    nickname?: string | undefined;
-    ieltsCourse?: string | undefined;
-    clientSessionId?: string | undefined;
-  }) => Promise<StudentEntryResult>;
+  studentEntry: (payload: Omit<StudentEntryPayload, "entrySession">) => Promise<StudentEntryResult>;
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
   refresh: () => Promise<AuthSession | null>;
@@ -271,16 +263,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     return setSessionState(nextSession, setSession, setStatus) as AuthSession;
   }, []);
 
-  const studentEntry = useCallback(async (payload: {
-    scheduleId?: string | undefined;
-    accessLinkId?: string | undefined;
-    wcode: string;
-    email: string;
-    studentName: string;
-    nickname?: string | undefined;
-    ieltsCourse?: string | undefined;
-    clientSessionId?: string | undefined;
-  }) => {
+  const studentEntry = useCallback(async (payload: Omit<StudentEntryPayload, "entrySession">) => {
     const result = await authService.studentEntry(payload);
     if (!('user' in result)) {
       return result;

@@ -23,7 +23,13 @@ export function SatErrorSurface({
       role="alert"
     >
       <div className="w-full max-w-md text-center">
-        <h1 className="text-[20px] font-semibold tracking-tight">{title}</h1>
+        <h1
+          data-sat-stage-heading="true"
+          tabIndex={-1}
+          className="text-[20px] font-semibold tracking-tight"
+        >
+          {title}
+        </h1>
         <p className="mt-2 text-[15px] leading-6 text-[var(--sat-text-secondary)]">{description}</p>
         {detail ? (
           <p className="mt-3 break-words text-[13px] leading-5 text-[var(--sat-text-secondary)]">

@@ -52,8 +52,8 @@ func readProctorCmd(r *http.Request) (proctor.AttemptCommand, error) {
 // proctorCmdBody is the wire envelope for per-attempt proctor commands.
 // All fields are optional; unknown fields are rejected by DecodeLimited.
 type proctorCmdBody struct {
-	OperationID              string  `json:"operationId"`
-	ModuleID                 string  `json:"moduleId"`
+	OperationID string `json:"operationId"`
+	ModuleID    string `json:"moduleId"`
 	// ActorID is accepted for wire compatibility with the pre-migration
 	// frontend. Authorization always comes from the authenticated session;
 	// this client value is intentionally ignored.
@@ -107,7 +107,7 @@ func attemptIDFromStudentWire(app *App, r *http.Request, scheduleID, attemptID s
 	// Session-bound verify in both modes (same rule as delivery writes).
 	claims, err := verifyAttemptReadBearer(app, r, bearer)
 	if err != nil {
-		return "", apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+		return "", attemptVerificationError(err)
 	}
 	if claims.ScheduleID != scheduleID {
 		return "", apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
@@ -459,7 +459,7 @@ func v1HeartbeatHandler(app *App) http.HandlerFunc {
 		response := map[string]any{"attempt": nil, "runtime": nil, "refreshedAttemptCredential": nil, "nextHeartbeatSecs": student.PresenceWindowSeconds()}
 		if !ackOnly {
 			response["attempt"] = attempt
-			response["runtime"], _ = loadStudentRuntimeContext(r.Context(), app.DB, chi.URLParam(r, "scheduleID"))
+			response["runtime"], _ = loadStudentRuntimeContext(r.Context(), app.DB, chi.URLParam(r, "scheduleID"), attemptID)
 		}
 		httpx.WriteJSON(w, http.StatusOK, response)
 	}
@@ -650,7 +650,7 @@ func proctorExtendSectionHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var body struct {
-			OperationID              string  `json:"operationId"`
+			OperationID string `json:"operationId"`
 			// ActorID is a legacy client field; the session remains authoritative.
 			ActorID                  *string `json:"actorId"`
 			Minutes                  int64   `json:"minutes"`
@@ -690,7 +690,7 @@ func proctorCompleteExamHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var body struct {
-			OperationID string  `json:"operationId"`
+			OperationID string `json:"operationId"`
 			// ActorID is a legacy client field; the session remains authoritative.
 			ActorID *string `json:"actorId"`
 			Reason  *string `json:"reason"`
@@ -791,8 +791,8 @@ func proctorExtendAttemptHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var body struct {
-			OperationID             string  `json:"operationId"`
-			ModuleID                string  `json:"moduleId"`
+			OperationID string `json:"operationId"`
+			ModuleID    string `json:"moduleId"`
 			// ActorID is a legacy client field; the session remains authoritative.
 			ActorID                 *string `json:"actorId"`
 			Minutes                 int64   `json:"minutes"`
@@ -836,7 +836,7 @@ func proctorReArmStageHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var body struct {
-			OperationID string  `json:"operationId"`
+			OperationID string `json:"operationId"`
 			// ActorID is a legacy client field; the session remains authoritative.
 			ActorID  *string `json:"actorId"`
 			ModuleID string  `json:"moduleId"`

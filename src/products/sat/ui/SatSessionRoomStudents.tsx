@@ -1,4 +1,5 @@
 import { AlertTriangle, ChevronRight, MessageSquareWarning, Pause, Play, Timer } from 'lucide-react';
+import { useRef, useState } from 'react';
 import type { StudentSession } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import { useAuthoritativeDeadlineClock, type ServerClockSnapshot } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
@@ -12,12 +13,15 @@ type StudentSessionWithModuleRole = StudentSession & {
 
 /** Current, actionable reasons only; historical warnings and violations are not open work. */
 export function studentAttentionReason(
-  _student: StudentSession,
+  student: StudentSession,
   deviceChangePending: boolean,
   currentIssues: readonly string[] = [],
 ): string | null {
   const reasons: string[] = [];
   if (deviceChangePending) reasons.push('Device change pending');
+  if (student.satRecoveryPhase === 'blocked') {
+    reasons.push(student.satRecoveryKind === 'entry' ? 'SAT module entry expired' : 'SAT connection recovery expired');
+  }
   reasons.push(...currentIssues.map((issue) => issue.trim()).filter(Boolean));
   return reasons.length ? reasons.join(' · ') : null;
 }
@@ -153,6 +157,7 @@ export function StudentDetail({
   onPause,
   onResume,
   onTerminate,
+  onResolveRecovery,
 }: {
   student: StudentSession;
   runtime: ExamSessionRuntime | null;
@@ -165,7 +170,13 @@ export function StudentDetail({
   onPause: () => void;
   onResume: () => void;
   onTerminate: () => void;
+  onResolveRecovery?: ((request: { resolutionId: string; reason: string }) => Promise<void>) | undefined;
 }) {
+  const [recoveryReviewOpen, setRecoveryReviewOpen] = useState(false);
+  const [recoveryReason, setRecoveryReason] = useState('');
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [resolvingRecovery, setResolvingRecovery] = useState(false);
+  const recoveryResolutionId = useRef<string | null>(null);
   const anyStudentPending = [
     'student-extend-5',
     'student-extend-10',
@@ -174,6 +185,7 @@ export function StudentDetail({
     'student-resume',
     'student-terminate',
   ].some((key) => pendingActions.has(key));
+  const recoveryPending = pendingActions.has(`sat-recovery-${student.id}`);
   const sectionRunning = isSatStageLive(runtime, student);
   // Both of the panel's clocks take the same source chain: the student's own
   // projection first, the room's read behind it. The section clock used to have
@@ -210,10 +222,33 @@ export function StudentDetail({
   });
   const sectionLabel = sectionLabelFor(runtime, student.runtimeCurrentSection);
   const moduleSlot = satModuleSlotLabel(moduleRoleFor(student));
-  const actionDisabled = anyStudentPending || blocked;
+  const actionDisabled = anyStudentPending || recoveryPending || blocked;
   const hasAttention = student.warnings > 0 || student.violations.length > 0;
   const attentionCount = student.warnings + student.violations.length;
   const attentionFirst = variant === 'review' && hasAttention;
+  const hasBlockedSATRecovery = student.satRecoveryPhase === 'blocked'
+    && student.satRecoveryModuleAttemptId
+    && student.satRecoveryBoundaryRevision != null;
+  const entryRecovery = student.satRecoveryKind === 'entry';
+
+  const resolveRecovery = async () => {
+    const reason = recoveryReason.trim();
+    if (!hasBlockedSATRecovery || !onResolveRecovery || !reason || resolvingRecovery) return;
+    recoveryResolutionId.current ??= globalThis.crypto?.randomUUID?.()
+      ?? `sat-recovery-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setResolvingRecovery(true);
+    setRecoveryError(null);
+    try {
+      await onResolveRecovery({ resolutionId: recoveryResolutionId.current, reason });
+      recoveryResolutionId.current = null;
+      setRecoveryReviewOpen(false);
+      setRecoveryReason('');
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : 'The recovery decision could not be confirmed.');
+    } finally {
+      setResolvingRecovery(false);
+    }
+  };
 
   return (
     <section
@@ -257,6 +292,71 @@ export function StudentDetail({
           <DetailFact label="Attempt" value={student.status} capitalize />
         </dl>
       </section>
+
+      {hasBlockedSATRecovery && onResolveRecovery ? (
+        <section className={DETAIL_SECTION} aria-labelledby="sat-recovery-exception-heading">
+          <h3 id="sat-recovery-exception-heading" className={DETAIL_HEADING}>Recovery exception</h3>
+          <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3">
+            <DetailFact label="Affected module" value={student.satRecoveryModuleTitle ?? 'SAT module'} />
+            <DetailFact label="Boundary" value={entryRecovery ? 'Entry expired' : 'Answer recovery expired'} />
+            <DetailFact
+              label="Recovery deadline"
+              value={student.satRecoveryDeadlineAt ? new Date(student.satRecoveryDeadlineAt).toLocaleString() : 'Unavailable'}
+            />
+            <DetailFact label="Pending local answers" value={entryRecovery ? 'Not applicable; module not started' : 'Unknown; server-confirmed answers are preserved'} />
+          </dl>
+          {!recoveryReviewOpen ? (
+            <button
+              type="button"
+              className="sat-btn sat-btn--secondary sat-press mt-3 w-full"
+              disabled={actionDisabled}
+              onClick={() => { setRecoveryReviewOpen(true); setRecoveryError(null); }}
+            >
+              Review recovery decision…
+            </button>
+          ) : (
+            <div className="mt-3 rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-warning-dot,#d97706)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.08))] p-3" role="group" aria-label="Recovery decision preview">
+              <p className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">
+                {entryRecovery
+                  ? 'This module has not started. Starting it now begins the student’s timer.'
+                  : 'Continue with server-confirmed answers. Unconfirmed device-held answers may be excluded from scoring and routing; the exact count is unknown.'}
+              </p>
+              <label className="mt-3 block text-[14px] font-medium text-[var(--sat-staff-text-primary,#1d1d1f)]" htmlFor="sat-recovery-resolution-reason">
+                Reason for the recovery decision
+                <textarea
+                  id="sat-recovery-resolution-reason"
+                  aria-label="Reason for the recovery decision"
+                  value={recoveryReason}
+                  onChange={(event) => setRecoveryReason(event.target.value.slice(0, 500))}
+                  maxLength={500}
+                  rows={3}
+                  required
+                  className="mt-1 min-h-20 w-full rounded-md border border-[var(--sat-staff-border,#d2d2d7)] bg-white px-3 py-2 text-[14px] leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]"
+                />
+              </label>
+              {recoveryError ? <p role="alert" className="mt-2 text-[14px] text-[var(--sat-staff-danger,#b42318)]">{recoveryError}</p> : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="sat-btn sat-btn--primary sat-press"
+                  disabled={actionDisabled || resolvingRecovery || recoveryReason.trim().length === 0}
+                  onClick={() => void resolveRecovery()}
+                >
+                  {resolvingRecovery ? 'Recording decision…' : entryRecovery ? 'Start module' : 'Continue with confirmed answers'}
+                </button>
+                <button
+                  type="button"
+                  className="sat-btn sat-btn--quiet sat-press"
+                  disabled={resolvingRecovery}
+                  onClick={() => setRecoveryReviewOpen(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+      ) : null}
 
       {/* Actions here affect only this student; room-wide controls live in the
           room header. Each label says what it does, and each consequential

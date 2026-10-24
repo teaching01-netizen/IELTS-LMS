@@ -118,6 +118,14 @@ export function StudentDetailPanel({
       && student.runtimeSectionStatus === 'live'
       && student.status !== 'terminated',
   });
+  const personalRemaining = useAuthoritativeDeadlineClock({
+    deadlineAt: student?.ieltsPersonalDeadlineAt ?? null,
+    serverNow: student?.runtimeServerNow ?? null,
+    fallbackSeconds: student?.ieltsPersonalTimeRemainingSeconds ?? 0,
+    running:
+      (student?.ieltsPersonalStatus === 'active' || student?.ieltsPersonalStatus === 'delayed')
+      && student.status !== 'terminated',
+  });
 
   if (!student || !cohort) {
     return (
@@ -135,7 +143,12 @@ export function StudentDetailPanel({
     );
   }
 
-  const runtimeSection = student.runtimeCurrentSection ?? student.currentSection ?? 'waiting';
+  const runtimeSection = student.ieltsPersonalSectionKey ?? student.runtimeCurrentSection ?? student.currentSection ?? 'waiting';
+  const displayedRemaining = student.ieltsPersonalStatus
+    ? student.ieltsPersonalDeadlineAt && (student.ieltsPersonalStatus === 'active' || student.ieltsPersonalStatus === 'delayed')
+      ? personalRemaining
+      : null
+    : runtimeRemaining;
   const tabClass = (tab: StudentDrawerTab) =>
     `inline-flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium ${
       activeTab === tab ? 'border-slate-950 text-slate-950' : 'border-transparent text-slate-500 hover:text-slate-800'
@@ -223,10 +236,15 @@ export function StudentDetailPanel({
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Section</p>
                 <p className="mt-1 font-medium capitalize text-slate-900">{runtimeSection}</p>
+                {student.ieltsPersonalStatus ? (
+                  <p className={`mt-1 text-xs font-medium capitalize ${student.ieltsPersonalStatus === 'unable' ? 'text-rose-700' : student.ieltsPersonalStatus === 'delayed' || student.ieltsPersonalStatus === 'reconnecting' ? 'text-amber-700' : 'text-indigo-700'}`}>
+                    IELTS {student.ieltsPersonalSectionKey ?? runtimeSection} · {student.ieltsPersonalStatus === 'unable' ? 'unable to start' : student.ieltsPersonalStatus}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Time left</p>
-                <p className="mt-1 font-medium text-slate-900">{formatTime(runtimeRemaining)}</p>
+                <p className="mt-1 font-medium text-slate-900">{displayedRemaining === null ? '—' : formatTime(displayedRemaining)}</p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Violations</p>

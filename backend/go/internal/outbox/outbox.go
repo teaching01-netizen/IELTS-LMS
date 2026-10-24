@@ -257,7 +257,7 @@ func (r *Repository) ClaimBatch(ctx context.Context, limit int, workerID string,
 
 func (r *Repository) claimBatchUpdate(ctx context.Context, limit int, workerID string, leaseSecs int64) (string, []Event, error) {
 	token := uuid.NewString()
-	startedTx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	startedTx, err := tx.Begin(ctx, r.db, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return "", nil, err
 	}
@@ -267,9 +267,6 @@ func (r *Repository) claimBatchUpdate(ctx context.Context, limit int, workerID s
 			_ = startedTx.Rollback()
 		}
 	}()
-	if _, err := startedTx.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-		return "", nil, err
-	}
 	res, err := startedTx.ExecContext(ctx, `
 		UPDATE outbox_events
 		SET claimed_at = NOW(),
@@ -333,7 +330,7 @@ func (r *Repository) claimBatchUpdate(ctx context.Context, limit int, workerID s
 // locked until commit.
 func (r *Repository) claimBatchSkipLocked(ctx context.Context, limit int, workerID string, leaseSecs int64) (string, []Event, error) {
 	token := uuid.NewString()
-	startedTx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	startedTx, err := tx.Begin(ctx, r.db, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return "", nil, err
 	}
@@ -343,9 +340,6 @@ func (r *Repository) claimBatchSkipLocked(ctx context.Context, limit int, worker
 			_ = startedTx.Rollback()
 		}
 	}()
-	if _, err := startedTx.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-		return "", nil, err
-	}
 	rows, err := startedTx.QueryContext(ctx, `
 		SELECT id FROM outbox_events
 		WHERE `+duePredicate+r.partitionPredicate()+`

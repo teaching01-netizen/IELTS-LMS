@@ -31,8 +31,12 @@ var metricHelpText = map[string]string{
 	MPoolOpen:                       "Number of open database connections.",
 	MPoolInUse:                      "Number of database connections currently in use.",
 	MPoolWait:                       "Total number of waits for a database connection.",
-	MQueryDur:                       "Database query duration in seconds.",
-	MTxDur:                          "Database transaction duration in seconds.",
+	MPoolIdle:                       "Number of idle database connections.",
+	MPoolMaxOpen:                    "Configured maximum open database connections (0 = unlimited).",
+	MPoolWaitSeconds:                "Total seconds callers waited for a database connection.",
+	MPoolClosed:                     "Total database connections closed by the pool, by reason (max_idle, max_idle_time, max_lifetime).",
+	MQueryDur:                       "Database prepare, execution, and query-result consumption duration in seconds.",
+	MTxDur:                          "Database transaction-attempt duration in seconds, including pool wait and commit or rollback.",
 	MDeadlocks:                      "Total number of database deadlocks.",
 	MV2BatchTotal:                   "Total v2 response batches by outcome.",
 	MV2CommandsTotal:                "Total v2 response commands by outcome.",
@@ -56,11 +60,17 @@ var metricHelpText = map[string]string{
 	MSATAdaptiveModuleOpenTotal:     "Total SAT adaptive follow-up modules opened by adaptive role (higher_branch vs lower_branch).",
 	MSATModuleRouteBasisTotal:       "Total SAT module finalizations by what closed the module (client_confirmed, window_closed, room_completed, proctor_end, proctor_terminate).",
 	MSATModuleCloseRequestTotal:     "Total SAT module close requests by outcome (closed, already_closed, not_expired, writes_pending).",
+	MSATCloseAdmissionWaitSeconds:   "Time queued SAT module-close requests wait for process-local bulkhead admission, by bounded outcome.",
+	MSATTransitionServiceSeconds:    "SAT module close and next-module start service time, by bounded operation stage.",
 	MSATLateAnswerEvidenceTotal:     "Total SAT late-answer evidence uploads by whether the evidence would have selected the other adaptive branch.",
 	MSATPersonalOfferTotal:          "Total attempt-owned SAT entry offers by event (armed, rearmed, exhausted) and stage (module, break).",
 	MSATPersonalEntryTotal:          "Total attempt-owned SAT entry confirmations by stage and result (confirmed, missed).",
 	MSATPersonalFrameLateTotal:      "Total first active SAT frames acknowledged after their authored start, by stage. Non-zero means the candidate's visible clock began below the authored duration.",
 	MSATPersonalFrameLeadSeconds:    "Seconds between the authored start and the first acknowledged active SAT frame, by stage. Negative is late (time the candidate lost).",
+	MSATRecoveryBoundaryTotal:       "Committed SAT recovery boundary transitions by bounded event (opened, settled, expired, entry_expired, entry_resolved, or resolved).",
+	MSATRecoveryResolutionTotal:     "Committed or replayed SAT recovery resolutions by action and actor; labels use closed vocabularies only.",
+	MSATRecoveryExceptionAge:        "Seconds from the fixed recovery or entry cutoff until an explicit SAT recovery resolution.",
+	MSATRecoveryRegistrationTotal:   "SAT frozen-frontier registration outcomes (registered, replayed, expired).",
 	MRuntimePersonalCompleteTotal:   "Total personal SAT runtimes completed because admission closed and all admitted attempts were terminal.",
 	MV1MutationTotal:                "Total v1 mutation requests by outcome.",
 	MV1SubmitTotal:                  "Total v1 submit requests by outcome.",
@@ -141,9 +151,15 @@ const (
 	MPoolOpen  = "db_pool_open"
 	MPoolInUse = "db_pool_in_use"
 	MPoolWait  = "db_pool_wait_count"
-	MQueryDur  = "db_query_duration_seconds"
-	MTxDur     = "db_tx_duration_seconds"
-	MDeadlocks = "db_deadlocks_total"
+	// Cumulative pool counters (database/sql DBStats) and the remaining
+	// pool gauges; WaitCount alone does not say how long callers waited.
+	MPoolIdle        = "db_pool_idle"
+	MPoolMaxOpen     = "db_pool_max_open"
+	MPoolWaitSeconds = "db_pool_wait_seconds_total"
+	MPoolClosed      = "db_pool_closed_total"
+	MQueryDur        = "db_query_duration_seconds"
+	MTxDur           = "db_tx_duration_seconds"
+	MDeadlocks       = "db_deadlocks_total"
 
 	MV2BatchTotal    = "v2_response_batch_total"
 	MV2CommandsTotal = "v2_response_commands_total"
@@ -192,6 +208,11 @@ const (
 	MSATModuleRouteBasisTotal = "sat_module_route_basis_total"
 	// MSATModuleCloseRequestTotal counts browser close requests by outcome.
 	MSATModuleCloseRequestTotal = "sat_module_close_total"
+	// MSATCloseAdmissionTotal counts process-local close bulkhead outcomes,
+	// including queued admission, cancellation, timeout, and rejection.
+	MSATCloseAdmissionTotal       = "sat_close_admission_total"
+	MSATCloseAdmissionWaitSeconds = "sat_close_admission_wait_seconds"
+	MSATTransitionServiceSeconds  = "sat_transition_service_seconds"
 	// MSATLateAnswerEvidenceTotal counts late-answer evidence uploads; any
 	// would_change_route="true" is a proctor review case.
 	MSATLateAnswerEvidenceTotal = "sat_late_answer_evidence_total"
@@ -201,10 +222,14 @@ const (
 	// id, so the series stay bounded through an exam-day spike. Read together:
 	// offer{event="rearmed"} rising means clients cannot paint inside the lead,
 	// and frame_late/lead_seconds measure the time candidates actually lost.
-	MSATPersonalOfferTotal       = "sat_personal_offer_total"
-	MSATPersonalEntryTotal       = "sat_personal_entry_total"
-	MSATPersonalFrameLateTotal   = "sat_personal_frame_late_total"
-	MSATPersonalFrameLeadSeconds = "sat_personal_frame_lead_seconds"
+	MSATPersonalOfferTotal        = "sat_personal_offer_total"
+	MSATPersonalEntryTotal        = "sat_personal_entry_total"
+	MSATPersonalFrameLateTotal    = "sat_personal_frame_late_total"
+	MSATPersonalFrameLeadSeconds  = "sat_personal_frame_lead_seconds"
+	MSATRecoveryBoundaryTotal     = "sat_recovery_boundary_total"
+	MSATRecoveryResolutionTotal   = "sat_recovery_resolution_total"
+	MSATRecoveryExceptionAge      = "sat_recovery_exception_age_seconds"
+	MSATRecoveryRegistrationTotal = "sat_recovery_registration_total"
 	// MRuntimePersonalCompleteTotal counts personal runtimes the completion sweep
 	// closed (admission closed + every admitted attempt terminal).
 	MRuntimePersonalCompleteTotal = "runtime_personal_complete_total"
@@ -436,6 +461,10 @@ func Names() []string {
 		MPoolOpen,
 		MPoolInUse,
 		MPoolWait,
+		MPoolIdle,
+		MPoolMaxOpen,
+		MPoolWaitSeconds,
+		MPoolClosed,
 		MQueryDur,
 		MTxDur,
 		MDeadlocks,
@@ -457,6 +486,9 @@ func Names() []string {
 		MSATAdaptiveModuleOpenTotal,
 		MSATModuleRouteBasisTotal,
 		MSATModuleCloseRequestTotal,
+		MSATCloseAdmissionTotal,
+		MSATCloseAdmissionWaitSeconds,
+		MSATTransitionServiceSeconds,
 		MSATRouteLagSeconds, MSATM2StartLagSeconds, MSATM2AutoStartTotal, MSATModuleScopedRejectionTotal, MSATCloseWritesPendingTotal,
 		MSATAdmissionTotal, MSATTransferTotal,
 		MSATLateAnswerEvidenceTotal,
@@ -464,6 +496,10 @@ func Names() []string {
 		MSATPersonalEntryTotal,
 		MSATPersonalFrameLateTotal,
 		MSATPersonalFrameLeadSeconds,
+		MSATRecoveryBoundaryTotal,
+		MSATRecoveryResolutionTotal,
+		MSATRecoveryExceptionAge,
+		MSATRecoveryRegistrationTotal,
 		MRuntimePersonalCompleteTotal,
 		MV1MutationTotal,
 		MV1SubmitTotal,

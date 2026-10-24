@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
+	"github.com/go-sql-driver/mysql"
 )
 
 func TestEntryTimeoutProvidesRetryAfter(t *testing.T) {
@@ -26,6 +30,71 @@ func TestEntryTimeoutProvidesRetryAfter(t *testing.T) {
 func TestDefaultQueryTimeoutRunbookFigure(t *testing.T) {
 	if DefaultQueryTimeout != 10*time.Second {
 		t.Fatalf("runbook §3 quotes 10s budget, got %v", DefaultQueryTimeout)
+	}
+}
+
+func TestSATCloseTimeoutIsBoundedBelowBrowserTimeout(t *testing.T) {
+	if DefaultSATCloseTimeout != 5*time.Second {
+		t.Fatalf("SAT close server budget = %v, want 5s below the six-second client timeout", DefaultSATCloseTimeout)
+	}
+}
+
+func TestSATCloseAdmissionDenialCarriesRetryAfter(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/modules/close", nil)
+	writeDeliveryCloseError(rec, req, delivery.ErrSATCloseAdmissionFull)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != "1" || rec.Header().Get("X-RateLimit-Tier") != "sat-close" {
+		t.Fatalf("close admission denial = status %d headers %v", rec.Code, rec.Header())
+	}
+	var body struct {
+		Code    string         `json:"code"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode close backpressure envelope: %v", err)
+	}
+	if body.Code != "RATE_LIMIT_EXCEEDED" || body.Details["retryAfterSeconds"] != float64(1) {
+		t.Fatalf("close backpressure body = %+v", body)
+	}
+}
+
+func TestSATCloseDatabaseTimeoutCarriesRetryAfter(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/modules/close", nil)
+	writeDeliveryCloseError(rec, req, context.DeadlineExceeded)
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
+		t.Fatalf("close database timeout = status %d headers %v", rec.Code, rec.Header())
+	}
+}
+
+func TestExpiredCloseBudgetMapsRolledBackTransactionToRetryable503(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/modules/close", nil).WithContext(ctx)
+
+	writeDeliveryCloseError(rec, req, sql.ErrTxDone)
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
+		t.Fatalf("expired close transaction = status %d headers %v, want retryable 503", rec.Code, rec.Header())
+	}
+}
+
+func TestTransientMySQLContentionReturnsRetryableServiceUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		number uint16
+	}{
+		{name: "lock wait timeout", number: 1205},
+		{name: "deadlock", number: 1213},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/modules/start", nil)
+			writeEntryError(rec, req, &mysql.MySQLError{Number: tc.number})
+			if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
+				t.Fatalf("transient MySQL error %d = status %d headers %v, want retryable 503", tc.number, rec.Code, rec.Header())
+			}
+		})
 	}
 }
 

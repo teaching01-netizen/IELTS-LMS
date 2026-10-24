@@ -39,11 +39,10 @@ func TestSyncV2TimingForAttemptScopesToOneAttempt(t *testing.T) {
 	}
 }
 
-// A personal SAT runtime's active section never advances on the section clock,
-// so projecting the section boundary onto its attempts would freeze every
-// answer once the room's first section ran out. The statement must therefore
-// CLEAR deadline_at/closing_grace_until for sat_personal_v1 (plan 2026-09-24
-// full-entry-time) and keep them for the cohort models.
+	// A personal-timing runtime's active section never advances on the section
+	// clock, so projecting the room deadline onto attempts would freeze answers
+	// when the shared section runs out. Clear the room deadline for personal SAT
+	// and IELTS models, while retaining it for cohort timing.
 func TestSyncV2TimingPersonalRuntimeClearsRoomDeadline(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -52,9 +51,10 @@ func TestSyncV2TimingPersonalRuntimeClearsRoomDeadline(t *testing.T) {
 	defer db.Close()
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
+	personalModels := "rt.timing_model IN ('" + TimingModelPersonal + "'," + IELTSPersonalTimingModelsSQL + ")"
 	expected := regexp.QuoteMeta("JOIN exam_session_runtimes rt ON rt.id = rs.runtime_id") + ".*" +
-		regexp.QuoteMeta("deadline_at = CASE WHEN rt.timing_model = '"+TimingModelPersonal+"' THEN NULL") + ".*" +
-		regexp.QuoteMeta("closing_grace_until = CASE WHEN rt.timing_model = '"+TimingModelPersonal+"' THEN NULL")
+		regexp.QuoteMeta("deadline_at = CASE WHEN "+personalModels+" THEN NULL") + ".*" +
+		regexp.QuoteMeta("closing_grace_until = CASE WHEN "+personalModels+" THEN NULL")
 	mock.ExpectExec(expected).WithArgs("rt-1", "reading-writing", "sched-1").
 		WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectCommit()

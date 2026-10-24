@@ -13,6 +13,9 @@ import {
 import type { StudentAnswer } from './providers/StudentRuntimeProvider';
 import type { StudentLayoutMode } from './layout/studentLayoutMode';
 import { CompactQuestionNavigation } from './layout/CompactQuestionNavigation';
+import { StudentIeltsFooter } from './StudentIeltsFooter';
+import type { ExamType } from '../../types';
+import { isIeltsExamType } from './layout/studentExamTypeContext';
 
 const pressClassName =
   'transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out';
@@ -40,6 +43,7 @@ interface StudentFooterProps {
   tabletMode?: boolean | undefined;
   layoutMode?: StudentLayoutMode | undefined;
   onOpenNavigator?: (() => void) | undefined;
+  examType?: ExamType | undefined;
 }
 
 export function StudentFooter({
@@ -53,7 +57,24 @@ export function StudentFooter({
   tabletMode = false,
   layoutMode,
   onOpenNavigator,
+  examType,
 }: StudentFooterProps) {
+  // IELTS on tablet widths shows every number of the active part. Phones keep
+  // the compact bar; every other caller keeps this footer unchanged.
+  if (isIeltsExamType(examType) && layoutMode !== 'phone') {
+    return (
+      <StudentIeltsFooter
+        questions={questions}
+        currentQuestionId={currentQuestionId}
+        onNavigate={onNavigate}
+        answers={answers}
+        flags={flags}
+        onSubmit={onSubmit}
+        showSubmitButton={showSubmitButton}
+      />
+    );
+  }
+
   const groupedQuestions = questions.reduce<Record<string, StudentQuestionDescriptor[]>>(
     (groups, question) => {
       const existingGroup = groups[question.groupId];

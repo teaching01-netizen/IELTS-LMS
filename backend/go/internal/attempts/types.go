@@ -1,6 +1,9 @@
 package attempts
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 // ResponsePayload is the full per-question aggregate (plan 17).
 type ResponsePayload struct {
@@ -75,12 +78,22 @@ type SaveResponsesCommand struct {
 	LeaseEpoch   uint64
 	ControlEpoch uint64
 	Commands     []ResponseCommand
+	// ModuleClose opts this bounded batch into the already-registered frozen
+	// SAT frontier. The delivery-owned authorizer verifies the module boundary,
+	// manifest hash, and exact per-command content before the shared mutation
+	// core admits any new write.
+	ModuleClose *SATModuleCloseWriteContext
 	// BearerTokenID threads the edge-resolved token id into the service
 	// call path (smallest diff: optional field, no signature change).
 	// When non-empty it must equal the crypto-resolved claims.TokenID or
 	// the call fails closed 401; when empty the crypto-resolved TokenID
 	// is used (older call paths keep working).
 	BearerTokenID string
+}
+
+type SATModuleCloseWriteContext struct {
+	ModuleAttemptID string `json:"moduleAttemptId"`
+	ManifestHash    string `json:"manifestHash"`
 }
 
 // Ack is the per-command acknowledgement.
@@ -105,22 +118,23 @@ type SaveResult struct {
 
 // AttemptState is the locked attempt row subset the engine needs.
 type AttemptState struct {
-	ID                string
-	ScheduleID        string
-	UserID            string
-	OrganizationID    string
-	ProtocolVersion   int
-	DeliveryStatus    string
-	Phase             string
-	LeaseEpoch        uint64
-	ControlEpoch      uint64
-	ResponseRevision  uint64
-	DeadlineAt        *time.Time
-	ClosingGraceUntil *time.Time
-	SubmittedAt       *time.Time
-	FinalSubmission   *string
-	ProctorStatus     string
-	ProviderKey       string
+	ID                    string
+	ScheduleID            string
+	UserID                string
+	OrganizationID        string
+	ProtocolVersion       int
+	DeliveryStatus        string
+	Phase                 string
+	LeaseEpoch            uint64
+	ControlEpoch          uint64
+	ActiveClientSessionID sql.NullString
+	ResponseRevision      uint64
+	DeadlineAt            *time.Time
+	ClosingGraceUntil     *time.Time
+	SubmittedAt           *time.Time
+	FinalSubmission       *string
+	ProctorStatus         string
+	ProviderKey           string
 	// TimingModel is the schedule runtime's timing model (empty when the
 	// schedule has no runtime row yet). The attempt-level deadline/grace
 	// columns belong to the cohort section clock, so the personal SAT model
@@ -132,11 +146,17 @@ type AttemptState struct {
 // once here (and mirrored in delivery/runtime) so the write gate, the resolver,
 // and the takeover path cannot drift on the literal.
 const personalTimingModel = "sat_personal_v1"
+const personalIELTSTimingModelV1 = "ielts_personal_v1"
+const personalIELTSTimingModel = "ielts_cohort_personal_v2"
 
 // isPersonalTimingModel reports whether a timing model is the attempt-owned
 // SAT model. Empty/unknown (no runtime row, cohort, legacy) is false.
 func isPersonalTimingModel(model string) bool {
 	return model == personalTimingModel
+}
+
+func isPersonalIELSTimingModel(model string) bool {
+	return model == personalIELTSTimingModelV1 || model == personalIELTSTimingModel
 }
 
 // Provider identifies completion policy owner (plan 4.1, 28-32).

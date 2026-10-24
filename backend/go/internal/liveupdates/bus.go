@@ -116,19 +116,65 @@ func (b *Bus) Append(ctx context.Context, kind, targetID string, revision int64,
 func AppendInTx(ctx context.Context, q interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, origin, kind, targetID string, revision int64, name string, payload any) error {
-	var raw any
-	if payload != nil {
-		b, err := json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-		raw = string(b)
+	return appendEventsInTx(ctx, q, origin, busEventInsert{
+		kind: kind, targetID: targetID, revision: revision, name: name, payload: payload,
+	})
+}
+
+// AppendPairInTx persists two related wakeups in one INSERT while keeping them
+// inside the caller's business transaction. Module transitions use this for
+// the attempt and schedule-roster views of the same committed change.
+func AppendPairInTx(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, origin string, first, second Event) error {
+	return appendEventsInTx(ctx, q, origin,
+		busEventInsert{kind: first.Kind, targetID: first.ID, revision: first.Revision, name: first.Name, payload: optionalPayload(first.Payload)},
+		busEventInsert{kind: second.Kind, targetID: second.ID, revision: second.Revision, name: second.Name, payload: optionalPayload(second.Payload)},
+	)
+}
+
+type busEventInsert struct {
+	kind, targetID string
+	revision       int64
+	name           string
+	payload        any
+}
+
+func optionalPayload(payload json.RawMessage) any {
+	if payload == nil {
+		return nil
 	}
-	_, err := q.ExecContext(ctx, `
+	return payload
+}
+
+func appendEventsInTx(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}, origin string, events ...busEventInsert) error {
+	if len(events) == 0 {
+		return nil
+	}
+	var query strings.Builder
+	query.WriteString(`
 		INSERT INTO live_update_events
 			(origin_instance_id, event_kind, event_target_id, event_revision, event_name, event_payload, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-		origin, kind, targetID, revision, name, raw)
+		VALUES `)
+	args := make([]any, 0, len(events)*6)
+	for i, event := range events {
+		if i > 0 {
+			query.WriteString(", ")
+		}
+		query.WriteString("(?, ?, ?, ?, ?, ?, NOW())")
+		var raw any
+		if event.payload != nil {
+			b, err := json.Marshal(event.payload)
+			if err != nil {
+				return err
+			}
+			raw = string(b)
+		}
+		args = append(args, origin, event.kind, event.targetID, event.revision, event.name, raw)
+	}
+	_, err := q.ExecContext(ctx, query.String(), args...)
 	return err
 }
 

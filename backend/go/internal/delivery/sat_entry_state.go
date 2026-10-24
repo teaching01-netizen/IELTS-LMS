@@ -235,6 +235,63 @@ func (s *Service) selectedModuleSectionWithRevision(ctx context.Context, attempt
 		examdomain.ParseSATPublishScope(publishScope.String),
 		examdomain.ParseStoredSectionScope(linkScope),
 	)
+	section, err := selectedModuleFromSections(sections, scope, moduleID)
+	return section, revision, err
+}
+
+const selectedModuleSectionMetadataQuery = `
+	SELECT sec.id, sec.section_key, sec.title, sec.display_order, sec.duration_seconds,
+		sec.break_after_seconds, sec.instructions,
+		m.id, m.module_key, m.title, m.display_order, m.duration_seconds,
+		m.target_question_count, m.adaptive_role, m.tool_policy,
+		v.sat_publish_scope, l.enabled_sections
+	FROM exam_schedules s
+	JOIN exam_versions v ON v.id = ?
+	JOIN student_attempts a ON a.schedule_id = s.id AND a.exam_id = s.exam_id AND a.published_version_id = v.id
+	JOIN assessment_module_attempts ma ON ma.attempt_id = a.id AND ma.module_id = ?
+	JOIN assessment_modules m ON m.id = ma.module_id
+	JOIN assessment_sections sec ON sec.id = m.section_id AND sec.exam_version_id = v.id
+	LEFT JOIN assessment_access_links l ON l.schedule_id = s.id
+	WHERE s.id = ? AND a.id = ?`
+
+// selectedModuleSectionMetadata returns the route-selected section/module
+// shell without reading question revisions. Recovery close receipts use this
+// while the next module is unstarted; only StartModule may load its questions.
+func (s *Service) selectedModuleSectionMetadata(ctx context.Context, attemptID, scheduleID, versionID, moduleID string) (*DeliverySection, error) {
+	var section DeliverySection
+	var module DeliveryModule
+	var sectionInstructions, toolPolicy, publishScope, linkScope sql.NullString
+	err := s.db.QueryRowContext(ctx, selectedModuleSectionMetadataQuery,
+		versionID, moduleID, scheduleID, attemptID,
+	).Scan(
+		&section.ID, &section.SectionKey, &section.Title, &section.DisplayOrder,
+		&section.DurationSeconds, &section.BreakAfterSeconds, &sectionInstructions,
+		&module.ID, &module.ModuleKey, &module.Title, &module.DisplayOrder,
+		&module.DurationSeconds, &module.TargetQuestionCount, &module.AdaptiveRole,
+		&toolPolicy, &publishScope, &linkScope,
+	)
+	if err == sql.ErrNoRows {
+		return nil, apperrors.New(apperrors.CodeNotFound, "Selected module content not found.")
+	}
+	if err != nil {
+		return nil, err
+	}
+	scope := examdomain.IntersectSectionScopes(
+		examdomain.ParseSATPublishScope(publishScope.String),
+		examdomain.ParseStoredSectionScope(linkScope),
+	)
+	if !examdomain.AllowsSection(scope, section.SectionKey) {
+		return nil, apperrors.New(apperrors.CodeNotFound, "Selected module content not found.")
+	}
+	section.Instructions = rawJSON(sectionInstructions)
+	module.ToolPolicy = rawJSON(toolPolicy)
+	module.Questions = []DeliveredQuestion{}
+	module.ContentWithheld = true
+	section.Modules = []DeliveryModule{module}
+	return &section, nil
+}
+
+func selectedModuleFromSections(sections []DeliverySection, scope map[string]bool, moduleID string) (*DeliverySection, error) {
 	for _, section := range sections {
 		if !examdomain.AllowsSection(scope, section.SectionKey) {
 			continue
@@ -242,9 +299,9 @@ func (s *Service) selectedModuleSectionWithRevision(ctx context.Context, attempt
 		for _, module := range section.Modules {
 			if module.ID == moduleID {
 				section.Modules = []DeliveryModule{module}
-				return &section, revision, nil
+				return &section, nil
 			}
 		}
 	}
-	return nil, 0, apperrors.New(apperrors.CodeNotFound, "Selected module content not found.")
+	return nil, apperrors.New(apperrors.CodeNotFound, "Selected module content not found.")
 }

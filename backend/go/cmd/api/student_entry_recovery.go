@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"example.com/ielts-proctoring/internal/assessmentforms"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +17,9 @@ import (
 type studentEntryIdentity struct {
 	UserID, DisplayName, Email, ScheduleID, Code, AttemptID, ClientSessionID string
 	Proof                                                                    auth.SessionProof
+	// Registration carries the entry-time form answers to the admission
+	// transaction; recovery of an admitted attempt never supplies it.
+	Registration *assessmentforms.RegistrationSubmission
 }
 
 // Recovery is independent of new-admission windows. Only an authenticated
@@ -93,7 +97,7 @@ func writeStudentEntry(w http.ResponseWriter, r *http.Request, app *App, identit
 	if identity.ClientSessionID == "" {
 		identity.ClientSessionID = uuid.NewString()
 	}
-	admission, err := admitStudentSession(r.Context(), app, identity.UserID, identity.ScheduleID, identity.AttemptID, identity.ClientSessionID)
+	admission, err := admitStudentSession(r.Context(), app, identity.UserID, identity.ScheduleID, identity.AttemptID, identity.ClientSessionID, identity.Registration)
 	if err != nil {
 		httpx.WriteError(w, r, MapDBError(err))
 		return

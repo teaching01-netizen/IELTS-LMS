@@ -63,8 +63,6 @@ func TestSubmitZeroResponsesCanTerminalizeSAT(t *testing.T) {
 	mock.ExpectQuery("FROM attempt_submissions_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT attempt_id FROM attempt_submissions_v2 WHERE submission_id").WillReturnError(sql.ErrNoRows)
 	// Active-session / writer-lease check.
-	mock.ExpectQuery("SELECT active_client_session_id").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	// Zero answers are legal; the module topology must still be terminal.
 	satScopeUnscoped(mock)
 	mock.ExpectQuery("FROM assessment_module_attempts").WithArgs("att-1").

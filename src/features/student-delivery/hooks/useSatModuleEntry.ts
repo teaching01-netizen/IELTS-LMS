@@ -81,6 +81,10 @@ export function useSatModuleEntry({
             inFlightRef.current = false;
             return;
           }
+          // The server has durably closed this entry key. Keep the single-flight
+          // latch set until the pending module changes; lifecycle refresh routes
+          // the blocked boundary to its recovery surface without a retry loop.
+          if (outcome === "expired") return;
           // Transient failure: keep the waiting room mounted, retry with
           // jitter behind it. No recovery screen, no manual button.
           attempts += 1;

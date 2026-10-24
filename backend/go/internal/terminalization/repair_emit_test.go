@@ -29,9 +29,9 @@ func TestRepairMissingReceiptEmits(t *testing.T) {
 	submittedAt := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery("FROM student_attempts a WHERE a.submitted_at IS NOT NULL").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id", "organization_id", "exam_id", "answer_revision", "submitted_at", "proctor_status"}).
-			AddRow("att-1", "sched-1", nil, "exam-1", int64(9), submittedAt, "active"))
+	mock.ExpectQuery("FROM student_attempts a.*WHERE a.submitted_at IS NOT NULL").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id", "organization_id", "exam_id", "answer_revision", "submitted_at", "proctor_status", "protocol_version"}).
+			AddRow("att-1", "sched-1", nil, "exam-1", int64(9), submittedAt, "active", 1))
 	mock.ExpectQuery("FROM student_attempts WHERE id").
 		WillReturnRows(sqlmock.NewRows([]string{"snap"}).AddRow(`{}`))
 	mock.ExpectExec("INSERT INTO attempt_terminalizations").
@@ -66,8 +66,8 @@ func TestRepairMissingReceiptEmptySilent(t *testing.T) {
 	defer db.Close()
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery("FROM student_attempts a WHERE a.submitted_at IS NOT NULL").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id", "organization_id", "exam_id", "answer_revision", "submitted_at", "proctor_status"}))
+	mock.ExpectQuery("FROM student_attempts a.*WHERE a.submitted_at IS NOT NULL").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id", "organization_id", "exam_id", "answer_revision", "submitted_at", "proctor_status", "protocol_version"}))
 	mock.ExpectCommit()
 	n, err := RepairMissingReceipts(context.Background(), db, 100)
 	if err != nil {

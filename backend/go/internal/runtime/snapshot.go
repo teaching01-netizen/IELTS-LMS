@@ -16,6 +16,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"time"
 
@@ -48,6 +49,7 @@ type Snapshot struct {
 	ActiveSectionKey *string
 	Revision         int64
 	TimingModel      string
+	CompletionReason string
 	// SectionDeadlineAt lets the student poll contract enter its fast lane
 	// before an automatic section boundary. Without this, a 25-second steady
 	// poll can discover a correctly-timed transition only after the next
@@ -91,16 +93,35 @@ func SectionLiveness(status string) (started, live, paused bool) {
 	}
 }
 
+// snapshotCacheMaxEntries bounds retained schedules; expired entries are
+// swept first, and a full cache still serves loads without storing them.
+const snapshotCacheMaxEntries = 4096
+
 // SnapshotCache is a mutex-guarded TTL map: scheduleID -> Snapshot.
-// Loader errors are never cached. Safe for concurrent use.
+// Loader errors are never cached. Safe for concurrent use. Concurrent misses
+// for one schedule share one load, and a load that began before an
+// Invalidate never repopulates the cache.
 type SnapshotCache struct {
-	mu    sync.Mutex
-	ttl   time.Duration
-	items map[string]Snapshot
+	mu       sync.Mutex
+	ttl      time.Duration
+	items    map[string]Snapshot
+	inflight map[string]*snapshotCall
+	// generation counts Invalidate calls; a load publishes only if it is
+	// unchanged since the load began.
+	// offcut: one generation for every schedule; key it per schedule if room
+	// commands become frequent enough to suppress unrelated publishes.
+	generation uint64
+	lastSweep  time.Time
 	// invalidatedAt records the last Invalidate per schedule (plan C3:
 	// a control command within the fast-lane window keeps student polls
 	// tight; the timestamps are bounded by the items map lifetime).
 	invalidatedAt map[string]time.Time
+}
+
+type snapshotCall struct {
+	done chan struct{}
+	snap Snapshot
+	err  error
 }
 
 // NewSnapshotCache builds an empty cache; ttl<=0 falls back to SnapshotTTL.
@@ -108,7 +129,7 @@ func NewSnapshotCache(ttl time.Duration) *SnapshotCache {
 	if ttl <= 0 {
 		ttl = SnapshotTTL
 	}
-	return &SnapshotCache{ttl: ttl, items: make(map[string]Snapshot), invalidatedAt: make(map[string]time.Time)}
+	return &SnapshotCache{ttl: ttl, items: make(map[string]Snapshot), inflight: make(map[string]*snapshotCall), invalidatedAt: make(map[string]time.Time)}
 }
 
 // InvalidatedWithin reports whether the schedule was invalidated (control
@@ -129,30 +150,70 @@ func (c *SnapshotCache) InvalidatedWithin(scheduleID string, d time.Duration, no
 	return now.Sub(ts.UTC()) < d
 }
 
-// Get returns the cached snapshot when fresh, else calls load, caches on
-// success, and returns it. Loader errors propagate and cache nothing.
-func (c *SnapshotCache) Get(scheduleID string, now time.Time, load func() (Snapshot, error)) (Snapshot, error) {
+// Get returns the cached snapshot when fresh, else joins or leads the one
+// load for this schedule, caches on success, and returns it. A follower waits
+// for the leader or its own ctx; when the leader failed only because its own
+// request ended, a live follower retries once with its own loader. Loader
+// errors propagate and cache nothing.
+func (c *SnapshotCache) Get(ctx context.Context, scheduleID string, now time.Time, load func() (Snapshot, error)) (Snapshot, error) {
 	if c == nil {
 		return load()
 	}
 	now = now.UTC()
-	c.mu.Lock()
-	if s, ok := c.items[scheduleID]; ok && now.Sub(s.LoadedAt.UTC()) < c.ttl {
+	for attempt := 0; ; attempt++ {
+		c.mu.Lock()
+		if s, ok := c.items[scheduleID]; ok && now.Sub(s.LoadedAt.UTC()) < c.ttl {
+			c.mu.Unlock()
+			telemetry.IncCounter(telemetry.MSnapshotCacheHit)
+			return s, nil
+		}
+		call, following := c.inflight[scheduleID]
+		if !following {
+			call = &snapshotCall{done: make(chan struct{})}
+			c.inflight[scheduleID] = call
+			generation := c.generation
+			c.mu.Unlock()
+			c.lead(scheduleID, now, generation, call, load)
+			return call.snap, call.err
+		}
 		c.mu.Unlock()
-		telemetry.IncCounter(telemetry.MSnapshotCacheHit)
-		return s, nil
+		select {
+		case <-call.done:
+		case <-ctx.Done():
+			return Snapshot{}, ctx.Err()
+		}
+		if call.err != nil && (errors.Is(call.err, context.Canceled) || errors.Is(call.err, context.DeadlineExceeded)) && ctx.Err() == nil && attempt == 0 {
+			continue
+		}
+		return call.snap, call.err
 	}
-	c.mu.Unlock()
+}
+
+func (c *SnapshotCache) lead(scheduleID string, now time.Time, generation uint64, call *snapshotCall, load func() (Snapshot, error)) {
 	s, err := load()
-	if err != nil {
-		return Snapshot{}, err
+	if err == nil {
+		telemetry.IncCounter(telemetry.MSnapshotCacheMiss)
+		s.LoadedAt = now
 	}
-	telemetry.IncCounter(telemetry.MSnapshotCacheMiss)
-	s.LoadedAt = now
 	c.mu.Lock()
-	c.items[scheduleID] = s
-	c.mu.Unlock()
-	return s, nil
+	defer c.mu.Unlock()
+	delete(c.inflight, scheduleID)
+	call.snap, call.err = s, err
+	close(call.done)
+	if err != nil || c.generation != generation {
+		return
+	}
+	if now.Sub(c.lastSweep) >= c.ttl {
+		c.lastSweep = now
+		for id, cached := range c.items {
+			if now.Sub(cached.LoadedAt.UTC()) >= c.ttl {
+				delete(c.items, id)
+			}
+		}
+	}
+	if _, ok := c.items[scheduleID]; ok || len(c.items) < snapshotCacheMaxEntries {
+		c.items[scheduleID] = s
+	}
 }
 
 // Invalidate drops one schedule (called after control commands bump the
@@ -163,6 +224,7 @@ func (c *SnapshotCache) Invalidate(scheduleID string) {
 		return
 	}
 	c.mu.Lock()
+	c.generation++
 	delete(c.items, scheduleID)
 	c.invalidatedAt[scheduleID] = time.Now().UTC()
 	// Bound the side map: drop stamps older than the fast-lane window x2.
@@ -194,16 +256,17 @@ func LoadSnapshot(ctx context.Context, q SnapshotQuerier, scheduleID string, now
 	var revision int64
 	var timing sql.NullString
 	var waiting sql.NullBool
+	var completionReason sql.NullString
 	err := q.QueryRowContext(ctx,
-		"SELECT id, status, active_section_key, revision, COALESCE(timing_model,'"+TimingModelLegacy+"'), waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ?",
-		scheduleID).Scan(&id, &status, &active, &revision, &timing, &waiting)
+		"SELECT id, status, active_section_key, revision, COALESCE(timing_model,'"+TimingModelLegacy+"'), waiting_for_next_section, COALESCE(completion_reason, '') FROM exam_session_runtimes WHERE schedule_id = ?",
+		scheduleID).Scan(&id, &status, &active, &revision, &timing, &waiting, &completionReason)
 	if err == sql.ErrNoRows {
 		return Snapshot{Status: StatusLive, ActiveSectionKey: strptr("*"), SectionLive: true, SectionStarted: true, LoadedAt: now}, nil
 	}
 	if err != nil {
 		return Snapshot{}, err
 	}
-	snap := Snapshot{Status: status.String, Revision: revision, TimingModel: timing.String,
+	snap := Snapshot{Status: status.String, Revision: revision, TimingModel: timing.String, CompletionReason: completionReason.String,
 		WaitingForNextSection: waiting.Bool, LoadedAt: now}
 	if active.Valid && active.String != "" {
 		snap.ActiveSectionKey = strptr(active.String)

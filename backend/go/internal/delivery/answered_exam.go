@@ -73,10 +73,8 @@ func (s *Service) AnsweredExam(ctx context.Context, attemptID string) (*Answered
 	defer release()
 	var out *AnsweredExam
 	err := s.runner.WithTxReadOnly(ctx, func(ctx context.Context, q tx.Tx) error {
-		snapshot := *s
-		snapshot.db, snapshot.runner = q, nil
 		var readErr error
-		out, readErr = snapshot.answeredExamSnapshot(ctx, attemptID)
+		out, readErr = s.withTxDatabase(q).answeredExamSnapshot(ctx, attemptID)
 		return readErr
 	})
 	return out, err

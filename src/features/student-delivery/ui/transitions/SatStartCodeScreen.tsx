@@ -55,7 +55,13 @@ export function SatStartCodeScreen({ policy, submitting, onSubmit, onExit, foote
       <SatPresenceSurface className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] px-6 py-8 text-center text-[var(--sat-text)]">
         <main className="w-full max-w-lg py-10">
           <p className="sat-type-control-secondary font-semibold text-[var(--sat-text-secondary)]">Digital SAT</p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight">The start window has closed</h1>
+          <h1
+            data-sat-stage-heading="true"
+            tabIndex={-1}
+            className="mt-3 text-2xl font-semibold tracking-tight"
+          >
+            The start window has closed
+          </h1>
           <p className="mt-3 sat-type-control-primary leading-6 text-[var(--sat-text-secondary)]" role="status">
             This exam can no longer be started. If you think this is a mistake, ask your proctor for help.
           </p>
@@ -104,7 +110,13 @@ export function SatStartCodeScreen({ policy, submitting, onSubmit, onExit, foote
     <SatPresenceSurface className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] px-6 py-8 text-[var(--sat-text)]">
       <main className="w-full max-w-md py-10">
         <p className="sat-type-control-secondary text-center font-semibold text-[var(--sat-text-secondary)]">Digital SAT</p>
-        <h1 className="mt-3 text-center text-2xl font-semibold tracking-tight">Enter your exam start code</h1>
+        <h1
+          data-sat-stage-heading="true"
+          tabIndex={-1}
+          className="mt-3 text-center text-2xl font-semibold tracking-tight"
+        >
+          Enter your exam start code
+        </h1>
         <p className="mt-3 text-center sat-type-control-primary leading-6 text-[var(--sat-text-secondary)]">
           Your timer starts when your exam opens; it does not run while your start is being checked.
           {closesAt ? ` New starts close ${closesAt}.` : ""}

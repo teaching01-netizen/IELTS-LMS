@@ -41,7 +41,7 @@ import (
 	platformdb "example.com/ielts-proctoring/internal/platform/db"
 )
 
-func staleETagTestDB(t *testing.T) *sql.DB {
+func staleETagTestDB(t testing.TB) *sql.DB {
 	t.Helper()
 	raw := os.Getenv("TEST_MYSQL_DSN")
 	if raw == "" {
@@ -226,11 +226,21 @@ func TestDeliveryBootstrapStaleVersionETagReturnsCurrentState(t *testing.T) {
 	}
 
 	scheduleID, attemptID, _, lowID, highID := seedStaleETagExam(t, db)
+	userID := uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO users (id, email, display_name, role, state)
+		VALUES (?, ?, 'Stale ETag candidate', 'student', 'active')`, userID, userID+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := db.Exec(`DELETE FROM users WHERE id = ?`, userID); err != nil {
+			t.Errorf("delete stale ETag test user: %v", err)
+		}
+	})
 
 	// Mint a real attempt bearer (HMAC + attempt_sessions row), the same
 	// credential a reconnecting student presents.
 	lease := uint64(1)
-	token, _, err := auth.IssueAttemptToken(ctx, db, cfg, "user-1", scheduleID, attemptID, "sess-1", nil, &lease, time.Now().UTC())
+	token, _, err := auth.IssueAttemptToken(ctx, db, cfg, userID, scheduleID, attemptID, "sess-1", nil, &lease, time.Now().UTC())
 	if err != nil {
 		t.Fatalf("issue attempt token: %v", err)
 	}

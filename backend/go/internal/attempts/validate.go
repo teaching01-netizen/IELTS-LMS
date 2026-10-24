@@ -58,6 +58,9 @@ func ValidateSaveEnvelope(cmd SaveResponsesCommand) error {
 	if len(cmd.Commands) > MaxBatchCommands {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Too many commands in batch.", HTTPStatus: 400}
 	}
+	if cmd.ModuleClose != nil && (strings.TrimSpace(cmd.ModuleClose.ModuleAttemptID) == "" || len(cmd.ModuleClose.ManifestHash) != 64 || len(cmd.Commands) == 0) {
+		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "A registered SAT module-close batch requires a module, manifest hash, and commands.", HTTPStatus: 400}
+	}
 	// I2: duplicate write IDs within one batch can never be intentional
 	// (clients mint UUIDs) and would otherwise insert-or-conflict against
 	// itself mid-tx. Fail closed at the envelope, before any tx begins.

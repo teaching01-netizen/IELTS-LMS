@@ -13,6 +13,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/act"
@@ -29,6 +31,7 @@ import (
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
+	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
@@ -36,6 +39,10 @@ import (
 	"example.com/ielts-proctoring/internal/sat"
 	"example.com/ielts-proctoring/internal/satpublish"
 )
+
+// FrozenResponseApplier reuses the attempts package's V2 mutation core inside
+// a delivery-owned settlement transaction. Implementations must not commit.
+type FrozenResponseApplier func(context.Context, tx.Tx, crypto.AttemptClaims, attempts.SaveResponsesCommand, string) (attempts.SaveResult, error)
 
 // Service wires delivery reads explicitly.
 type Service struct {
@@ -56,10 +63,11 @@ type Service struct {
 	// liveSinkBus + liveSinkMode select the optional async debug sink
 	// (plan C1): sample = ~1:1000 hub events also Append a bus row
 	// post-commit (outside any business tx); off = zero bus writes.
-	liveSinkBus         *liveupdates.Bus
-	liveSinkMode        config.LiveBusSinkMode
-	completer           AssessmentCompleter
-	satTerminalizerInTx func(context.Context, tx.Tx, string, string) (bool, error)
+	liveSinkBus           *liveupdates.Bus
+	liveSinkMode          config.LiveBusSinkMode
+	completer             AssessmentCompleter
+	satTerminalizerInTx   func(context.Context, tx.Tx, string, string) (bool, error)
+	frozenResponseApplier FrozenResponseApplier
 	// Shared by pointer: per-tx Service snapshots (`*s` copies) must use the same lock.
 	mediaIndex      *mediaIndexCache
 	liveSinkCount   *atomic.Uint64 // pointer: shared with per-tx `*s` snapshots
@@ -78,10 +86,34 @@ type Service struct {
 	// authority for reservation budgets and runtime uniqueness.
 	satStartAdmissionOnce sync.Once
 	satStartAdmission     *satStartAdmission
+	// SAT closes use a bounded FIFO process-local bulkhead; MySQL remains the
+	// authority for close identity, answer state, routing, and receipts.
+	satCloseAdmission *satCloseAdmission
 	// answered bounds concurrent answered-exam builds (answered_exam.go).
 	answeredOnce sync.Once
 	answered     chan struct{}
 	dbStats      interface{ Stats() sql.DBStats }
+}
+
+// withTxDatabase creates a per-transaction view without copying mutexes or
+// Once values. Shared caches and lifecycle collaborators remain shared by
+// pointer, while transaction state stays local to the view.
+func (s *Service) withTxDatabase(database tx.Tx) *Service {
+	if s == nil {
+		return nil
+	}
+	return &Service{
+		db: database, versions: s.versions,
+		liveOrigin: s.liveOrigin, liveHub: s.liveHub, liveDirect: s.liveDirect,
+		liveSinkBus: s.liveSinkBus, liveSinkMode: s.liveSinkMode,
+		completer: s.completer, satTerminalizerInTx: s.satTerminalizerInTx,
+		frozenResponseApplier: s.frozenResponseApplier,
+		mediaIndex:            s.mediaIndex, liveSinkCount: s.liveSinkCount,
+		reconcileConcurrency: s.reconcileConcurrency,
+		codeStartRuntime:     s.codeStartRuntime, codeStartPlanner: s.codeStartPlanner,
+		satStartAdmission: s.satStartAdmission, satCloseAdmission: s.satCloseAdmission,
+		answered: s.answered, dbStats: s.dbStats,
+	}
 }
 
 // SetCodeStart wires the runtime opener and pinned-plan derivation the SAT
@@ -94,7 +126,14 @@ func (s *Service) SetCodeStart(rt *examruntime.Service, planner examruntime.Star
 
 // NewService wires dependencies explicitly.
 func NewService(db *sql.DB, runner *tx.Runner) *Service {
-	return &Service{db: db, runner: runner, dbStats: db, mediaIndex: &mediaIndexCache{}, liveSinkCount: new(atomic.Uint64)}
+	maxOpen := 0
+	if db != nil {
+		maxOpen = db.Stats().MaxOpenConnections
+	}
+	return &Service{
+		db: db, runner: runner, dbStats: db, mediaIndex: &mediaIndexCache{}, liveSinkCount: new(atomic.Uint64),
+		satCloseAdmission: newSATCloseAdmission(satCloseActiveLimit(maxOpen)),
+	}
 }
 
 // SetReconcileConcurrency bounds parallel attempts per timeout sweep. A
@@ -142,6 +181,11 @@ func (s *Service) SetCompleter(c AssessmentCompleter) *Service {
 
 func (s *Service) SetSATTerminalizerInTx(seal func(context.Context, tx.Tx, string, string) (bool, error)) *Service {
 	s.satTerminalizerInTx = seal
+	return s
+}
+
+func (s *Service) SetFrozenResponseApplier(apply FrozenResponseApplier) *Service {
+	s.frozenResponseApplier = apply
 	return s
 }
 
@@ -247,12 +291,28 @@ type ModuleAttempt struct {
 	// AutoStartAt is set on a routed module waiting for the browser to start
 	// it (client_start handoff): the server starts its clock then if the
 	// browser never does.
-	AutoStartAt              *time.Time      `json:"autoStartAt,omitempty"`
-	CompletionReason         *string         `json:"completionReason"`
-	RawCorrect               *int64          `json:"rawCorrect"`
-	OperationalQuestionCount *int64          `json:"operationalQuestionCount"`
-	ToolState                json.RawMessage `json:"toolState"`
-	Revision                 int             `json:"revision"`
+	AutoStartAt              *time.Time                 `json:"autoStartAt,omitempty"`
+	SATBoundary              *SATModuleBoundarySnapshot `json:"satBoundary,omitempty"`
+	CompletionReason         *string                    `json:"completionReason"`
+	RawCorrect               *int64                     `json:"rawCorrect"`
+	OperationalQuestionCount *int64                     `json:"operationalQuestionCount"`
+	ToolState                json.RawMessage            `json:"toolState"`
+	Revision                 int                        `json:"revision"`
+}
+
+// SATModuleBoundarySnapshot carries lifecycle metadata only. Frozen manifests
+// and answer evidence stay in their existing server-side owners.
+type SATModuleBoundarySnapshot struct {
+	Phase              string          `json:"phase"`
+	PolicyVersion      string          `json:"policyVersion"`
+	WorkDeadlineAt     *time.Time      `json:"workDeadlineAt"`
+	EntryDeadlineAt    *time.Time      `json:"entryDeadlineAt"`
+	RecoveryDeadlineAt *time.Time      `json:"recoveryDeadlineAt"`
+	NextActionAt       *time.Time      `json:"nextActionAt"`
+	Resolution         *string         `json:"resolution"`
+	ResolvedAt         *time.Time      `json:"resolvedAt"`
+	ResolutionReceipt  json.RawMessage `json:"resolutionReceipt,omitempty"`
+	Revision           uint64          `json:"revision"`
 }
 
 // ResponseSnapshot is one persisted question response.
@@ -346,6 +406,12 @@ type Bootstrap struct {
 	// access-code start, and for code start the code_required / started /
 	// closed state). Absent for non-SAT providers.
 	SatStartPolicy *SatStartPolicy `json:"satStartPolicy,omitempty"`
+	// SATDeliveryPolicy is pinned on the schedule and selects the recovery
+	// lifecycle for newly opted-in personal-timing sessions.
+	SATDeliveryPolicy *attempts.SATDeliveryPolicy `json:"satDeliveryPolicy,omitempty"`
+	// SatSessionMode is server-derived for opted-in SAT sessions. It lets the
+	// student surface offer only the exception action allowed in that mode.
+	SatSessionMode string `json:"satSessionMode,omitempty"`
 	// AwaitingStaffRoute is true while a staff_selects classroom attempt has
 	// closed Module 1 and staff have not yet chosen Easy/Hard. Derived, never
 	// stored; the student holds on an "awaiting teacher" screen.
@@ -437,10 +503,8 @@ func (s *Service) Bootstrap(ctx context.Context, bearerScheduleID, bearerAttempt
 	}
 	var bootstrap *Bootstrap
 	err = s.runner.WithTxReadOnly(ctx, func(ctx context.Context, q tx.Tx) error {
-		snapshot := *s
-		snapshot.db, snapshot.runner = q, nil
 		var readErr error
-		bootstrap, readErr = snapshot.bootstrapSnapshot(ctx, scheduleID, examID, providerKey, versionID, attemptID, versionRev, sections)
+		bootstrap, readErr = s.withTxDatabase(q).bootstrapSnapshot(ctx, scheduleID, examID, providerKey, versionID, attemptID, versionRev, sections)
 		return readErr
 	})
 	return bootstrap, err
@@ -481,11 +545,31 @@ func (s *Service) bootstrapSnapshot(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
+	var satDeliveryPolicy *attempts.SATDeliveryPolicy
+	var satSessionMode string
+	if providerKey == "sat" {
+		satDeliveryPolicy, err = satRecoveryPolicyTx(ctx, s.db, attemptID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if satDeliveryPolicy != nil {
+		if err := s.db.QueryRowContext(ctx,
+			"SELECT COALESCE(sat_session_mode, 'practice') FROM exam_schedules WHERE id = ?", scheduleID).Scan(&satSessionMode); err != nil {
+			return nil, err
+		}
+		if err := s.loadSATModuleBoundaries(ctx, attemptID, moduleAttempts); err != nil {
+			return nil, err
+		}
+		sections = withholdBlockedSATRecoveryContent(sections, moduleAttempts)
+	}
 	if examruntime.IsSatPersonal(timing.TimingModel) {
 		if err := s.loadPersonalEntryOffers(ctx, attemptID, moduleAttempts); err != nil {
 			return nil, err
 		}
-		sections = withholdAwaitingModuleContent(sections, moduleAttempts)
+		// No personal module content is delivered before authenticated entry,
+		// including a first module held for its section form.
+		sections = withholdUnstartedModuleContent(sections, moduleAttempts)
 	}
 	var personalBreaks []PersonalBreak
 	if examruntime.IsSatPersonal(timing.TimingModel) {
@@ -528,8 +612,10 @@ func (s *Service) bootstrapSnapshot(ctx context.Context, scheduleID, examID, pro
 			PersonalBreaks:       personalBreaks,
 			ProvisionalSubmitted: control.deliveryStatus == "submitted" && control.submittedAt == nil,
 		},
-		Result:         result,
-		SatStartPolicy: startPolicy,
+		Result:            result,
+		SatStartPolicy:    startPolicy,
+		SATDeliveryPolicy: satDeliveryPolicy,
+		SatSessionMode:    satSessionMode,
 	}, nil
 }
 
@@ -621,135 +707,23 @@ func (s *Service) versionRevision(ctx context.Context, versionID string) (int64,
 }
 
 // cachedSections serves the assembled tree from the D1 cache when the
-// probed revision matches, else loads via LoadSections under singleflight
-// and stores with the probed revision. Cache disabled (nil) = today's N+1.
+// probed revision matches, else loads it under singleflight together with the
+// revision observed in the same snapshot; the cache publishes only a tree
+// whose observed revision is the probed one. Cache disabled (nil) loads
+// directly.
 func (s *Service) cachedSections(ctx context.Context, versionID string, probedRev int64) ([]DeliverySection, error) {
 	if s.versions == nil {
 		return s.LoadSections(ctx, versionID)
 	}
-	return s.versions.GetChecked(ctx, versionID, probedRev, func() ([]DeliverySection, int64, error) {
-		tree, err := s.LoadSections(ctx, versionID)
-		if err != nil {
-			return nil, 0, err
-		}
-		return tree, probedRev, nil
-	})
+	return s.versions.GetChecked(ctx, versionID, probedRev, s.BulkSectionsLoader(ctx, versionID))
 }
 
 // LoadSections projects a version into candidate content without grading keys.
-// Authoring preview uses the same projection for its draft version.
+// Authoring preview uses the same projection for its draft version. It runs
+// the three version-scoped tree reads on the service's querier (the caller's
+// transaction when bound to one).
 func (s *Service) LoadSections(ctx context.Context, versionID string) ([]DeliverySection, error) {
-	sections := []DeliverySection{}
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, section_key, title, display_order, duration_seconds, break_after_seconds, instructions FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order",
-		versionID)
-	if err != nil {
-		return nil, err
-	}
-	type sectionRow struct {
-		sec          DeliverySection
-		instructions sql.NullString
-	}
-	var order []sectionRow
-	for rows.Next() {
-		var r sectionRow
-		if err := rows.Scan(&r.sec.ID, &r.sec.SectionKey, &r.sec.Title, &r.sec.DisplayOrder,
-			&r.sec.DurationSeconds, &r.sec.BreakAfterSeconds, &r.instructions); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		r.sec.Instructions = rawJSON(r.instructions)
-		r.sec.Modules = []DeliveryModule{}
-		order = append(order, r)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for _, r := range order {
-		modules, err := s.loadModules(ctx, r.sec.ID)
-		if err != nil {
-			return nil, err
-		}
-		r.sec.Modules = modules
-		sections = append(sections, r.sec)
-	}
-	return sections, nil
-}
-
-// loadModules loads one section's modules with their questions.
-func (s *Service) loadModules(ctx context.Context, sectionID string) ([]DeliveryModule, error) {
-	modules := []DeliveryModule{}
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, module_key, title, display_order, duration_seconds, target_question_count, adaptive_role, instructions, tool_policy FROM assessment_modules WHERE section_id = ? ORDER BY display_order",
-		sectionID)
-	if err != nil {
-		return nil, err
-	}
-	type moduleRow struct {
-		mod          DeliveryModule
-		instructions sql.NullString
-		toolPolicy   sql.NullString
-	}
-	var order []moduleRow
-	for rows.Next() {
-		var r moduleRow
-		if err := rows.Scan(&r.mod.ID, &r.mod.ModuleKey, &r.mod.Title, &r.mod.DisplayOrder,
-			&r.mod.DurationSeconds, &r.mod.TargetQuestionCount, &r.mod.AdaptiveRole,
-			&r.instructions, &r.toolPolicy); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		r.mod.Instructions = rawJSON(r.instructions)
-		r.mod.ToolPolicy = rawJSON(r.toolPolicy)
-		r.mod.Questions = []DeliveredQuestion{}
-		order = append(order, r)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for _, r := range order {
-		questions, err := s.loadQuestions(ctx, r.mod.ID)
-		if err != nil {
-			return nil, err
-		}
-		r.mod.Questions = questions
-		modules = append(modules, r.mod)
-	}
-	return modules, nil
-}
-
-// loadQuestions loads one module's delivered questions.
-func (s *Service) loadQuestions(ctx context.Context, moduleID string) ([]DeliveredQuestion, error) {
-	questions := []DeliveredQuestion{}
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT eq.id AS exam_question_id, eq.question_id, eq.display_order, eq.is_pretest, qr.question_type, qr.stimulus, qr.prompt, qr.answer_definition, qr.metadata, qr.accessibility FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE eq.module_id = ? ORDER BY eq.display_order",
-		moduleID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var q DeliveredQuestion
-		var isPretest bool
-		var stimulus, prompt, answer, metadata, accessibility sql.NullString
-		if err := rows.Scan(&q.ExamQuestionID, &q.QuestionID, &q.DisplayOrder, &isPretest,
-			&q.QuestionType, &stimulus, &prompt, &answer, &metadata, &accessibility); err != nil {
-			return nil, err
-		}
-		_ = isPretest // server-side only; never serialized to candidates
-		q.Stimulus = rawJSON(stimulus)
-		q.Prompt = rawJSON(prompt)
-		q.Answer, err = deliveredAnswer(rawJSON(answer))
-		if err != nil {
-			return nil, err
-		}
-		q.Metadata = rawJSON(metadata)
-		q.Accessibility = rawJSON(accessibility)
-		questions = append(questions, q)
-	}
-	return questions, rows.Err()
+	return loadDeliveryTree(ctx, s.db, versionID)
 }
 
 // ensureBaseModuleAttempt seeds the first base module attempt when the
@@ -938,6 +912,70 @@ func withholdAwaitingModuleContent(sections []DeliverySection, attempts []Module
 	return out
 }
 
+// withholdUnstartedModuleContent is used by the pinned SAT recovery policy:
+// assignment and break completion make a module eligible, but only the
+// authenticated StartModule transaction may return its questions.
+func withholdUnstartedModuleContent(sections []DeliverySection, attempts []ModuleAttempt) []DeliverySection {
+	unstarted := make(map[string]bool)
+	for i := range attempts {
+		if attempts[i].State != "not_started" {
+			continue
+		}
+		unstarted[attempts[i].ModuleID] = true
+		attempts[i].DeadlineAt = nil
+		full := int64(attempts[i].AllocatedSeconds + attempts[i].ExtensionSeconds)
+		attempts[i].RemainingSeconds = &full
+	}
+	if len(unstarted) == 0 {
+		return sections
+	}
+	out := make([]DeliverySection, 0, len(sections))
+	for _, section := range sections {
+		modules := make([]DeliveryModule, 0, len(section.Modules))
+		for _, module := range section.Modules {
+			if unstarted[module.ID] {
+				module.Questions = []DeliveredQuestion{}
+				module.Instructions = nil
+				module.ContentWithheld = true
+			}
+			modules = append(modules, module)
+		}
+		section.Modules = modules
+		out = append(out, section)
+	}
+	return out
+}
+
+// withholdBlockedSATRecoveryContent removes the ended module's questions from
+// a student snapshot as soon as its recovery boundary is blocked. The server
+// still returns canonical response rows and lifecycle metadata for resolution.
+func withholdBlockedSATRecoveryContent(sections []DeliverySection, attempts []ModuleAttempt) []DeliverySection {
+	blocked := make(map[string]bool)
+	for _, attempt := range attempts {
+		if attempt.SATBoundary != nil && attempt.SATBoundary.Phase == "blocked" && attempt.SATBoundary.Resolution == nil {
+			blocked[attempt.ModuleID] = true
+		}
+	}
+	if len(blocked) == 0 {
+		return sections
+	}
+	out := make([]DeliverySection, 0, len(sections))
+	for _, section := range sections {
+		modules := make([]DeliveryModule, 0, len(section.Modules))
+		for _, module := range section.Modules {
+			if blocked[module.ID] {
+				module.Questions = []DeliveredQuestion{}
+				module.Instructions = nil
+				module.ContentWithheld = true
+			}
+			modules = append(modules, module)
+		}
+		section.Modules = modules
+		out = append(out, section)
+	}
+	return out
+}
+
 func filterModuleAttemptsForSections(attempts []ModuleAttempt, sections []DeliverySection) []ModuleAttempt {
 	allowed := make(map[string]bool)
 	for _, section := range sections {
@@ -1044,6 +1082,44 @@ func (s *Service) loadModuleAttempts(ctx context.Context, attemptID string, now 
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func (s *Service) loadSATModuleBoundaries(ctx context.Context, attemptID string, moduleAttempts []ModuleAttempt) error {
+	byID := make(map[string]int, len(moduleAttempts))
+	for i := range moduleAttempts {
+		byID[moduleAttempts[i].ID] = i
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT module_attempt_id, phase, policy_version, work_deadline_at, entry_deadline_at,
+		       recovery_deadline_at, next_action_at, resolution, resolved_at,
+	       CAST(resolution_receipt AS CHAR), revision
+		FROM assessment_module_boundaries WHERE attempt_id = ?`, attemptID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, phase, policyVersion string
+		var workDeadline, entryDeadline, recoveryDeadline, nextAction, resolvedAt sql.NullTime
+		var resolution, resolutionReceipt sql.NullString
+		var revision uint64
+		if err := rows.Scan(&id, &phase, &policyVersion, &workDeadline, &entryDeadline,
+			&recoveryDeadline, &nextAction, &resolution, &resolvedAt, &resolutionReceipt, &revision); err != nil {
+			return err
+		}
+		index, ok := byID[id]
+		if !ok {
+			continue
+		}
+		moduleAttempts[index].SATBoundary = &SATModuleBoundarySnapshot{
+			Phase: phase, PolicyVersion: policyVersion,
+			WorkDeadlineAt: nullTime(workDeadline), EntryDeadlineAt: nullTime(entryDeadline),
+			RecoveryDeadlineAt: nullTime(recoveryDeadline), NextActionAt: nullTime(nextAction),
+			Resolution: nullString(resolution), ResolvedAt: nullTime(resolvedAt),
+			ResolutionReceipt: rawJSON(resolutionReceipt), Revision: revision,
+		}
+	}
+	return rows.Err()
 }
 
 // loadPersonalEntryOffers projects future-start metadata only for the new SAT
@@ -1557,10 +1633,11 @@ func (s *Service) SaveResponse(ctx context.Context, bearerScheduleID, bearerAtte
 	var out *ResponseSnapshot
 	// B1: single-response save is a point-write tx (RC-safe).
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
-		if err := s.ensureAttemptCanWorkTx(ctx, t, scheduleID, bearerAttemptID); err != nil {
+		var authority attemptAuthoritySnapshot
+		if err := s.ensureAttemptCanWorkWithAuthorityTx(ctx, t, scheduleID, bearerAttemptID, nil, &authority); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, scheduleID, bearerAttemptID, writerBinding...); err != nil {
+		if err := enforceWriterSessionWithAuthorityTx(ctx, t, scheduleID, bearerAttemptID, writerBinding, &authority); err != nil {
 			return err
 		}
 		active, timeoutRecovery, err := s.lockActiveModuleTx(ctx, t, bearerAttemptID, req)
@@ -1887,14 +1964,59 @@ func (s *Service) saveAttemptBinding(ctx context.Context, scheduleID, attemptID,
 // UPDATE then runtime FOR SHARE; proctor paused/terminated =>
 // StructuredConflict AttemptProctorBlocked; submitted/delivery-terminal /
 // post-exam => Conflict.
-func (s *Service) ensureAttemptCanWorkTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string) error {
+func (s *Service) ensureAttemptCanWorkTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, startRuntime ...*moduleTimingRuntimeSnapshot) error {
+	var runtime *moduleTimingRuntimeSnapshot
+	if len(startRuntime) > 0 {
+		runtime = startRuntime[0]
+	}
+	return s.ensureAttemptCanWorkWithAuthorityTx(ctx, t, scheduleID, attemptID, runtime, nil)
+}
+
+const attemptWorkRuntimeSnapshotQuery = `
+	SELECT rt.status, rt.timing_model, rt.active_section_key, COALESCE(rt.sat_handoff_mode, 'server_start'),
+		(SELECT CAST(s.sat_delivery_policy AS CHAR) FROM exam_schedules s WHERE s.id = rt.schedule_id),
+		COALESCE((SELECT s.sat_timing_model FROM exam_schedules s WHERE s.id = rt.schedule_id), rt.timing_model, '')
+	FROM exam_session_runtimes rt WHERE rt.schedule_id = ? FOR SHARE`
+
+const startModuleRuntimeSnapshotQuery = `
+	SELECT rt.status, rt.timing_model, rt.active_section_key, COALESCE(rt.sat_handoff_mode, 'server_start'),
+		(SELECT CAST(s.sat_delivery_policy AS CHAR) FROM exam_schedules s WHERE s.id = rt.schedule_id),
+		COALESCE((SELECT s.sat_timing_model FROM exam_schedules s WHERE s.id = rt.schedule_id), rt.timing_model, ''),
+		EXISTS(SELECT 1 FROM assessment_attempt_breaks b WHERE b.attempt_id = ? AND b.state <> 'completed')
+	FROM exam_session_runtimes rt WHERE rt.schedule_id = ? FOR SHARE`
+
+// ensureAttemptCanWorkWithAuthorityTx can return the fields needed by the
+// writer and control-epoch fences from the attempt row it already locks. Hot
+// mutation paths pass authority so they do not issue another FOR UPDATE read
+// of the same row later in the transaction.
+func (s *Service) ensureAttemptCanWorkWithAuthorityTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, startRuntime *moduleTimingRuntimeSnapshot, authority *attemptAuthoritySnapshot) error {
+	return s.ensureAttemptCanWorkWithRuntimeSnapshotTx(ctx, t, scheduleID, attemptID, startRuntime, authority, false)
+}
+
+func (s *Service) ensureAttemptCanStartModuleWithAuthorityTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, startRuntime *moduleTimingRuntimeSnapshot, authority *attemptAuthoritySnapshot) error {
+	return s.ensureAttemptCanWorkWithRuntimeSnapshotTx(ctx, t, scheduleID, attemptID, startRuntime, authority, true)
+}
+
+func (s *Service) ensureAttemptCanWorkWithRuntimeSnapshotTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, startRuntime *moduleTimingRuntimeSnapshot, authority *attemptAuthoritySnapshot, includePendingBreak bool) error {
 	var proctorStatus, deliveryStatus string
 	var submittedAt, codeAcceptedAt sql.NullTime
 	var phase sql.NullString
 	var codeRequired bool
-	if err := t.QueryRowContext(ctx,
-		"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
-		attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt); err != nil {
+	var err error
+	if authority != nil {
+		*authority = attemptAuthoritySnapshot{}
+		err = t.QueryRowContext(ctx,
+			"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at, active_client_session_id, lease_epoch, control_epoch FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt, &authority.activeClientSessionID, &authority.leaseEpoch, &authority.controlEpoch)
+		if err == nil {
+			authority.loaded = true
+		}
+	} else {
+		err = t.QueryRowContext(ctx,
+			"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt)
+	}
+	if err != nil {
 		if err == sql.ErrNoRows {
 			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
 		}
@@ -1919,13 +2041,38 @@ func (s *Service) ensureAttemptCanWorkTx(ctx context.Context, t tx.Tx, scheduleI
 		return startCodeRequired()
 	}
 	var runtimeStatus sql.NullString
-	if err := t.QueryRowContext(ctx,
-		"SELECT status FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE",
-		scheduleID).Scan(&runtimeStatus); err != nil {
-		if err == sql.ErrNoRows {
+	var runtimeErr error
+	if startRuntime != nil {
+		*startRuntime = moduleTimingRuntimeSnapshot{}
+		var recoveryPolicyJSON sql.NullString
+		var recoveryTimingModel string
+		query := attemptWorkRuntimeSnapshotQuery
+		queryArgs := []any{scheduleID}
+		scanArgs := []any{
+			&runtimeStatus, &startRuntime.timingModel, &startRuntime.activeStage, &startRuntime.handoffMode,
+			&recoveryPolicyJSON, &recoveryTimingModel,
+		}
+		if includePendingBreak {
+			query = startModuleRuntimeSnapshotQuery
+			queryArgs = []any{attemptID, scheduleID}
+			scanArgs = append(scanArgs, &startRuntime.pendingBreak)
+		}
+		runtimeErr = t.QueryRowContext(ctx, query, queryArgs...).Scan(scanArgs...)
+		if runtimeErr == nil {
+			startRuntime.status = runtimeStatus
+			startRuntime.exists = true
+			startRuntime.recoveryPolicy, runtimeErr = attempts.ParseSATDeliveryPolicy([]byte(recoveryPolicyJSON.String), recoveryTimingModel)
+		}
+	} else {
+		runtimeErr = t.QueryRowContext(ctx,
+			"SELECT status FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE",
+			scheduleID).Scan(&runtimeStatus)
+	}
+	if runtimeErr != nil {
+		if runtimeErr == sql.ErrNoRows {
 			return assessmentConflict("RUNTIME_NOT_LIVE", "The SAT session has not been started by the proctor.")
 		}
-		return err
+		return runtimeErr
 	}
 	switch runtimeStatus.String {
 	case "live":
@@ -2025,6 +2172,23 @@ type moduleTimingGateResult struct {
 	roomWindowKnown bool
 }
 
+type moduleTimingRuntimeSnapshot struct {
+	exists         bool
+	timingModel    sql.NullString
+	activeStage    sql.NullString
+	status         sql.NullString
+	handoffMode    sql.NullString
+	pendingBreak   bool
+	recoveryPolicy *attempts.SATDeliveryPolicy
+}
+
+type attemptAuthoritySnapshot struct {
+	loaded                bool
+	activeClientSessionID sql.NullString
+	leaseEpoch            int64
+	controlEpoch          int64
+}
+
 // dbTimeTx reads the authoritative database instant inside the transaction.
 // Deadline authority must be the time at which the transaction holds its
 // locks, never a wall-clock sample taken before lock acquisition (SAT-006).
@@ -2043,35 +2207,38 @@ func dbTimeTx(ctx context.Context, t tx.Tx) (time.Time, error) {
 // that waited past the deadline is judged by the moment it can mutate, not a
 // timestamp captured before it entered the transaction (SAT-006).
 func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, moduleID string) (moduleTimingGateResult, error) {
-	var timingModel sql.NullString
-	var activeStage sql.NullString
+	var runtime moduleTimingRuntimeSnapshot
 	if err := t.QueryRowContext(ctx,
-		"SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE",
-		scheduleID).Scan(&timingModel, &activeStage); err != nil {
+		"SELECT timing_model, active_section_key, status, COALESCE(sat_handoff_mode, 'server_start') FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE",
+		scheduleID).Scan(&runtime.timingModel, &runtime.activeStage, &runtime.status, &runtime.handoffMode); err != nil {
 		if err == sql.ErrNoRows {
 			now, nerr := dbTimeTx(ctx, t)
 			return moduleTimingGateResult{gate: timingGateLegacy, now: now}, nerr
 		}
 		return moduleTimingGateResult{}, err
 	}
-	switch timingModel.String {
+	runtime.exists = true
+	return s.moduleTimingGateWithRuntimeTx(ctx, t, scheduleID, moduleID, runtime)
+}
+
+// moduleTimingGateWithRuntimeTx reuses the runtime row already locked by
+// ensureAttemptCanWorkTx on the module-start path. The authoritative DB clock
+// remains read only after the module/section rows are locked.
+func (s *Service) moduleTimingGateWithRuntimeTx(ctx context.Context, t tx.Tx, scheduleID, moduleID string, runtime moduleTimingRuntimeSnapshot) (moduleTimingGateResult, error) {
+	if !runtime.exists {
+		now, err := dbTimeTx(ctx, t)
+		return moduleTimingGateResult{gate: timingGateLegacy, now: now}, err
+	}
+	switch runtime.timingModel.String {
 	case examruntime.TimingModelPersonal:
 		now, nerr := dbTimeTx(ctx, t)
 		if nerr != nil {
 			return moduleTimingGateResult{}, nerr
 		}
-		var runtimeStatus string
-		if err := t.QueryRowContext(ctx, "SELECT status FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&runtimeStatus); err != nil {
-			return moduleTimingGateResult{}, err
-		}
-		if runtimeStatus != "live" {
+		if runtime.status.String != "live" {
 			return moduleTimingGateResult{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT runtime is not live.")
 		}
-		var mode string
-		if err := t.QueryRowContext(ctx, "SELECT COALESCE(sat_handoff_mode, 'server_start') FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&mode); err != nil {
-			return moduleTimingGateResult{}, err
-		}
-		return moduleTimingGateResult{gate: timingGatePersonal, now: now, handoffMode: mode}, nil
+		return moduleTimingGateResult{gate: timingGatePersonal, now: now, handoffMode: runtime.handoffMode.String}, nil
 	case examruntime.TimingModelCohortStage:
 	case examruntime.TimingModelCohortSection:
 	default:
@@ -2091,14 +2258,14 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 		return moduleTimingGateResult{}, err
 	}
 	expected := sectionKey
-	if timingModel.String == examruntime.TimingModelCohortStage {
+	if runtime.timingModel.String == examruntime.TimingModelCohortStage {
 		suffix, err := saveStageSuffix(adaptiveRole)
 		if err != nil {
 			return moduleTimingGateResult{}, err
 		}
 		expected = sectionKey + ":" + suffix
 	}
-	if !activeStage.Valid || activeStage.String != expected {
+	if !runtime.activeStage.Valid || runtime.activeStage.String != expected {
 		return moduleTimingGateResult{}, assessmentConflict("SECTION_NOT_ACTIVE", "SAT section `"+expected+"` is not active for this cohort.")
 	}
 	var status string
@@ -2129,7 +2296,7 @@ func (s *Service) moduleTimingGateTx(ctx context.Context, t tx.Tx, scheduleID, m
 	if !now.Before(deadline) {
 		return moduleTimingGateResult{}, assessmentConflict("DEADLINE_EXPIRED", "The SAT section clock has expired.")
 	}
-	if timingModel.String == examruntime.TimingModelCohortStage {
+	if runtime.timingModel.String == examruntime.TimingModelCohortStage {
 		return moduleTimingGateResult{gate: timingGateCohortStage, now: now}, nil
 	}
 	return moduleTimingGateResult{
@@ -2640,57 +2807,100 @@ func (s *Service) EnsureActiveWriter(ctx context.Context, attemptID, scheduleID,
 	})
 }
 
-// claimWriterSessionTx claims + verifies the exclusive writer session INSIDE
-// the mutation tx (plan B2.4 fold-in): bearer token row re-check (revocation
-// landing between edge verify and commit fails closed) + conditional claim
-// UPDATE (free slot -> bearer session; guarded by terminal/proctor
-// predicates) + SELECT ... FOR UPDATE + equality. One tx — the separate
-// pre-tx EnsureActiveWriter round trip is gone; the takeover race it raced
-// is closed by construction (claim and write commit atomically). Empty
-// session ids are rejected: the delivery edge guarantees non-empty (every
-// minted bearer carries one), so an empty id here is a programming error,
-// never a legacy case to silently weaken.
+// claimWriterSessionTx claims + verifies the exclusive writer session inside
+// the mutation transaction. The token row is read FOR SHARE so concurrent
+// writes from one student can proceed together while revocation waits until
+// this write commits. The transaction checks schedule, attempt, client-session
+// binding, expiry, and the live attempt lease when the session row carries one;
+// the edge only needs to verify the signed token and expiry. This replaces a
+// pre-transaction session lookup without weakening the lease fence. Empty
+// session identities fail closed because every minted writer token carries one.
 func claimWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID, clientSessionID, tokenID string) error {
+	return claimWriterSessionWithAuthorityTx(ctx, t, scheduleID, attemptID, clientSessionID, tokenID, nil)
+}
+
+func claimWriterSessionWithAuthorityTx(ctx context.Context, t tx.Tx, scheduleID, attemptID, clientSessionID, tokenID string, authority *attemptAuthoritySnapshot) error {
 	if clientSessionID == "" || tokenID == "" {
 		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 	}
-	// TOCTOU close: the edge VerifyAttemptRead already checked this token
-	// row, but a revocation/rotation landing after the edge and before
-	// commit must not write. One indexed current read; revoked, rotated
-	// (lease mismatch is enforced by the writer-session equality below),
-	// or unknown rows fail closed. The attempt_sessions table predates
-	// lease_epoch on some schemas; a missing column falls back to the
-	// token/revocation probe (same rule as VerifyAttemptRead).
-	var dbToken string
-	var revokedAt sql.NullTime
-	if err := t.QueryRowContext(ctx,
-		"SELECT token_id, revoked_at FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL",
-		tokenID).Scan(&dbToken, &revokedAt); err != nil {
-		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+	var dbScheduleID, dbAttemptID, dbClientSessionID string
+	var expiresAt time.Time
+	var sessionLease sql.NullInt64
+	err := t.QueryRowContext(ctx,
+		`SELECT schedule_id, attempt_id, client_session_id, expires_at, lease_epoch
+		 FROM attempt_sessions
+		 WHERE token_id = ? AND revoked_at IS NULL
+		 FOR SHARE`, tokenID).Scan(&dbScheduleID, &dbAttemptID, &dbClientSessionID, &expiresAt, &sessionLease)
+	if isMySQLMissingColumn(err) {
+		// Preserve the pre-0079 schema fallback used by VerifyAttemptRead.
+		sessionLease = sql.NullInt64{}
+		err = t.QueryRowContext(ctx,
+			`SELECT schedule_id, attempt_id, client_session_id, expires_at
+			 FROM attempt_sessions
+			 WHERE token_id = ? AND revoked_at IS NULL
+			 FOR SHARE`, tokenID).Scan(&dbScheduleID, &dbAttemptID, &dbClientSessionID, &expiresAt)
 	}
-	if dbToken != tokenID || revokedAt.Valid {
-		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+		}
+		return apperrors.New(apperrors.CodeServiceUnavailable, "Attempt verification is temporarily unavailable; please retry.")
 	}
-	if _, err := t.ExecContext(ctx,
-		"UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated' AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
-		clientSessionID, attemptID, scheduleID); err != nil {
-		return err
+	if dbScheduleID != scheduleID || dbAttemptID != attemptID || dbClientSessionID != clientSessionID || !expiresAt.After(time.Now().UTC()) {
+		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 	}
 	var active sql.NullString
-	if err := t.QueryRowContext(ctx,
-		"SELECT active_client_session_id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
-		attemptID, scheduleID).Scan(&active); err != nil {
-		if err == sql.ErrNoRows {
-			return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+	var currentLease int64
+	if authority != nil && authority.loaded {
+		active = authority.activeClientSessionID
+		currentLease = authority.leaseEpoch
+	} else {
+		if err := t.QueryRowContext(ctx,
+			"SELECT active_client_session_id, lease_epoch FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&active, &currentLease); err != nil {
+			if err == sql.ErrNoRows {
+				return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
+			}
+			return err
 		}
-		return err
 	}
-	if !active.Valid || active.String != clientSessionID {
+	if sessionLease.Valid && sessionLease.Int64 != currentLease {
+		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+	}
+	if active.Valid && active.String != clientSessionID {
 		err := apperrors.New(apperrors.CodeActiveSessionSuperseded, "A newer student session owns this attempt.")
 		err.Details = map[string]any{"reason": "ACTIVE_SESSION_SUPERSEDED"}
 		return err
 	}
+	if !active.Valid {
+		// The attempt row is already locked, so only the first writer needs a
+		// claim write. Established writers avoid a no-op UPDATE on every save,
+		// close, and transition command.
+		result, err := t.ExecContext(ctx,
+			"UPDATE student_attempts SET active_client_session_id = ? WHERE id = ? AND schedule_id = ? AND active_client_session_id IS NULL AND submitted_at IS NULL AND COALESCE(proctor_status, 'active') <> 'terminated' AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')",
+			clientSessionID, attemptID, scheduleID)
+		if err != nil {
+			return err
+		}
+		claimed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if claimed == 0 {
+			err := apperrors.New(apperrors.CodeActiveSessionSuperseded, "A newer student session owns this attempt.")
+			err.Details = map[string]any{"reason": "ACTIVE_SESSION_SUPERSEDED"}
+			return err
+		}
+		if authority != nil && authority.loaded {
+			authority.activeClientSessionID = sql.NullString{String: clientSessionID, Valid: true}
+		}
+	}
 	return nil
+}
+
+func isMySQLMissingColumn(err error) bool {
+	var dbErr *mysql.MySQLError
+	return errors.As(err, &dbErr) && dbErr.Number == 1054
 }
 
 // enforceWriterSessionTx keeps the historical in-tx call shape (variadic
@@ -2703,6 +2913,13 @@ func enforceWriterSessionTx(ctx context.Context, t tx.Tx, scheduleID, attemptID 
 		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
 	}
 	return claimWriterSessionTx(ctx, t, scheduleID, attemptID, writerBinding[0], writerBinding[1])
+}
+
+func enforceWriterSessionWithAuthorityTx(ctx context.Context, t tx.Tx, scheduleID, attemptID string, writerBinding []string, authority *attemptAuthoritySnapshot) error {
+	if len(writerBinding) < 2 || writerBinding[0] == "" || writerBinding[1] == "" {
+		return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+	}
+	return claimWriterSessionWithAuthorityTx(ctx, t, scheduleID, attemptID, writerBinding[0], writerBinding[1], authority)
 }
 
 // enforceControlEpochTx fences an entry/arm command against the attempt control
@@ -2726,12 +2943,26 @@ func enforceControlEpochTx(ctx context.Context, t tx.Tx, attemptID string, expec
 		}
 		return err
 	}
-	if current != *expected {
+	return enforceControlEpochValue(attemptID, int64(current), uint64(*expected))
+}
+
+func enforceControlEpochSnapshot(attemptID string, authority *attemptAuthoritySnapshot, expected *int) error {
+	if expected == nil || *expected <= 0 {
+		return nil
+	}
+	if authority == nil || !authority.loaded {
+		return apperrors.New(apperrors.CodeInternal, "Attempt control state is unavailable.")
+	}
+	return enforceControlEpochValue(attemptID, authority.controlEpoch, uint64(*expected))
+}
+
+func enforceControlEpochValue(attemptID string, current int64, expected uint64) error {
+	if current < 0 || uint64(current) != expected {
 		return &apperrors.Error{
 			Code:       apperrors.CodeControlEpochStale,
 			Message:    "Command crossed a pause/resume control boundary.",
 			HTTPStatus: 409,
-			Details:    map[string]any{"requestControlEpoch": uint64(*expected), "currentControlEpoch": uint64(current)},
+			Details:    map[string]any{"attemptId": attemptID, "requestControlEpoch": expected, "currentControlEpoch": uint64(current)},
 		}
 	}
 	return nil

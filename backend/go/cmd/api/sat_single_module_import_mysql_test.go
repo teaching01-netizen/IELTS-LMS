@@ -496,7 +496,7 @@ func TestSATSingleModuleTransactionRollsBackLateReceiptFailureMySQL(t *testing.T
 		t.Fatalf("import state was not rolled back: state=%s checkpoint=%+v", state, checkpoint)
 	}
 	var operationKey, requestHash, result sql.NullString
-	if err := h.db.QueryRow("SELECT operation_key, request_hash, CAST(result_json AS CHAR) FROM sat_single_module_imports WHERE import_id = ?", preview.ImportID).Scan(&operationKey, &requestHash, &result); err != nil {
+	if err := h.db.QueryRow("SELECT operation_key, request_hash, CAST(result_json AS CHAR) FROM sat_workbook_import_scopes WHERE import_id = ?", preview.ImportID).Scan(&operationKey, &requestHash, &result); err != nil {
 		t.Fatal(err)
 	}
 	if operationKey.Valid || requestHash.Valid || result.Valid {

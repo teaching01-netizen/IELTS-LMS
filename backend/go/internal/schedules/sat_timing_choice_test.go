@@ -55,7 +55,8 @@ func TestPersistSatTimingChoiceHonoursTheOffSwitch(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
-	// No UPDATE: sqlmock fails on an unexpected statement.
+	mock.ExpectQuery("SELECT COALESCE\\(JSON_EXTRACT").WithArgs("sched-1").WillReturnRows(sqlmock.NewRows([]string{"schema_version"}).AddRow(1))
+	// Legacy versions keep the off switch; no timing UPDATE.
 	mock.ExpectCommit()
 
 	if err := writeTimingChoice(t, db, "sched-1", "sat"); err != nil {
@@ -104,7 +105,7 @@ func TestScanScheduleProjectsTheStoredTimingChoice(t *testing.T) {
 	svc := NewService(db, tx.NewRunner(db))
 
 	now := time.Date(2026, 9, 24, 9, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta("sat_timing_model, sat_start_mode, COALESCE(sat_session_mode, 'practice'), sat_route_policy FROM exam_schedules WHERE id = ?")).
+	mock.ExpectQuery(regexp.QuoteMeta("sat_timing_model, ielts_timing_model, sat_start_mode, COALESCE(sat_session_mode, 'practice'), sat_route_policy FROM exam_schedules WHERE id = ?")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "exam_id", "provider_key", "organization_id", "exam_title",
@@ -113,7 +114,7 @@ func TestScanScheduleProjectsTheStoredTimingChoice(t *testing.T) {
 			"planned_duration_minutes", "delivery_mode", "status", "revision",
 			"recurrence_type", "recurrence_interval", "recurrence_end_date",
 			"buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop",
-			"created_at", "created_by", "updated_at", "sat_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy",
+			"created_at", "created_by", "updated_at", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy",
 		}).AddRow(
 			"sched-1", "exam-1", "sat", nil, "SAT Practice",
 			"SAT Practice", "SAT Practice", "pv-1",
@@ -121,7 +122,7 @@ func TestScanScheduleProjectsTheStoredTimingChoice(t *testing.T) {
 			134, "online", "scheduled", 3,
 			"none", 1, nil,
 			0, 0, true, false,
-			now, "admin-1", now, examruntime.TimingModelPersonal, "proctor", "practice", nil,
+			now, "admin-1", now, examruntime.TimingModelPersonal, nil, "proctor", "practice", nil,
 		))
 
 	sch, err := svc.Get(context.Background(), "sched-1")
@@ -147,7 +148,7 @@ func TestScanScheduleLeavesALegacyChoiceUnset(t *testing.T) {
 	svc := NewService(db, tx.NewRunner(db))
 
 	now := time.Date(2026, 9, 24, 9, 0, 0, 0, time.UTC)
-	mock.ExpectQuery(regexp.QuoteMeta("sat_timing_model, sat_start_mode, COALESCE(sat_session_mode, 'practice'), sat_route_policy FROM exam_schedules WHERE id = ?")).
+	mock.ExpectQuery(regexp.QuoteMeta("sat_timing_model, ielts_timing_model, sat_start_mode, COALESCE(sat_session_mode, 'practice'), sat_route_policy FROM exam_schedules WHERE id = ?")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "exam_id", "provider_key", "organization_id", "exam_title",
@@ -156,7 +157,7 @@ func TestScanScheduleLeavesALegacyChoiceUnset(t *testing.T) {
 			"planned_duration_minutes", "delivery_mode", "status", "revision",
 			"recurrence_type", "recurrence_interval", "recurrence_end_date",
 			"buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop",
-			"created_at", "created_by", "updated_at", "sat_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy",
+			"created_at", "created_by", "updated_at", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy",
 		}).AddRow(
 			"sched-1", "exam-1", "sat", nil, "SAT Practice",
 			"SAT Practice", "SAT Practice", "pv-1",
@@ -164,7 +165,7 @@ func TestScanScheduleLeavesALegacyChoiceUnset(t *testing.T) {
 			134, "online", "scheduled", 3,
 			"none", 1, nil,
 			0, 0, true, false,
-			now, "admin-1", now, nil, "proctor", "practice", nil,
+			now, "admin-1", now, nil, nil, "proctor", "practice", nil,
 		))
 
 	sch, err := svc.Get(context.Background(), "sched-1")
@@ -173,6 +174,25 @@ func TestScanScheduleLeavesALegacyChoiceUnset(t *testing.T) {
 	}
 	if sch.SatTimingModel != nil {
 		t.Fatalf("a legacy row must project as no choice, got %q", *sch.SatTimingModel)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSeparateFormsRejectTimingOff(t *testing.T) {
+	t.Setenv(satPersonalTimingEnv, "off")
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT COALESCE\\(JSON_EXTRACT").WithArgs("sched-1").WillReturnRows(sqlmock.NewRows([]string{"schema_version"}).AddRow(2))
+	mock.ExpectRollback()
+	if err := writeTimingChoice(t, db, "sched-1", "sat"); err == nil {
+		t.Fatal("separate forms must not create a shared-clock room")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { DurableResponseEngine, type ScopeManifestEntry } from '@shared/durability/DurableResponseEngine';
+import { DurableResponseEngine, type PreparedScopeClose, type ScopeManifestEntry } from '@shared/durability/DurableResponseEngine';
 import {
   blockedSubmitGateMessage,
   mapEngineStatus,
@@ -12,6 +12,8 @@ import {
 import {
   getVisibleResponse,
   type ResponsePayload,
+  type ResponseAcknowledgementV2,
+  type ResponseCommandV2,
   type SubmitAttemptV2Response,
 } from '@shared/durability/types';
 import type {
@@ -94,6 +96,15 @@ export interface SatResponsePersistence {
   closedModuleAttemptIds?: ReadonlyArray<string>;
   /** The close manifest for one module attempt (see DurableResponseEngine.getScopeManifest). */
   closeManifest?: (moduleAttemptId: string) => Promise<ScopeManifestEntry[]>;
+  freezeScope?: (moduleAttemptId: string) => void;
+  prepareScopeClose?: (moduleAttemptId: string, closeId: string) => Promise<PreparedScopeClose>;
+  uploadScopeCloseChunk?: (
+    moduleAttemptId: string,
+    closeId: string,
+    manifestHash: string,
+    commands: ResponseCommandV2[],
+  ) => Promise<void>;
+  acknowledgeScopeClose?: (moduleAttemptId: string, closeId: string, acknowledgements: readonly ResponseAcknowledgementV2[]) => Promise<void>;
   failure: string | null;
   failureKind: SatResponseFailureKind | null;
   tombstoneCount: number;
@@ -497,6 +508,42 @@ export function useSatResponsePersistence({
     []
   );
 
+  const freezeScope = useCallback((moduleAttemptId: string) => {
+    v2EngineRef.current?.freezeScope(moduleAttemptId);
+  }, []);
+
+  const prepareScopeClose = useCallback(
+    async (moduleAttemptId: string, closeId: string): Promise<PreparedScopeClose> => {
+      const engine = v2EngineRef.current;
+      if (!engine) throw new Error('V2 response durability engine is not ready.');
+      return engine.prepareScopeClose(moduleAttemptId, closeId);
+    },
+    []
+  );
+
+  const uploadScopeCloseChunk = useCallback(
+    async (
+      moduleAttemptId: string,
+      closeId: string,
+      manifestHash: string,
+      commands: ResponseCommandV2[],
+    ): Promise<void> => {
+      const engine = v2EngineRef.current;
+      if (!engine) throw new Error('V2 response durability engine is not ready.');
+      await engine.uploadScopeCloseChunk(moduleAttemptId, closeId, manifestHash, commands);
+    },
+    [],
+  );
+
+  const acknowledgeScopeClose = useCallback(
+    async (moduleAttemptId: string, closeId: string, acknowledgements: readonly ResponseAcknowledgementV2[]) => {
+      const engine = v2EngineRef.current;
+      if (!engine) throw new Error('V2 response durability engine is not ready.');
+      await engine.applyScopeCloseAcknowledgement(moduleAttemptId, closeId, acknowledgements);
+    },
+    []
+  );
+
   const waitForV2Acceptances = useCallback(async () => {
     let firstError: unknown;
     while (v2PendingAcceptancesRef.current.size > 0) {
@@ -820,6 +867,10 @@ export function useSatResponsePersistence({
     assertBoundarySettled,
     closedModuleAttemptIds,
     closeManifest,
+    freezeScope,
+    prepareScopeClose,
+    uploadScopeCloseChunk,
+    acknowledgeScopeClose,
     failure,
     failureKind,
     tombstoneCount,

@@ -253,8 +253,10 @@ func TestCompleteLocksTheScheduleBeforeTheRuntime(t *testing.T) {
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id", "exam_id", "status", "active_section_key", "revision", "timing_model"}).
 			AddRow("rt-1", "sched-1", "exam-1", StatusLive, "reading-writing", int64(6), TimingModelCohortSection))
+	mock.ExpectExec("UPDATE exam_schedules SET eva_sim_closed_at").
+		WithArgs("admin-1", "sched-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE exam_session_runtimes SET status = 'completed'").
-		WithArgs("rt-1").WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs("proctor_complete", "rt-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE exam_session_runtime_sections SET status = 'completed'").
 		WithArgs("proctor_complete", "rt-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE exam_schedules SET status = 'completed'").

@@ -45,7 +45,7 @@ func deliveryAnsweredExamHandler(app *App) http.HandlerFunc {
 			}
 			claims, err := verifyAttemptReadBearer(app, r, bearer)
 			if err != nil {
-				httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+				writeAttemptVerificationError(w, r, err)
 				return
 			}
 			if app.Delivery == nil || app.DB == nil {
@@ -162,7 +162,7 @@ func deliveryAnsweredPDFHandler(app *App) http.HandlerFunc {
 		}
 		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			writeAttemptVerificationError(w, r, err)
 			return
 		}
 		if app.Delivery == nil || app.DB == nil || app.AnsweredPDF == nil {

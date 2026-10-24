@@ -172,7 +172,8 @@ export function collectLegacyServiceViolations(
       isPathUnder(file, 'src/features/results/infrastructure') ||
       isPathUnder(file, 'src/features/answer-history/infrastructure') ||
       isPathUnder(file, 'src/features/builder/infrastructure') ||
-      isPathUnder(file, 'src/features/sat-score-conversion/infrastructure');
+      isPathUnder(file, 'src/features/sat-score-conversion/infrastructure') ||
+      isPathUnder(file, 'src/features/assessment-forms/infrastructure');
     return approvedAdapter ? null : target;
   });
   return sortViolations(violations);

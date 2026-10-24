@@ -28,6 +28,12 @@ export interface BackendE2EManifest {
     examSlug: string;
     publishedVersionId: string;
     scheduleId: string;
+    ieltsPersonalTimingScheduleId: string;
+    ieltsPersonalLoadScheduleId: string;
+    ieltsPersonalRecoveryScheduleId: string;
+    ieltsPersonalResilienceScheduleId: string;
+    ieltsPersonalSubmissionScheduleId: string;
+    ieltsPersonalControlsScheduleId: string;
     precheckScheduleId: string;
     proctorWorkflowScheduleId: string;
     flushScheduleId: string;

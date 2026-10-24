@@ -48,7 +48,7 @@ func (r *recordingOutbox) EnqueueInTx(ctx context.Context, q tx.Tx, kind, id str
 }
 
 // scheduleLockColumns mirrors LockScheduleRow's SELECT list.
-var scheduleLockColumns = []string{"id", "exam_id", "provider_key", "sat_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}
+var scheduleLockColumns = []string{"id", "exam_id", "provider_key", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}
 
 // expectScheduleLock stages the schedule row lock that opens every Start and
 // Complete transaction. sqlmock's expectations are ORDERED, so staging it first
@@ -57,7 +57,7 @@ var scheduleLockColumns = []string{"id", "exam_id", "provider_key", "sat_timing_
 func expectScheduleLock(mock sqlmock.Sqlmock, status, versionID string, revision int64) {
 	mock.ExpectQuery("FROM exam_schedules WHERE id = \\? FOR UPDATE").
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows(scheduleLockColumns).AddRow("sched-1", "exam-1", "sat", "", "proctor", versionID, status, revision, 154))
+		WillReturnRows(sqlmock.NewRows(scheduleLockColumns).AddRow("sched-1", "exam-1", "sat", "", "", "proctor", versionID, status, revision, 154))
 }
 
 // staticPlanner is the injected planner for tests that do not exercise plan
@@ -91,7 +91,7 @@ func startStubs(mock sqlmock.Sqlmock, handoffMode ...string) {
 		WithArgs("exam-1").
 		WillReturnRows(sqlmock.NewRows([]string{"provider_key"}).AddRow("sat"))
 	mock.ExpectExec("INSERT INTO exam_session_runtimes").
-		WithArgs(sqlmock.AnyArg(), "sched-1", "exam-1", "sat", sqlmock.AnyArg(), sqlmock.AnyArg(), mode, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "sched-1", "exam-1", "sat", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), mode, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO exam_session_runtime_sections").
 		WillReturnResult(sqlmock.NewResult(0, 1))

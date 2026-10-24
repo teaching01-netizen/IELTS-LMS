@@ -13,6 +13,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
+	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/student"
 	"example.com/ielts-proctoring/internal/terminalization"
 )
@@ -35,7 +36,7 @@ func requireV1StudentIdentity(app *App, r *http.Request, attemptID, scheduleID, 
 		// write, even when ATTEMPT_VERIFY=stateless.
 		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil {
-			return v1StudentIdentity{}, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+			return v1StudentIdentity{}, attemptVerificationError(err)
 		}
 		if claims.AttemptID != attemptID || claims.ScheduleID != scheduleID {
 			return v1StudentIdentity{}, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Attempt credential does not match the request.")
@@ -139,16 +140,12 @@ func v1SubmitHandler(app *App) http.HandlerFunc {
 		// RC-safe: both phases lock the attempt row explicitly. (The seal
 		// itself, TerminalizeInTx, keeps its own RR guarantees internally
 		// where it opens nested scope — this outer tx only needs RC.)
-		sqlTx, err := app.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+		sqlTx, err := tx.Begin(ctx, app.DB, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
 		defer func() { _ = sqlTx.Rollback() }()
-		if _, err := sqlTx.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
 		preparation, err := app.Student.PrepareSubmitInTx(ctx, sqlTx, student.V1SubmitRequest{
 			AttemptID:                wire.AttemptID,
 			ScheduleID:               scheduleID,

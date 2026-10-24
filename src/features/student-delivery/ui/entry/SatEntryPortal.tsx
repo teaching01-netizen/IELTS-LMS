@@ -12,8 +12,16 @@ const GUTTER =
 
 const CARD = "rounded-2xl border border-[var(--sat-divider-soft)] bg-[var(--sat-surface)]";
 
-const STEPS = [
-  { title: "Check in", body: "Enter your Student ID/WCODE, name, and email." },
+/** The check-in step reflects the access mode and any configured exam details. */
+export function satCheckInStep({ code, examDetails }: { code: boolean; examDetails: boolean }): string {
+  const items = [code ? "Student ID/WCODE" : null, "name", "email", examDetails ? "exam details" : null].filter(
+    (item): item is string => item !== null
+  );
+  const listed = items.length > 1 ? `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}` : items[0];
+  return `Enter your ${listed}.`;
+}
+
+const LATER_STEPS = [
   {
     title: "Wait for your proctor",
     body: "Stay on the next screen. It updates on its own — there is nothing to refresh.",
@@ -52,6 +60,8 @@ export interface SatEntryLayoutProps {
   description?: string | undefined;
   /** Closing line of the card. */
   helpText?: string | undefined;
+  /** "What happens next" check-in sentence; see satCheckInStep. */
+  checkInStep?: string | undefined;
   /** Notices and the form. */
   children: ReactNode;
 }
@@ -61,8 +71,10 @@ export function SatEntryLayout({
   title,
   description,
   helpText = "Need help? Ask your proctor.",
+  checkInStep = satCheckInStep({ code: true, examDetails: false }),
   children,
 }: SatEntryLayoutProps) {
+  const steps = [{ title: "Check in", body: checkInStep }, ...LATER_STEPS];
   const titleId = useId();
   const stepsId = useId();
   return (
@@ -107,7 +119,7 @@ export function SatEntryLayout({
             What happens next
           </h2>
           <ol className="mt-5 space-y-5">
-            {STEPS.map((step, index) => (
+            {steps.map((step, index) => (
               <li
                 key={step.title}
                 aria-current={index === 0 ? "step" : undefined}

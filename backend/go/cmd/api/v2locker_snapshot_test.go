@@ -92,8 +92,8 @@ func TestSnapshotLockerReadsCurrentStateOnTheTransaction(t *testing.T) {
 			}
 			mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
 				WithArgs("sched-1").
-				WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section"}).
-					AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false))
+				WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section", "completion_reason"}).
+					AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false, ""))
 			mock.ExpectQuery("FROM exam_session_runtime_sections").
 				WithArgs("rt-1", "rw").
 				WillReturnRows(sqlmock.NewRows([]string{
@@ -185,8 +185,8 @@ func lockWithV2Locker(t *testing.T, sectionStatus *string) attempts.RuntimeGate 
 	defer db.Close()
 	mock.ExpectBegin()
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key", "waiting_for_next_section"}).
-			AddRow("rt-1", "live", "legacy_section_v1", "rw", false))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key", "waiting_for_next_section", "completion_reason"}).
+			AddRow("rt-1", "live", "legacy_section_v1", "rw", false, ""))
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now().UTC()))
 	sectionRow(mock, sectionStatus)
 	mock.ExpectRollback()
@@ -217,8 +217,8 @@ func lockWithSnapshotLocker(t *testing.T, sectionStatus *string) attempts.Runtim
 	defer db.Close()
 	mock.ExpectBegin()
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section"}).
-			AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section", "completion_reason"}).
+			AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false, ""))
 	snapshotSectionRow(mock, sectionStatus)
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now().UTC()))
 	mock.ExpectRollback()

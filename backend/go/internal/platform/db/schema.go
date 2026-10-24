@@ -40,6 +40,8 @@ var RequiredTables = []string{
 	"sat_room_operations",
 	// Native SAT downloads (0092): browser grants and artifact cleanup.
 	"sat_pdf_exports",
+	// SAT configurable forms (0101): registration admission and native Eva.
+	"assessment_form_responses",
 }
 
 // RequiredColumns: 19 durability-critical columns from the Rust
@@ -91,6 +93,9 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "sat_pdf_exports", Column: "browser_hash"},
 	{Table: "sat_pdf_exports", Column: "binding"},
 	{Table: "sat_pdf_exports", Column: "expires_at"},
+	// Explicit End Exam Eva closure (0101): every native Eva write reads it.
+	{Table: "exam_schedules", Column: "eva_sim_closed_at"},
+	{Table: "exam_schedules", Column: "eva_sim_closed_by"},
 }
 
 // RequiredIndex is one (table, index) pair the runtime depends on.
@@ -162,6 +167,21 @@ func (v *SchemaVerifier) Verify(ctx context.Context) error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("db: required schema objects missing: %s; run the database migrator before starting the API", strings.Join(missing, ", "))
+	}
+	if err := v.checkSectionFormVocabulary(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *SchemaVerifier) checkSectionFormVocabulary(ctx context.Context) error {
+	var n int
+	err := v.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.check_constraints WHERE constraint_schema=DATABASE() AND constraint_name='chk_assessment_form_responses_form_key' AND CHECK_CLAUSE LIKE '%verbal_entry%' AND CHECK_CLAUSE LIKE '%math_entry%'`).Scan(&n)
+	if err != nil {
+		return fmt.Errorf("db: verify section form vocabulary: %w", err)
+	}
+	if n != 1 {
+		return fmt.Errorf("db: section form vocabulary missing; run migration 0104_sat_section_entry_forms.sql before starting the API")
 	}
 	return nil
 }

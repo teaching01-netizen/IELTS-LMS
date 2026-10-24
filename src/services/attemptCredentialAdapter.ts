@@ -1,8 +1,8 @@
-import { backendGet, backendPost, hasBackendStatusCode } from './backendBridge';
-import { studentSessionTransport } from './studentSessionTransport';
-import type { StudentAttempt } from '../types/studentAttempt';
+import { backendGet, backendPost, hasBackendStatusCode } from "./backendBridge";
+import { studentSessionTransport } from "./studentSessionTransport";
+import type { StudentAttempt } from "../types/studentAttempt";
 
-const STORAGE_KEY_ATTEMPT_CREDENTIALS = 'ielts_student_attempt_credentials_v1';
+const STORAGE_KEY_ATTEMPT_CREDENTIALS = "ielts_student_attempt_credentials_v1";
 
 export interface BackendAttemptCredential {
   attemptToken: string;
@@ -19,6 +19,41 @@ interface StoredAttemptCredential {
   scheduleId: string;
   attemptToken: string;
   expiresAt: string;
+}
+
+const ATTEMPT_CREDENTIAL_REFRESH_RETRIES = 3;
+
+function isTransientCredentialRefreshFailure(error: unknown): boolean {
+  return (
+    [0, 502, 503, 504].some((status) => hasBackendStatusCode(error, status)) ||
+    error instanceof TypeError
+  );
+}
+
+function waitBeforeCredentialRefreshRetry(retryIndex: number): Promise<void> {
+  const maxDelayMs = Math.min(2_000, 250 * 2 ** retryIndex);
+  const delayMs = Math.floor(Math.random() * maxDelayMs);
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function fetchAttemptCredentialWithRetry(
+  endpoint: string
+): Promise<BackendStudentSessionContextWithCredential> {
+  for (let retryIndex = 0; retryIndex <= ATTEMPT_CREDENTIAL_REFRESH_RETRIES; retryIndex += 1) {
+    try {
+      return await backendGet<BackendStudentSessionContextWithCredential>(endpoint, { retries: 0 });
+    } catch (error) {
+      if (
+        retryIndex >= ATTEMPT_CREDENTIAL_REFRESH_RETRIES ||
+        !isTransientCredentialRefreshFailure(error)
+      ) {
+        throw error;
+      }
+      await waitBeforeCredentialRefreshRetry(retryIndex);
+    }
+  }
+
+  throw new Error("Attempt credential refresh did not settle.");
 }
 
 export interface AttemptCredentialRef {
@@ -38,8 +73,8 @@ export interface AttemptCredentialStatus {
   expiresAtMs: number;
 }
 
-function getBrowserStorage(type: 'localStorage' | 'sessionStorage'): Storage | null {
-  if (typeof window === 'undefined') {
+function getBrowserStorage(type: "localStorage" | "sessionStorage"): Storage | null {
+  if (typeof window === "undefined") {
     return null;
   }
 
@@ -62,15 +97,15 @@ function parseAttemptCredentialStorage(raw: string | null): StoredAttemptCredent
     }
 
     return parsed.filter((candidate): candidate is StoredAttemptCredential => {
-      if (!candidate || typeof candidate !== 'object') {
+      if (!candidate || typeof candidate !== "object") {
         return false;
       }
       const record = candidate as Partial<StoredAttemptCredential>;
       return (
-        typeof record.attemptId === 'string' &&
-        typeof record.scheduleId === 'string' &&
-        typeof record.attemptToken === 'string' &&
-        typeof record.expiresAt === 'string'
+        typeof record.attemptId === "string" &&
+        typeof record.scheduleId === "string" &&
+        typeof record.attemptToken === "string" &&
+        typeof record.expiresAt === "string"
       );
     });
   } catch {
@@ -80,7 +115,7 @@ function parseAttemptCredentialStorage(raw: string | null): StoredAttemptCredent
 
 function mergeAttemptCredentials(
   localCredentials: StoredAttemptCredential[],
-  sessionCredentials: StoredAttemptCredential[],
+  sessionCredentials: StoredAttemptCredential[]
 ): StoredAttemptCredential[] {
   const merged = new Map<string, StoredAttemptCredential>();
 
@@ -115,12 +150,12 @@ function mergeAttemptCredentials(
 }
 
 function getAttemptCredentialStorage(): StoredAttemptCredential[] {
-  if (typeof window === 'undefined') {
+  if (typeof window === "undefined") {
     return [];
   }
 
-  const local = getBrowserStorage('localStorage');
-  const session = getBrowserStorage('sessionStorage');
+  const local = getBrowserStorage("localStorage");
+  const session = getBrowserStorage("sessionStorage");
 
   const read = (storage: Storage | null): string | null => {
     try {
@@ -136,8 +171,8 @@ function getAttemptCredentialStorage(): StoredAttemptCredential[] {
 }
 
 function setAttemptCredentialStorage(credentials: StoredAttemptCredential[]): void {
-  const local = getBrowserStorage('localStorage');
-  const session = getBrowserStorage('sessionStorage');
+  const local = getBrowserStorage("localStorage");
+  const session = getBrowserStorage("sessionStorage");
   const payload = JSON.stringify(credentials);
 
   try {
@@ -157,7 +192,7 @@ function loadAttemptCredential(attempt: AttemptCredentialRef): StoredAttemptCred
   return (
     getAttemptCredentialStorage().find(
       (candidate) =>
-        candidate.attemptId === attempt.id && candidate.scheduleId === attempt.scheduleId,
+        candidate.attemptId === attempt.id && candidate.scheduleId === attempt.scheduleId
     ) ?? null
   );
 }
@@ -165,14 +200,14 @@ function loadAttemptCredential(attempt: AttemptCredentialRef): StoredAttemptCred
 export function clearAttemptCredential(attempt: AttemptCredentialRef): void {
   const credentials = getAttemptCredentialStorage().filter(
     (candidate) =>
-      !(candidate.attemptId === attempt.id && candidate.scheduleId === attempt.scheduleId),
+      !(candidate.attemptId === attempt.id && candidate.scheduleId === attempt.scheduleId)
   );
   setAttemptCredentialStorage(credentials);
 }
 
 export function storeAttemptCredential(
   attempt: AttemptCredentialRef,
-  credential: BackendAttemptCredential | null | undefined,
+  credential: BackendAttemptCredential | null | undefined
 ): void {
   if (!credential) {
     return;
@@ -180,7 +215,7 @@ export function storeAttemptCredential(
 
   const credentials = getAttemptCredentialStorage().filter(
     (candidate) =>
-      !(candidate.attemptId === attempt.id && candidate.scheduleId === attempt.scheduleId),
+      !(candidate.attemptId === attempt.id && candidate.scheduleId === attempt.scheduleId)
   );
   credentials.push({
     attemptId: attempt.id,
@@ -193,13 +228,13 @@ export function storeAttemptCredential(
 
 export function hasAttemptCredential(scheduleId: string, attemptId: string): boolean {
   return getAttemptCredentialStorage().some(
-    (candidate) => candidate.scheduleId === scheduleId && candidate.attemptId === attemptId,
+    (candidate) => candidate.scheduleId === scheduleId && candidate.attemptId === attemptId
   );
 }
 
 export function getAttemptCredentialStatus(
   scheduleId: string,
-  attemptId: string,
+  attemptId: string
 ): AttemptCredentialStatus | null {
   const credential = loadAttemptCredential({ scheduleId, id: attemptId });
   if (!credential) return null;
@@ -214,23 +249,25 @@ export function isAttemptCredentialExpiringWithin(
   scheduleId: string,
   attemptId: string,
   withinMs: number,
-  nowMs = Date.now(),
+  nowMs = Date.now()
 ): boolean {
   const status = getAttemptCredentialStatus(scheduleId, attemptId);
   return !status || !Number.isFinite(status.expiresAtMs) || status.expiresAtMs - nowMs <= withinMs;
 }
 
-export function buildAttemptAuthorizationHeader(attempt: AttemptCredentialRef): Record<string, string> {
+export function buildAttemptAuthorizationHeader(
+  attempt: AttemptCredentialRef
+): Record<string, string> {
   const credential = loadAttemptCredential(attempt);
   if (!credential) {
-    throw new Error('Missing attempt credential for student session.');
+    throw new Error("Missing attempt credential for student session.");
   }
   return { Authorization: `Bearer ${credential.attemptToken}` };
 }
 
 export function tryBuildAttemptAuthorizationHeader(
   scheduleId: string,
-  attemptId: string,
+  attemptId: string
 ): Record<string, string> | null {
   try {
     return buildAttemptAuthorizationHeader({ scheduleId, id: attemptId });
@@ -241,16 +278,15 @@ export function tryBuildAttemptAuthorizationHeader(
 
 export async function refreshAttemptCredential(
   attempt: AttemptCredentialRefreshRef,
-  clientSessionId: string,
+  clientSessionId: string
 ): Promise<boolean> {
   try {
-    const session = await backendGet<BackendStudentSessionContextWithCredential>(
+    const session = await fetchAttemptCredentialWithRetry(
       studentSessionTransport.paths.credentialRefresh(
         attempt.scheduleId,
         attempt.candidateId,
-        clientSessionId,
-      ),
-      { retries: 0 },
+        clientSessionId
+      )
     );
 
     if (session.attemptCredential) {
@@ -275,11 +311,11 @@ export async function refreshAttemptCredential(
       email: attempt.candidateEmail ?? null,
       studentKey: attempt.studentKey ?? attempt.candidateId,
       candidateId: attempt.candidateId,
-      candidateName: attempt.candidateName ?? '',
-      candidateEmail: attempt.candidateEmail ?? '',
+      candidateName: attempt.candidateName ?? "",
+      candidateEmail: attempt.candidateEmail ?? "",
       clientSessionId,
     },
-    { retries: 0 },
+    { retries: 0 }
   );
 
   if (!session.attemptCredential) {
@@ -292,7 +328,7 @@ export async function refreshAttemptCredential(
 
 export async function refreshAttemptCredentialForAttempt(
   attempt: StudentAttempt,
-  clientSessionId: string,
+  clientSessionId: string
 ): Promise<boolean> {
   return refreshAttemptCredential(attempt, clientSessionId);
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"example.com/ielts-proctoring/internal/assessmentforms"
 	"net/http"
 	"strings"
 	"time"
@@ -55,11 +56,21 @@ func transferBlockedError() *apperrors.Error {
 
 // attemptCredentialIssuer issues the writer credential inside the ownership
 // transaction that authorized it.
-func attemptCredentialIssuer(app *App, userID, scheduleID, attemptID, clientSessionID string) attempts.CredentialIssuer {
+//
+// A first admission also passes the registration-form gate here, so the
+// registration response and the first usable credential commit together on
+// every issuance path (entry, bootstrap, refresh, transfer). registration is
+// the entry-time answer set, nil on paths that collect none.
+func attemptCredentialIssuer(app *App, userID, scheduleID, attemptID, clientSessionID string, registration *assessmentforms.RegistrationSubmission) attempts.CredentialIssuer {
 	return func(ctx context.Context, q tx.Tx, lease uint64) (string, time.Time, error) {
-		now, err := authorizeStudentCredentialTx(ctx, q, userID, scheduleID, attemptID)
+		now, adm, err := authorizeStudentCredentialAdmissionTx(ctx, q, userID, scheduleID, attemptID)
 		if err != nil {
 			return "", time.Time{}, err
+		}
+		if !adm.Admitted && !adm.Preview {
+			if err := assessmentforms.EnsureRegistrationTx(ctx, q, attemptID, registration); err != nil {
+				return "", time.Time{}, err
+			}
 		}
 		l := lease
 		return auth.IssueAttemptTokenTx(ctx, q, app.Config, userID, scheduleID, attemptID, clientSessionID, nil, &l, now)
@@ -69,14 +80,14 @@ func attemptCredentialIssuer(app *App, userID, scheduleID, attemptID, clientSess
 // admitStudentSession is the shared admission path for entry, session
 // bootstrap, and credential refresh: never a hardcoded lease, never a writer
 // credential for a blocked session.
-func admitStudentSession(ctx context.Context, app *App, userID, scheduleID, attemptID, clientSessionID string) (attempts.Admission, error) {
+func admitStudentSession(ctx context.Context, app *App, userID, scheduleID, attemptID, clientSessionID string, registration *assessmentforms.RegistrationSubmission) (attempts.Admission, error) {
 	if app.Attempts == nil {
 		return attempts.Admission{}, apperrors.New(apperrors.CodeServiceUnavailable, "Attempt service is unavailable.")
 	}
 	return app.Attempts.Admit(ctx, attempts.AdmitCommand{
 		AttemptID: attemptID, UserID: userID, ClientSessionID: clientSessionID,
 		SingleWriterEnabled: singleWriterEnabledForSchedule(app, scheduleID),
-	}, attemptCredentialIssuer(app, userID, scheduleID, attemptID, clientSessionID))
+	}, attemptCredentialIssuer(app, userID, scheduleID, attemptID, clientSessionID, registration))
 }
 
 // admissionPayload is the browser-facing admission summary.
@@ -226,7 +237,7 @@ func studentTransferCommitHandler(app *App) http.HandlerFunc {
 		requestID := chi.URLParam(r, "requestID")
 		target := strings.TrimSpace(body.ClientSessionID)
 		issuerFor := func(attemptID string) attempts.CredentialIssuer {
-			return attemptCredentialIssuer(app, sess.UserID, scheduleID, attemptID, target)
+			return attemptCredentialIssuer(app, sess.UserID, scheduleID, attemptID, target, nil)
 		}
 		res, err := app.Attempts.CommitTransfer(r.Context(), attempts.CommitTransferCommand{
 			RequestID: requestID, TargetSessionID: target, Requester: requesterOf(sess, scheduleID, target),

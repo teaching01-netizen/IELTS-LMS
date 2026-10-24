@@ -1,4 +1,11 @@
-export type StudentAutoSaveStatus = 'saved' | 'saving' | 'syncing' | 'offline' | 'error';
+export type StudentAutoSaveStatus =
+  | 'saved'
+  | 'saved_locally'
+  | 'saving'
+  | 'syncing'
+  | 'offline'
+  | 'needs_recovery'
+  | 'error';
 
 export interface StudentSaveStatusPresentation {
   /** Full wording; what assistive tech announces. */
@@ -24,8 +31,20 @@ export function getStudentSaveStatusPresentation(
       return { label: 'Saving…', shortLabel: 'Saving…', tone: 'neutral' };
     case 'syncing':
       return { label: 'Syncing…', shortLabel: 'Syncing…', tone: 'neutral' };
+    case 'saved_locally':
+      return {
+        label: 'Saved on this device · awaiting server',
+        shortLabel: 'Saved on device',
+        tone: 'warning',
+      };
     case 'offline':
       return { label: 'Offline · saving paused', shortLabel: 'Offline', tone: 'warning' };
+    case 'needs_recovery':
+      return {
+        label: 'Needs recovery · work kept on this device',
+        shortLabel: 'Needs recovery',
+        tone: 'danger',
+      };
     case 'error':
       return { label: 'Not saved · retrying', shortLabel: 'Not saved', tone: 'danger' };
     case 'saved':

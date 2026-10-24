@@ -37,8 +37,8 @@ func TestModuleTimingGateRejectsWhenInTxTimePassedDeadline(t *testing.T) {
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key"}).
-			AddRow("cohort_stage_v2", "math:m1"))
+		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key", "status", "sat_handoff_mode"}).
+			AddRow("cohort_stage_v2", "math:m1", "live", "server_start"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s")).
 		WithArgs("mod-1").
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "adaptive_role", "duration_seconds"}).AddRow("math", "base", 2100))
@@ -87,8 +87,8 @@ func TestModuleTimingGateAdmitsWhenInTxTimeBeforeDeadline(t *testing.T) {
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key"}).
-			AddRow("cohort_stage_v2", "math:m1"))
+		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key", "status", "sat_handoff_mode"}).
+			AddRow("cohort_stage_v2", "math:m1", "live", "server_start"))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s")).
 		WithArgs("mod-1").
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "adaptive_role", "duration_seconds"}).AddRow("math", "base", 2100))

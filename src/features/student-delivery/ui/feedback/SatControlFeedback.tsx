@@ -61,6 +61,7 @@ export function SatTimeoutOverlay({
   onRetrySave,
   closeStalled = false,
   onRetryClose,
+  recoveryMode = false,
 }: {
   saveFailureKind: "offline" | "retryable" | "terminal" | "expired" | "superseded" | "module_closed" | null;
   saveFailure: string | null;
@@ -68,19 +69,20 @@ export function SatTimeoutOverlay({
   /** The server has not confirmed the module closed; a save failure still takes precedence. */
   closeStalled?: boolean;
   onRetryClose?: () => void;
+  recoveryMode?: boolean;
 }) {
   const hasSaveFailure = saveFailureKind !== null;
   const showCloseRetry = closeStalled && !hasSaveFailure && onRetryClose !== undefined;
   const note =
     saveFailureKind === "offline"
-      ? SAT_COPY.timeout.offline
+      ? recoveryMode ? SAT_COPY.timeout.recoveryOffline : SAT_COPY.timeout.offline
       : saveFailureKind === "retryable" || saveFailureKind === "terminal" || saveFailureKind === "expired"
         ? saveFailure || SAT_COPY.timeout.failed
         : saveFailureKind === "superseded"
           ? SAT_COPY.review.saveSuperseded
           : showCloseRetry
             ? SAT_COPY.timeout.stalled
-            : SAT_COPY.timeout.recordingAnswers;
+            : recoveryMode ? SAT_COPY.timeout.recoveryOffline : SAT_COPY.timeout.recordingAnswers;
   return (
     <div
       className="sat-ui fixed inset-0 z-[80] grid place-items-center bg-[var(--sat-background)]/90"

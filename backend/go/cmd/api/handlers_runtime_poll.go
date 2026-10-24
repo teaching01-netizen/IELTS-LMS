@@ -27,6 +27,15 @@ func verifyAttemptReadBearer(app *App, r *http.Request, bearer string) (crypto.A
 	return auth.VerifyAttemptRead(r.Context(), app.DB, app.Config, time.Now().UTC(), bearer)
 }
 
+// verifyAttemptWriteBearer verifies the signature and token expiry at the
+// edge. Use it only when the owning mutation rechecks the token row, binding,
+// and writer lease inside its transaction; reads must use
+// verifyAttemptReadBearer because they have no transactional authorization
+// fence.
+func verifyAttemptWriteBearer(app *App, r *http.Request, bearer string) (crypto.AttemptClaims, error) {
+	return auth.VerifyAttemptTokenStateless(app.Config, time.Now().UTC(), bearer)
+}
+
 // runtimePollHandler serves GET /api/v1/student/sessions/{scheduleID}/runtime
 // (plan C3, Polling tier): the versioned runtime poll that replaces student
 // sockets. Auth is session or attempt-bearer (bound to the URL schedule).
@@ -146,7 +155,7 @@ func authorizeRuntimePollBearer(w http.ResponseWriter, r *http.Request, app *App
 	}
 	claims, err := verifyAttemptReadBearer(app, r, bearer)
 	if err != nil {
-		httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+		writeAttemptVerificationError(w, r, err)
 		return "", false
 	}
 	if claims.ScheduleID != scheduleID {

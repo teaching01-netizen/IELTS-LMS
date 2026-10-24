@@ -89,6 +89,21 @@ function buildRuntime(overrides: Partial<ExamSessionRuntime> = {}): ExamSessionR
   };
 }
 
+function buildLiveRuntime(): ExamSessionRuntime {
+  return buildRuntime({
+    status: "live",
+    sections: [
+      {
+        sectionKey: "reading",
+        status: "active",
+        remainingSeconds: 1200,
+        extensionMinutes: 0,
+        pausedAt: null,
+      },
+    ],
+  });
+}
+
 describe("student exam acceptance contracts", () => {
   it("keeps a completed pre-check in the lobby until runtime becomes active", () => {
     const attempt = buildAttempt();
@@ -176,7 +191,7 @@ describe("student exam acceptance contracts", () => {
   it("keeps offline and heartbeat signals non-blocking while storage remains a hard stop", () => {
     const base = {
       runtimeBacked: true,
-      runtime: buildRuntime({ status: "live" }),
+      runtime: buildLiveRuntime(),
       waitingForCohortAdvance: false,
       proctorStatus: "active" as const,
       blockingReasonOverride: null,
@@ -227,7 +242,7 @@ describe("student exam acceptance contracts", () => {
     // so effects (auto-submit, edit-stop) trigger from one authoritative value.
     const base = {
       runtimeBacked: true,
-      runtime: buildRuntime({ status: "live" }),
+      runtime: buildLiveRuntime(),
       waitingForCohortAdvance: false,
       proctorStatus: "active" as const,
       blockingReasonOverride: null,

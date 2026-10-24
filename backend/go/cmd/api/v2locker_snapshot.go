@@ -17,6 +17,7 @@ func snapshotRuntimeGate(snap runtime.Snapshot, now time.Time) attempts.RuntimeG
 	gate := attempts.RuntimeGate{
 		Status:                snap.Status,
 		TimingModel:           snap.TimingModel,
+		CompletionReason:      snap.CompletionReason,
 		ActiveSectionKey:      "*",
 		SectionLive:           snap.SectionLive,
 		SectionPaused:         snap.SectionPaused,

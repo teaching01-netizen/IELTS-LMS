@@ -14,12 +14,13 @@ import (
 // `opened` is the set of module ids the attempt owns
 // (assessment_module_attempts rows).
 func expectAttemptMediaRows(mock sqlmock.Sqlmock, linkScope string, opened ...string) {
-	expectAttemptMediaQueries(mock, true, linkScope, opened...)
+	expectAttemptMediaQueries(mock, true, false, linkScope, opened...)
 }
 
 // expectAttemptMediaQueries skips the section tree reads when loadTree is
-// false, as on a version-cache hit.
-func expectAttemptMediaQueries(mock sqlmock.Sqlmock, loadTree bool, linkScope string, opened ...string) {
+// false, as on a version-cache hit. A cached load also reads the revision it
+// observed alongside the tree.
+func expectAttemptMediaQueries(mock sqlmock.Sqlmock, loadTree, cached bool, linkScope string, opened ...string) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT schedule_id, published_version_id, sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ?")).
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "published_version_id", "sat_start_code_required", "sat_start_code_accepted_at"}).AddRow("schedule-1", "version-1", false, nil))
@@ -28,6 +29,11 @@ func expectAttemptMediaQueries(mock sqlmock.Sqlmock, loadTree bool, linkScope st
 		WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(1))
 	if loadTree {
 		expectAttemptMediaTree(mock)
+		if cached {
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT revision FROM exam_versions WHERE id = ?")).
+				WithArgs("version-1").
+				WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(1))
+		}
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_publish_scope FROM exam_versions WHERE id = ?")).
 		WithArgs("version-1").
@@ -50,24 +56,19 @@ func expectAttemptMediaTree(mock sqlmock.Sqlmock) {
 		WithArgs("version-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions"}).
 			AddRow("section-1", "reading-writing", "Reading and Writing", 1, 30, 0, nil))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, module_key, title, display_order, duration_seconds, target_question_count, adaptive_role, instructions, tool_policy FROM assessment_modules WHERE section_id = ? ORDER BY display_order")).
-		WithArgs("section-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
-			AddRow("module-1", "rw-m1", "Module 1", 1, 30, 1, "base", nil, nil).
-			AddRow("module-lower", "rw-m2-lower", "Module 2 - Lower", 2, 30, 1, "lower_branch", nil, nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE s.exam_version_id = ?")).
+		WithArgs("version-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "section_id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
+			AddRow("module-1", "section-1", "rw-m1", "Module 1", 1, 30, 1, "base", nil, nil).
+			AddRow("module-lower", "section-1", "rw-m2-lower", "Module 2 - Lower", 2, 30, 1, "lower_branch", nil, nil))
 	imageContent := `{"version":1,"nodes":[{"type":"image","attrs":{"assetId":"asset-pinned"}}]}`
 	answer := `{"kind":"single_choice","options":[{"id":"A","content":` + imageContent + `}]}`
-	questionRows := func(examQuestionID, prompt string) *sqlmock.Rows {
-		return sqlmock.NewRows([]string{"exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}).
-			AddRow(examQuestionID, examQuestionID, 1, false, "single_choice", nil, prompt, answer, nil, nil)
-	}
 	branchContent := `{"version":1,"nodes":[{"type":"image","attrs":{"assetId":"asset-branch"}}]}`
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT eq.id AS exam_question_id, eq.question_id, eq.display_order, eq.is_pretest, qr.question_type, qr.stimulus, qr.prompt, qr.answer_definition, qr.metadata, qr.accessibility FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE eq.module_id = ? ORDER BY eq.display_order")).
-		WithArgs("module-1").
-		WillReturnRows(questionRows("question-1", imageContent))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT eq.id AS exam_question_id, eq.question_id, eq.display_order, eq.is_pretest, qr.question_type, qr.stimulus, qr.prompt, qr.answer_definition, qr.metadata, qr.accessibility FROM assessment_exam_questions eq JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id WHERE eq.module_id = ? ORDER BY eq.display_order")).
-		WithArgs("module-lower").
-		WillReturnRows(questionRows("question-branch", branchContent))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT eq.module_id, eq.id AS exam_question_id")).
+		WithArgs("version-1").
+		WillReturnRows(sqlmock.NewRows([]string{"module_id", "exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}).
+			AddRow("module-1", "question-1", "question-1", 1, false, "single_choice", nil, imageContent, answer, nil, nil).
+			AddRow("module-lower", "question-branch", "question-branch", 1, false, "single_choice", nil, branchContent, answer, nil, nil))
 }
 
 // The memoized index must not carry one request's fence or scope into the
@@ -88,7 +89,7 @@ func TestCanAttemptReadMediaCachedIndexKeepsPerRequestFence(t *testing.T) {
 		{linkScope: `["reading-writing"]`, opened: []string{"module-1", "module-lower"}, want: true},
 		{linkScope: `["math"]`, opened: []string{"module-1", "module-lower"}, want: false},
 	} {
-		expectAttemptMediaQueries(mock, i == 0, step.linkScope, step.opened...)
+		expectAttemptMediaQueries(mock, i == 0, true, step.linkScope, step.opened...)
 		allowed, err := service.CanAttemptReadMedia(context.Background(), "schedule-1", "attempt-1", "asset-branch")
 		if err != nil {
 			t.Fatalf("step %d: CanAttemptReadMedia() error = %v", i, err)

@@ -109,6 +109,13 @@ func HashResponse(payload any) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// HashResponsePayload applies the exact V2 response normalization before
+// hashing, including SAT annotation defaults and omitted optional fields.
+// Clients registering a frozen SAT frontier use this representation.
+func HashResponsePayload(payload ResponsePayload) (string, error) {
+	return HashResponse(payloadToAny(payload))
+}
+
 // FinalDigest computes the submit digest over sorted question/hash pairs
 // (plan 19.6): sha256 of canonical JSON of [[questionID, hash]...] sorted.
 //

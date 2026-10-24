@@ -9,6 +9,9 @@ import { Button } from "../ui/Button";
 import { LoadingMark } from "../ui/LoadingMark";
 import { AlertTriangle } from "lucide-react";
 import { AccessibilitySettings } from "./AccessibilitySettings";
+import { IeltsAccessibilitySettings } from "./IeltsAccessibilitySettings";
+import { isIeltsExamType } from "./layout/studentExamTypeContext";
+import { isIeltsPersonalTimingModel } from "../../types/domain";
 import { StudentExamPhaseRenderer } from "./StudentExamPhaseRenderer";
 import { StudentExamWorkspaceSession } from "./StudentExamWorkspaceSession";
 import "./StudentHeader";
@@ -41,7 +44,11 @@ import {
   EXAM_VISIBILITY_WARNING_TITLE,
 } from "@student/api/examVisibilityIntegrity";
 import { useStudentAttempt } from "./providers/StudentAttemptProvider";
-import { useStudentRuntime, useStudentRuntimeSession } from "./providers/StudentRuntimeProvider";
+import {
+  useStudentRuntime,
+  useStudentRuntimeClock,
+  useStudentRuntimeSession,
+} from "./providers/StudentRuntimeProvider";
 import { useStudentUI } from "./providers/StudentUIProvider";
 import { useKeyboardSubmitHandler } from "./providers/StudentKeyboardProvider";
 import { useExamCommands } from "@student/hooks/exam-session/useExamCommands";
@@ -56,8 +63,9 @@ import { useZoomScrollAnchoring } from "./useZoomScrollAnchoring";
 import { emitAnswerMutationDebugLog } from "./answerMutationDebug";
 import { isStudentHighlightToolContextActive } from "./studentHighlightToolContext";
 import type { StudentAnswerMutationMeta, StudentAnswerValue } from "../../types/studentAttempt";
-import { ensureBrowserClientSessionIdForAttempt } from '@student/api/studentAttemptGateway';
-import { useIeltsCohortReadiness } from '@student/hooks/useIeltsCohortReadiness';
+import type { ExamState, ModuleType } from "../../types";
+import { ensureBrowserClientSessionIdForAttempt } from "@student/api/studentAttemptGateway";
+import { useIeltsCohortReadiness } from "@student/hooks/useIeltsCohortReadiness";
 
 import { StudentExamHeaderClock } from "./StudentExamHeaderClock";
 import { StudentExamClockEffects } from "./StudentExamClockEffects";
@@ -156,6 +164,40 @@ function formatRuntimeTime(seconds: number) {
   return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
+function isIeltsSectionContentAvailable(
+  state: ExamState,
+  sectionKey: string | null | undefined
+): boolean {
+  switch (sectionKey as ModuleType | undefined) {
+    case "listening":
+      return (
+        state.listening.parts.length > 0 &&
+        state.listening.parts.every(
+          (part) =>
+            Boolean(part.title.trim()) &&
+            part.blocks.length > 0 &&
+            (!(state.config.sections.listening.audioPlaybackEnabled ?? true) ||
+              Boolean(part.audioUrl?.trim()))
+        )
+      );
+    case "reading":
+      return (
+        state.reading.passages.length > 0 &&
+        state.reading.passages.every(
+          (passage) =>
+            Boolean(passage.title.trim() || passage.content.trim()) && passage.blocks.length > 0
+        )
+      );
+    case "writing":
+      return (
+        Boolean(state.writing.task1Prompt.trim() && state.writing.task2Prompt.trim()) &&
+        (state.writing.tasks === undefined || state.writing.tasks.length > 0)
+      );
+    default:
+      return false;
+  }
+}
+
 interface StudentAppProps {
   showSubmitControls?: boolean | undefined;
   allowPreviewStart?: boolean | undefined;
@@ -177,19 +219,83 @@ export function StudentApp({
     onExit: onExit,
   } = useStudentRuntimeSession();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
+  const personalTransitionClockSeconds = useStudentRuntimeClock();
+  const usesPersonalIeltsTiming = isIeltsPersonalTimingModel(
+    runtimeState.runtimeSnapshot?.timingModel
+  );
+  const readinessSectionKey = runtimeState.runtimeSnapshot?.currentSectionKey;
   const readinessSection = runtimeState.runtimeSnapshot?.sections.find(
-    (section) => section.sectionKey === runtimeState.runtimeSnapshot?.currentSectionKey,
+    (section) => section.sectionKey === readinessSectionKey
   );
   const readinessError = useIeltsCohortReadiness({
     scheduleId: attemptState.attempt?.scheduleId,
     attemptId: attemptState.attempt?.id ?? null,
-    clientSessionId: attemptState.attempt ? ensureBrowserClientSessionIdForAttempt(attemptState.attempt) : null,
-    sectionKey: runtimeState.runtimeSnapshot?.currentSectionKey ?? null,
-    pending: Boolean(onRuntimeRefresh) && examState.type !== 'ACT' && runtimeState.runtimeBacked &&
-      runtimeState.phase === 'exam' && Boolean(readinessSection && !readinessSection.actualStartAt &&
-      readinessSection.status !== 'completed'),
+    clientSessionId: attemptState.attempt
+      ? ensureBrowserClientSessionIdForAttempt(attemptState.attempt)
+      : null,
+    sectionKey: readinessSectionKey ?? null,
+    contentAvailable: isIeltsSectionContentAvailable(examState, readinessSectionKey),
+    audioRequired: examState.config.sections.listening.audioPlaybackEnabled ?? true,
+    pending:
+      Boolean(onRuntimeRefresh) &&
+      examState.type !== "ACT" &&
+      runtimeState.runtimeBacked &&
+      runtimeState.phase === "exam" &&
+      Boolean(readinessSection) &&
+      (usesPersonalIeltsTiming
+        ? runtimeState.currentModule !== runtimeState.runtimeSnapshot?.currentSectionKey ||
+          (runtimeState.runtimeSnapshot?.personalSectionState !== "active" &&
+            runtimeState.runtimeSnapshot?.personalSectionState !== "completed")
+        : Boolean(
+            readinessSection &&
+            !readinessSection.actualStartAt &&
+            readinessSection.status !== "completed"
+          )),
     refreshRuntime: onRuntimeRefresh,
   });
+  const enabledModules = getEnabledModules(examState.config);
+  const currentModuleIndex = runtimeState.currentModule
+    ? enabledModules.indexOf(runtimeState.currentModule)
+    : -1;
+  const personalSectionNeedsTransitionRefresh =
+    usesPersonalIeltsTiming &&
+    isIeltsExamType(examState.type) &&
+    runtimeState.phase === "exam" &&
+    personalTransitionClockSeconds === 0 &&
+    runtimeState.runtimeSnapshot?.personalSectionState === "active" &&
+    runtimeState.runtimeSnapshot.currentSectionKey === runtimeState.currentModule &&
+    currentModuleIndex >= 0 &&
+    currentModuleIndex < enabledModules.length;
+
+  useEffect(() => {
+    if (!personalSectionNeedsTransitionRefresh || !onRuntimeRefresh) {
+      return;
+    }
+
+    let cancelled = false;
+    let retryTimer: number | null = null;
+    let retryDelayMs = 500;
+    const refreshAtPersonalBoundary = async () => {
+      await onRuntimeRefresh();
+      if (cancelled) {
+        return;
+      }
+      retryTimer = window.setTimeout(() => {
+        void refreshAtPersonalBoundary();
+      }, retryDelayMs);
+      retryDelayMs = Math.min(retryDelayMs * 2, 8_000);
+    };
+
+    void refreshAtPersonalBoundary();
+    return () => {
+      cancelled = true;
+      if (retryTimer !== null) {
+        window.clearTimeout(retryTimer);
+      }
+    };
+  }, [onRuntimeRefresh, personalSectionNeedsTransitionRefresh]);
+
+  const readinessErrorIsFinal = readinessError?.startsWith("Could not start") ?? false;
   const examSessionCommands = useExamCommands();
   const examSessionStore = useStudentExamSessionStore();
   const { state: uiState, actions: uiActions } = useStudentUI();
@@ -204,7 +310,7 @@ export function StudentApp({
     uiState.accessibilitySettings.highContrast || (isIeltsExam && prefersMoreContrast);
   const layoutEnvironment = useStudentLayoutEnvironment(
     uiState.accessibilitySettings.zoom,
-    getStudentTypographyScale(uiState.accessibilitySettings.fontSize).fontScale * systemTextScale,
+    getStudentTypographyScale(uiState.accessibilitySettings.fontSize).fontScale * systemTextScale
   );
   const layoutMode = layoutEnvironment.layoutMode;
   const tabletMode =
@@ -227,9 +333,22 @@ export function StudentApp({
     [uiState.accessibilitySettings.passageReadabilityLevel]
   );
   useZoomScrollAnchoring(
-    uiState.accessibilitySettings.zoom * studentTypography.fontScale * systemTextScale,
+    uiState.accessibilitySettings.zoom * studentTypography.fontScale * systemTextScale
   );
-  const blockingCopy = getBlockingCopy(runtimeState.blocking.reason);
+  const blockingCopy = useMemo(() => {
+    const baseBlockingCopy = getBlockingCopy(runtimeState.blocking.reason);
+    return usesPersonalIeltsTiming &&
+      (runtimeState.blocking.reason === "waiting_for_runtime" ||
+        runtimeState.blocking.reason === "waiting_for_advance")
+      ? {
+          ...baseBlockingCopy,
+          title: "Preparing your section",
+          message:
+            "Your section starts automatically when its content, answer storage, and required audio are ready.",
+          badge: "Preparing",
+        }
+      : baseBlockingCopy;
+  }, [runtimeState.blocking.reason, usesPersonalIeltsTiming]);
   const { resetHighlightTool } = uiActions;
   const timeExtensionReason =
     typeof uiState.timeExtensionReason === "string" ? uiState.timeExtensionReason : "";
@@ -281,9 +400,11 @@ export function StudentApp({
         ["--student-answer-font-size" as string]: studentTypography.answerFontSize,
         ["--student-answer-line-height" as string]: studentTypography.answerLineHeight,
         ["--student-writing-editor-font-size" as string]: studentTypography.writingEditorFontSize,
-        ["--student-writing-editor-line-height" as string]: studentTypography.writingEditorLineHeight,
+        ["--student-writing-editor-line-height" as string]:
+          studentTypography.writingEditorLineHeight,
         ["--student-writing-prompt-font-size" as string]: studentTypography.writingPromptFontSize,
-        ["--student-writing-prompt-line-height" as string]: studentTypography.writingPromptLineHeight,
+        ["--student-writing-prompt-line-height" as string]:
+          studentTypography.writingPromptLineHeight,
       }) as React.CSSProperties,
     [isIeltsExam, passageReadabilityGeometry, studentTypography, uiState.accessibilitySettings.zoom]
   );
@@ -364,10 +485,23 @@ export function StudentApp({
 
     setChoiceEliminationEnabled((enabled) => !enabled);
   }, [choiceEliminationAvailable]);
-  const runtimeCompletionVerified = isRuntimeStructurallyCompleted(runtimeState.runtimeSnapshot);
+  const personalFinalSectionComplete =
+    usesPersonalIeltsTiming &&
+    isIeltsExamType(examState.type) &&
+    finalModule !== null &&
+    runtimeState.runtimeSnapshot?.currentSectionKey === finalModule &&
+    runtimeState.runtimeSnapshot.personalSectionState === "completed";
+  // The shared room can finish while a delayed candidate still has personal
+  // sections to complete. IELTS submission follows that candidate's final
+  // timeline, including when the shared runtime is naturally complete.
+  const runtimeCompletionVerified =
+    isRuntimeStructurallyCompleted(runtimeState.runtimeSnapshot) || personalFinalSectionComplete;
+  const submissionRuntimeStatus = personalFinalSectionComplete
+    ? "completed"
+    : runtimeState.runtimeStatus;
   const runtimeSubmissionPending =
     runtimeState.runtimeBacked &&
-    runtimeState.runtimeStatus === "completed" &&
+    submissionRuntimeStatus === "completed" &&
     runtimeCompletionVerified &&
     verifiedTerminalState === "not_terminal";
   const examViewportActive = effectivePhase === "exam";
@@ -438,31 +572,30 @@ export function StudentApp({
     moduleSubmitStatus,
     moduleSubmitError,
     retryModuleSubmit,
-  } =
-    useStudentSubmissionOrchestration({
-      runtimeState: {
-        runtimeBacked: runtimeState.runtimeBacked,
-        runtimeStatus: runtimeState.runtimeStatus,
-        currentModule: runtimeState.currentModule,
-      },
-      runtimeStateRef,
-      attemptId: attemptState.attemptId,
-      runtimeCompletionVerified,
-      shouldRenderPostExam: shouldRenderPostExam && !runtimeSubmissionPending,
-      isFinalModule: (module) => module === finalModule,
-      reconcileLiveAnswerCacheNow,
-      commitWritingDraft,
-      attemptActions: {
-        flushPending: attemptActions.flushPending,
-        submitAttempt: attemptActions.submitAttempt,
-        submitAttemptAfterBarrier: attemptActions.submitAttemptAfterBarrier,
-      },
-      runtimeActions: {
-        transitionBlocking: runtimeActions.transitionBlocking,
-        submitModule: runtimeActions.submitModule,
-      },
-      submissionCommands,
-    });
+  } = useStudentSubmissionOrchestration({
+    runtimeState: {
+      runtimeBacked: runtimeState.runtimeBacked,
+      runtimeStatus: submissionRuntimeStatus,
+      currentModule: runtimeState.currentModule,
+    },
+    runtimeStateRef,
+    attemptId: attemptState.attemptId,
+    runtimeCompletionVerified,
+    shouldRenderPostExam: shouldRenderPostExam && !runtimeSubmissionPending,
+    isFinalModule: (module) => module === finalModule,
+    reconcileLiveAnswerCacheNow,
+    commitWritingDraft,
+    attemptActions: {
+      flushPending: attemptActions.flushPending,
+      submitAttempt: attemptActions.submitAttempt,
+      submitAttemptAfterBarrier: attemptActions.submitAttemptAfterBarrier,
+    },
+    runtimeActions: {
+      transitionBlocking: runtimeActions.transitionBlocking,
+      submitModule: runtimeActions.submitModule,
+    },
+    submissionCommands,
+  });
   const flushAndSubmitCurrentModuleWithRetryRef = useRef(flushAndSubmitCurrentModuleWithRetry);
   useLayoutEffect(() => {
     flushAndSubmitCurrentModuleWithRetryRef.current = flushAndSubmitCurrentModuleWithRetry;
@@ -516,7 +649,7 @@ export function StudentApp({
   useEffect(() => {
     if (
       runtimeState.runtimeBacked &&
-      runtimeState.runtimeStatus === "completed" &&
+      submissionRuntimeStatus === "completed" &&
       runtimeCompletionVerified &&
       finalSubmitStatus !== "idle"
     ) {
@@ -526,7 +659,7 @@ export function StudentApp({
     finalSubmitStatus,
     runtimeCompletionVerified,
     runtimeState.runtimeBacked,
-    runtimeState.runtimeStatus,
+    submissionRuntimeStatus,
   ]);
 
   useEffect(() => {
@@ -814,32 +947,47 @@ export function StudentApp({
             {blockingCopy.contextLabel}
           </p>
           <h2 id="blocking-overlay-title" className="text-2xl font-black text-gray-900 mb-3">
-            {blockingCopy.title}
+            {readinessErrorIsFinal && usesPersonalIeltsTiming
+              ? "Could not start"
+              : blockingCopy.title}
           </h2>
           <p className="text-sm text-gray-700 leading-6">
-            {runtimeState.proctorNote ?? (runtimeState.blocking.reason === 'waiting_for_runtime' ? readinessError : null) ??
-              (runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus === "submitting"
+            {runtimeState.proctorNote ??
+              (usesPersonalIeltsTiming &&
+              ["waiting_for_runtime", "waiting_for_advance"].includes(
+                runtimeState.blocking.reason ?? ""
+              )
+                ? readinessError
+                : null) ??
+              (runtimeState.blocking.reason === "time_expired" &&
+              moduleSubmitStatus === "submitting"
                 ? "Saving your answers now. Keep this page open; it will continue automatically when they are saved."
                 : runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus === "failed"
-                  ? moduleSubmitError ?? "We could not confirm that your answers were saved. Please retry."
+                  ? (moduleSubmitError ??
+                    "We could not confirm that your answers were saved. Please retry.")
                   : blockingCopy.message)}
           </p>
           {(runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus !== "failed") ||
-          runtimeState.blocking.reason === "waiting_for_runtime" ||
-          runtimeState.blocking.reason === "waiting_for_advance" ? (
-            <div role="status" aria-label="Loading section" className="mt-6 flex items-center justify-center gap-3 text-sm text-gray-700">
+          ((!readinessError || !usesPersonalIeltsTiming) &&
+            (runtimeState.blocking.reason === "waiting_for_runtime" ||
+              runtimeState.blocking.reason === "waiting_for_advance")) ? (
+            <div
+              role="status"
+              aria-label="Loading section"
+              className="mt-6 flex items-center justify-center gap-3 text-sm text-gray-700"
+            >
               <LoadingMark className="bg-gray-600" />
               <span>Loading…</span>
             </div>
           ) : (
-          <div className="mt-6 flex items-center justify-center gap-3">
-            <div className="px-3 py-1 rounded-sm bg-gray-50 border border-gray-100 text-xs font-bold uppercase tracking-widest text-gray-700">
-              Remaining {formatRuntimeTime(runtimeState.blocking.timeRemaining)}
+            <div className="mt-6 flex items-center justify-center gap-3">
+              <div className="px-3 py-1 rounded-sm bg-gray-50 border border-gray-100 text-xs font-bold uppercase tracking-widest text-gray-700">
+                Remaining {formatRuntimeTime(runtimeState.blocking.timeRemaining)}
+              </div>
+              <div className="px-3 py-1 rounded-sm bg-amber-50 border border-amber-700 text-xs font-bold uppercase tracking-widest text-amber-900">
+                {blockingCopy.badge}
+              </div>
             </div>
-            <div className="px-3 py-1 rounded-sm bg-amber-50 border border-amber-700 text-xs font-bold uppercase tracking-widest text-amber-900">
-              {blockingCopy.badge}
-            </div>
-          </div>
           )}
           {runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus === "failed" ? (
             <Button
@@ -961,6 +1109,10 @@ export function StudentApp({
     );
   }
 
+  const AccessibilitySheet = isIeltsExamType(examState.type)
+    ? IeltsAccessibilitySettings
+    : AccessibilitySettings;
+
   return (
     <StudentExamShell
       layoutMode={layoutMode}
@@ -1059,7 +1211,7 @@ export function StudentApp({
             // preview state never merges with live attempts.
             persistenceKeyBase={
               attemptState.attemptId
-                ? `student-workspace:${attemptState.attemptId}:${attemptState.attempt?.publishedVersionId ?? 'live'}:${runtimeState.currentModule}`
+                ? `student-workspace:${attemptState.attemptId}:${attemptState.attempt?.publishedVersionId ?? "live"}:${runtimeState.currentModule}`
                 : `student-workspace:preview:${examState.title}`
             }
             allQuestions={runtimeState.allQuestions}
@@ -1233,7 +1385,7 @@ export function StudentApp({
           </Button>
         </div>
       </dialog>
-      <AccessibilitySettings
+      <AccessibilitySheet
         isOpen={uiState.showAccessibility}
         onClose={() => uiActions.setShowAccessibility(false)}
         fontSize={uiState.accessibilitySettings.fontSize}

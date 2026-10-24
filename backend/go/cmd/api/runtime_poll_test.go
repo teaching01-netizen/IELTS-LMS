@@ -25,7 +25,7 @@ func pollTestApp(rev int64, status string) (*App, sqlmock.Sqlmock) {
 	}
 	cache := runtime.NewSnapshotCache(time.Minute)
 	active := "rw"
-	if _, err := cache.Get("sched-1", time.Now().UTC(), func() (runtime.Snapshot, error) {
+	if _, err := cache.Get(context.Background(), "sched-1", time.Now().UTC(), func() (runtime.Snapshot, error) {
 		return runtime.Snapshot{Status: status, ActiveSectionKey: &active, Revision: rev, TimingModel: "legacy_section_v1", SectionLive: true, SectionStarted: true, LoadedAt: time.Now().UTC()}, nil
 	}); err != nil {
 		panic(err)

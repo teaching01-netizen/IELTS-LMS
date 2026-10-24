@@ -2659,6 +2659,252 @@ paths:
               schema: { type: object }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/forms:
+    get:
+      tags: [authoring]
+      summary: Read the exam's registration and Eva SIM forms (draft, else read-only published)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [authoring]
+      summary: Save the draft's registration and Eva SIM forms with a revision fence
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-forms/schedules/{scheduleId}/attempts/{attemptId}/eva-sim:
+    get:
+      tags: [student]
+      summary: Read the attempt owner's Eva SIM state (native or embedded)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [student]
+      summary: Submit or edit the native Eva SIM response
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-forms/schedules/{scheduleId}/attempts/{attemptId}/section-entry/{sectionKey}:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: attemptId
+        in: path
+        required: true
+        schema: { type: string }
+      - name: sectionKey
+        in: path
+        required: true
+        schema: { type: string, enum: [reading-writing, math] }
+    get:
+      tags: [student]
+      summary: Read the owner's pinned section entry form
+      description: Future sections and active breaks withhold questions. Disabled, empty and legacy forms are skipped. Never starts a clock.
+      responses:
+        "200":
+          description: Authoritative section gate
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATSectionEntryState" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [student]
+      summary: Seal the owner's section entry answers once
+      description: >-
+        Requires an active attempt credential bound to this URL and the pinned
+        form version. A committed operationId replays the same acknowledgement;
+        changed content under that ID conflicts. A new operation after staff
+        End or termination is refused. Accepting answers does not start working
+        time or redeem a start code. Normal module entry remains required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SATSectionEntrySubmission" }
+      responses:
+        "200":
+          description: Sealed answers and server timestamps
+          headers:
+            Cache-Control: { schema: { type: string, enum: [no-store] } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SATFormAcknowledgement" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-forms/responses:
+    get:
+      tags: [proctor]
+      summary: List scoped registration, section entry and Eva SIM responses (keyset pages)
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: examId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: scheduleId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: versionId
+          in: query
+          required: false
+          schema: { type: string }
+        - name: formKey
+          in: query
+          required: false
+          schema: { type: string, enum: [registration, verbal_entry, math_entry, eva_sim] }
+        - name: mode
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string }
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-forms/attempts/{attemptId}/responses/{formKey}:
+    get:
+      tags: [proctor]
+      summary: Read one attempt's form response with pinned labels
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: attemptId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: formKey
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proctor/sessions/{scheduleId}/forms/state:
+    get:
+      tags: [proctor]
+      summary: Room Eva SIM mode and collection state
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /assessment-authoring/exams/{examId}/sat-classroom-plan:
     get:
       tags: [authoring]
@@ -5144,6 +5390,43 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    SATFormAnswers:
+      type: object
+      additionalProperties:
+        oneOf:
+          - { type: string }
+          - { type: number }
+    SATSectionEntryState:
+      type: object
+      required: [versionId, sectionKey, formKey, state, canSubmit, canStart]
+      properties:
+        versionId: { type: string }
+        sectionKey: { type: string, enum: [reading-writing, math] }
+        formKey: { type: string, enum: [verbal_entry, math_entry] }
+        state: { type: string, enum: [not_applicable, waiting, required, submitted, closed] }
+        moduleId: { type: string, description: First delivered module in this section, including selected-module-only sittings }
+        fields:
+          type: array
+          items: { type: object, description: Pinned question definition; v2 fields have no scope property }
+        answers: { $ref: "#/components/schemas/SATFormAnswers" }
+        submittedAt: { type: string, format: date-time }
+        canSubmit: { type: boolean }
+        canStart: { type: boolean, description: Form eligibility only; normal runtime, writer and code checks still apply }
+    SATSectionEntrySubmission:
+      type: object
+      required: [operationId, versionId, answers]
+      properties:
+        operationId: { type: string, minLength: 1, maxLength: 64 }
+        versionId: { type: string }
+        answers: { $ref: "#/components/schemas/SATFormAnswers" }
+    SATFormAcknowledgement:
+      type: object
+      required: [revision, firstSubmittedAt, updatedAt, answers]
+      properties:
+        revision: { type: integer, minimum: 1 }
+        firstSubmittedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        answers: { $ref: "#/components/schemas/SATFormAnswers" }
     PreparedAnsweredExamPDF:
       type: object
       required: [downloadUrl, filename, sizeBytes, expiresAt]

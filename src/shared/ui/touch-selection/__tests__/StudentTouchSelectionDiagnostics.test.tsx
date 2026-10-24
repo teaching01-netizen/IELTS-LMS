@@ -31,6 +31,8 @@ it('shows actual listener, DOM events, capture outcome, and cleans up on exit', 
   Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: (x: number) => ({ offsetNode: node, offset: x }) });
   try {
     fireEvent.pointerDown(root, { pointerId: 1, pointerType: 'touch', clientX: 6, clientY: 10 });
+    // A deliberate touch-selection gesture has a 350 ms hold before drag capture.
+    act(() => { vi.advanceTimersByTime(350); });
     fireEvent.pointerMove(root, { pointerId: 1, pointerType: 'touch', clientX: 10, clientY: 30 });
     fireEvent.pointerUp(root, { pointerId: 1, pointerType: 'touch', clientX: 10, clientY: 30 });
     act(() => { vi.advanceTimersByTime(250); });
@@ -47,7 +49,7 @@ it('shows actual listener, DOM events, capture outcome, and cleans up on exit', 
       coarse: true,
       anyCoarse: true,
       ownedTouchSelectionMarkerPresent: true,
-      ownerMarkerPresent: false,
+      ownerMarkerPresent: true,
       protectedRootPresent: false,
       nativeSelectionRangeCount: 0,
     });

@@ -32,7 +32,11 @@ export function SatBreakScreen({
         <p className="sat-tabular mt-4 text-5xl font-semibold" role="timer" aria-label={remainingSeconds === null ? "Break time synchronizing" : "Time remaining " + displayedTime}>
           {displayedTime}
         </p>
-        <h1 className="mt-6 text-2xl font-semibold tracking-tight">
+        <h1
+          data-sat-stage-heading="true"
+          tabIndex={-1}
+          className="mt-6 text-2xl font-semibold tracking-tight"
+        >
           {/* The early-finish headline only holds while nothing is opening;
               once entry is progressing the destination is the truth. */}
           {waiting && !progressLabel ? "Scheduled break begins when this timer ends" : destination}

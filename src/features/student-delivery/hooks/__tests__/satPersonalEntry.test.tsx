@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import { useSatExamController } from "../useSatExamController";
@@ -18,6 +18,7 @@ const gatewayMocks = vi.hoisted(() => ({
   state: vi.fn(),
   configureSatDeliveryAttempt: vi.fn(),
   startModule: vi.fn(),
+  sectionEntry: vi.fn(),
   submitModule: vi.fn(),
   submitAssessment: vi.fn(),
 }));
@@ -46,6 +47,7 @@ vi.mock("../../infrastructure/satDeliveryGateway", () => ({
     bootstrap: gatewayMocks.bootstrap,
     state: gatewayMocks.state,
     startModule: gatewayMocks.startModule,
+    sectionEntry: gatewayMocks.sectionEntry,
     submitModule: gatewayMocks.submitModule,
     submitAssessment: gatewayMocks.submitAssessment,
   },
@@ -204,7 +206,27 @@ describe("SAT personal single-operation entry", () => {
     vi.clearAllMocks();
     gatewayMocks.bootstrap.mockReset();
     gatewayMocks.startModule.mockReset();
+    gatewayMocks.sectionEntry.mockReset().mockResolvedValue({ state: "not_applicable", versionId: "version", sectionKey: "reading-writing", formKey: "verbal_entry", canSubmit: false, canStart: true });
     persistenceMock.flush.mockResolvedValue(undefined);
+  });
+
+  it("holds automatic and direct starts until the section form is confirmed", async () => {
+    const seeded = payload([moduleAttempt(MODULE_ID, "not_started", false)]);
+    const active = payload([moduleAttempt(MODULE_ID, "active", true)]);
+    gatewayMocks.bootstrap.mockResolvedValue(seeded);
+    gatewayMocks.startModule.mockResolvedValue(active);
+    const gate = { state: "required", versionId: "version", sectionKey: "reading-writing", formKey: "verbal_entry", moduleId: MODULE_ID, canSubmit: true, canStart: false };
+    gatewayMocks.sectionEntry.mockResolvedValue(gate);
+    const hook = renderController();
+    await waitFor(() => expect(hook.result.current.sectionEntry.state?.state).toBe("required"));
+    expect(gatewayMocks.startModule).not.toHaveBeenCalled();
+    await act(async () => { await hook.result.current.commands.startPendingModule(); });
+    expect(gatewayMocks.startModule).not.toHaveBeenCalled();
+    gatewayMocks.sectionEntry.mockResolvedValue({ ...gate, state: "submitted", canSubmit: false, canStart: true });
+    await act(async () => { await hook.result.current.sectionEntry.refresh(); });
+    await waitFor(() => expect(hook.result.current.state.phase).toBe("module"));
+    expect(gatewayMocks.startModule).toHaveBeenCalledTimes(1);
+    hook.unmount();
   });
 
   it("activates the initial module with one StartModule and renders it", async () => {

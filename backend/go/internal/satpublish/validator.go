@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"example.com/ielts-proctoring/internal/assessmentforms/definition"
 	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/satconvert"
 )
@@ -242,7 +243,45 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 	if err != nil {
 		return nil, err
 	}
-	return append(issues, converterIssues...), nil
+	issues = append(issues, converterIssues...)
+	formIssues, err := validateForms(ctx, q, versionID)
+	if err != nil {
+		return nil, err
+	}
+	return append(issues, formIssues...), nil
+}
+
+// validateForms seals registration/Eva definitions with the release: a
+// malformed forms subtree, an enabled native Eva without questions, or an
+// enabled embed without a URL cannot be captured by a room. Absent forms is
+// legacy and passes.
+func validateForms(ctx context.Context, q Queryer, versionID string) ([]Issue, error) {
+	rows, err := q.QueryContext(ctx, "SELECT CAST(config_snapshot AS CHAR) FROM exam_versions WHERE id = ?", versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var raw sql.NullString
+	if rows.Next() {
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	forms, err := definition.FromSnapshot([]byte(raw.String))
+	if err != nil {
+		return []Issue{issue("sat.forms.invalid", "forms", "Registration or Eva SIM settings are invalid. Open Settings to fix them.")}, nil
+	}
+	if forms == nil {
+		return nil, nil
+	}
+	var out []Issue
+	for _, found := range forms.ReadinessIssues() {
+		out = append(out, issue("sat.forms.incomplete", "forms."+found.Path, found.Message))
+	}
+	return out, nil
 }
 
 // topologiesFor lists the module topologies students can receive in a section

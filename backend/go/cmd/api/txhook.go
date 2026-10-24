@@ -8,6 +8,7 @@ package main
 // deadlock | lockwait | conntransient, never raw SQL text.
 import (
 	"errors"
+	"time"
 
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -19,6 +20,15 @@ import (
 func installTxRetryHook() func() {
 	return tx.SetRetryHook(func(err error) {
 		telemetry.IncCounter(telemetry.MDeadlocks, "kind", retryKind(err))
+	})
+}
+
+// installTxDurationHook exports transaction-attempt latency to db_tx_duration_seconds.
+// Outcomes are fixed by internal/platform/tx; no statement, attempt, or user
+// identifiers are attached to the series.
+func installTxDurationHook() func() {
+	return tx.SetDurationHook(func(duration time.Duration, outcome string) {
+		telemetry.ObserveSeconds(telemetry.MTxDur, duration.Seconds(), "outcome", outcome)
 	})
 }
 

@@ -1,3 +1,4 @@
+import type { SectionEntryState, SittingSection } from "@/src/features/assessment-forms/api/assessmentForms";
 import type {
   AssessmentDeliveryBootstrap,
   AssessmentDeliveryState,
@@ -5,6 +6,8 @@ import type {
   AssessmentLateEvidenceRequest,
   AssessmentModuleCloseAck,
   AssessmentModuleCloseRequest,
+  AssessmentModuleCloseIntentAck,
+  AssessmentModuleCloseIntentRequest,
   AssessmentModuleEntryRequest,
   AssessmentModuleEntryStateAck,
   AssessmentModuleStartRequest,
@@ -12,6 +15,8 @@ import type {
   AssessmentResponseRequest,
   AssessmentResponseSnapshot,
   AssessmentResult,
+  SATRecoveryResolutionReceipt,
+  SATRecoveryResolutionRequest,
   AssessmentStageVisibleAck,
   AssessmentSubmitRequest,
   SatStartWithCodeRequest,
@@ -19,6 +24,7 @@ import type {
 } from '../../contracts/assessmentDelivery';
 
 export interface SatDeliveryGateway {
+  sectionEntry?(scheduleId: string, attemptId: string, section: SittingSection): Promise<SectionEntryState>;
   /**
    * Unconditional read of LIVE attempt state. There is deliberately no
    * conditional variant: the published exam version cannot validate module
@@ -106,6 +112,16 @@ export interface SatDeliveryGateway {
     attemptId: string,
     request: AssessmentModuleCloseRequest,
   ): Promise<AssessmentModuleCloseAck>;
+  registerCloseIntent?(
+    scheduleId: string,
+    attemptId: string,
+    request: AssessmentModuleCloseIntentRequest,
+  ): Promise<AssessmentModuleCloseIntentAck>;
+  resolveRecovery(
+    scheduleId: string,
+    attemptId: string,
+    request: SATRecoveryResolutionRequest,
+  ): Promise<SATRecoveryResolutionReceipt>;
   /** Uploads answers kept on the device after their module closed (evidence only). */
   recordLateEvidence?(
     scheduleId: string,

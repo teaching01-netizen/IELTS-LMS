@@ -24,10 +24,10 @@ describe("SAT recovery-poll cadence", () => {
   it("backs off on failure, never past the live cadence", () => {
     const delay = (failures: number) =>
       satPollDelayMs({ liveSocketConnected: false, failures, random: 1 });
-    expect(delay(0)).toBe(15_000);
-    expect(delay(1)).toBe(20_000);
-    expect(delay(3)).toBe(20_000);
-    expect(delay(50)).toBe(20_000);
+    expect(delay(0)).toBe(20_000);
+    expect(delay(1)).toBe(40_000);
+    expect(delay(3)).toBe(60_000);
+    expect(delay(50)).toBe(60_000);
     expect(delay(50)).toBeLessThanOrEqual(SAT_POLL_LIVE_CADENCE_MS);
   });
 

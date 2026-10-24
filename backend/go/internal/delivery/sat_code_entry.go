@@ -774,7 +774,7 @@ func (s *Service) codeStartTx(ctx context.Context, t tx.Tx, scheduleID, attemptI
 	if !startAt.Before(closesAt) {
 		return nil, "", false, false, startWindowClosed()
 	}
-	events, err := s.activatePersonalModuleTx(ctx, t, scheduleID, attemptID, module, startAt)
+	events, _, _, err := s.activatePersonalModuleTx(ctx, t, scheduleID, attemptID, module, startAt, false)
 	if err != nil {
 		return nil, "", false, false, err
 	}
@@ -867,8 +867,10 @@ func (s *Service) checkStartCodeQuotas(ctx context.Context, attemptID, principal
 			return startCodeQuotaUnavailable()
 		}
 		defer func() { _ = conn.Close() }()
-		if _, err := conn.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-			return startCodeQuotaUnavailable()
+		if !tx.SessionReady(s.db) {
+			if _, err := conn.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
+				return startCodeQuotaUnavailable()
+			}
 		}
 		countRequest = func(ctx context.Context, route, key string, limit int, window time.Duration) (bool, time.Duration, error) {
 			return countStartCodeRequestOnConn(ctx, conn, route, key, limit, window)

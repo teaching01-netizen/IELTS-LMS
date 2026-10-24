@@ -1,4 +1,4 @@
-import { BarChart3, MoreHorizontal, Pause, Play, Timer } from 'lucide-react';
+import { BarChart3, MoreHorizontal, Pause, Play, Square, Timer } from 'lucide-react';
 import { SatMenu, type SatMenuItem } from './Menu';
 
 /**
@@ -17,6 +17,7 @@ export function SatSessionControls({
   onExtend,
   onComplete,
   onViewResponses,
+  evaOpen = false,
 }: {
   runtimeStatus: string;
   pendingActions: ReadonlySet<string>;
@@ -27,6 +28,8 @@ export function SatSessionControls({
   onComplete: (trigger: HTMLElement | null) => void;
   /** Present once the room is finished or cancelled. */
   onViewResponses?: (() => void) | undefined;
+  /** Eva SIM is still open: End exam stays available on a completed room. */
+  evaOpen?: boolean | undefined;
 }) {
   const active = runtimeStatus === 'live' || runtimeStatus === 'paused';
   const pauseBusy = pendingActions.has('pause');
@@ -37,7 +40,11 @@ export function SatSessionControls({
     { id: 'end-exam', label: 'End exam', destructive: true, separatorBefore: true, disabled: blocked, onSelect: onComplete },
   ];
 
-  if (!active && !onViewResponses) return null;
+  // A completed room never regains Pause or Extend; only explicit closure.
+  const endOnly = runtimeStatus === 'completed' && evaOpen;
+  const endBusy = pendingActions.has('complete');
+
+  if (!active && !onViewResponses && !endOnly) return null;
 
   return (
     <div role="group" aria-label="Room controls" className="sat-room__controls flex shrink-0 flex-wrap items-center gap-2">
@@ -45,6 +52,19 @@ export function SatSessionControls({
         <button type="button" onClick={onViewResponses} className="sat-btn sat-btn--primary sat-press">
           <BarChart3 size={16} aria-hidden="true" />
           View responses
+        </button>
+      ) : null}
+      {endOnly ? (
+        <button
+          type="button"
+          onClick={(event) => { if (!endBusy) onComplete(event.currentTarget); }}
+          disabled={blocked}
+          aria-busy={endBusy || undefined}
+          aria-disabled={endBusy || undefined}
+          className="sat-btn sat-btn--danger-secondary sat-press"
+        >
+          {endBusy ? <span aria-hidden="true" className="sat-btn__spinner" /> : <Square size={16} aria-hidden="true" />}
+          {endBusy ? 'Ending…' : 'End exam'}
         </button>
       ) : null}
       {runtimeStatus === 'paused' ? (

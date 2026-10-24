@@ -25,7 +25,11 @@ export function SatQuestionHeader(props: SatQuestionHeaderProps) {
           real h2 whose accessible name is "Question N" from real text — never
           an aria-label on a generic div. The "Question " prefix is sr-only so
           the visible Bluebook cell keeps its number-only styling. */}
-      <h2 className="grid h-11 w-11 shrink-0 place-items-center bg-[var(--sat-text)] sat-type-control-primary font-semibold text-[var(--sat-background)]">
+      <h2
+        data-sat-stage-heading="true"
+        tabIndex={-1}
+        className="grid h-11 w-11 shrink-0 place-items-center bg-[var(--sat-text)] sat-type-control-primary font-semibold text-[var(--sat-background)]"
+      >
         <span className="sr-only">Question </span>
         {props.questionNumber}
       </h2>

@@ -51,7 +51,7 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 			}
 			claims, err := verifyAttemptReadBearer(app, r, bearer)
 			if err != nil {
-				httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+				writeAttemptVerificationError(w, r, err)
 				return
 			}
 			if claims.ScheduleID != chi.URLParam(r, "scheduleID") || claims.ClientSessionID == "" {

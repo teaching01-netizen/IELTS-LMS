@@ -53,7 +53,7 @@ func satScopeUnscoped(mock sqlmock.Sqlmock) {
 
 // submitPrefixStubs stages the shared prefix every submit walks before the
 // provider branch: tx begin, attempt lock, session binding, receipt probes,
-// writer-session check, and the (empty) response digest read.
+// locked writer-session check, and the (empty) response digest read.
 func submitPrefixStubs(mock sqlmock.Sqlmock) {
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -61,8 +61,6 @@ func submitPrefixStubs(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnRows(sessionRows())
 	mock.ExpectQuery("FROM attempt_submissions_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT attempt_id FROM attempt_submissions_v2 WHERE submission_id").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 }
 
 // satTopologyRefusal runs one SAT submit whose module topology is `rows` and

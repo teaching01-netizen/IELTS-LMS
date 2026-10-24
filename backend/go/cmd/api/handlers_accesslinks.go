@@ -1,6 +1,7 @@
 package main
 
 import (
+	"example.com/ielts-proctoring/internal/assessmentforms"
 	"net/http"
 	"time"
 
@@ -391,6 +392,16 @@ func publicLinkGet(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		var form *assessmentforms.PublicRegistrationForm
+		if app.DB != nil {
+			if form, err = assessmentforms.ScheduleRegistrationForm(r.Context(), app.DB, out.ScheduleID); err != nil {
+				httpx.WriteError(w, r, MapDBError(err))
+				return
+			}
+		}
+		httpx.WriteJSON(w, http.StatusOK, struct {
+			accesslinks.PublicAccessLink
+			RegistrationForm *assessmentforms.PublicRegistrationForm `json:"registrationForm"`
+		}{out, form})
 	}
 }

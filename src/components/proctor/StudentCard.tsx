@@ -43,6 +43,24 @@ export const StudentCard = React.memo(function StudentCard({
       && session.runtimeSectionStatus === 'live'
       && session.status !== 'terminated',
   });
+  const personalTimeRemaining = useAuthoritativeDeadlineClock({
+    deadlineAt: session.ieltsPersonalDeadlineAt ?? null,
+    serverNow: session.runtimeServerNow ?? null,
+    fallbackSeconds: session.ieltsPersonalTimeRemainingSeconds ?? 0,
+    running:
+      (session.ieltsPersonalStatus === 'active' || session.ieltsPersonalStatus === 'delayed')
+      && session.status !== 'terminated',
+  });
+  const personalSectionActive = Boolean(
+    session.ieltsPersonalStatus && session.ieltsPersonalSectionKey,
+  );
+  const displayedSection = personalSectionActive
+    ? session.ieltsPersonalSectionKey
+    : runtimeSection;
+  const displayedTimeRemaining =
+    personalSectionActive && session.ieltsPersonalDeadlineAt
+      ? personalTimeRemaining
+      : runtimeTimeRemaining;
   const badgeVariant =
     session.status === 'active'
       ? 'success'
@@ -97,11 +115,16 @@ export const StudentCard = React.memo(function StudentCard({
       </div>
 
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium capitalize text-slate-900">{runtimeSection ?? 'Waiting'}</p>
+        <p className="truncate text-sm font-medium capitalize text-slate-900">{displayedSection ?? 'Waiting'}</p>
+        {personalSectionActive ? (
+          <p className={`mt-1 truncate text-xs font-medium capitalize ${session.ieltsPersonalStatus === 'unable' ? 'text-rose-700' : session.ieltsPersonalStatus === 'delayed' || session.ieltsPersonalStatus === 'reconnecting' ? 'text-amber-700' : 'text-indigo-700'}`}>
+            IELTS · {session.ieltsPersonalStatus === 'unable' ? 'unable to start' : session.ieltsPersonalStatus}
+          </p>
+        ) : null}
         <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
           <Clock size={12} />
-          <span className={runtimeTimeRemaining < 600 ? 'font-medium text-red-700' : ''}>{formatTime(runtimeTimeRemaining)}</span>
-          {session.runtimeWaiting ? (
+          <span className={displayedTimeRemaining < 600 ? 'font-medium text-red-700' : ''}>{personalSectionActive && !session.ieltsPersonalDeadlineAt ? '—' : formatTime(displayedTimeRemaining)}</span>
+          {!personalSectionActive && session.runtimeWaiting ? (
             <span
               className="rounded bg-sky-100 px-1.5 py-0.5 font-medium text-sky-700"
               title="Between sections: the previous section is finished and the next has not started"

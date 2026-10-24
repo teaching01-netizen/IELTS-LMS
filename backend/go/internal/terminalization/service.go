@@ -571,6 +571,34 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 
 	// Step 5: if sat+terminated lock SAT modules UPDATE ... state='locked' ... WHERE state IN (not_started,active,review).
 	if providerKey == "sat" && cmd.Outcome == OutcomeTerminated {
+		// SAT recovery writers rely on this durable boundary to authorize a
+		// terminal module state. Materialize missing rows as ended so old and
+		// new terminalization paths can safely terminate every assigned module.
+		if _, err := q.ExecContext(ctx, `
+			INSERT INTO assessment_module_boundaries
+				(module_attempt_id, attempt_id, phase, policy_version)
+			SELECT ma.id, ma.attempt_id, 'ended',
+			       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(s.sat_delivery_policy, '$.version')), 'unsupported')
+			FROM assessment_module_attempts ma
+			JOIN student_attempts a ON a.id = ma.attempt_id
+			JOIN exam_schedules s ON s.id = a.schedule_id
+			WHERE ma.attempt_id = ? AND s.sat_delivery_policy IS NOT NULL
+			  AND NOT EXISTS (
+				SELECT 1 FROM assessment_module_boundaries b WHERE b.module_attempt_id = ma.id
+			  )`, a.ID); err != nil {
+			return nil, err
+		}
+		if _, err := q.ExecContext(ctx, `
+			UPDATE assessment_module_boundaries b
+			JOIN assessment_module_attempts ma ON ma.id = b.module_attempt_id
+			JOIN student_attempts a ON a.id = ma.attempt_id
+			JOIN exam_schedules s ON s.id = a.schedule_id
+			SET b.phase = CASE WHEN b.phase = 'settled' THEN 'settled' ELSE 'ended' END,
+			    b.next_action_at = NULL,
+			    b.revision = b.revision + 1
+			WHERE ma.attempt_id = ? AND s.sat_delivery_policy IS NOT NULL`, a.ID); err != nil {
+			return nil, err
+		}
 		const lockMods = "UPDATE assessment_module_attempts SET state = 'locked', locked_at = COALESCE(locked_at, ?), paused_at = NULL, completion_reason = COALESCE(completion_reason, ?), revision = revision + 1 WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')"
 		if _, err := q.ExecContext(ctx, lockMods, effectiveAt, cmd.Reason, a.ID); err != nil {
 			return nil, err
@@ -1484,20 +1512,22 @@ func terminalJSON(value any) string {
 
 // StragglerRow is one terminal-without-receipt attempt awaiting repair.
 type StragglerRow struct {
-	AttemptID      string
-	ScheduleID     string
-	OrganizationID *string
-	ExamID         string
-	AnswerRevision int64
-	SubmittedAt    time.Time
-	ProctorStatus  string
+	AttemptID       string
+	ScheduleID      string
+	OrganizationID  *string
+	ExamID          string
+	AnswerRevision  int64
+	SubmittedAt     time.Time
+	ProctorStatus   string
+	ProtocolVersion int
 }
 
 // stragglerSweepSQL is the missing-receipt repair predicate:
 // submitted_at IS NOT NULL AND NOT EXISTS receipt. NEVER delivery_status
 // alone — provisional rows are submitted/post-exam/NULL/NULL and must be
-// repaired, not skipped.
-const stragglerSweepSQL = "SELECT a.id, a.schedule_id, a.organization_id, a.exam_id, a.answer_revision, a.submitted_at, COALESCE(a.proctor_status,'active') FROM student_attempts a WHERE a.submitted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id) ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE"
+// repaired, not skipped. Force the submitted_at range index so the locking
+// repair never scans active rows while they are being saved.
+const stragglerSweepSQL = "SELECT a.id, a.schedule_id, a.organization_id, a.exam_id, a.answer_revision, a.submitted_at, COALESCE(a.proctor_status,'active'), COALESCE(a.protocol_version,1) FROM student_attempts a FORCE INDEX (idx_student_attempts_submitted_updated_id) WHERE a.submitted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id) ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE OF a"
 
 // RepairMissingReceipts sweeps terminal-without-receipt stragglers and
 // manufactures legacy_unknown receipts (outcome derived from proctor_status),
@@ -1507,14 +1537,11 @@ func RepairMissingReceipts(ctx context.Context, db tx.DB, batchSize int) (int64,
 	if batchSize < 1 {
 		batchSize = 1
 	}
-	sqlTx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	sqlTx, err := tx.Begin(ctx, db, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = sqlTx.Rollback() }()
-	if _, err := sqlTx.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-		return 0, err
-	}
 	rows, err := sqlTx.QueryContext(ctx, stragglerSweepSQL, batchSize)
 	if err != nil {
 		return 0, err
@@ -1527,7 +1554,7 @@ func RepairMissingReceipts(ctx context.Context, db tx.DB, batchSize int) (int64,
 			var st StragglerRow
 			var org sql.NullString
 			var submittedAny any
-			if err := rows.Scan(&st.AttemptID, &st.ScheduleID, &org, &st.ExamID, &st.AnswerRevision, &submittedAny, &st.ProctorStatus); err != nil {
+			if err := rows.Scan(&st.AttemptID, &st.ScheduleID, &org, &st.ExamID, &st.AnswerRevision, &submittedAny, &st.ProctorStatus, &st.ProtocolVersion); err != nil {
 				log.Printf("WARN missing-receipt repair scan failed err=%v", err)
 				failures = append(failures, fmt.Sprintf("scan: %v", err))
 				continue
@@ -1550,6 +1577,19 @@ func RepairMissingReceipts(ctx context.Context, db tx.DB, batchSize int) (int64,
 		outcome := OutcomeSubmitted
 		if st.ProctorStatus == "terminated" {
 			outcome = OutcomeTerminated
+		}
+		// Protocol-2 blobs can be stale under row-first writes; the receipt
+		// snapshot follows the seal rule and publishes the row materialization.
+		if st.ProtocolVersion == 2 {
+			blobs, err := materializeBlobsForSeal(ctx, sqlTx, st.AttemptID)
+			if err == nil {
+				_, err = sqlTx.ExecContext(ctx, "UPDATE student_attempts SET answers=?, writing_answers=?, flags=? WHERE id=?", blobs.Answers, blobs.WritingAnswers, blobs.Flags, st.AttemptID)
+			}
+			if err != nil {
+				log.Printf("WARN missing-receipt repair materialize failed attempt_id=%s err=%v", st.AttemptID, err)
+				failures = append(failures, fmt.Sprintf("materialize %s: %v", st.AttemptID, err))
+				continue
+			}
 		}
 		var snap []byte
 		snapRow := sqlTx.QueryRowContext(ctx, "SELECT JSON_OBJECT('attemptId', id, 'scheduleId', schedule_id, 'organizationId', organization_id, 'examId', exam_id, 'publishedVersionId', published_version_id, 'providerKey', 'legacy', 'answerRevision', answer_revision, 'answers', answers, 'writingAnswers', writing_answers, 'flags', flags) FROM student_attempts WHERE id = ? FOR UPDATE", st.AttemptID)
@@ -1588,9 +1628,10 @@ func RepairMissingReceipts(ctx context.Context, db tx.DB, batchSize int) (int64,
 	return repaired, nil
 }
 
-// satGapSweepSQL is the SAT gap repair predicate: phase post-exam AND provider
-// sat AND receipt exists AND result missing.
-const satGapSweepSQL = "SELECT a.id FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id JOIN attempt_terminalizations t ON t.attempt_id = a.id LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat' WHERE a.phase = 'post-exam' AND e.provider_key = 'sat' AND ar.id IS NULL AND NOT (a.sat_start_code_required = 1 AND a.sat_start_code_accepted_at IS NULL) ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE"
+// satGapSweepSQL drives from SAT exams so this locking read only visits SAT
+// attempts. A student_attempts table scan can lock unrelated IELTS inserts and
+// deadlock high-volume candidate admission while the background repair runs.
+const satGapSweepSQL = "SELECT a.id FROM exam_entities e STRAIGHT_JOIN student_attempts a ON a.exam_id = e.id JOIN attempt_terminalizations t ON t.attempt_id = a.id LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat' WHERE e.provider_key = 'sat' AND a.phase = 'post-exam' AND ar.id IS NULL AND NOT (a.sat_start_code_required = 1 AND a.sat_start_code_accepted_at IS NULL) ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE OF a"
 
 // satAttemptNeverStartedTx is the shared never-started predicate: a code-start
 // attempt without acceptance. Acceptance and first-module activation commit

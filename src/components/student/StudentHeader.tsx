@@ -8,6 +8,7 @@ import {
   Contrast,
   LayoutGrid,
   Eraser,
+  HardDrive,
   Highlighter,
   Minus,
   Plus,
@@ -23,6 +24,7 @@ import { useStudentTimerAnnouncement } from '@shared/hooks/useStudentTimerAnnoun
 import { getStudentHighlightPaletteEntry, studentHighlightPalette, type StudentHighlightColor } from './highlightPalette';
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 import type { ExamType } from '../../types';
+import { isIeltsExamType } from './layout/studentExamTypeContext';
 
 const pressClassName =
   'transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out';
@@ -79,6 +81,7 @@ export function StudentHeader({
   const saveStatus = autoSaveStatus ? getStudentSaveStatusPresentation(autoSaveStatus) : null;
   void onClearHighlights;
   const examLabel = examType === 'ACT' ? 'ACT' : 'IELTS';
+  const isIelts = isIeltsExamType(examType);
   const [showTabletZoomControls, setShowTabletZoomControls] = useState(false);
   const [showHighlightOptions, setShowHighlightOptions] = useState(false);
   const highlightOptionsTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -107,8 +110,10 @@ export function StudentHeader({
   );
   const highlightButtonLayoutClassName =
     examType === 'ACT' ? 'min-w-[9.5rem] justify-center whitespace-nowrap' : '';
+  // IELTS keeps labels only on wide screens: half the header is the timer's
+  // budget, so narrower iPads show the icon (with its aria-label) alone.
   const highlightButtonLabelClassName =
-    examType === 'ACT' ? 'inline whitespace-nowrap' : 'hidden md:inline';
+    examType === 'ACT' ? 'inline whitespace-nowrap' : isIelts ? 'hidden xl:inline' : 'hidden md:inline';
 
   const closeHighlightOptions = useCallback(() => {
     setShowHighlightOptions(false);
@@ -318,14 +323,23 @@ export function StudentHeader({
             <span className="hidden md:inline">Eliminate</span>
           </button>
         ) : null}
-        <div className="flex flex-col min-w-0 hidden sm:flex">
-          <div className="font-semibold text-[length:var(--student-meta-font-size)] text-gray-600 uppercase tracking-wide">
-            Test taker ID
+        {isIelts ? (
+          <div className="hidden min-w-0 items-baseline gap-1.5 whitespace-nowrap text-[length:var(--student-control-font-size)] sm:flex">
+            <span className="text-[length:var(--student-meta-font-size)] font-medium text-gray-600">
+              Test taker ID
+            </span>
+            <span className="truncate font-semibold text-gray-900">{testTakerId ?? '—'}</span>
           </div>
-          <div className="text-[length:var(--student-control-font-size)] font-semibold text-gray-900 truncate">
-            {testTakerId ?? '—'}
+        ) : (
+          <div className="flex flex-col min-w-0 hidden sm:flex">
+            <div className="font-semibold text-[length:var(--student-meta-font-size)] text-gray-600 uppercase tracking-wide">
+              Test taker ID
+            </div>
+            <div className="text-[length:var(--student-control-font-size)] font-semibold text-gray-900 truncate">
+              {testTakerId ?? '—'}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div
@@ -366,7 +380,11 @@ export function StudentHeader({
       </div>
 
       <div
-        className="flex min-w-0 max-w-full items-center justify-start gap-1.5 md:gap-2 lg:gap-4 text-gray-700 flex-shrink-0 overflow-x-auto no-scrollbar justify-self-end lg:justify-end"
+        className={`flex items-center text-gray-700 justify-self-end ${
+          isIelts
+            ? 'shrink-0 justify-end gap-2 md:gap-3'
+            : 'min-w-0 max-w-full justify-start gap-1.5 md:gap-2 lg:gap-4 flex-shrink-0 overflow-x-auto no-scrollbar lg:justify-end'
+        }`}
         data-testid="student-header-controls-slot"
       >
         {shouldShowHighlightTool ? (
@@ -447,7 +465,7 @@ export function StudentHeader({
             aria-label="Erase highlights"
           >
             <Eraser size={16} aria-hidden="true" />
-            <span className="hidden md:inline">Erase</span>
+            <span className={isIelts ? 'hidden xl:inline' : 'hidden md:inline'}>Erase</span>
           </button>
         ) : null}
         {autoSaveStatus && (
@@ -459,6 +477,10 @@ export function StudentHeader({
           >
             {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
               <LoadingMark size="xs" className="bg-gray-300" />
+            ) : autoSaveStatus === 'saved_locally' ? (
+              <HardDrive size={12} aria-hidden="true" className="text-amber-700" />
+            ) : autoSaveStatus === 'needs_recovery' ? (
+              <TriangleAlert size={12} aria-hidden="true" className="text-red-700" />
             ) : autoSaveStatus === 'offline' ? (
               <WifiOff size={12} aria-hidden="true" className="text-amber-700" />
             ) : autoSaveStatus === 'error' ? (
@@ -571,7 +593,7 @@ export function StudentHeader({
             aria-label="Open question navigator"
           >
             <LayoutGrid size={16} strokeWidth={2} />
-            <span className="hidden sm:inline">Questions</span>
+            <span className={isIelts ? 'hidden xl:inline' : 'hidden sm:inline'}>Questions</span>
           </button>
         )}
         {!isExamActive && (

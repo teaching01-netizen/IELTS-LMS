@@ -7,9 +7,10 @@ import { logError, logInfo } from '../../../shared/observability/errorLogger';
 import { useAuthSession } from '../../../features/auth/authSession';
 import { useAuthoritativeDeadlineClock, useRoomClockMs } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { useProctorRouteController } from '../../../features/proctor/hooks/useProctorRouteController';
-import { examDeliveryService } from '../../../features/proctor/infrastructure/proctorGateway';
+import { examDeliveryService, proctorGateway } from '../../../features/proctor/infrastructure/proctorGateway';
 import { SatStatusPill } from '../ui/SatPage';
 import { SatSessionControls } from '../ui/SatSessionControls';
+import { useScheduleFormState } from '@/src/features/assessment-forms/api/assessmentForms';
 import { SatSessionContextBar, getSatRoomMode, roomStatusTone, runtimeLabel } from '../ui/SatSessionContextBar';
 import { SAT_SESSION_WARN_MESSAGE, SatSessionRoomConfirmDialog, type SatSessionRoomConfirmation } from '../ui/SatSessionRoomConfirmDialog';
 import { SatSessionRoomInspector } from '../ui/SatSessionRoomInspector';
@@ -155,6 +156,10 @@ export function SatSessionRoomRoute() {
   const roomMode = runtime ? getSatRoomMode(runtime.status) : 'prestart';
   const sessionLive = runtime?.status === 'live' || runtime?.status === 'paused';
   const sessionFinished = runtime?.status === 'completed';
+  const formState = useScheduleFormState(scheduleId);
+  const completeMessageRef = useRef('Room completed.');
+  const evaOpen = formState.data?.collection === 'open';
+  const evaMode = formState.data?.evaSimEnabled ? formState.data.mode : null;
   const currentStage = sessionFinished
     ? 'Room finished'
     : runtime?.status === 'cancelled'
@@ -231,7 +236,7 @@ export function SatSessionRoomRoute() {
     });
   }, []);
 
-  const run = useCallback(async (key: string, action: () => Promise<void>, success: string) => {
+  const run = useCallback(async (key: string, action: () => Promise<void>, success: string | (() => string)) => {
     if (isStale) {
       setMessage({ kind: 'error', text: 'This action was not completed because room data is out of date. Retry to confirm the current room state.' });
       return;
@@ -251,7 +256,7 @@ export function SatSessionRoomRoute() {
       }
       // IDs only — never student names or emails (PII).
       logInfo('sat.session.action', { action: key, scheduleId, latencyMs: Date.now() - startedAt, outcome: 'success' });
-      if (mountedRef.current) setMessage({ kind: 'success', text: success });
+      if (mountedRef.current) setMessage({ kind: 'success', text: typeof success === 'function' ? success() : success });
     } catch (error) {
       logError(error, { scope: 'sat.session.action', action: key, scheduleId, latencyMs: Date.now() - startedAt });
       if (mountedRef.current) {
@@ -276,7 +281,21 @@ export function SatSessionRoomRoute() {
       return;
     }
     if (action.kind === 'complete') {
-      void run('complete', () => controller.handleCompleteExam(scheduleId), 'Room completed.');
+      // Report only what the server confirmed: the runtime command result,
+      // then the re-read Eva closure time.
+      void run('complete', async () => {
+        const result = await examDeliveryService.completeRuntime(scheduleId, proctorName);
+        if (!result.success) throw new Error(result.error ?? 'The exam could not be ended.');
+        await controller.reload();
+        const forms = await formState.refetch();
+        const closedAt = forms.data?.closedAt ? new Date(forms.data.closedAt) : null;
+        completeMessageRef.current = closedAt && !Number.isNaN(closedAt.getTime())
+          ? `Room completed. Eva SIM closed at ${closedAt.toLocaleTimeString()}.`
+          : 'Room completed.';
+        requestAnimationFrame(() => {
+          if (!completeConfirmTriggerRef.current?.isConnected) document.querySelector<HTMLElement>('[data-sat-room-title]')?.focus();
+        });
+      }, () => completeMessageRef.current);
       return;
     }
     if (action.kind === 'extend-session') {
@@ -330,6 +349,25 @@ export function SatSessionRoomRoute() {
           onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`)}
           onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`)}
           onTerminate={() => setConfirm({ kind: 'terminate', studentId: selectedStudent.id, studentName: selectedStudent.name })}
+          onResolveRecovery={({ resolutionId, reason }) => {
+            const moduleAttemptId = selectedStudent.satRecoveryModuleAttemptId;
+            const expectedBoundaryRevision = selectedStudent.satRecoveryBoundaryRevision;
+            if (!moduleAttemptId || expectedBoundaryRevision == null || !scheduleId) {
+              return Promise.reject(new Error('The recovery state could not be verified. Refresh the room and review it again.'));
+            }
+            const action = selectedStudent.satRecoveryKind === 'entry' ? 'activate_entry' : 'continue_confirmed';
+            return run(
+              `sat-recovery-${selectedStudent.id}`,
+              () => proctorGateway.backendPost(
+                `/v1/proctor/sessions/${encodeURIComponent(scheduleId)}/attempts/${encodeURIComponent(selectedStudent.id)}/recovery/resolve`,
+                { resolutionId, moduleAttemptId, expectedBoundaryRevision, action, reason },
+                { retries: 0 },
+              ),
+              selectedStudent.satRecoveryKind === 'entry'
+                ? `${selectedStudent.name}’s module started.`
+                : `${selectedStudent.name} continued with server-confirmed answers.`,
+            );
+          }}
         />
       ) : (
         <div className="flex min-h-60 flex-col items-center justify-center px-4 py-8 text-center">
@@ -433,7 +471,9 @@ export function SatSessionRoomRoute() {
             title={title}
             status={<SatStatusPill tone={roomStatusTone(runtime.status)} pulse={runtime.status === 'live'}>{runtimeLabel(runtime.status)}</SatStatusPill>}
             details={`${schedule.examTitle}${accessLink ? ` · Version ${accessLink.versionNumber}` : ''} · ${satPublishScopeCopy(schedule.publishScope ?? 'full')}`}
-            statusLine={statusLine}
+            statusLine={sessionFinished && formState.data?.evaSimEnabled
+              ? `${statusLine} · Eva SIM ${evaOpen ? 'open' : 'closed'}`
+              : statusLine}
             onBack={goBack}
             actions={(
               <>
@@ -447,10 +487,13 @@ export function SatSessionRoomRoute() {
                     return;
                   }
                   setConfirm({ kind: 'extend-session', minutes, stage: currentStage, sectionKey: runtime.activeSectionKey, runtimeRevision: revision, remainingLabel: formatRunSheetRemaining(cohortStageRemainingSeconds) });
-                }} onComplete={(trigger) => {
+                }} evaOpen={evaOpen} onComplete={(trigger) => {
                   completeConfirmTriggerRef.current = trigger;
-                  setConfirm({ kind: 'complete' });
+                  setConfirm({ kind: 'complete', evaMode, runtimeCompleted: runtime.status === 'completed' });
                 }} />
+                {scheduleId && formState.data && formState.data.collection !== 'not_applicable' ? (
+                  <SatButton variant="quiet" onClick={() => navigate(`/sat/forms?form=eva_sim&scheduleId=${encodeURIComponent(scheduleId)}`)}>Form responses</SatButton>
+                ) : null}
               </>
             )}
           />

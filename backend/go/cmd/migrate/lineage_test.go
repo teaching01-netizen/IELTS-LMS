@@ -80,11 +80,15 @@ func migDir(t *testing.T) string {
 // bumps 85->86. Global SAT score conversion (0087) bumps 86->87. The SAT
 // one-action room receipt (0088) bumps 87->88. Exact response replay
 // (0089) bumps 88->89. The exam-purge terminalization fence (0090) bumps
-// 89->90. Any other
-// count/max/gap change fails loudly.
+// 89->90. IELTS personal timing landed 0094/0095; SAT recovery boundaries,
+// resolution receipts, close intents, and the writer fence landed 0096-0100
+// — count/max bumped 93->100. SAT configurable forms and Eva SIM (0101:
+// assessment_form_responses, schedule Eva closure) bumps 100->101. The roster
+// page index (0102), runtime status/timing index (0103), and SAT section-entry
+// forms (0104) bump 101->104. Any other count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 93
-	pinnedMigrationMax   = 93
+	pinnedMigrationFiles = 104
+	pinnedMigrationMax   = 104
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

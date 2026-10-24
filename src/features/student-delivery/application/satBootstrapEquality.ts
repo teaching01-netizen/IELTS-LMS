@@ -98,6 +98,12 @@ export function regressesAttemptState(
     // A dropped row is older state (rows are never deleted server-side).
     if (!incoming) return true;
     if (incoming.revision < previous.revision) return true;
+    // SAT boundary transitions have an independent revision and may advance
+    // without touching the module-attempt row (for example, entry recovery).
+    if (
+      previous.satBoundary != null &&
+      (incoming.satBoundary == null || incoming.satBoundary.revision < previous.satBoundary.revision)
+    ) return true;
     // A finalized module never reopens: a payload that shows one active again
     // is a stale read from before the finalization.
     if (isFinalAttemptState(previous.state) && !isFinalAttemptState(incoming.state)) {
@@ -136,6 +142,7 @@ function sameAttempts(
       m.remainingSeconds === n.remainingSeconds &&
       m.deadlineAt === n.deadlineAt &&
       m.availableAt === n.availableAt &&
+      JSON.stringify(m.satBoundary ?? null) === JSON.stringify(n.satBoundary ?? null) &&
       m.completionReason === n.completionReason
     );
   });

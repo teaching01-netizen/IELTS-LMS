@@ -916,7 +916,8 @@ func (s *Service) SaveDraft(ctx context.Context, examID string, actorID string, 
 	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		var draftID string
 		var draftRev int
-		if err := q.QueryRowContext(ctx, "SELECT v.id, v.revision FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND e.current_draft_version_id = v.id FOR UPDATE", examID).Scan(&draftID, &draftRev); err != nil {
+		var storedConfig sql.NullString
+		if err := q.QueryRowContext(ctx, "SELECT v.id, v.revision, CAST(v.config_snapshot AS CHAR) FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND e.current_draft_version_id = v.id FOR UPDATE", examID).Scan(&draftID, &draftRev, &storedConfig); err != nil {
 			if err == sql.ErrNoRows {
 				return notFoundError("Draft version not found.")
 			}
@@ -925,7 +926,11 @@ func (s *Service) SaveDraft(ctx context.Context, examID string, actorID string, 
 		if draftRev != req.Revision {
 			return conflictError("Draft changed while you were editing; refresh before retrying.")
 		}
-		res, err := q.ExecContext(ctx, "UPDATE exam_versions SET content_snapshot = ?, config_snapshot = ?, revision = revision + 1 WHERE id = ? AND revision = ?", string(req.Content), string(req.Config), draftID, req.Revision)
+		config, err := preserveForms(req.Config, storedConfig.String)
+		if err != nil {
+			return err
+		}
+		res, err := q.ExecContext(ctx, "UPDATE exam_versions SET content_snapshot = ?, config_snapshot = ?, revision = revision + 1 WHERE id = ? AND revision = ?", string(req.Content), string(config), draftID, req.Revision)
 		if err != nil {
 			return err
 		}

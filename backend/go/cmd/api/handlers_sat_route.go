@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 )
@@ -33,6 +34,44 @@ func proctorAssignRouteHandler(app *App) http.HandlerFunc {
 			return
 		}
 		out, err := app.Delivery.AssignStaffRoute(r.Context(), sess.UserID, schedule.ID, chi.URLParam(r, "attemptID"), body.SectionKey, body.Route)
+		if err != nil {
+			httpx.WriteError(w, r, MapDBError(err))
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+// proctorSATRecoveryResolutionHandler lets an already-authorized schedule
+// proctor resolve an expired classroom recovery boundary with a required
+// reason. The service rechecks classroom mode in the transaction.
+func proctorSATRecoveryResolutionHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, schedule, ok := requireStaffSchedule(w, r, app)
+		if !ok {
+			return
+		}
+		if app.Delivery == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Delivery service is unavailable."))
+			return
+		}
+		var body struct {
+			ResolutionID             string `json:"resolutionId"`
+			ModuleAttemptID          string `json:"moduleAttemptId"`
+			ExpectedBoundaryRevision uint64 `json:"expectedBoundaryRevision"`
+			Action                   string `json:"action"`
+			Reason                   string `json:"reason"`
+		}
+		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &body); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Delivery.ResolveSATRecovery(r.Context(), schedule.ID, chi.URLParam(r, "attemptID"), delivery.SATRecoveryResolutionRequest{
+			ResolutionID: body.ResolutionID, ModuleAttemptID: body.ModuleAttemptID,
+			ExpectedBoundaryRevision: body.ExpectedBoundaryRevision,
+			Action:                   body.Action, Reason: body.Reason,
+		}, "staff", sess.UserID, nil)
 		if err != nil {
 			httpx.WriteError(w, r, MapDBError(err))
 			return

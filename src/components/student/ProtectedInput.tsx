@@ -1,9 +1,10 @@
-import React, { useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { ExamConfig } from '../../types';
 import { saveStudentAuditEvent } from '@student/application/studentAttemptFacade';
 import { useOptionalStudentAttemptControls } from './providers/StudentAttemptProvider';
 import { registerAnswerUndoRedoGuard } from './answerUndoRedoGuard';
 import { registerProtectedAnswerControlLifecycle } from './protectedAnswerControlLifecycle';
+import { isIeltsExamType, useStudentExamType } from './layout/studentExamTypeContext';
 
 type ProtectedInputSecurity = Pick<
   ExamConfig['security'],
@@ -11,7 +12,7 @@ type ProtectedInputSecurity = Pick<
 >;
 
 interface ProtectedInputProps
-  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'security'> {
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement>, 'security'> {
   security: ProtectedInputSecurity;
   sessionId?: string | undefined;
   studentId?: string | undefined;
@@ -48,9 +49,19 @@ export function ProtectedInput({
   const getResolvedSessionId = () => sessionId ?? attemptControls?.getScheduleId();
   const getResolvedStudentId = () => studentId ?? attemptControls?.getAttemptId();
   const flushAnswerDurabilityNow = () => attemptControls?.flushAnswerDurabilityNow();
-  const { onInput: userOnInput, onChange: userOnChange, onBlur: userOnBlur, ...restInputProps } =
-    inputProps;
-  const inputRef = useRef<HTMLInputElement>(null);
+  // IELTS answers wrap inside the box instead of scrolling sideways. ACT and
+  // controls outside an exam shell keep the single-line input they always had.
+  const examType = useStudentExamType();
+  const wrapsText = isIeltsExamType(examType);
+  const {
+    onInput: userOnInput,
+    onChange: userOnChange,
+    onBlur: userOnBlur,
+    onKeyDown: userOnKeyDown,
+    onPaste: userOnPaste,
+    ...restInputProps
+  } = inputProps;
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   const lastKeydownRef = useRef<number>(0);
   const previousValueRef = useRef<string>('');
   const lastRescuedDomValueRef = useRef<string | null>(null);
@@ -352,15 +363,17 @@ export function ProtectedInput({
     const input = inputRef.current;
     if (!input) return;
 
-    const handleBeforeInput = (event: InputEvent) => {
-      if (event.inputType === 'insertReplacementText') {
+    // Typed as Event: the input/textarea union has no typed `beforeinput` overload.
+    const handleBeforeInput = (event: Event) => {
+      const inputEvent = event as InputEvent;
+      if (inputEvent.inputType === 'insertReplacementText') {
         // This is likely autofill or autocorrect
         saveStudentAuditEvent(
           getResolvedSessionId(),
           'AUTOFILL_SUSPECTED',
           {
-            inputType: event.inputType,
-            data: event.data,
+            inputType: inputEvent.inputType,
+            data: inputEvent.data,
             targetName: input.name || 'unknown',
           },
           getResolvedStudentId(),
@@ -369,7 +382,7 @@ export function ProtectedInput({
     };
 
     const handleInput = (event: Event) => {
-      const target = event.target as HTMLInputElement;
+      const target = event.target as HTMLInputElement | HTMLTextAreaElement;
       const newValue = target.value;
       const previousValue = previousValueRef.current;
       latestDomValueRef.current = newValue;
@@ -410,36 +423,101 @@ export function ProtectedInput({
     };
   }, [attemptControls, sessionId, studentId]);
 
-  return (
-    <input
-      ref={inputRef}
-      {...restInputProps}
-      onInput={(event) => {
-        latestDomValueRef.current = event.currentTarget.value;
-        userOnInput?.(event);
-      }}
-      onChange={(event) => {
-        const nextValue = event.currentTarget.value;
-        latestDomValueRef.current = nextValue;
-        onLiveValueChange?.(nextValue);
-        // Bug 3: React observed this edit and is handing it to the parent's
-        // controlled-update path, so the retained rescue intent is redundant for
-        // that value. Commit-only callers (no onChange owner) keep it: nothing
-        // else carries the keystroke until blur/lifecycle commits.
-        if (typeof userOnChange === 'function' && nativeIntentRef.current?.value === nextValue) {
-          nativeIntentRef.current = null;
-        }
-        userOnChange?.(event);
-      }}
-      onBlur={(event) => {
-        latestDomValueRef.current = event.currentTarget.value;
-        userOnBlur?.(event);
-      }}
-      className={className}
-      autoComplete={security.preventAutofill ? 'off' : restInputProps.autoComplete}
-      spellCheck={!security.preventAutocorrect}
-      autoCorrect={security.preventAutocorrect ? 'off' : 'on'}
-      autoCapitalize={security.preventAutocorrect ? 'off' : 'on'}
-    />
-  );
+  // Auto-grow: the box is as tall as its wrapped answer. A width change (zoom,
+  // rotation, pane resize) re-fits too; the observer only reacts to width, so
+  // the height write it triggers cannot loop.
+  const fitAnswerHeight = useCallback(() => {
+    const element = inputRef.current;
+    if (!(element instanceof HTMLTextAreaElement)) return;
+    element.style.height = 'auto';
+    element.style.height = `${element.scrollHeight + element.offsetHeight - element.clientHeight}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (wrapsText) fitAnswerHeight();
+  }, [fitAnswerHeight, inputProps.value, wrapsText]);
+
+  useEffect(() => {
+    const element = inputRef.current;
+    if (!wrapsText || !element || typeof ResizeObserver === 'undefined') return;
+    let width = element.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return;
+      width = element.clientWidth;
+      fitAnswerHeight();
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [fitAnswerHeight, wrapsText]);
+
+  const answerFieldProps = {
+    ...restInputProps,
+    onInput: (event: React.InputEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      latestDomValueRef.current = event.currentTarget.value;
+      if (wrapsText) fitAnswerHeight();
+      userOnInput?.(event);
+    },
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const nextValue = event.currentTarget.value;
+      latestDomValueRef.current = nextValue;
+      onLiveValueChange?.(nextValue);
+      // Bug 3: React observed this edit and is handing it to the parent's
+      // controlled-update path, so the retained rescue intent is redundant for
+      // that value. Commit-only callers (no onChange owner) keep it: nothing
+      // else carries the keystroke until blur/lifecycle commits.
+      if (typeof userOnChange === 'function' && nativeIntentRef.current?.value === nextValue) {
+        nativeIntentRef.current = null;
+      }
+      userOnChange?.(event);
+    },
+    onBlur: (event: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      latestDomValueRef.current = event.currentTarget.value;
+      userOnBlur?.(event);
+    },
+    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      // One logical line: Enter must not add a break. IME composition keeps its
+      // own Enter (it confirms the candidate).
+      if (wrapsText && event.key === 'Enter' && !event.nativeEvent.isComposing) {
+        event.preventDefault();
+      }
+      userOnKeyDown?.(event);
+    },
+    onPaste: (event: React.ClipboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      userOnPaste?.(event);
+      if (!wrapsText || event.defaultPrevented) return;
+      const pasted = event.clipboardData.getData('text');
+      if (!/[\r\n]/.test(pasted)) return;
+      // A text input drops line breaks on paste; keep that for a one-line answer.
+      event.preventDefault();
+      document.execCommand(
+        'insertText',
+        false,
+        pasted
+          .split(/\r\n|\r|\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .join(' '),
+      );
+    },
+    className: wrapsText
+      ? `${className} resize-none overflow-hidden [overflow-wrap:anywhere]`
+      : className,
+    autoComplete: security.preventAutofill ? 'off' : restInputProps.autoComplete,
+    spellCheck: !security.preventAutocorrect,
+    autoCorrect: security.preventAutocorrect ? 'off' : 'on',
+    autoCapitalize: security.preventAutocorrect ? 'off' : 'on',
+  };
+
+  if (wrapsText) {
+    const { type: _type, ...textareaProps } = answerFieldProps;
+    return (
+      <textarea
+        ref={inputRef as React.Ref<HTMLTextAreaElement>}
+        rows={1}
+        {...textareaProps}
+      />
+    );
+  }
+
+  return <input ref={inputRef as React.Ref<HTMLInputElement>} {...answerFieldProps} />;
 }

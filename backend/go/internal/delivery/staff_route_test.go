@@ -236,6 +236,7 @@ func TestAssignStaffRouteCommitsDecisionAndModule(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "mod-higher", 2100, sqlmock.AnyArg(), "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	deliverySATPolicyRead(mock, "att-1")
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO session_audit_logs")).
 		WithArgs(sqlmock.AnyArg(), "sched-1", "staff-1", "att-1", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))

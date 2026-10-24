@@ -42,10 +42,10 @@ func sectionGateModes() []sectionGateQuerier {
 			name:   "snapshot off (v2Locker, FOR UPDATE)",
 			locker: v2Locker{},
 			stage: func(mock sqlmock.Sqlmock, sectionStatus *string) {
-				mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, timing_model, active_section_key, waiting_for_next_section FROM exam_session_runtimes")).
+				mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, timing_model, active_section_key, waiting_for_next_section, COALESCE(completion_reason, '') FROM exam_session_runtimes")).
 					WithArgs("sched-1").
-					WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key", "waiting_for_next_section"}).
-						AddRow("rt-1", "live", "legacy_section_v1", "rw", false))
+					WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key", "waiting_for_next_section", "completion_reason"}).
+						AddRow("rt-1", "live", "legacy_section_v1", "rw", false, ""))
 				mock.ExpectQuery("SELECT UTC_TIMESTAMP").
 					WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now().UTC()))
 				sectionRow(mock, sectionStatus)
@@ -57,8 +57,8 @@ func sectionGateModes() []sectionGateQuerier {
 			stage: func(mock sqlmock.Sqlmock, sectionStatus *string) {
 				mock.ExpectQuery(regexp.QuoteMeta("COALESCE(timing_model")).
 					WithArgs("sched-1").
-					WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section"}).
-						AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false))
+					WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "revision", "timing_model", "waiting_for_next_section", "completion_reason"}).
+						AddRow("rt-1", "live", "rw", 4, "legacy_section_v1", false, ""))
 				snapshotSectionRow(mock, sectionStatus)
 				mock.ExpectQuery("SELECT UTC_TIMESTAMP").
 					WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(time.Now().UTC()))
@@ -125,14 +125,11 @@ func TestResponseWriteSectionLiveness(t *testing.T) {
 						AddRow("att-1", "sess-1", nil, nil))
 				// Exact-replay probe: nothing stored for this write id.
 				mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
-				mock.ExpectQuery("SELECT active_client_session_id").
-					WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 				mode.stage(mock, sc.section)
 				if sc.wantWritable {
-					// The write itself: probes, projection row, ledger row,
-					// revision bump, audit row.
-					mock.ExpectQuery("SELECT request_hash, response_hash").
-						WillReturnError(sql.ErrNoRows)
+					// The write itself (the idempotency probe reuses the replay
+					// miss): probes, projection row, ledger row, revision bump,
+					// audit row.
 					mock.ExpectQuery("SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id").
 						WillReturnError(sql.ErrNoRows)
 					mock.ExpectQuery("SELECT lease_epoch, client_version, server_revision FROM attempt_responses_v2").
@@ -144,9 +141,8 @@ func TestResponseWriteSectionLiveness(t *testing.T) {
 					mock.ExpectCommit()
 				} else {
 					// The per-command idempotency probe runs BEFORE ensureWritable
-					// (new-write branch), so the refusal path still probes once.
-					mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").
-						WillReturnError(sql.ErrNoRows)
+					// (new-write branch) and reuses the replay miss, so the
+					// refusal path issues no further ledger read.
 					mock.ExpectRollback()
 				}
 
@@ -196,7 +192,7 @@ func TestResponseWriteIgnoresWarmLiveSnapshotCache(t *testing.T) {
 	// Warm the app's snapshot cache exactly as the student poll path does.
 	live := "rw"
 	cache := runtime.NewSnapshotCache(runtime.SnapshotTTL)
-	if _, err := cache.Get("sched-1", time.Now().UTC(), func() (runtime.Snapshot, error) {
+	if _, err := cache.Get(context.Background(), "sched-1", time.Now().UTC(), func() (runtime.Snapshot, error) {
 		return runtime.Snapshot{Status: runtime.StatusLive, ActiveSectionKey: &live, Revision: 4,
 			TimingModel: "legacy_section_v1", SectionLive: true, SectionStarted: true, LoadedAt: time.Now().UTC()}, nil
 	}); err != nil {
@@ -213,14 +209,11 @@ func TestResponseWriteIgnoresWarmLiveSnapshotCache(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"attempt_id", "client_session_id", "revoked_at", "expires_at"}).
 			AddRow("att-1", "sess-1", nil, nil))
 	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	// Current committed state: the section is paused.
 	paused := "paused"
 	sectionGateModes()[1].stage(mock, &paused)
-	// Per-command idempotency probe: nothing stored, so no replay path exists
-	// that could bypass the gate.
-	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
+	// The per-command idempotency probe reuses the replay miss: nothing
+	// stored, so no replay path exists that could bypass the gate.
 	mock.ExpectRollback()
 
 	cmd := attempts.SaveResponsesCommand{AttemptID: "att-1", LeaseEpoch: 3, ControlEpoch: 7,

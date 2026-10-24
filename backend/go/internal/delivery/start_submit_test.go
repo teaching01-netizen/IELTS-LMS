@@ -69,11 +69,30 @@ func deliveryReconcileDrainedStranded(mock sqlmock.Sqlmock) {
 func deliveryModuleWorkableTx(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at"}).
-			AddRow("active", "running", nil, "exam", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "active_client_session_id", "lease_epoch", "control_epoch"}).
+			AddRow("active", "running", nil, "exam", false, nil, "sess-test", 1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
+	// ensureAttemptCanWorkTx completes before the writer fence.
+	deliveryWriterClaimTx(mock, "sess-test")
+}
+
+func deliveryModuleStartWorkableTx(mock sqlmock.Sqlmock, timingModel string, activeSection any, pendingBreak ...bool) {
+	breakPending := false
+	if len(pendingBreak) > 0 {
+		breakPending = pendingBreak[0]
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
+		WithArgs("att-1", "sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "active_client_session_id", "lease_epoch", "control_epoch"}).
+			AddRow("active", "running", nil, "exam", false, nil, "sess-test", 1, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(startModuleRuntimeSnapshotQuery)).
+		WithArgs("att-1", "sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "timing_model", "active_section_key", "sat_handoff_mode", "sat_delivery_policy",
+			"policy_timing_model", "pending_break",
+		}).AddRow("live", timingModel, activeSection, "server_start", nil, timingModel, breakPending))
 	// ensureAttemptCanWorkTx completes before the writer fence.
 	deliveryWriterClaimTx(mock, "sess-test")
 }
@@ -95,24 +114,30 @@ func deliveryLegacyGate(mock sqlmock.Sqlmock) {
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 }
 
+func deliveryLegacyGateFromSnapshot(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
+}
+
 func deliveryMaxRevision(mock sqlmock.Sqlmock, rev int64) {
 	mock.ExpectQuery(regexp.QuoteMeta("COALESCE(MAX(revision), 0) FROM assessment_module_attempts")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"rev"}).AddRow(rev))
 }
 
-func deliveryBusInsert(mock sqlmock.Sqlmock, kind, target, name string, rev int64) {
+func deliveryBusPairInsert(mock sqlmock.Sqlmock, firstKind, firstTarget, firstName string, firstRev int64, secondKind, secondTarget, secondName string, secondRev int64) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO live_update_events")).
-		WithArgs(sqlmock.AnyArg(), kind, target, rev, name, sqlmock.AnyArg()).
-		WillReturnResult(sqlmock.NewResult(1, 1))
+		WithArgs(sqlmock.AnyArg(), firstKind, firstTarget, firstRev, firstName, sqlmock.AnyArg(),
+			sqlmock.AnyArg(), secondKind, secondTarget, secondRev, secondName, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 2))
 }
 
 // deliveryReconcileWakeup stages the attempt + roster live wake-up a reconcile
 // pass appends inside its transaction whenever it changed module state.
 func deliveryReconcileWakeup(mock sqlmock.Sqlmock, rev int64) {
 	deliveryMaxRevision(mock, rev)
-	deliveryBusInsert(mock, liveupdates.KindAttempt, "att-1", liveEventModuleSubmitted, rev)
-	deliveryBusInsert(mock, liveupdates.KindScheduleRoster, "sched-1", liveEventModuleSubmitted, rev)
+	deliveryBusPairInsert(mock, liveupdates.KindAttempt, "att-1", liveEventModuleSubmitted, rev,
+		liveupdates.KindScheduleRoster, "sched-1", liveEventModuleSubmitted, rev)
 }
 
 // deliveryUnscopedLink stages the Student Access scope read as "no link" — the
@@ -151,13 +176,13 @@ func deliveryBootstrapLoadsForModel(mock sqlmock.Sqlmock, at time.Time, model an
 		WithArgs("pv-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions"}).
 			AddRow("sec-1", "reading-writing", "Reading & Writing", 0, 3600, 0, nil))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules WHERE section_id = ? ORDER BY display_order")).
-		WithArgs("sec-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
-			AddRow("mod-1", "m1", "Module 1", 0, 3600, 27, "base", nil, nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE s.exam_version_id = ?")).
+		WithArgs("pv-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "section_id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
+			AddRow("mod-1", "sec-1", "m1", "Module 1", 0, 3600, 27, "base", nil, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN")).
-		WithArgs("mod-1").
-		WillReturnRows(sqlmock.NewRows([]string{"exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}))
+		WithArgs("pv-1").
+		WillReturnRows(sqlmock.NewRows([]string{"module_id", "exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}))
 	deliveryUnscopedLink(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_module_attempts WHERE attempt_id = ?")).
 		WithArgs("att-1").
@@ -206,15 +231,15 @@ func TestDeliveryStartModuleIdempotent(t *testing.T) {
 	defer db.Close()
 	svc := deliverySvc(db)
 	now := time.Now().UTC()
-	deliverySaveBinding(mock)
+	deliveryStartModuleBinding(mock)
 	deliveryReconcileDrained(mock)
 	deliverySaveBegin(mock)
-	deliveryModuleWorkableTx(mock)
+	deliveryModuleStartWorkableTx(mock, "legacy", nil)
 	deliveryModuleRow(mock, "active", now.Add(-time.Minute))
-	deliveryLegacyGate(mock)
+	deliveryLegacyGateFromSnapshot(mock)
 	deliveryMaxRevision(mock, 7)
-	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+	deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+		"schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
 	deliveryBootstrapLoads(mock, now.Add(-time.Minute))
 	out, err := svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")

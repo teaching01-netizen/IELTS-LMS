@@ -4,16 +4,15 @@
 // (revoked/mismatched rows fail closed). One SELECT per verification.
 //
 // Stateless (single-deploy target): HMAC + expiry only, zero SQL. Claim-to-
-// resource binding is enforced downstream against rows the business tx
-// already holds: attempts.saveInTx compares claims.ScheduleID/UserID (and
-// org when set) to the locked attempt row, validateTokenSession still runs
-// its in-tx session SELECT there, and every handler below re-checks
-// claims.AttemptID/ScheduleID against the URL. Delivery write handlers
-// (save/start/submit-module/submit-assessment) call VerifyAttemptRead for
-// an explicit token_id/revoked_at/lease_epoch session touch in BOTH modes,
-// and in-tx claimWriterSessionTx fences the writer session — stateless
-// never skips the session-table touch on delivery writes. No new crypto
-// (HMAC-SHA256).
+// resource binding is enforced downstream against authoritative rows:
+// attempts.saveInTx compares claims.ScheduleID/UserID (and org when set) to
+// the locked attempt row, validateTokenSession runs its in-tx session SELECT,
+// and handlers bind AttemptID/ScheduleID to the URL. Delivery mutations
+// verify HMAC + expiry at the edge and fence the live token row, resource
+// binding, and writer lease in their owning transaction. Read handlers use
+// VerifyAttemptRead because they have no transaction fence. Assessment-wide
+// submission remains session-bound at the edge until its owner accepts an
+// in-transaction token fence. No new crypto (HMAC-SHA256).
 package auth
 
 import (

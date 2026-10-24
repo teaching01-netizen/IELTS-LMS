@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { examWorkspacePath } from "../shell/examLifecycle";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/src/components/ui/sheet";
 import { useExamQuery } from "../../api/examQueries";
 import { requestAuthoringDraftOnEntry } from "../../application/authoringEntryIntent";
@@ -23,10 +25,23 @@ export function ExamSettingsSheet({ examId, open, onClose, onEditExam }: ExamSet
   const examQuery = useExamQuery(examId);
   const [dirtyCount, setDirtyCount] = useState(0);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const requestClose = () => {
     if (dirtyCount > 0) setConfirmClose(true);
     else onClose();
+  };
+  // Form builders live on the full Settings page, not in this sheet.
+  const openForms = () => {
+    const path = `${examWorkspacePath(examId, "settings")}?panel=forms`;
+    if (dirtyCount > 0) {
+      setPendingPath(path);
+      setConfirmClose(true);
+      return;
+    }
+    onClose();
+    navigate(path);
   };
 
   return (
@@ -70,6 +85,19 @@ export function ExamSettingsSheet({ examId, open, onClose, onEditExam }: ExamSet
                 Loading settings…
               </p>
             )}
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-4 text-sm">
+              <div>
+                <p className="font-semibold">Registration form and Eva SIM</p>
+                <p className="text-muted-foreground">Edit check-in questions and the post-exam form in Settings.</p>
+              </div>
+              <button
+                type="button"
+                onClick={openForms}
+                className="inline-flex min-h-11 items-center rounded-xl bg-muted px-4 text-sm font-semibold text-foreground hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Open in Settings
+              </button>
+            </div>
           </div>
           <div className="flex items-center justify-between gap-3 border-t border-border bg-card px-6 py-3">
             <p role="status" className="text-sm text-muted-foreground">
@@ -91,11 +119,17 @@ export function ExamSettingsSheet({ examId, open, onClose, onEditExam }: ExamSet
         description="Your timing changes have not been saved. Closing now discards them."
         confirmLabel="Discard changes"
         destructive
-        onCancel={() => setConfirmClose(false)}
-        onConfirm={() => {
+        onCancel={() => {
           setConfirmClose(false);
+          setPendingPath(null);
+        }}
+        onConfirm={() => {
+          const path = pendingPath;
+          setConfirmClose(false);
+          setPendingPath(null);
           setDirtyCount(0);
           onClose();
+          if (path) navigate(path);
         }}
       />
     </>

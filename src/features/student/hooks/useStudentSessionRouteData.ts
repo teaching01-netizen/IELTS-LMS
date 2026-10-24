@@ -1,37 +1,44 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAsyncPolling } from '@shared/hooks/useAsyncPolling';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAsyncPolling } from "@shared/hooks/useAsyncPolling";
 import {
   DEFAULT_MAX_CONNECT_ATTEMPTS_WITHOUT_OPEN,
   useLiveUpdates,
   type LiveUpdateEvent,
-} from '@shared/hooks/useLiveUpdates';
-import { useAuthSession } from '../../auth/api/authSession';
+} from "@shared/hooks/useLiveUpdates";
+import { useAuthSession } from "../../auth/api/authSession";
 import {
   studentSessionFacade,
   type StudentSessionLivePayload,
-} from '@student/application/studentSessionFacade';
-import type { ExamState } from '../../../types';
-import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
-import type { StudentAttempt } from '../../../types/studentAttempt';
+} from "@student/application/studentSessionFacade";
+import type { ExamState } from "../../../types";
+import {
+  isIeltsPersonalTimingModel,
+  type ExamSchedule,
+  type ExamSessionRuntime,
+} from "../../../types/domain";
+import type { StudentAttempt } from "../../../types/studentAttempt";
 import {
   emitStudentObservabilityMetric,
   withStudentObservabilityDimensions,
-} from '../../../utils/studentObservability';
+} from "../../../utils/studentObservability";
 import {
   extractLiveSnapshotFreshness,
   mergeLiveSnapshotFreshness,
   type LiveSnapshotFreshness,
-} from '../liveSnapshotFreshness';
-import { createStudentSessionBootstrap } from '../application/exam-session/studentSessionBootstrap';
-import { createStudentRuntimePoll } from '../infrastructure/exam-session/studentRuntimePoll';
-import { createStudentRuntimePollLoop } from '../infrastructure/exam-session/studentRuntimePollLoop';
-import { resolveStudentRealtimeTransport } from '../infrastructure/exam-session/studentRealtimeRollout';
+} from "../liveSnapshotFreshness";
+import { createStudentSessionBootstrap } from "../application/exam-session/studentSessionBootstrap";
+import { createStudentRuntimePoll } from "../infrastructure/exam-session/studentRuntimePoll";
+import { createStudentRuntimePollLoop } from "../infrastructure/exam-session/studentRuntimePollLoop";
+import { resolveStudentRealtimeTransport } from "../infrastructure/exam-session/studentRealtimeRollout";
 import {
   createStudentRealtimeCoordinator,
   type StudentRealtimeCoordinator,
-} from '../infrastructure/exam-session/studentRealtimeCoordinator';
-import { runStudentSessionMachineCommands } from './studentSessionMachineAdapters';
-import { evaluateLiveSnapshotTransition, evaluateLoadTransition } from './studentSessionStateMachine';
+} from "../infrastructure/exam-session/studentRealtimeCoordinator";
+import { runStudentSessionMachineCommands } from "./studentSessionMachineAdapters";
+import {
+  evaluateLiveSnapshotTransition,
+  evaluateLoadTransition,
+} from "./studentSessionStateMachine";
 import {
   asRecord,
   buildDefaultAnswerInvariantRollout,
@@ -42,20 +49,20 @@ import {
   parseIsoTimestampMs,
   resolveAnswerInvariantRollout,
   type StudentAnswerInvariantRollout,
-} from './studentSessionRouteUtils';
+} from "./studentSessionRouteUtils";
 import {
   buildStudentKey,
   createCandidateProfile,
   loadStoredCandidateProfile,
   normalizeCandidateId,
-} from './studentCandidateStorage';
-import { collectPublishedDiagramSnapshotIssues } from './studentSessionDiagnostics';
+} from "./studentCandidateStorage";
+import { collectPublishedDiagramSnapshotIssues } from "./studentSessionDiagnostics";
 import {
   buildSatBootstrapSeed,
   type SatBootstrapSeed,
-} from '../../student-delivery/api/satBootstrap';
+} from "../../student-delivery/api/satBootstrap";
 
-export type { StudentAnswerInvariantRollout } from './studentSessionRouteUtils';
+export type { StudentAnswerInvariantRollout } from "./studentSessionRouteUtils";
 
 interface StudentSessionRouteData {
   answerInvariantRollout: StudentAnswerInvariantRollout;
@@ -70,7 +77,7 @@ interface StudentSessionRouteData {
   /** Normalized candidate id the session reads use (the SAT writer-key input). */
   candidateId: string | null;
   isLoading: boolean;
-  providerKey: 'ielts' | 'sat' | 'act' | 'unknown';
+  providerKey: "ielts" | "sat" | "act" | "unknown";
   runtimeSnapshot: ExamSessionRuntime | null;
   liveSocketConnected: boolean;
   satAttemptUpdateToken: number;
@@ -86,7 +93,7 @@ type BackendLiveSession = StudentSessionLivePayload;
 
 type LoadedStaticSnapshot = {
   examState: ExamState;
-  providerKey: 'ielts' | 'sat' | 'act' | 'unknown';
+  providerKey: "ielts" | "sat" | "act" | "unknown";
   scheduleEntity: ExamSchedule;
   versionId: string;
 };
@@ -97,30 +104,36 @@ type LiveSnapshotApplyDecision = {
   applyRuntime: boolean;
 };
 
-function providerKeyFromVersion(version: unknown): 'ielts' | 'sat' | 'act' | 'unknown' {
+interface StudentSatRefreshFlight {
+  key: string;
+  followUpRequested: boolean;
+  followUpStarted: boolean;
+  promise: Promise<void>;
+}
+
+function providerKeyFromVersion(version: unknown): "ielts" | "sat" | "act" | "unknown" {
   const versionRecord = asRecord(version);
-  const contentSnapshot = asRecord(versionRecord?.['contentSnapshot']);
-  const rawProviderKey = contentSnapshot?.['providerKey'];
-  if (rawProviderKey === 'sat') {
-    return 'sat';
+  const contentSnapshot = asRecord(versionRecord?.["contentSnapshot"]);
+  const rawProviderKey = contentSnapshot?.["providerKey"];
+  if (rawProviderKey === "sat") {
+    return "sat";
   }
-  if (rawProviderKey === 'act') {
-    return 'act';
+  if (rawProviderKey === "act") {
+    return "act";
   }
-  if (rawProviderKey === undefined || rawProviderKey === null || rawProviderKey === 'ielts') {
-    return 'ielts';
+  if (rawProviderKey === undefined || rawProviderKey === null || rawProviderKey === "ielts") {
+    return "ielts";
   }
-  return 'unknown';
+  return "unknown";
 }
 
 export function useStudentSessionRouteData(
   scheduleId?: string,
-  studentId?: string,
+  studentId?: string
 ): StudentSessionRouteData {
   const { status: authStatus } = useAuthSession();
-  const [answerInvariantRollout, setAnswerInvariantRollout] = useState<StudentAnswerInvariantRollout>(
-    buildDefaultAnswerInvariantRollout,
-  );
+  const [answerInvariantRollout, setAnswerInvariantRollout] =
+    useState<StudentAnswerInvariantRollout>(buildDefaultAnswerInvariantRollout);
   const [attemptSnapshot, setAttemptSnapshot] = useState<StudentAttempt | null>(null);
   const [schedule, setSchedule] = useState<ExamSchedule | null>(null);
   const [state, setState] = useState<ExamState | null>(null);
@@ -129,7 +142,7 @@ export function useStudentSessionRouteData(
   // product skin before the provider is known (an 'ielts' default flashes the
   // admin skeleton on every SAT cold open). Readers must treat 'unknown' as
   // "not yet known" during loading; the load path throws on a settled unknown.
-  const [providerKey, setProviderKey] = useState<'ielts' | 'sat' | 'act' | 'unknown'>('unknown');
+  const [providerKey, setProviderKey] = useState<"ielts" | "sat" | "act" | "unknown">("unknown");
   const [liveSocketConnected, setLiveSocketConnected] = useState(false);
   const [satAttemptUpdateToken, setSatAttemptUpdateToken] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -141,8 +154,8 @@ export function useStudentSessionRouteData(
   // poll-only posture this route shipped with, so the switch is also the
   // client-side rollback. Server-side rollback stays STUDENT_WS=gone.
   const studentRealtimeTransport = useMemo(
-    () => resolveStudentRealtimeTransport(import.meta.env['VITE_STUDENT_REALTIME']),
-    [],
+    () => resolveStudentRealtimeTransport(import.meta.env["VITE_STUDENT_REALTIME"]),
+    []
   );
   const candidateId = useMemo(() => normalizeCandidateId(studentId), [studentId]);
   const staticVersionIdRef = useRef<string | null>(null);
@@ -165,6 +178,7 @@ export function useStudentSessionRouteData(
   const runtimeSnapshotRef = useRef<ExamSessionRuntime | null>(null);
   const attemptSnapshotRef = useRef<StudentAttempt | null>(null);
   const realtimeCoordinatorRef = useRef<StudentRealtimeCoordinator | null>(null);
+  const satRefreshFlightRef = useRef<StudentSatRefreshFlight | null>(null);
   // Realtime rollout telemetry (Phase 3): whether THIS mount ever opened the
   // socket (so a disconnect can be told apart from "never connected"), the
   // runtime revision held at connect time (the gap a reconnect snapshot
@@ -177,18 +191,16 @@ export function useStudentSessionRouteData(
   const initialLoadKeyRef = useRef<string | null>(null);
   const storedCandidateProfile = useMemo(
     () => (scheduleId && candidateId ? loadStoredCandidateProfile(scheduleId, candidateId) : null),
-    [candidateId, scheduleId],
+    [candidateId, scheduleId]
   );
   const studentKey = useMemo(
     () => (scheduleId && candidateId ? buildStudentKey(scheduleId, candidateId) : null),
-    [candidateId, scheduleId],
+    [candidateId, scheduleId]
   );
   const sessionBootstrap = useMemo(
     () =>
-      scheduleId && candidateId
-        ? createStudentSessionBootstrap({ scheduleId, candidateId })
-        : null,
-    [candidateId, scheduleId],
+      scheduleId && candidateId ? createStudentSessionBootstrap({ scheduleId, candidateId }) : null,
+    [candidateId, scheduleId]
   );
   const realtimeCoordinator = useMemo(() => {
     if (!scheduleId || !candidateId) {
@@ -238,29 +250,34 @@ export function useStudentSessionRouteData(
       studentSessionFacade.loadStaticSession(scheduleId, candidateId));
     const providerKey = providerKeyFromVersion(session.version);
     setProviderKey(providerKey);
-    if (providerKey === 'unknown') {
+    if (providerKey === "unknown") {
       throw new Error(
-        'This exam uses an unsupported provider. Ask your proctor to check the published version.',
+        "This exam uses an unsupported provider. Ask your proctor to check the published version."
       );
     }
     const scheduleEntity = studentSessionFacade.mapSchedule(session.schedule);
     const version = studentSessionFacade.mapVersion(session.version);
-    const diagramSnapshotDiagnostics = collectPublishedDiagramSnapshotIssues(version.contentSnapshot);
+    const diagramSnapshotDiagnostics = collectPublishedDiagramSnapshotIssues(
+      version.contentSnapshot
+    );
     if (diagramSnapshotDiagnostics.missingImageUrlCount > 0) {
-      console.warn('[student-session] published version has DIAGRAM_LABELING blocks without imageUrl', {
-        routeScheduleId: scheduleId,
-        scheduleId: scheduleEntity.id,
-        publishedVersionId: scheduleEntity.publishedVersionId,
-        loadedVersionId: version.id,
-        totalDiagramBlocks: diagramSnapshotDiagnostics.totalDiagramBlocks,
-        missingImageUrlCount: diagramSnapshotDiagnostics.missingImageUrlCount,
-        missingUsableImageCount: diagramSnapshotDiagnostics.missingUsableImageCount,
-        missingBlocks: diagramSnapshotDiagnostics.missingBlocks,
-      });
+      console.warn(
+        "[student-session] published version has DIAGRAM_LABELING blocks without imageUrl",
+        {
+          routeScheduleId: scheduleId,
+          scheduleId: scheduleEntity.id,
+          publishedVersionId: scheduleEntity.publishedVersionId,
+          loadedVersionId: version.id,
+          totalDiagramBlocks: diagramSnapshotDiagnostics.totalDiagramBlocks,
+          missingImageUrlCount: diagramSnapshotDiagnostics.missingImageUrlCount,
+          missingUsableImageCount: diagramSnapshotDiagnostics.missingUsableImageCount,
+          missingBlocks: diagramSnapshotDiagnostics.missingBlocks,
+        }
+      );
     }
     const examState = studentSessionFacade.hydrateExamState(
       version.contentSnapshot,
-      version.configSnapshot,
+      version.configSnapshot
     );
 
     setSchedule(scheduleEntity);
@@ -278,30 +295,37 @@ export function useStudentSessionRouteData(
   const maybeRebootstrapStaticOnVersionMismatch = useCallback(
     async (live: BackendLiveSession): Promise<LoadedStaticSnapshot | null> => {
       const expectedVersionId = staticVersionIdRef.current;
-      if (!expectedVersionId || !live.publishedVersionId || live.publishedVersionId === expectedVersionId) {
+      if (
+        !expectedVersionId ||
+        !live.publishedVersionId ||
+        live.publishedVersionId === expectedVersionId
+      ) {
         return null;
       }
 
       return loadStaticSessionSnapshot();
     },
-    [loadStaticSessionSnapshot],
+    [loadStaticSessionSnapshot]
   );
 
   const saveAndReadReconciledAttempt = useCallback(async (nextAttempt: StudentAttempt) => {
     await studentSessionFacade.saveAttempt(nextAttempt);
-    const cachedAttempts = await studentSessionFacade.getAttemptsByScheduleId(nextAttempt.scheduleId);
+    const cachedAttempts = await studentSessionFacade.getAttemptsByScheduleId(
+      nextAttempt.scheduleId
+    );
     const matches = cachedAttempts.filter((candidate) => candidate.id === nextAttempt.id);
-    const newest = matches.length === 0
-      ? nextAttempt
-      : matches.reduce((latest, current) =>
-        (current.revision ?? 0) > (latest.revision ?? 0) ? current : latest,
-      );
+    const newest =
+      matches.length === 0
+        ? nextAttempt
+        : matches.reduce((latest, current) =>
+            (current.revision ?? 0) > (latest.revision ?? 0) ? current : latest
+          );
     if ((newest.revision ?? 0) < highestSeenAttemptRevisionRef.current) {
       return { ...newest, revision: highestSeenAttemptRevisionRef.current } as StudentAttempt;
     }
     highestSeenAttemptRevisionRef.current = Math.max(
       highestSeenAttemptRevisionRef.current,
-      newest.revision ?? 0,
+      newest.revision ?? 0
     );
     return newest;
   }, []);
@@ -317,7 +341,7 @@ export function useStudentSessionRouteData(
     }
     const cachedAttempts = await studentSessionFacade.getAttemptsByScheduleId(scheduleId);
     const candidates = cachedAttempts.filter(
-      (attempt) => normalizeCandidateId(attempt.candidateId) === normalizedCandidateId,
+      (attempt) => normalizeCandidateId(attempt.candidateId) === normalizedCandidateId
     );
 
     if (candidates.length === 0) {
@@ -342,7 +366,7 @@ export function useStudentSessionRouteData(
       incomingFreshness: LiveSnapshotFreshness,
       applyEpoch: number,
       live: BackendLiveSession,
-      source: 'refresh' | 'load',
+      source: "refresh" | "load"
     ): LiveSnapshotApplyDecision => {
       const transition = evaluateLiveSnapshotTransition({
         applyEpoch,
@@ -358,11 +382,14 @@ export function useStudentSessionRouteData(
       runStudentSessionMachineCommands(transition.commands);
       return transition.decision;
     },
-    [scheduleId],
+    [scheduleId]
   );
 
   const applyLoadTransition = useCallback(
-    (source: 'load' | 'retry', event: { type: 'requested' } | { type: 'succeeded' } | { type: 'failed'; error: string }) => {
+    (
+      source: "load" | "retry",
+      event: { type: "requested" } | { type: "succeeded" } | { type: "failed"; error: string }
+    ) => {
       const transition = evaluateLoadTransition(
         {
           scheduleId: scheduleId ?? null,
@@ -370,13 +397,13 @@ export function useStudentSessionRouteData(
           source,
           rollout: loadTransitionRollout,
         },
-        event,
+        event
       );
       runStudentSessionMachineCommands(transition.commands);
       setIsLoading(transition.decision.isLoading);
       setError(transition.decision.error);
     },
-    [loadTransitionRollout, scheduleId],
+    [loadTransitionRollout, scheduleId]
   );
 
   const mountedRef = useRef(true);
@@ -387,7 +414,7 @@ export function useStudentSessionRouteData(
     };
   }, []);
 
-  const refreshBackendSessionSnapshot = useCallback(async () => {
+  const performBackendSessionSnapshotRefresh = useCallback(async () => {
     // The initial load owns the epoch until it has applied a complete static
     // and live snapshot. A poll or websocket-triggered refresh that starts
     // after static state is set would otherwise supersede that load and leave
@@ -406,7 +433,7 @@ export function useStudentSessionRouteData(
     };
 
     try {
-        let scheduleEntity = scheduleRef.current;
+      let scheduleEntity = scheduleRef.current;
       if (!scheduleEntity) {
         const loaded = await loadStaticSessionSnapshot();
         if (!mountedRef.current || applyEpoch !== refreshEpochRef.current) {
@@ -425,19 +452,19 @@ export function useStudentSessionRouteData(
         // epoch_superseded reason the observability tests assert on.
         if (mountedRef.current && applyEpoch !== refreshEpochRef.current) {
           emitStudentObservabilityMetric(
-            'student_refresh_stale_discard_total',
+            "student_refresh_stale_discard_total",
             withStudentObservabilityDimensions({
               scheduleId: scheduleId ?? null,
               attemptId: (live as BackendLiveSession | null)?.attempt?.id ?? null,
               endpoint: scheduleId ? buildLiveMetricEndpoint(scheduleId) : null,
               statusCode: LIVE_SESSION_STATUS_CODE,
-              reason: 'epoch_superseded',
+              reason: "epoch_superseded",
               syncState: extractAttemptSyncState(live),
-              source: 'refresh',
+              source: "refresh",
               rolloutCohort: resolveAnswerInvariantRollout(live as BackendLiveSession).cohort,
               answerInvariantEnabled: false,
-              answerInvariantSource: 'none',
-            }),
+              answerInvariantSource: "none",
+            })
           );
         }
         return;
@@ -473,24 +500,29 @@ export function useStudentSessionRouteData(
       if (!mountedRef.current || epochStale) {
         if (mountedRef.current && epochStale) {
           emitStudentObservabilityMetric(
-            'student_refresh_stale_discard_total',
+            "student_refresh_stale_discard_total",
             withStudentObservabilityDimensions({
               scheduleId: scheduleId ?? null,
               attemptId: live.attempt?.id ?? null,
               endpoint: scheduleId ? buildLiveMetricEndpoint(scheduleId) : null,
               statusCode: LIVE_SESSION_STATUS_CODE,
-              reason: 'epoch_superseded',
+              reason: "epoch_superseded",
               syncState: extractAttemptSyncState(live),
-              source: 'refresh',
+              source: "refresh",
               rolloutCohort: resolveAnswerInvariantRollout(live).cohort,
               answerInvariantEnabled: false,
-              answerInvariantSource: 'none',
-            }),
+              answerInvariantSource: "none",
+            })
           );
         }
         return;
       }
-      const applyDecision = evaluateLiveSnapshotApply(incomingFreshness, applyEpoch, live, 'refresh');
+      const applyDecision = evaluateLiveSnapshotApply(
+        incomingFreshness,
+        applyEpoch,
+        live,
+        "refresh"
+      );
       if (applyDecision.discardAll) {
         // Freshness loser (out-of-order sibling arrived second): the gate
         // above already emitted its own regressed-reason metric via
@@ -499,19 +531,19 @@ export function useStudentSessionRouteData(
         // before touching durability or shared refs.
         if (mountedRef.current) {
           emitStudentObservabilityMetric(
-            'student_refresh_stale_discard_total',
+            "student_refresh_stale_discard_total",
             withStudentObservabilityDimensions({
               scheduleId: scheduleId ?? null,
               attemptId: live.attempt?.id ?? null,
               endpoint: scheduleId ? buildLiveMetricEndpoint(scheduleId) : null,
               statusCode: LIVE_SESSION_STATUS_CODE,
-              reason: 'epoch_superseded',
+              reason: "epoch_superseded",
               syncState: extractAttemptSyncState(live),
-              source: 'refresh',
+              source: "refresh",
               rolloutCohort: resolveAnswerInvariantRollout(live).cohort,
               answerInvariantEnabled: false,
-              answerInvariantSource: 'none',
-            }),
+              answerInvariantSource: "none",
+            })
           );
         }
         return;
@@ -523,7 +555,7 @@ export function useStudentSessionRouteData(
           : null;
       const previousRuntimeSnapshot = runtimeSnapshotRef.current;
       const nextRuntimeSnapshot = applyDecision.applyRuntime
-        ? mappedRuntime ?? previousRuntimeSnapshot
+        ? (mappedRuntime ?? previousRuntimeSnapshot)
         : previousRuntimeSnapshot;
       const rollout = resolveAnswerInvariantRollout(live);
       let reconciledAttempt: StudentAttempt | null = null;
@@ -536,21 +568,21 @@ export function useStudentSessionRouteData(
         reconciledAttempt = await saveAndReadReconciledAttempt(nextAttempt);
       }
 
-        if (applyEpoch !== refreshEpochRef.current) {
+      if (applyEpoch !== refreshEpochRef.current) {
         emitStudentObservabilityMetric(
-          'student_refresh_stale_discard_total',
+          "student_refresh_stale_discard_total",
           withStudentObservabilityDimensions({
             scheduleId: scheduleId ?? null,
             attemptId: live.attempt?.id ?? null,
             endpoint: scheduleId ? buildLiveMetricEndpoint(scheduleId) : null,
             statusCode: LIVE_SESSION_STATUS_CODE,
-            reason: 'epoch_superseded_after_reconcile',
+            reason: "epoch_superseded_after_reconcile",
             syncState: extractAttemptSyncState(live),
-            source: 'refresh',
+            source: "refresh",
             rolloutCohort: rollout.cohort,
             answerInvariantEnabled: rollout.enabled && !rollout.killSwitch,
             answerInvariantSource: rollout.source,
-          }),
+          })
         );
         return;
       }
@@ -566,17 +598,21 @@ export function useStudentSessionRouteData(
       if (reconciledAttempt) {
         setAttemptSnapshot(reconciledAttempt);
       }
-      appliedFreshnessRef.current = mergeLiveSnapshotFreshness(appliedFreshnessRef.current, incomingFreshness, {
-        applyAttempt: applyDecision.applyAttempt,
-        applyRuntime: applyDecision.applyRuntime,
-      });
+      appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
+        appliedFreshnessRef.current,
+        incomingFreshness,
+        {
+          applyAttempt: applyDecision.applyAttempt,
+          applyRuntime: applyDecision.applyRuntime,
+        }
+      );
     } catch (refreshError) {
       inFlightRefreshCountRef.current = Math.max(0, inFlightRefreshCountRef.current - 1);
       if (applyEpoch !== refreshEpochRef.current || !mountedRef.current) {
         return;
       }
       if (import.meta.env.DEV) {
-        console.warn('[student-session] refresh snapshot failed', refreshError);
+        console.warn("[student-session] refresh snapshot failed", refreshError);
       }
     }
   }, [
@@ -589,6 +625,40 @@ export function useStudentSessionRouteData(
     saveAndReadReconciledAttempt,
     sessionBootstrap,
   ]);
+
+  const refreshBackendSessionSnapshot = useCallback(() => {
+    if (providerKey !== "sat") return performBackendSessionSnapshotRefresh();
+
+    const flightKey = `${scheduleId ?? ""}:${attemptSnapshotRef.current?.id ?? ""}:${candidateId ?? ""}`;
+    const existing = satRefreshFlightRef.current;
+    if (existing?.key === flightKey) {
+      if (!existing.followUpStarted) existing.followUpRequested = true;
+      emitStudentObservabilityMetric("sat_parent_refresh_coalesced", {
+        reason: existing.followUpStarted ? "active_follow_up" : "queued_follow_up",
+      });
+      return existing.promise;
+    }
+
+    const flight: StudentSatRefreshFlight = {
+      key: flightKey,
+      followUpRequested: false,
+      followUpStarted: false,
+      promise: Promise.resolve(),
+    };
+    satRefreshFlightRef.current = flight;
+    flight.promise = Promise.resolve()
+      .then(async () => {
+        await performBackendSessionSnapshotRefresh();
+        if (flight.followUpRequested) {
+          flight.followUpStarted = true;
+          await performBackendSessionSnapshotRefresh();
+        }
+      })
+      .finally(() => {
+        if (satRefreshFlightRef.current === flight) satRefreshFlightRef.current = null;
+      });
+    return flight.promise;
+  }, [candidateId, performBackendSessionSnapshotRefresh, providerKey, scheduleId]);
 
   const scheduleDebouncedRefresh = useCallback(() => {
     if (isLoading) {
@@ -632,7 +702,7 @@ export function useStudentSessionRouteData(
       // schedule_runtime frame is a control-plane transition (start, pause,
       // resume, extend, section advance) and refreshes immediately; attempt
       // frames are per-student bursts and keep the coalescer.
-      if (event.kind === 'schedule_runtime') {
+      if (event.kind === "schedule_runtime") {
         if (event.id !== scheduleId) {
           return;
         }
@@ -642,14 +712,14 @@ export function useStudentSessionRouteData(
         const committedAtMs = event.createdAt ? Date.parse(event.createdAt) : Number.NaN;
         if (Number.isFinite(committedAtMs)) {
           emitStudentObservabilityMetric(
-            'runtime_event_to_client_ms',
+            "runtime_event_to_client_ms",
             withStudentObservabilityDimensions({
               scheduleId,
               attemptId: attemptSnapshot?.id ?? null,
               latencyMs: Math.max(0, Date.now() - committedAtMs),
               realtimeTransport: studentRealtimeTransport,
               reason: event.event,
-            }),
+            })
           );
         }
         realtimeCoordinatorRef.current?.handleEvent(event);
@@ -657,7 +727,7 @@ export function useStudentSessionRouteData(
         return;
       }
 
-      if (event.kind === 'attempt') {
+      if (event.kind === "attempt") {
         if (!attemptSnapshot?.id || event.id !== attemptSnapshot.id) {
           return;
         }
@@ -667,7 +737,13 @@ export function useStudentSessionRouteData(
         return;
       }
     },
-    [attemptSnapshot?.id, refreshOnRuntimeTransition, scheduleDebouncedRefresh, scheduleId],
+    [
+      attemptSnapshot?.id,
+      refreshOnRuntimeTransition,
+      scheduleDebouncedRefresh,
+      scheduleId,
+      studentRealtimeTransport,
+    ]
   );
 
   const handleRuntimeSnapshot = useCallback(
@@ -685,27 +761,43 @@ export function useStudentSessionRouteData(
       // ahead of the one the client reported. That difference is exactly what
       // the client missed while it was away — the one number that says whether
       // the reconnect path is closing real gaps or nothing at all.
-      const snapshotRevision = parseFiniteNumber(runtimeRecord['revision']);
+      const snapshotRevision = parseFiniteNumber(runtimeRecord["revision"]);
       const baselineRevision = connectBaselineRevisionRef.current;
-      if (baselineRevision !== null && snapshotRevision !== null && snapshotRevision > baselineRevision) {
+      if (
+        baselineRevision !== null &&
+        snapshotRevision !== null &&
+        snapshotRevision > baselineRevision
+      ) {
         emitStudentObservabilityMetric(
-          'runtime_revision_gap_on_reconnect',
+          "runtime_revision_gap_on_reconnect",
           withStudentObservabilityDimensions({
             scheduleId: scheduleId ?? null,
             attemptId: attemptSnapshot?.id ?? null,
             revisionGap: snapshotRevision - baselineRevision,
             realtimeTransport: studentRealtimeTransport,
-            reason: 'socket_snapshot',
-          }),
+            reason: "socket_snapshot",
+          })
         );
         connectBaselineRevisionRef.current = null;
       }
       const realtimeResult = realtimeCoordinatorRef.current?.handleRuntimeSnapshot({
         runtime: payload.runtime,
-        revision: parseFiniteNumber(runtimeRecord['revision']),
+        revision: parseFiniteNumber(runtimeRecord["revision"]),
         ...(payload.scheduleId ? { scheduleId: payload.scheduleId } : {}),
       });
-      if (realtimeResult === 'ignored') {
+      if (realtimeResult === "ignored") {
+        return;
+      }
+
+      // WebSocket runtime snapshots describe the shared room. IELTS personal
+      // timing is attempt-owned, so applying that room snapshot here would
+      // replace the student's section deadline with another candidate's clock.
+      // Use the attempt-aware live read as the refresh signal instead.
+      if (
+        isIeltsPersonalTimingModel(runtimeRecord["timingModel"]) ||
+        isIeltsPersonalTimingModel(runtimeSnapshotRef.current?.timingModel)
+      ) {
+        refreshOnRuntimeTransition();
         return;
       }
 
@@ -720,8 +812,8 @@ export function useStudentSessionRouteData(
             updatedAtMs: appliedFreshnessRef.current?.attempt.updatedAtMs ?? null,
           },
           runtime: {
-            revision: parseFiniteNumber(runtimeRecord['revision']),
-            updatedAtMs: parseIsoTimestampMs(runtimeRecord['updatedAt']),
+            revision: parseFiniteNumber(runtimeRecord["revision"]),
+            updatedAtMs: parseIsoTimestampMs(runtimeRecord["updatedAt"]),
           },
         };
         appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
@@ -730,13 +822,13 @@ export function useStudentSessionRouteData(
           {
             applyAttempt: false,
             applyRuntime: true,
-          },
+          }
         );
       } catch {
         // Ignore malformed snapshots and continue with pull-based refresh.
       }
     },
-    [scheduleId],
+    [attemptSnapshot?.id, refreshOnRuntimeTransition, scheduleId, studentRealtimeTransport]
   );
 
   // Phase 3: the socket is the primary student channel when the rollout says
@@ -747,13 +839,13 @@ export function useStudentSessionRouteData(
   // reconnect gap is closed by the server's own snapshot rather than by
   // trusting whatever the client happened to hold.
   useLiveUpdates({
-    role: 'student',
+    role: "student",
     ...(scheduleId ? { scheduleId } : {}),
     ...(attemptSnapshot?.id ? { attemptId: attemptSnapshot.id } : {}),
     ...(Number.isInteger(runtimeSnapshot?.revision)
       ? { lastSeenRuntimeRevision: runtimeSnapshot?.revision as number }
       : {}),
-    enabled: studentRealtimeTransport === 'websocket',
+    enabled: studentRealtimeTransport === "websocket",
     // STUDENT_WS=gone is a server-side rollback the browser cannot observe
     // (the 410 never reaches script): spend a bounded budget, then let the
     // poll own the session instead of reconnecting forever.
@@ -765,13 +857,13 @@ export function useStudentSessionRouteData(
       pollFallbackReportedRef.current = false;
       connectBaselineRevisionRef.current = runtimeSnapshotRef.current?.revision ?? null;
       emitStudentObservabilityMetric(
-        'student_ws_connect_success',
+        "student_ws_connect_success",
         withStudentObservabilityDimensions({
           scheduleId: scheduleId ?? null,
           attemptId: attemptSnapshot?.id ?? null,
           realtimeTransport: studentRealtimeTransport,
-          reason: 'connected',
-        }),
+          reason: "connected",
+        })
       );
       realtimeCoordinatorRef.current?.handleSocketConnected();
       if (state && !isLoading) {
@@ -787,26 +879,26 @@ export function useStudentSessionRouteData(
         // the retired/misconfigured case, reported separately by
         // onConnectExhausted.
         emitStudentObservabilityMetric(
-          'student_ws_disconnect_after_open',
+          "student_ws_disconnect_after_open",
           withStudentObservabilityDimensions({
             scheduleId: scheduleId ?? null,
             attemptId: attemptSnapshot?.id ?? null,
             realtimeTransport: studentRealtimeTransport,
-            reason: 'after_open',
-          }),
+            reason: "after_open",
+          })
         );
       }
       realtimeCoordinatorRef.current?.handleSocketDisconnected();
     },
     onConnectExhausted: () => {
       emitStudentObservabilityMetric(
-        'student_ws_connect_exhausted',
+        "student_ws_connect_exhausted",
         withStudentObservabilityDimensions({
           scheduleId: scheduleId ?? null,
           attemptId: attemptSnapshot?.id ?? null,
           realtimeTransport: studentRealtimeTransport,
-          reason: 'connect_budget',
-        }),
+          reason: "connect_budget",
+        })
       );
     },
     onRuntimeSnapshot: handleRuntimeSnapshot,
@@ -814,199 +906,207 @@ export function useStudentSessionRouteData(
   });
 
   useEffect(() => {
-    if (
-      !scheduleId ||
-      !candidateId ||
-      authStatus !== 'authenticated' ||
-      Boolean(error)
-    ) {
+    if (!scheduleId || !candidateId || authStatus !== "authenticated" || Boolean(error)) {
       setLiveSocketConnected(false);
     }
   }, [authStatus, candidateId, error, scheduleId]);
 
-  const loadStudentData = useCallback(async (source: 'load' | 'retry' = 'load') => {
-    if (!mountedRef.current) {
-      return;
-    }
-    const loadEpoch = ++refreshEpochRef.current;
-    if (!scheduleId) {
-      applyLoadTransition(source, { type: 'failed', error: 'Schedule ID not found' });
-      return;
-    }
+  const loadStudentData = useCallback(
+    async (source: "load" | "retry" = "load") => {
+      if (!mountedRef.current) {
+        return;
+      }
+      const loadEpoch = ++refreshEpochRef.current;
+      if (!scheduleId) {
+        applyLoadTransition(source, { type: "failed", error: "Schedule ID not found" });
+        return;
+      }
 
-    if (authStatus === 'loading') {
-      return;
-    }
+      if (authStatus === "loading") {
+        return;
+      }
 
-      applyLoadTransition(source, { type: 'requested' });
+      applyLoadTransition(source, { type: "requested" });
       setOwnershipBlocked(false);
 
       try {
         if (!candidateId) {
-        throw new Error('Invalid Student ID/WCODE. Please check in again.');
+          throw new Error("Invalid Student ID/WCODE. Please check in again.");
         }
 
-      if (!studentKey) {
-        throw new Error('Student identity not found');
-      }
+        if (!studentKey) {
+          throw new Error("Student identity not found");
+        }
 
-      const staticSnapshot = await loadStaticSessionSnapshot();
-      if (loadEpoch !== refreshEpochRef.current || !mountedRef.current) {
-        inFlightRefreshCountRef.current = Math.max(0, inFlightRefreshCountRef.current - 1);
-        return;
-      }
-      if (!staticSnapshot) {
-        throw new Error('Failed to load static session snapshot');
-      }
-      let loadedStatic: LoadedStaticSnapshot = staticSnapshot;
+        const staticSnapshot = await loadStaticSessionSnapshot();
+        if (loadEpoch !== refreshEpochRef.current || !mountedRef.current) {
+          inFlightRefreshCountRef.current = Math.max(0, inFlightRefreshCountRef.current - 1);
+          return;
+        }
+        if (!staticSnapshot) {
+          throw new Error("Failed to load static session snapshot");
+        }
+        let loadedStatic: LoadedStaticSnapshot = staticSnapshot;
 
-      let live = await (sessionBootstrap?.loadLive() ??
-        studentSessionFacade.loadLiveSession(scheduleId, candidateId));
-      if (loadEpoch !== refreshEpochRef.current || !mountedRef.current) {
-        return;
-      }
-      const reloadedStatic = await maybeRebootstrapStaticOnVersionMismatch(live);
-      if (loadEpoch !== refreshEpochRef.current || !mountedRef.current) {
-        return;
-      }
-      if (reloadedStatic) {
-        loadedStatic = reloadedStatic;
-        live = await (sessionBootstrap?.loadLive() ??
+        let live = await (sessionBootstrap?.loadLive() ??
           studentSessionFacade.loadLiveSession(scheduleId, candidateId));
         if (loadEpoch !== refreshEpochRef.current || !mountedRef.current) {
           return;
         }
-      }
-
-      const applyEpoch = loadEpoch;
-      const incomingFreshness = extractLiveSnapshotFreshness(live);
-      const applyDecision = evaluateLiveSnapshotApply(incomingFreshness, applyEpoch, live, 'load');
-      if (applyDecision.discardAll) {
-        applyLoadTransition(source, { type: 'succeeded' });
-        return;
-      }
-
-      const rollout = resolveAnswerInvariantRollout(live);
-      setAnswerInvariantRollout(rollout);
-      const mappedRuntime = applyDecision.applyRuntime && live.runtime
-        ? studentSessionFacade.mapRuntime(live.runtime, loadedStatic.scheduleEntity)
-        : null;
-      const previousRuntimeSnapshot = runtimeSnapshotRef.current;
-      const nextRuntimeSnapshot = applyDecision.applyRuntime
-        ? mappedRuntime ?? previousRuntimeSnapshot
-        : previousRuntimeSnapshot;
-      if (applyDecision.applyRuntime && nextRuntimeSnapshot !== previousRuntimeSnapshot) {
-        runtimeSnapshotRef.current = nextRuntimeSnapshot;
-        setRuntimeSnapshot(nextRuntimeSnapshot);
-        liveReceivedAtRef.current = Date.now();
-      }
-
-      if (live.attempt && applyDecision.applyAttempt) {
-        const nextAttempt = studentSessionFacade.mapAttempt(live.attempt);
-        const reconciledAttempt = await saveAndReadReconciledAttempt(nextAttempt);
-        if (applyEpoch !== refreshEpochRef.current) {
-          emitStudentObservabilityMetric(
-            'student_refresh_stale_discard_total',
-            withStudentObservabilityDimensions({
-              scheduleId: scheduleId ?? null,
-              attemptId: live.attempt.id,
-              endpoint: scheduleId ? buildLiveMetricEndpoint(scheduleId) : null,
-              statusCode: LIVE_SESSION_STATUS_CODE,
-              reason: 'epoch_superseded_after_reconcile',
-              syncState: extractAttemptSyncState(live),
-              source: 'load',
-              rolloutCohort: rollout.cohort,
-              answerInvariantEnabled: rollout.enabled && !rollout.killSwitch,
-              answerInvariantSource: rollout.source,
-            }),
-          );
-          applyLoadTransition(source, { type: 'succeeded' });
+        const reloadedStatic = await maybeRebootstrapStaticOnVersionMismatch(live);
+        if (loadEpoch !== refreshEpochRef.current || !mountedRef.current) {
           return;
         }
-        setAttemptSnapshot(reconciledAttempt);
-        liveReceivedAtRef.current = Date.now();
-      } else if (!live.attempt) {
-        // SAT admission is server-owned. A successful live read with no
-        // attempt means this authenticated identity is not admitted to this
-        // schedule; a local cache entry must never turn that response into an
-        // exam route (or create a replacement attempt here).
-        if (loadedStatic.providerKey === 'sat') {
-          setAttemptSnapshot(null);
+        if (reloadedStatic) {
+          loadedStatic = reloadedStatic;
+          live = await (sessionBootstrap?.loadLive() ??
+            studentSessionFacade.loadLiveSession(scheduleId, candidateId));
+          if (loadEpoch !== refreshEpochRef.current || !mountedRef.current) {
+            return;
+          }
+        }
+
+        const applyEpoch = loadEpoch;
+        const incomingFreshness = extractLiveSnapshotFreshness(live);
+        const applyDecision = evaluateLiveSnapshotApply(
+          incomingFreshness,
+          applyEpoch,
+          live,
+          "load"
+        );
+        if (applyDecision.discardAll) {
+          applyLoadTransition(source, { type: "succeeded" });
+          return;
+        }
+
+        const rollout = resolveAnswerInvariantRollout(live);
+        setAnswerInvariantRollout(rollout);
+        const mappedRuntime =
+          applyDecision.applyRuntime && live.runtime
+            ? studentSessionFacade.mapRuntime(live.runtime, loadedStatic.scheduleEntity)
+            : null;
+        const previousRuntimeSnapshot = runtimeSnapshotRef.current;
+        const nextRuntimeSnapshot = applyDecision.applyRuntime
+          ? (mappedRuntime ?? previousRuntimeSnapshot)
+          : previousRuntimeSnapshot;
+        if (applyDecision.applyRuntime && nextRuntimeSnapshot !== previousRuntimeSnapshot) {
+          runtimeSnapshotRef.current = nextRuntimeSnapshot;
+          setRuntimeSnapshot(nextRuntimeSnapshot);
           liveReceivedAtRef.current = Date.now();
-          appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
-            appliedFreshnessRef.current,
-            incomingFreshness,
-            {
-              applyAttempt: false,
-              applyRuntime: applyDecision.applyRuntime,
-            },
-          );
-          applyLoadTransition(source, { type: 'succeeded' });
-          return;
         }
 
-        const cachedAttempt = await readCachedAttemptForCandidate();
-        if (cachedAttempt) {
-          setAttemptSnapshot(cachedAttempt);
+        if (live.attempt && applyDecision.applyAttempt) {
+          const nextAttempt = studentSessionFacade.mapAttempt(live.attempt);
+          const reconciledAttempt = await saveAndReadReconciledAttempt(nextAttempt);
+          if (applyEpoch !== refreshEpochRef.current) {
+            emitStudentObservabilityMetric(
+              "student_refresh_stale_discard_total",
+              withStudentObservabilityDimensions({
+                scheduleId: scheduleId ?? null,
+                attemptId: live.attempt.id,
+                endpoint: scheduleId ? buildLiveMetricEndpoint(scheduleId) : null,
+                statusCode: LIVE_SESSION_STATUS_CODE,
+                reason: "epoch_superseded_after_reconcile",
+                syncState: extractAttemptSyncState(live),
+                source: "load",
+                rolloutCohort: rollout.cohort,
+                answerInvariantEnabled: rollout.enabled && !rollout.killSwitch,
+                answerInvariantSource: rollout.source,
+              })
+            );
+            applyLoadTransition(source, { type: "succeeded" });
+            return;
+          }
+          setAttemptSnapshot(reconciledAttempt);
           liveReceivedAtRef.current = Date.now();
-          appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
-            appliedFreshnessRef.current,
-            incomingFreshness,
-            {
-              applyAttempt: false,
-              applyRuntime: applyDecision.applyRuntime,
-            },
-          );
-          applyLoadTransition(source, { type: 'succeeded' });
-          return;
+        } else if (!live.attempt) {
+          // SAT admission is server-owned. A successful live read with no
+          // attempt means this authenticated identity is not admitted to this
+          // schedule; a local cache entry must never turn that response into an
+          // exam route (or create a replacement attempt here).
+          if (loadedStatic.providerKey === "sat") {
+            setAttemptSnapshot(null);
+            liveReceivedAtRef.current = Date.now();
+            appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
+              appliedFreshnessRef.current,
+              incomingFreshness,
+              {
+                applyAttempt: false,
+                applyRuntime: applyDecision.applyRuntime,
+              }
+            );
+            applyLoadTransition(source, { type: "succeeded" });
+            return;
+          }
+
+          const cachedAttempt = await readCachedAttemptForCandidate();
+          if (cachedAttempt) {
+            setAttemptSnapshot(cachedAttempt);
+            liveReceivedAtRef.current = Date.now();
+            appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
+              appliedFreshnessRef.current,
+              incomingFreshness,
+              {
+                applyAttempt: false,
+                applyRuntime: applyDecision.applyRuntime,
+              }
+            );
+            applyLoadTransition(source, { type: "succeeded" });
+            return;
+          }
+
+          const firstEnabledModule =
+            (["listening", "reading", "writing", "speaking", "science"] as const).find(
+              (module) => loadedStatic.examState.config.sections[module].enabled
+            ) ?? "listening";
+
+          const createdAttempt = await studentSessionFacade.createAttempt({
+            scheduleId,
+            studentKey,
+            examId: loadedStatic.scheduleEntity.examId,
+            examTitle: loadedStatic.scheduleEntity.examTitle,
+            ...createCandidateProfile(candidateId, storedCandidateProfile),
+            currentModule: mappedRuntime?.currentSectionKey ?? firstEnabledModule,
+          });
+          setAttemptSnapshot(createdAttempt);
+          liveReceivedAtRef.current = Date.now();
         }
-
-        const firstEnabledModule =
-          (['listening', 'reading', 'writing', 'speaking', 'science'] as const).find(
-            (module) => loadedStatic.examState.config.sections[module].enabled,
-          ) ?? 'listening';
-
-        const createdAttempt = await studentSessionFacade.createAttempt({
-          scheduleId,
-          studentKey,
-          examId: loadedStatic.scheduleEntity.examId,
-          examTitle: loadedStatic.scheduleEntity.examTitle,
-          ...createCandidateProfile(candidateId, storedCandidateProfile),
-          currentModule: mappedRuntime?.currentSectionKey ?? firstEnabledModule,
+        appliedFreshnessRef.current = mergeLiveSnapshotFreshness(
+          appliedFreshnessRef.current,
+          incomingFreshness,
+          {
+            applyAttempt: applyDecision.applyAttempt,
+            applyRuntime: applyDecision.applyRuntime,
+          }
+        );
+        applyLoadTransition(source, { type: "succeeded" });
+      } catch (loadError) {
+        // Another browser/device owns this SAT attempt: not a load failure but
+        // an ownership state the route answers with the device-transfer surface.
+        if ((loadError as { code?: unknown } | null)?.code === "SESSION_ALREADY_ACTIVE") {
+          setOwnershipBlocked(true);
+        }
+        applyLoadTransition(source, {
+          type: "failed",
+          error: loadError instanceof Error ? loadError.message : "Failed to load exam data",
         });
-        setAttemptSnapshot(createdAttempt);
-        liveReceivedAtRef.current = Date.now();
       }
-      appliedFreshnessRef.current = mergeLiveSnapshotFreshness(appliedFreshnessRef.current, incomingFreshness, {
-        applyAttempt: applyDecision.applyAttempt,
-        applyRuntime: applyDecision.applyRuntime,
-      });
-      applyLoadTransition(source, { type: 'succeeded' });
-    } catch (loadError) {
-      // Another browser/device owns this SAT attempt: not a load failure but
-      // an ownership state the route answers with the device-transfer surface.
-      if ((loadError as { code?: unknown } | null)?.code === 'SESSION_ALREADY_ACTIVE') {
-        setOwnershipBlocked(true);
-      }
-      applyLoadTransition(source, {
-        type: 'failed',
-        error: loadError instanceof Error ? loadError.message : 'Failed to load exam data',
-      });
-    }
-  }, [
-    applyLoadTransition,
-    authStatus,
-    candidateId,
-    evaluateLiveSnapshotApply,
-    loadStaticSessionSnapshot,
-    maybeRebootstrapStaticOnVersionMismatch,
-    readCachedAttemptForCandidate,
-    scheduleId,
-    saveAndReadReconciledAttempt,
-    sessionBootstrap,
-    storedCandidateProfile,
-    studentKey,
-  ]);
+    },
+    [
+      applyLoadTransition,
+      authStatus,
+      candidateId,
+      evaluateLiveSnapshotApply,
+      loadStaticSessionSnapshot,
+      maybeRebootstrapStaticOnVersionMismatch,
+      readCachedAttemptForCandidate,
+      scheduleId,
+      saveAndReadReconciledAttempt,
+      sessionBootstrap,
+      storedCandidateProfile,
+      studentKey,
+    ]
+  );
 
   const loadStudentDataRef = useRef(loadStudentData);
   useEffect(() => {
@@ -1014,15 +1114,15 @@ export function useStudentSessionRouteData(
   }, [loadStudentData]);
 
   useEffect(() => {
-    const mountKey = `${scheduleId ?? ''}::${candidateId ?? ''}::${authStatus}`;
+    const mountKey = `${scheduleId ?? ""}::${candidateId ?? ""}::${authStatus}`;
     if (initialLoadKeyRef.current === mountKey) {
       return;
     }
     initialLoadKeyRef.current = mountKey;
-    if (!scheduleId || !candidateId || authStatus !== 'authenticated') {
+    if (!scheduleId || !candidateId || authStatus !== "authenticated") {
       return;
     }
-    loadStudentDataRef.current('load').catch(() => {});
+    loadStudentDataRef.current("load").catch(() => {});
   }, [authStatus, candidateId, scheduleId]);
 
   // The runtime poll loop is the student RECOVERY channel: pollAfterSecs from
@@ -1063,7 +1163,7 @@ export function useStudentSessionRouteData(
     const pollClient = createStudentRuntimePoll({
       scheduleId,
       fetchJson: async (path) => {
-        const res = await fetch(path, { credentials: 'include' });
+        const res = await fetch(path, { credentials: "include" });
         if (res.status === 304) {
           return { status: 304, json: null };
         }
@@ -1094,7 +1194,7 @@ export function useStudentSessionRouteData(
       cadence: () => {
         const policy = realtimeCoordinatorRef.current?.getPollingPolicy(
           runtimeSnapshotRef.current?.status ?? null,
-          { attemptPhase: attemptSnapshotRef.current?.phase ?? null },
+          { attemptPhase: attemptSnapshotRef.current?.phase ?? null }
         );
         return policy
           ? { floorMs: policy.intervalMs, ceilingMs: policy.maxIntervalMs }
@@ -1119,19 +1219,19 @@ export function useStudentSessionRouteData(
             if ((pollError as { status?: number })?.status === 404) {
               runtimePollAvailableRef.current = false;
               if (
-                studentRealtimeTransport === 'websocket' &&
+                studentRealtimeTransport === "websocket" &&
                 !wsConnectedRef.current &&
                 !pollFallbackReportedRef.current
               ) {
                 pollFallbackReportedRef.current = true;
                 emitStudentObservabilityMetric(
-                  'poll_fallback_activation',
+                  "poll_fallback_activation",
                   withStudentObservabilityDimensions({
                     scheduleId: scheduleId ?? null,
                     attemptId: attemptSnapshot?.id ?? null,
                     realtimeTransport: studentRealtimeTransport,
-                    reason: 'socket_unavailable',
-                  }),
+                    reason: "socket_unavailable",
+                  })
                 );
               }
               try {
@@ -1149,19 +1249,19 @@ export function useStudentSessionRouteData(
           // that keeps flapping is visible as repeated activations rather than
           // one continuous state.
           if (
-            studentRealtimeTransport === 'websocket' &&
+            studentRealtimeTransport === "websocket" &&
             !wsConnectedRef.current &&
             !pollFallbackReportedRef.current
           ) {
             pollFallbackReportedRef.current = true;
             emitStudentObservabilityMetric(
-              'poll_fallback_activation',
+              "poll_fallback_activation",
               withStudentObservabilityDimensions({
                 scheduleId: scheduleId ?? null,
                 attemptId: attemptSnapshot?.id ?? null,
                 realtimeTransport: studentRealtimeTransport,
-                reason: 'socket_unavailable',
-              }),
+                reason: "socket_unavailable",
+              })
             );
           }
           // A runtime revision change means cohort state moved, and the loop's
@@ -1191,7 +1291,7 @@ export function useStudentSessionRouteData(
       // instead of applying a second, independent cadence of its own.
       resolveIntervalMs: () =>
         runtimePollLoopRef.current?.nextDelayMs() ?? pollingPolicy.intervalMs,
-    },
+    }
   );
 
   // Phase 02 seed (additive, memoized): non-null iff the SAT identity is
@@ -1203,9 +1303,9 @@ export function useStudentSessionRouteData(
   // exempt from deps); every reactive input is listed so static re-resolve
   // (new schedule/state objects) rebuilds the seed. Seed identity churn is
   // harmless: the child bootstrap effect deps read seed scalars only.
-  const isSatStaticReady = providerKey === 'sat' && schedule !== null && state !== null;
+  const isSatStaticReady = providerKey === "sat" && schedule !== null && state !== null;
   const satBootstrapSeed = useMemo<SatBootstrapSeed | null>(() => {
-    if (providerKey !== 'sat' || schedule === null || state === null) {
+    if (providerKey !== "sat" || schedule === null || state === null) {
       return null;
     }
     if (!scheduleId || !candidateId || !attemptSnapshot?.id) {
@@ -1240,6 +1340,6 @@ export function useStudentSessionRouteData(
     isSatStaticReady,
     refreshRuntime: (...args: Parameters<typeof refreshBackendSessionSnapshot>) =>
       refreshBackendSessionSnapshot(...args).catch(() => {}),
-    retry: () => loadStudentData('retry').catch(() => {}),
+    retry: () => loadStudentData("retry").catch(() => {}),
   };
 }

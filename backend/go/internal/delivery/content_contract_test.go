@@ -19,15 +19,15 @@ func TestDeliveredQuestionsExcludeGradingSecrets(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			mock.ExpectQuery("SELECT eq.id AS exam_question_id").WithArgs("mod-1").WillReturnRows(
-				sqlmock.NewRows([]string{"id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer", "metadata", "accessibility"}).
-					AddRow("eq-1", "q-1", 0, false, "single_choice", `{}`, `{}`, answer, `{}`, `{}`))
-			questions, err := deliverySvc(db).loadQuestions(context.Background(), "mod-1")
+			mock.ExpectQuery("SELECT eq.module_id, eq.id AS exam_question_id").WithArgs("ver-1").WillReturnRows(
+				sqlmock.NewRows([]string{"module_id", "id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer", "metadata", "accessibility"}).
+					AddRow("mod-1", "eq-1", "q-1", 0, false, "single_choice", `{}`, `{}`, answer, `{}`, `{}`))
+			questions, err := loadBulkDeliveryQuestions(context.Background(), db, "ver-1")
 			if err != nil {
 				t.Fatal(err)
 			}
 			var wire map[string]any
-			if err := json.Unmarshal(questions[0].Answer, &wire); err != nil {
+			if err := json.Unmarshal(questions[0].q.Answer, &wire); err != nil {
 				t.Fatal(err)
 			}
 			for _, key := range []string{"correctOptionId", "acceptedResponses", "internalNote"} {

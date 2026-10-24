@@ -831,6 +831,12 @@ export interface StudentSession {
   runtimeBreakEntryStartsAt?: string | null | undefined;
   runtimeBreakDeadlineAt?: string | null | undefined;
   runtimeBreakRemainingSeconds?: number | null | undefined;
+  satRecoveryModuleAttemptId?: string | null | undefined;
+  satRecoveryModuleTitle?: string | null | undefined;
+  satRecoveryPhase?: string | null | undefined;
+  satRecoveryKind?: "work" | "entry" | null | undefined;
+  satRecoveryDeadlineAt?: string | null | undefined;
+  satRecoveryBoundaryRevision?: number | null | undefined;
   /**
    * Runtime identity fence (SAT adaptive routing). These order two projections
    * of one candidate: `lastActivity` is presence only ("when did we last hear
@@ -845,6 +851,10 @@ export interface StudentSession {
   runtimeModuleAttemptRevision?: number | null | undefined;
   runtimeSectionStatus?: SectionRuntimeStatus | undefined;
   runtimeWaiting?: boolean | undefined;
+  ieltsPersonalStatus?: "preparing" | "active" | "delayed" | "reconnecting" | "submitting" | "completed" | "unable" | undefined;
+  ieltsPersonalSectionKey?: ModuleType | undefined;
+  ieltsPersonalDeadlineAt?: string | null | undefined;
+  ieltsPersonalTimeRemainingSeconds?: number | null | undefined;
   violations: Violation[];
   warnings: number;
   lastActivity: string;

@@ -31,7 +31,7 @@ export function SatRoomHeader({
         <SatButton variant="quiet" icon={<ArrowLeft size={16} aria-hidden="true" />} onClick={onBack} className="-ml-1 shrink-0 px-2.5">Rooms</SatButton>
         <div className="min-w-[min(100%,16rem)] flex-[1_1_16rem]">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
-            <h1 className="min-w-0 truncate text-[22px] font-semibold leading-7 tracking-[-0.02em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
+            <h1 data-sat-room-title tabIndex={-1} className="min-w-0 truncate outline-none text-[22px] font-semibold leading-7 tracking-[-0.02em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h1>
             {status}
           </div>
           <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">

@@ -206,6 +206,7 @@ export function StudentExamWorkspace({
           tabletMode={tabletMode}
           layoutMode={layoutMode}
           onOpenNavigator={onOpenNavigator}
+          examType={examState.type}
         />
       ) : null}
 

@@ -237,7 +237,9 @@ func liveWebSocketHandler(app *App) http.HandlerFunc {
 		if query.scheduleID != "" && app.Schedules != nil {
 			runtime, err := app.Schedules.GetRuntime(r.Context(), query.scheduleID)
 			if err == nil && runtime.Revision > runtimeRevision(query.lastSeenRuntimeRevision) {
-				payloadLoader := loadStudentRuntimeContext
+				payloadLoader := func(ctx context.Context, db *sql.DB, scheduleID string) (map[string]any, error) {
+					return loadStudentRuntimeContext(ctx, db, scheduleID, query.attemptID)
+				}
 				if sess.Role != auth.RoleStudent {
 					payloadLoader = loadStaffRuntimeContext
 				}

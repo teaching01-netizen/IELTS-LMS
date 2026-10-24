@@ -82,12 +82,14 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 	finalizedModules := 0
 	var hubEvents []liveupdates.Event
 	var autoStartLag *float64
+	var recoveryTransitions []satBoundaryTransition
 	// B1: reconcile locks attempt + runtime rows explicitly; it never depends
 	// on a repeatable snapshot, so RC only shrinks its gap-lock footprint.
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		shouldComplete, completedInTx, satCreated, changed, finalizedModules = false, false, false, false, 0
 		hubEvents = nil
 		autoStartLag = nil
+		recoveryTransitions = nil
 		var attemptRow, providerKey string
 		if err := t.QueryRowContext(ctx,
 			"SELECT id, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), '') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
@@ -151,7 +153,17 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			}
 			closingAsOf = dbNow.UTC().Add(-attempts.ModuleCloseWindow(timingModel, handoffMode))
 		}
+		var recoveryPolicy *attempts.SATDeliveryPolicy
+		recoveryPolicyLoaded := false
 		if examruntime.IsSatPersonal(timingModel) && runtimeStatus == "live" {
+			if providerKey == "sat" {
+				var policyErr error
+				recoveryPolicy, policyErr = satRecoveryPolicyTx(ctx, t, attemptID)
+				if policyErr != nil {
+					return policyErr
+				}
+				recoveryPolicyLoaded = true
+			}
 			// Personal breaks own their deadline. They are completed at that
 			// exact instant (no cohort section clock and no module save grace);
 			// a delayed worker cannot consume the next module's authored time.
@@ -189,7 +201,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				attemptID).Scan(&pendingBreak); err != nil {
 				return err
 			}
-			if !pendingBreak {
+			if !pendingBreak && recoveryPolicy == nil {
 				ares, err := t.ExecContext(ctx, `
 					UPDATE assessment_module_attempts
 					SET state = 'active', started_at = UTC_TIMESTAMP(6),
@@ -204,7 +216,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 					    WHERE sa.id = assessment_module_attempts.attempt_id
 					      AND (sa.proctor_status = 'paused'
 					           OR (sa.sat_start_code_required = 1 AND sa.sat_start_code_accepted_at IS NULL)))
-					ORDER BY created_at, id LIMIT 1`, attemptID)
+					`+sectionEntryActivationSQL("assessment_module_attempts")+` ORDER BY created_at, id LIMIT 1`, attemptID)
 				if err != nil {
 					return err
 				}
@@ -223,6 +235,14 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 					}
 					changed = true
 				}
+			}
+		}
+		var followup *moduleFollowupContext
+		if !examruntime.IsSatPersonal(timingModel) || recoveryPolicyLoaded {
+			followup = &moduleFollowupContext{
+				timingModel:    timingModel,
+				handoffMode:    handoffMode,
+				recoveryPolicy: recoveryPolicy,
 			}
 		}
 		for i := 0; i < reconcileCap; i++ {
@@ -247,6 +267,24 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				}
 				break
 			}
+			if providerKey == "sat" && examruntime.IsSatPersonal(timingModel) {
+				handled, boundaryChanged, transition, err := reconcileSatRecoveryBoundaryTx(ctx, t, attemptID, mod)
+				if err != nil {
+					return err
+				}
+				if transition.from != "" {
+					recoveryTransitions = append(recoveryTransitions, transition)
+				}
+				if handled {
+					if boundaryChanged {
+						changed = true
+					}
+					// The policy boundary owns this module until settlement or an
+					// explicit resolution. In particular, do not let the legacy
+					// timeout path route it or complete the attempt.
+					break
+				}
+			}
 			expired, err := reconcileModuleExpiredTx(ctx, t, runtimeID, runtimeStatus, timingModel, currentStageKey, currentStageOrder, mod, closingAsOf, providerKey == "sat")
 			if err != nil {
 				return err
@@ -264,7 +302,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				startedAt: mod.startedAt, pausedAt: mod.pausedAt,
 				accumulatedPausedSeconds: mod.accumulatedPausedSeconds,
 				extensionSeconds:         mod.extensionSeconds, completionReason: mod.completionReason,
-			}, "time_expired", basis)
+			}, "time_expired", basis, followup)
 			if err != nil {
 				return err
 			}
@@ -331,6 +369,9 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		return nil
 	}); err != nil {
 		return false, err
+	}
+	for _, transition := range recoveryTransitions {
+		recordSATRecoveryBoundaryTransition(transition)
 	}
 	if autoStartLag != nil {
 		telemetry.IncCounter(telemetry.MSATM2AutoStartTotal)
@@ -592,6 +633,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			  AND a.submitted_at IS NULL
 			  AND COALESCE(a.proctor_status, 'active') <> 'paused'
 			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			  AND NOT EXISTS (SELECT 1 FROM assessment_module_boundaries owned WHERE owned.module_attempt_id = m.id)
 			  AND m.id > ?
 			ORDER BY m.id LIMIT ?`, closingAsOf, int64(attempts.SATHandoff().CloseWindow/time.Second), asOf.UTC(), cursor, limit)
 		if err != nil {
@@ -615,6 +657,79 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 		rows.Close()
 		if count < int(limit) {
 			break
+		}
+	}
+	// Recovery-policy work is driven by the boundary's indexed next action,
+	// whose first due instant is the exact module deadline (rather than the
+	// legacy close-grace deadline). Blocked rows clear next_action_at, so an
+	// expired exception does not become a hot-loop candidate; the legacy leg
+	// above skips every module that has a boundary for the same reason.
+	//
+	// Pages follow the (next_action_at, module_attempt_id) due index from the
+	// sweep's one cutoff. The cursor is local to this sweep: the next sweep
+	// starts over, so a deadline rescheduled earlier is never skipped, and a
+	// row left due (paused) cannot hold the sweep on one page.
+	if len(candidates) < personalTimeoutSweepLimit {
+		seenModules := make(map[string]struct{}, len(candidates))
+		for _, c := range candidates {
+			seenModules[c.moduleID] = struct{}{}
+		}
+		const dueBoundaries = `
+				SELECT b.next_action_at, b.module_attempt_id, a.id, a.schedule_id
+				FROM assessment_module_boundaries b
+				JOIN assessment_module_attempts m ON m.id = b.module_attempt_id
+				JOIN student_attempts a ON a.id = b.attempt_id
+				JOIN exam_schedules s ON s.id = a.schedule_id
+				JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
+				WHERE b.phase IN ('preparing', 'working', 'collecting')
+				  AND b.next_action_at IS NOT NULL AND b.next_action_at <= ?
+				  AND m.state IN ('not_started', 'active', 'review')
+				  AND r.timing_model = 'sat_personal_v1'
+				  AND s.sat_delivery_policy IS NOT NULL
+				  AND a.submitted_at IS NULL
+				  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')`
+		cutoff := asOf.UTC()
+		var cursorAt time.Time
+		cursorID := ""
+		for len(candidates) < personalTimeoutSweepLimit {
+			limit := pageSize
+			if left := personalTimeoutSweepLimit - len(candidates); int64(left) < limit {
+				limit = int64(left)
+			}
+			query, args := dueBoundaries, []any{cutoff}
+			if cursorID != "" {
+				query += `
+				  AND (b.next_action_at > ? OR (b.next_action_at = ? AND b.module_attempt_id > ?))`
+				args = append(args, cursorAt, cursorAt, cursorID)
+			}
+			rows, err := s.db.QueryContext(ctx, query+`
+				ORDER BY b.next_action_at, b.module_attempt_id LIMIT ?`, append(args, limit)...)
+			if err != nil {
+				return 0, 0, err
+			}
+			count := 0
+			for rows.Next() {
+				var c timeoutCandidate
+				if err := rows.Scan(&cursorAt, &c.moduleID, &c.attemptID, &c.scheduleID); err != nil {
+					rows.Close()
+					return 0, 0, err
+				}
+				cursorID = c.moduleID
+				count++
+				if _, exists := seenModules[c.moduleID]; exists {
+					continue
+				}
+				seenModules[c.moduleID] = struct{}{}
+				candidates = append(candidates, c)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return 0, 0, err
+			}
+			rows.Close()
+			if count < int(limit) {
+				break
+			}
 		}
 	}
 	// Server-driven break→next-section: attempts waiting on an expired ACTIVE
@@ -677,8 +792,10 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			SELECT m.id, a.id, a.schedule_id
 			FROM assessment_module_attempts m
 			JOIN student_attempts a ON a.id = m.attempt_id
+			JOIN exam_schedules s ON s.id = a.schedule_id
 			JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
-			WHERE m.state = 'not_started' AND m.auto_start_at IS NOT NULL AND m.auto_start_at <= ? AND m.paused_at IS NULL
+			WHERE s.sat_delivery_policy IS NULL
+			  AND m.state = 'not_started' AND m.auto_start_at IS NOT NULL AND m.auto_start_at <= ? AND m.paused_at IS NULL
 			  AND r.timing_model = 'sat_personal_v1' AND r.status = 'live'
 			  AND a.submitted_at IS NULL
 			  AND COALESCE(a.proctor_status, 'active') <> 'paused'

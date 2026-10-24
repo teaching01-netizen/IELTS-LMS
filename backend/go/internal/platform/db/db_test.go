@@ -51,3 +51,30 @@ func TestNormalizeMySQLDSNRejectsUnsupportedURI(t *testing.T) {
 		t.Fatal("expected unsupported URI scheme to fail")
 	}
 }
+
+// interpolateParams is a driver option, not a session variable: in both DSN
+// forms it must reach the connector config (newPool re-parses the normalized
+// DSN) while the enforced UTC session settings stay intact and nothing turns
+// on multi-statements. A URI parameter copied into Params alone would instead
+// be sent as `SET interpolateParams=...` and fail every new connection.
+func TestNormalizeMySQLDSNKeepsInterpolateParamsAsDriverOption(t *testing.T) {
+	for _, raw := range []string{
+		"root:root@tcp(127.0.0.1:3306)/ielts?interpolateParams=true",
+		"mysql://user:p%2Fss@db.example.test:4000/ielts?interpolateParams=true",
+	} {
+		got, err := normalizeMySQLDSN(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := mysql.ParseDSN(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !cfg.InterpolateParams || cfg.MultiStatements || !cfg.ParseTime || cfg.Loc.String() != "UTC" {
+			t.Fatalf("%s -> %q: interpolate=%v multi=%v parseTime=%v loc=%v", raw, got, cfg.InterpolateParams, cfg.MultiStatements, cfg.ParseTime, cfg.Loc)
+		}
+		if len(cfg.Params) != 1 || cfg.Params["time_zone"] != "'+00:00'" {
+			t.Fatalf("%s -> %q: session variables must be only time_zone, got %v", raw, got, cfg.Params)
+		}
+	}
+}

@@ -93,6 +93,7 @@ func boundaryBranchExpectations(mock sqlmock.Sqlmock, moduleID, route, moduleKey
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", moduleID, 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	deliverySATPolicyRead(mock, "att-1")
 }
 
 func boundaryFinalize(t *testing.T, correct int) *nextModuleRow {

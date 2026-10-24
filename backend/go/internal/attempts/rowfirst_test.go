@@ -10,17 +10,15 @@ import (
 )
 
 // saveHappyStubs stages a successful single-command save through the fencing
-// and probe chain: attempt row, session binding, exact-replay miss,
-// active-session pass, idempotency miss, version-probe miss, responses
-// probe miss (newer write). Caller adds the projection + tail expectations.
+// and probe chain: attempt row, session binding, exact-replay miss (reused by
+// the idempotency probe), active-session validation from the locked attempt
+// row, version-probe miss, responses probe miss (newer write). Caller adds the projection + tail expectations.
 func saveHappyStubs(mock sqlmock.Sqlmock) {
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM student_attempts WHERE id").WillReturnRows(attemptRows())
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnRows(sessionRows())
 	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT lease_epoch, client_version, server_revision FROM attempt_responses_v2").WillReturnError(sql.ErrNoRows)
 }

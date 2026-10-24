@@ -288,7 +288,14 @@ export type TimingModel =
   | "legacy_section_v1"
   | "cohort_stage_v2"
   | "cohort_section_v3"
-  | "sat_personal_v1";
+  | "sat_personal_v1"
+  | "ielts_personal_v1"
+  | "ielts_cohort_personal_v2";
+
+/** Both IELTS personal models use per-attempt readiness and section deadlines. */
+export function isIeltsPersonalTimingModel(model: unknown): boolean {
+  return model === "ielts_personal_v1" || model === "ielts_cohort_personal_v2";
+}
 
 /**
  * The single test for "this runtime is on the cohort section clock". Every
@@ -306,9 +313,7 @@ export function isCohortTimingModel(
  * by section plus module (`"<section>:m1"`). Only code comparing a stage key to
  * a section key wants this narrower test.
  */
-export function isSectionKeyedCohortModel(
-  model: TimingModel | string | null | undefined
-): boolean {
+export function isSectionKeyedCohortModel(model: TimingModel | string | null | undefined): boolean {
   return model === "cohort_section_v3";
 }
 
@@ -317,9 +322,7 @@ export function isSectionKeyedCohortModel(
  * each attempt. A server-issued future start lets the browser load the next
  * surface before its clock begins. Null/empty (old rows) never matches.
  */
-export function isSatPersonalTimingModel(
-  model: TimingModel | string | null | undefined
-): boolean {
+export function isSatPersonalTimingModel(model: TimingModel | string | null | undefined): boolean {
   return model === "sat_personal_v1";
 }
 
@@ -427,6 +430,10 @@ export interface ExamSessionRuntime {
   deliveryMode: "proctor_start";
   status: RuntimeStatus;
   timingModel?: TimingModel | undefined;
+  personalSectionState?: "preparing" | "active" | "completed" | "unable" | "" | undefined;
+  personalPreparationMessage?: string | undefined;
+  personalExpectedStartAt?: string | null | undefined;
+  personalPreparationEndsAt?: string | null | undefined;
   actualStartAt: string | null;
   actualEndAt: string | null;
   activeSectionKey: ModuleType | null;

@@ -162,7 +162,7 @@ func mediaDownloadContentHandler(app *App) http.HandlerFunc {
 		}
 		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil || claims.ClientSessionID == "" {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			writeAttemptVerificationError(w, r, err)
 			return
 		}
 		if app.Delivery == nil || app.Media == nil {

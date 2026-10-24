@@ -77,9 +77,9 @@ func attemptRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
-		"response_revision", "deadline_at", "closing_grace_until",
+		"active_client_session_id", "response_revision", "deadline_at", "closing_grace_until",
 		"submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
-	}).AddRow("att-1", "sched-1", "u-1", "", 2, "running", "exam", 3, 7, 9, nil, nil, nil, nil, "active", "", "")
+	}).AddRow("att-1", "sched-1", "u-1", "", 2, "running", "exam", 3, 7, "sess-1", 9, nil, nil, nil, nil, "active", "", "")
 }
 
 func sessionRows() *sqlmock.Rows {
@@ -117,11 +117,9 @@ func TestConcurrentSameWriteConflicts(t *testing.T) {
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM student_attempts WHERE id").WillReturnRows(attemptRows())
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnRows(sessionRows())
-	// exactReplay probe: no stored row -> not a replay.
-	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
-	// Active-session check passes.
-	mock.ExpectQuery("SELECT active_client_session_id").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	// Idempotency probe finds the write ID with a DIFFERENT hash.
+	// The replay probe finds the write ID with a DIFFERENT hash. (A miss here
+	// cannot turn into a hit later in the transaction: every ledger writer
+	// holds this attempt's row lock.)
 	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").
 		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "response_hash", "outcome", "server_revision", "canonical_response"}).AddRow("other-hash", "hash", "applied", 4, `{"answer":null,"markedForReview":false,"eliminatedOptions":[],"annotations":[]}`))
 	mock.ExpectRollback()
@@ -154,10 +152,8 @@ func TestConcurrentSameVersionDifferentWriteCollides(t *testing.T) {
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM student_attempts WHERE id").WillReturnRows(attemptRows())
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnRows(sessionRows())
+	// Replay probe miss; the idempotency probe reuses it.
 	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	// Idempotency probe: write ID unseen.
-	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WillReturnError(sql.ErrNoRows)
 	// Version-collision probe: same lease/question/version already taken.
 	mock.ExpectQuery("SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id").
 		WillReturnRows(sqlmock.NewRows([]string{"client_write_id"}).AddRow("w-other"))
@@ -261,13 +257,12 @@ func TestSubmitVsResponseOnPausedAttempt(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 			"delivery_status", "phase", "lease_epoch", "control_epoch",
-			"response_revision", "deadline_at", "closing_grace_until",
+			"active_client_session_id", "response_revision", "deadline_at", "closing_grace_until",
 			"submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
-		}).AddRow("att-1", "sched-1", "u-1", "", 2, "paused", "exam", 3, 7, 9, nil, nil, nil, nil, "active", "", ""))
+		}).AddRow("att-1", "sched-1", "u-1", "", 2, "paused", "exam", 3, 7, "sess-1", 9, nil, nil, nil, nil, "active", "", ""))
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WillReturnRows(sessionRows())
 	mock.ExpectQuery("FROM attempt_submissions_v2 WHERE attempt_id").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT attempt_id FROM attempt_submissions_v2 WHERE submission_id").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP\\(6\\)").WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
 	mock.ExpectRollback()
 

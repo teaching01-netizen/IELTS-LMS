@@ -26,9 +26,9 @@ func TestUpdateFreezesVersionOnceCandidatesJoined(t *testing.T) {
 		}
 		svc := NewService(db, tx.NewRunner(db))
 		now := time.Now().UTC()
-		cols := []string{"id", "exam_id", "provider_key", "organization_id", "exam_title", "proctor_display_name", "grading_display_name", "published_version_id", "cohort_name", "institution", "start_time", "end_time", "planned_duration_minutes", "delivery_mode", "status", "revision", "recurrence_type", "recurrence_interval", "recurrence_end_date", "buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop", "created_at", "created_by", "updated_at", "sat_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy"}
+		cols := []string{"id", "exam_id", "provider_key", "organization_id", "exam_title", "proctor_display_name", "grading_display_name", "published_version_id", "cohort_name", "institution", "start_time", "end_time", "planned_duration_minutes", "delivery_mode", "status", "revision", "recurrence_type", "recurrence_interval", "recurrence_end_date", "buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop", "created_at", "created_by", "updated_at", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy"}
 		row := func(version string, rev int) *sqlmock.Rows {
-			return sqlmock.NewRows(cols).AddRow("sched-1", "exam-1", "sat", nil, "T", "T", "T", version, "C", nil, now, now.Add(time.Hour), 60, "cohort", StatusScheduled, rev, "", 0, nil, nil, nil, false, false, now, "u", now, nil, "proctor", "practice", nil)
+			return sqlmock.NewRows(cols).AddRow("sched-1", "exam-1", "sat", nil, "T", "T", "T", version, "C", nil, now, now.Add(time.Hour), 60, "cohort", StatusScheduled, rev, "", 0, nil, nil, nil, false, false, now, "u", now, nil, nil, "proctor", "practice", nil)
 		}
 
 		mock.ExpectBegin()
@@ -86,9 +86,9 @@ func TestUpdateAcceptsOnlyForwardStatus(t *testing.T) {
 		}
 		svc := NewService(db, tx.NewRunner(db))
 		now := time.Now().UTC()
-		cols := []string{"id", "exam_id", "provider_key", "organization_id", "exam_title", "proctor_display_name", "grading_display_name", "published_version_id", "cohort_name", "institution", "start_time", "end_time", "planned_duration_minutes", "delivery_mode", "status", "revision", "recurrence_type", "recurrence_interval", "recurrence_end_date", "buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop", "created_at", "created_by", "updated_at", "sat_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy"}
+		cols := []string{"id", "exam_id", "provider_key", "organization_id", "exam_title", "proctor_display_name", "grading_display_name", "published_version_id", "cohort_name", "institution", "start_time", "end_time", "planned_duration_minutes", "delivery_mode", "status", "revision", "recurrence_type", "recurrence_interval", "recurrence_end_date", "buffer_before_minutes", "buffer_after_minutes", "auto_start", "auto_stop", "created_at", "created_by", "updated_at", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "sat_session_mode", "sat_route_policy"}
 		row := func(status string, rev int) *sqlmock.Rows {
-			return sqlmock.NewRows(cols).AddRow("sched-1", "exam-1", "sat", nil, "T", "T", "T", "v-1", "C", nil, now, now.Add(time.Hour), 60, "cohort", status, rev, "", 0, nil, nil, nil, false, false, now, "u", now, nil, "proctor", "practice", nil)
+			return sqlmock.NewRows(cols).AddRow("sched-1", "exam-1", "sat", nil, "T", "T", "T", "v-1", "C", nil, now, now.Add(time.Hour), 60, "cohort", status, rev, "", 0, nil, nil, nil, false, false, now, "u", now, nil, nil, "proctor", "practice", nil)
 		}
 		mock.ExpectBegin()
 		mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))

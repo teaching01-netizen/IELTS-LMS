@@ -11,6 +11,12 @@ import { SatSessionsRoute } from '../SatSessionsRoute';
 const useSatResultsQueryMock = vi.hoisted(() => vi.fn());
 const useSatAttemptsQueryMock = vi.hoisted(() => vi.fn());
 const useSatResultQueryMock = vi.hoisted(() => vi.fn());
+const formStateMock = vi.hoisted(() => vi.fn(() => ({ data: undefined as unknown, refetch: vi.fn(async () => ({ data: undefined })) })));
+// Room form state has its own suite; rooms here have no Eva SIM.
+vi.mock('@/src/features/assessment-forms/api/assessmentForms', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/src/features/assessment-forms/api/assessmentForms')>()),
+  useScheduleFormState: () => formStateMock(),
+}));
 vi.mock('../../../../features/results/api/satResultsQueries', () => ({
   useSatResultsQuery: useSatResultsQueryMock,
   useSatAttemptsQuery: useSatAttemptsQueryMock,

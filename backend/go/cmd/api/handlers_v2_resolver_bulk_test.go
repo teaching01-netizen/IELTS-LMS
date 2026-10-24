@@ -51,9 +51,9 @@ func bulkNormalizedRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key",
 		"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
-		"timing_model", "entry_confirmed_at", "entry_entered_at",
-	}).AddRow("q-0", "q-0-inner", "mod-a", "reading-writing", "active", "ielts", nil, nil, nil, nil, "", nil, nil).
-		AddRow("eq-1-other", "q-1", "mod-b", "math", "review", "ielts", nil, nil, nil, nil, "", nil, nil)
+		"timing_model", "entry_confirmed_at", "entry_entered_at", "timeline_state", "timeline_started_at", "timeline_deadline_at", "timeline_paused_at",
+	}).AddRow("q-0", "q-0-inner", "mod-a", "reading-writing", "active", "ielts", nil, nil, nil, nil, "", nil, nil, "", nil, nil, nil).
+		AddRow("eq-1-other", "q-1", "mod-b", "math", "review", "ielts", nil, nil, nil, nil, "", nil, nil, "", nil, nil, nil)
 }
 
 func bulkQuestionIDs() []string { return []string{"q-0", "q-1", "q-2", "q-3", "q-4", "q-5"} }
@@ -81,6 +81,9 @@ func TestV2ResolverResolveManyIsSetBased(t *testing.T) {
 		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts a JOIN exam_versions v")).
 			WithArgs("att-1").
 			WillReturnRows(sqlmock.NewRows([]string{"content_snapshot"}).AddRow(snapshot))
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(rt.timing_model, '')")).
+			WithArgs("att-1").
+			WillReturnRows(sqlmock.NewRows([]string{"timing_model"}).AddRow(""))
 	}, bulkQuestionIDs())
 
 	if len(verdicts) != 6 {
@@ -126,7 +129,7 @@ func TestV2ResolverResolveManySATGateSkipsSnapshot(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{
 				"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key",
 				"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
-				"timing_model", "entry_confirmed_at", "entry_entered_at",
+				"timing_model", "entry_confirmed_at", "entry_entered_at", "timeline_state", "timeline_started_at", "timeline_deadline_at", "timeline_paused_at",
 			}))
 		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts sa JOIN exam_schedules")).
 			WithArgs("att-1").
@@ -148,8 +151,8 @@ func TestV2ResolverPersonalSATBulkCarriesAdmissionClock(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{
 				"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key",
 				"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
-				"timing_model", "entry_confirmed_at", "entry_entered_at",
-			}).AddRow("eq-1", "q-1", "mod-1", "math", "active", "sat", now, 600, 60, 30, "sat_personal_v1", now, nil))
+				"timing_model", "entry_confirmed_at", "entry_entered_at", "timeline_state", "timeline_started_at", "timeline_deadline_at", "timeline_paused_at",
+			}).AddRow("eq-1", "q-1", "mod-1", "math", "active", "sat", now, 600, 60, 30, "sat_personal_v1", now, nil, "", nil, nil, nil))
 	}, []string{"eq-1"})
 	owner := verdicts["eq-1"].Owner
 	if owner.ModuleStartedAt == nil || !owner.ModuleStartedAt.Equal(now) {
@@ -160,5 +163,53 @@ func TestV2ResolverPersonalSATBulkCarriesAdmissionClock(t *testing.T) {
 	}
 	if owner.TimingModel != "sat_personal_v1" || owner.EntryConfirmedAt == nil || !owner.EntryConfirmedAt.Equal(now) {
 		t.Fatalf("bulk owner loses captured timing/entry: %+v", owner)
+	}
+}
+
+// TestV2ResolverResolveManyPersonalIELTSSnapshotBatch resolves several
+// snapshot-only IELTS questions, including Writing task IDs, through one shared
+// snapshot traversal: the SQL is the same as before (normalized, provider gate,
+// snapshot, timing model, timelines) and each owner carries the current
+// transaction's timeline for its own section.
+func TestV2ResolverResolveManyPersonalIELTSSnapshotBatch(t *testing.T) {
+	start := time.Date(2026, 10, 24, 9, 0, 40, 0, time.UTC)
+	deadline := start.Add(time.Hour)
+	const snapshot = `{"contentSnapshot":{"reading":[{"questionId":"r-1"},{"questionId":"shared"}],"writing":{"tasks":[{"taskId":"task1"},{"taskID":"task2"},{"id":"shared"}]}}}`
+	ids := []string{"r-1", "task1", "task2", "shared", "absent"}
+	verdicts := resolveManyWithMockDB(t, func(mock sqlmock.Sqlmock) {
+		mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).WillReturnRows(sqlmock.NewRows([]string{
+			"exam_question_id", "question_id", "module_id", "section_key", "state", "provider_key",
+			"started_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds",
+			"timing_model", "entry_confirmed_at", "entry_entered_at", "timeline_state", "timeline_started_at", "timeline_deadline_at", "timeline_paused_at",
+		}))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts sa JOIN exam_schedules")).WithArgs("att-1").
+			WillReturnRows(sqlmock.NewRows([]string{"provider_key"}).AddRow("ielts"))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts a JOIN exam_versions v")).WithArgs("att-1").
+			WillReturnRows(sqlmock.NewRows([]string{"content_snapshot"}).AddRow(snapshot))
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(rt.timing_model, '')")).WithArgs("att-1").
+			WillReturnRows(sqlmock.NewRows([]string{"timing_model"}).AddRow("ielts_cohort_personal_v2"))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM ielts_attempt_section_timelines WHERE attempt_id = ?")).WithArgs("att-1").
+			WillReturnRows(sqlmock.NewRows([]string{"section_key", "state", "started_at", "deadline_at", "paused_at"}).
+				AddRow("reading", "active", start, deadline, nil))
+	}, ids)
+
+	reading := verdicts["r-1"]
+	if reading.Err != nil || reading.Owner.SectionKey != "reading" || reading.Owner.SectionTimelineState != "active" ||
+		reading.Owner.SectionTimelineDeadlineAt == nil || !reading.Owner.SectionTimelineDeadlineAt.Equal(deadline) ||
+		reading.Owner.TimingModel != "ielts_cohort_personal_v2" {
+		t.Fatalf("reading owner must carry its current timeline: %+v", reading)
+	}
+	if got := verdicts["shared"]; got.Err != nil || got.Owner.SectionKey != "reading" {
+		t.Fatalf("first eligible root must own a shared ID: %+v", got)
+	}
+	// Writing content membership grants no time: no Writing timeline row exists.
+	for _, id := range []string{"task1", "task2"} {
+		got := verdicts[id]
+		if got.Err != nil || got.Owner.SectionKey != "writing" || got.Owner.SectionTimelineState != "" || got.Owner.SectionTimelineStartedAt != nil {
+			t.Fatalf("%s must resolve to Writing without an active timeline: %+v", id, got)
+		}
+	}
+	if appErr, ok := apperrors.As(verdicts["absent"].Err); !ok || appErr.Code != apperrors.CodeNotFound {
+		t.Fatalf("absent question must stay NOT_FOUND, got %+v", verdicts["absent"])
 	}
 }

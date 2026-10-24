@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"example.com/ielts-proctoring/internal/assessmentforms"
 	"log"
 	"net/http"
 	"sort"
@@ -89,6 +90,7 @@ type App struct {
 	Library       *library.Service
 	AnswerHistory *answerhistory.Service
 	Authoring     *authoring.Service
+	Forms         *assessmentforms.Service
 	SatScoring    *satscoring.Service
 	AccessLinks   *accesslinks.Service
 	SatRooms      *satrooms.Service
@@ -287,6 +289,7 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.Library = svc.Library
 		app.AnswerHistory = svc.AnswerHistory
 		app.Authoring = svc.Authoring
+		app.Forms = svc.Forms
 		app.SatScoring = svc.SatScoring
 		app.AccessLinks = svc.AccessLinks
 		app.SatRooms = svc.SatRooms
@@ -295,6 +298,12 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.Release = svc.Release
 		app.Runtime = svc.Runtime
 		app.Delivery = svc.Delivery
+		if app.Delivery != nil && app.Attempts != nil {
+			app.Attempts.SetFrozenSATBatchAuthorizer(app.Delivery)
+			app.Delivery.SetFrozenResponseApplier(func(ctx context.Context, q tx.Tx, claims crypto.AttemptClaims, cmd attempts.SaveResponsesCommand, moduleID string) (attempts.SaveResult, error) {
+				return app.Attempts.SaveFrozenResponsesInTx(ctx, q, claims, cmd, moduleID, v2Resolver{})
+			})
+		}
 		app.LiveBus = bus
 		app.LiveHub = hub
 		app.Leases = liveupdates.NewLeaseRepository(pool)
@@ -409,7 +418,9 @@ func main() {
 		defer workerPool.Close()
 		app.Background = startActivityRuntime(app, workerPool)
 		stopBackground = app.Background.Close
+		log.Printf("api: db connection cap %d (api %d + embedded worker %d); the fleet budget sums every replica, worker and deploy overlap", cfg.DBPoolMaxAPI+cfg.DBPoolMaxWorker, cfg.DBPoolMaxAPI, cfg.DBPoolMaxWorker)
 	} else {
+		log.Printf("api: db connection cap %d (api pool); the fleet budget sums every replica, worker and deploy overlap", cfg.DBPoolMaxAPI)
 		if app.CoeditCapability() {
 			if err := recoverExpiredCoeditFreezes(context.Background(), app); err != nil {
 				log.Printf("api: co-edit freeze recovery unavailable at startup: %v", err)
@@ -419,6 +430,7 @@ func main() {
 	}
 	// Plan E3: report absorbed tx transients on db_deadlocks_total{kind}.
 	defer installTxRetryHook()()
+	defer installTxDurationHook()()
 	srvCfg := httpx.DefaultServerConfig()
 	// Plan-E conn lever (round 137): HTTP_WRITE_TIMEOUT_SECS lengthens the
 	// write bound for saturated waves; default 30 = today's behavior.
@@ -630,6 +642,18 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Put("/exams/{examID}/sat-classroom-plan", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan", authorClassroomPlanHandler(app)))
 			r.With(adminLimit).Get("/exams/{examID}/sat-score-converter", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter", authorScoreConverterHandler(app)))
 			r.With(adminLimit).Put("/exams/{examID}/sat-score-converter", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter", authorScoreConverterHandler(app)))
+			r.With(adminLimit).Get("/exams/{examID}/forms", authorize("GET /api/v1/assessment-authoring/exams/{examID}/forms", authorFormsHandler(app)))
+			r.With(adminLimit).Put("/exams/{examID}/forms", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/forms", authorFormsHandler(app)))
+		})
+		// SAT registration answers and Eva SIM: student state/native submit
+		// (attempt bearer) and the staff response workspace.
+		r.Route("/assessment-forms", func(r chi.Router) {
+			r.With(studentLimit, limitTier(app, httpx.TierPolling, attemptKey())).Get("/schedules/{scheduleID}/attempts/{attemptID}/section-entry/{sectionKey}", authorize("GET /api/v1/assessment-forms/schedules/{scheduleID}/attempts/{attemptID}/section-entry/{sectionKey}", studentSectionEntryHandler(app)))
+			r.With(studentLimit, limitTier(app, httpx.TierWrites, attemptKey())).Put("/schedules/{scheduleID}/attempts/{attemptID}/section-entry/{sectionKey}", authorize("PUT /api/v1/assessment-forms/schedules/{scheduleID}/attempts/{attemptID}/section-entry/{sectionKey}", studentSectionEntryHandler(app)))
+			r.With(studentLimit, limitTier(app, httpx.TierPolling, attemptKey())).Get("/schedules/{scheduleID}/attempts/{attemptID}/eva-sim", authorize("GET /api/v1/assessment-forms/schedules/{scheduleID}/attempts/{attemptID}/eva-sim", studentEvaStateHandler(app)))
+			r.With(studentLimit, limitTier(app, httpx.TierWrites, attemptKey())).Put("/schedules/{scheduleID}/attempts/{attemptID}/eva-sim", authorize("PUT /api/v1/assessment-forms/schedules/{scheduleID}/attempts/{attemptID}/eva-sim", studentEvaSubmitHandler(app)))
+			r.With(limitTier(app, httpx.TierAuthedReads, userKey()), adminLimit).Get("/responses", authorize("GET /api/v1/assessment-forms/responses", formResponsesListHandler(app)))
+			r.With(limitTier(app, httpx.TierAuthedReads, userKey()), adminLimit).Get("/attempts/{attemptID}/responses/{formKey}", authorize("GET /api/v1/assessment-forms/attempts/{attemptID}/responses/{formKey}", formResponseDetailHandler(app)))
 		})
 		// SAT one-action room creation: server-side release capture + room in
 		// one transaction, plus the per-actor receipt lookup used to recover a
@@ -662,10 +686,14 @@ func BuildRouter(app *App) http.Handler {
 				authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/enter", deliveryEnterBreakHandler(app))
 				authzRoute(r, "POST", "/schedules/{scheduleID}/breaks/visible", deliveryMarkBreakVisibleHandler(app))
 				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/submit", deliverySubmitModuleHandler(app))
-				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/close", deliveryCloseModuleHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/close-intent", deliveryCloseIntentHandler(app))
+				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/recovery/resolve", deliveryRecoveryResolutionHandler(app))
 				authzRoute(r, "POST", "/schedules/{scheduleID}/modules/late-evidence", deliveryLateEvidenceHandler(app))
 				authzRoute(r, "POST", "/schedules/{scheduleID}/submit", deliverySubmitAssessmentHandler(app))
 			})
+			// Module close first verifies the attempt bearer and acquires its
+			// bounded bulkhead before invoking the database-backed write limiter.
+			authzRoute(r, "POST", "/schedules/{scheduleID}/modules/close", deliveryCloseModuleHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Group(func(r chi.Router) {
 			authzRoute(r, "GET", "/versions/{versionID}", versionSummaryHandler(app))
@@ -744,6 +772,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "POST", "/sessions/{scheduleID}/control/end-section-now", proctorEndSectionHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/control/extend-section", proctorExtendSectionHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/control/complete-exam", proctorCompleteExamHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}/forms/state", proctorFormsStateHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/warn", proctorWarnHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/pause", proctorPauseAttemptHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/resume", proctorResumeAttemptHandler(app))
@@ -761,6 +790,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/sessions/{scheduleID}/entry-info", proctorSessionEntryInfoHandler(app))
 			// SAT Practice Classroom: staff assign Module 2 under staff_selects.
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/route", proctorAssignRouteHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/recovery/resolve", proctorSATRecoveryResolutionHandler(app))
 			authzRoute(r, "GET", "/sessions/{scheduleID}/route-queue", proctorStaffRouteQueueHandler(app))
 			authzRoute(r, "POST", "/alerts/{alertID}/ack", proctorAckAlertHandler(app))
 			authzRoute(r, "GET", "/live-mode", proctorLiveModeHandler(app))

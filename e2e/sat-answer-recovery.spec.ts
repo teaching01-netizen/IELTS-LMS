@@ -65,15 +65,20 @@ test.describe("SAT answer durability recovery", () => {
       await page.getByRole("button", { name: new RegExp(examTitle) }).click();
       await page.getByRole("button", { name: new RegExp(linkName) }).click();
       await page.getByRole("button", { name: new RegExp(studentName) }).click();
+      const inspector = page.getByRole("dialog", { name: "Student response" });
+      await expect(inspector.getByText("1 answer")).toBeVisible();
+      await inspector.getByRole("link", { name: "Open as page" }).click();
       await expect(page).toHaveURL(/\/sat\/results\/attempts\/[0-9a-f-]+$/i);
-      await expect(page.getByText("1 server-saved answers")).toBeVisible();
+      await expect(page.getByText("Saved on the server")).toBeVisible();
+      await expect(page.getByText("1 answer")).toBeVisible();
       await expect(page.getByText(/Revision [1-9]\d*/)).toBeVisible();
       await expect(page.getByRole("heading", { name: /Question-level responses/ })).toBeVisible();
-      await expect(page.getByRole("columnheader", { name: "Student raw" })).toBeVisible();
+      await expect(page.getByRole("columnheader", { name: "Student answer" })).toBeVisible();
+      await expect(page.getByText("Only answers accepted by the server appear here.")).toBeVisible();
       await expect(page.getByText("Unanswered").first()).toBeVisible();
       const refreshStatus = page
         .getByRole("status")
-        .filter({ hasText: "Checks automatically every 15 seconds while visible" });
+        .filter({ hasText: "Checks every 15 seconds while visible" });
       await expect(refreshStatus).toBeVisible();
       await page.waitForResponse(
         (response) =>

@@ -32,7 +32,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -42,11 +41,10 @@ import (
 )
 
 // bulkWriteThreshold is the command count above which a batch switches to the
-// set-based I/O strategy. Interactive autosaves send one or two commands and
-// stay on the per-command path, whose statements the durability contract tests
-// pin one by one; offline flushes (tens to MaxBatchCommands answers) are the
-// case the audit found holding the attempt lock for a round trip per command.
-const bulkWriteThreshold = 8
+// set-based I/O strategy. Single-answer writes keep the per-command path; two
+// or more answers use bounded set-based reads and writes so synchronized small
+// batches do not hold each attempt lock across per-answer round trips.
+const bulkWriteThreshold = 1
 
 // ledgerRow is one attempt_mutations_v2 row as the write path consumes it.
 // The version-collision lookup fills only WriteID (that is all the per-command
@@ -142,33 +140,46 @@ func writeIDConflict(writeID string) error {
 	}
 }
 
-// perCommandIO is the interactive strategy: exactly the statements the write
-// path issued before batch I/O existed, one command at a time.
+// perCommandIO is the interactive strategy: one statement per read/write per
+// command. It is transaction-local (built by ioFor inside one saveInTx call), so
+// it may remember what it has already read under the attempt lock.
 type perCommandIO struct {
 	ctx       context.Context
 	q         tx.Tx
 	attemptID string
 	rowFirst  bool
 	qr        QuestionResolver
+
+	// byWrite memoizes ledgerByWrite: key presence means the probe completed,
+	// a nil value is a confirmed miss. The exact-replay probe and the in-loop
+	// idempotency probe then share one SELECT per write id. It never outlives
+	// the transaction attempt, so a rolled-back miss is never trusted on retry;
+	// the attempt row lock serializes every ledger writer for this attempt.
+	byWrite map[string]*ledgerRow
 }
 
-var _ saveIO = perCommandIO{}
+var _ saveIO = (*perCommandIO)(nil)
 
-func (p perCommandIO) ledgerByWrite(writeID string) (*ledgerRow, error) {
-	var row ledgerRow
-	row.WriteID = writeID
+func (p *perCommandIO) ledgerByWrite(writeID string) (*ledgerRow, error) {
+	if row, loaded := p.byWrite[writeID]; loaded {
+		return row, nil
+	}
+	row := &ledgerRow{WriteID: writeID}
 	err := p.q.QueryRowContext(p.ctx, `SELECT request_hash, response_hash, outcome, server_revision, CAST(canonical_response AS CHAR) FROM attempt_mutations_v2 WHERE attempt_id=? AND client_write_id=? FOR UPDATE`, p.attemptID, writeID).
 		Scan(&row.RequestHash, &row.ResponseHash, &row.Outcome, &row.ServerRevision, &row.CanonicalRaw)
 	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
+		row = nil
+	} else if err != nil {
 		return nil, err
 	}
-	return &row, nil
+	if p.byWrite == nil {
+		p.byWrite = make(map[string]*ledgerRow, 1)
+	}
+	p.byWrite[writeID] = row
+	return row, nil
 }
 
-func (p perCommandIO) ledgerByVersion(leaseEpoch uint64, questionID string, clientVersion uint64) (*ledgerRow, error) {
+func (p *perCommandIO) ledgerByVersion(leaseEpoch uint64, questionID string, clientVersion uint64) (*ledgerRow, error) {
 	var writeID string
 	err := p.q.QueryRowContext(p.ctx, `SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id=? AND lease_epoch=? AND question_id=? AND client_version=? FOR UPDATE`, p.attemptID, leaseEpoch, questionID, clientVersion).Scan(&writeID)
 	if err == sql.ErrNoRows {
@@ -180,7 +191,7 @@ func (p perCommandIO) ledgerByVersion(leaseEpoch uint64, questionID string, clie
 	return &ledgerRow{WriteID: writeID}, nil
 }
 
-func (p perCommandIO) projection(questionID string) (*projectionRow, error) {
+func (p *perCommandIO) projection(questionID string) (*projectionRow, error) {
 	var row projectionRow
 	err := p.q.QueryRowContext(p.ctx, `SELECT lease_epoch, client_version, server_revision FROM attempt_responses_v2 WHERE attempt_id=? AND question_id=? FOR UPDATE`, p.attemptID, questionID).
 		Scan(&row.LeaseEpoch, &row.ClientVersion, &row.ServerRevision)
@@ -193,7 +204,7 @@ func (p perCommandIO) projection(questionID string) (*projectionRow, error) {
 	return &row, nil
 }
 
-func (p perCommandIO) projectionContent(questionID string) (*projectionRow, error) {
+func (p *perCommandIO) projectionContent(questionID string) (*projectionRow, error) {
 	var row projectionRow
 	if err := p.q.QueryRowContext(p.ctx, `SELECT CAST(response AS CHAR), response_hash FROM attempt_responses_v2 WHERE attempt_id=? AND question_id=?`, p.attemptID, questionID).Scan(&row.CanonicalRaw, &row.ResponseHash); err != nil {
 		return nil, err
@@ -201,11 +212,11 @@ func (p perCommandIO) projectionContent(questionID string) (*projectionRow, erro
 	return &row, nil
 }
 
-func (p perCommandIO) owner(questionID string) (QuestionOwner, error) {
+func (p *perCommandIO) owner(questionID string) (QuestionOwner, error) {
 	return p.qr.Resolve(p.ctx, p.q, p.attemptID, questionID)
 }
 
-func (p perCommandIO) applyProjection(w projectionWrite) error {
+func (p *perCommandIO) applyProjection(w projectionWrite) error {
 	if p.rowFirst {
 		return upsertResponseRow(p.ctx, p.q, w.AttemptID, w.QuestionID, w.ModuleID, w.LeaseEpoch, w.ControlEpoch, w.ClientVersion, w.WriteID, w.RequestHash, w.Canonical, w.ResponseHash, w.ServerRevision, w.Now)
 	}
@@ -215,7 +226,7 @@ func (p perCommandIO) applyProjection(w projectionWrite) error {
 	return err
 }
 
-func (p perCommandIO) insertLedger(w ledgerWrite) error {
+func (p *perCommandIO) insertLedger(w ledgerWrite) error {
 	_, err := p.q.ExecContext(p.ctx, ledgerInsertPrefix+"(?,?,?,?,?,?,?,?,?,?,?,?,?)",
 		uuid.NewString(), w.AttemptID, w.WriteID, w.LeaseEpoch, w.ControlEpoch, w.QuestionID, w.ClientVersion, w.RequestHash, w.ResponseHash, w.Outcome, w.ServerRevision, w.CanonicalPayload, w.Now)
 	if err != nil {
@@ -224,10 +235,18 @@ func (p perCommandIO) insertLedger(w ledgerWrite) error {
 		}
 		return err
 	}
+	// Keep the memo coherent: a cached miss for this id is now a stored row.
+	if _, loaded := p.byWrite[w.WriteID]; loaded {
+		p.byWrite[w.WriteID] = &ledgerRow{
+			WriteID: w.WriteID, QuestionID: w.QuestionID, ClientVersion: w.ClientVersion, LeaseEpoch: w.LeaseEpoch,
+			RequestHash: w.RequestHash, ResponseHash: w.ResponseHash, Outcome: w.Outcome,
+			ServerRevision: w.ServerRevision, CanonicalRaw: w.CanonicalPayload,
+		}
+	}
 	return nil
 }
 
-func (perCommandIO) flush() error { return nil }
+func (*perCommandIO) flush() error { return nil }
 
 // batchIO is the set-based strategy for flushes above bulkWriteThreshold.
 // Reads are one statement per kind, issued lazily at the first command that
@@ -246,10 +265,15 @@ type batchIO struct {
 	replayLoaded      bool
 	byWrite           map[string]*ledgerRow
 	versionLoaded     bool
-	byQuestionVersion map[string]*ledgerRow
+	byQuestionVersion map[questionVersionKey]*ledgerRow
+	// pendingVersions holds the keys staged earlier in this batch (write id),
+	// the rows a sequential implementation would already have inserted.
+	pendingVersions map[questionVersionKey]string
 
 	projectionsLoaded bool
-	projections       map[string]*projectionRow
+	// projections is the staged view: loaded rows, replaced by each accepted
+	// command so later commands for the same question see it.
+	projections map[string]*projectionRow
 
 	owners *bulkOwnerCache
 
@@ -312,35 +336,47 @@ func (b *batchIO) loadReplayRows() error {
 	return rows.Err()
 }
 
-// loadVersionRows is the in-loop read: the write-id rows again plus the
-// (lease, question, clientVersion) keys of the batch's commands. The version arm
-// is deliberately a superset — question IN (...) AND client_version IN (...) —
-// because the decision only ever looks up the exact triple.
+// questionVersionKey is the ledger's (lease, question, clientVersion) unique key.
+type questionVersionKey struct {
+	leaseEpoch    uint64
+	questionID    string
+	clientVersion uint64
+}
+
+// loadVersionRows is the in-loop read: the exact (question, clientVersion)
+// pairs, at the batch lease, of the commands whose write id is not already
+// stored. The pre-fence write-id read is reused rather than repeated; under
+// the attempt row lock no other writer can add ledger rows for this attempt.
 func (b *batchIO) loadVersionRows() error {
 	if b.versionLoaded {
 		return nil
 	}
 	b.versionLoaded = true
-	b.byQuestionVersion = make(map[string]*ledgerRow)
-	if b.byWrite == nil {
-		b.byWrite = make(map[string]*ledgerRow)
+	b.byQuestionVersion = make(map[questionVersionKey]*ledgerRow)
+	if err := b.loadReplayRows(); err != nil {
+		return err
 	}
-	writeIDs := uniqueStrings(b.commands, func(c ResponseCommand) string { return c.WriteID })
-	questionIDs := uniqueStrings(b.commands, func(c ResponseCommand) string { return c.QuestionID })
-	versions := uniqueUint64(b.commands, func(c ResponseCommand) uint64 { return c.ClientVersion })
-	if len(writeIDs) == 0 {
+	pairs := make([]questionVersionKey, 0, len(b.commands))
+	seen := make(map[questionVersionKey]bool, len(b.commands))
+	for _, c := range b.commands {
+		key := questionVersionKey{b.lease, c.QuestionID, c.ClientVersion}
+		if b.byWrite[c.WriteID] != nil || seen[key] {
+			continue
+		}
+		seen[key] = true
+		pairs = append(pairs, key)
+	}
+	if len(pairs) == 0 {
 		return nil
 	}
-	query := ledgerColumns + "(client_write_id IN (" + placeholders(len(writeIDs)) + ") OR (lease_epoch=? AND question_id IN (" + placeholders(len(questionIDs)) + ") AND client_version IN (" + placeholders(len(versions)) + "))) FOR UPDATE"
-	args := make([]any, 0, 2+len(writeIDs)+len(questionIDs)+len(versions))
-	args = append(args, b.attemptID)
-	args = append(args, anySlice(writeIDs)...)
-	args = append(args, b.lease)
-	args = append(args, anySlice(questionIDs)...)
-	for _, v := range versions {
-		args = append(args, v)
+	args := make([]any, 0, 2+2*len(pairs))
+	args = append(args, b.attemptID, b.lease)
+	predicates := make([]string, 0, len(pairs))
+	for _, key := range pairs {
+		predicates = append(predicates, "(question_id=? AND client_version=?)")
+		args = append(args, key.questionID, key.clientVersion)
 	}
-	rows, err := b.q.QueryContext(b.ctx, query, args...)
+	rows, err := b.q.QueryContext(b.ctx, ledgerColumns+"lease_epoch=? AND ("+strings.Join(predicates, " OR ")+") FOR UPDATE", args...)
 	if err != nil {
 		return err
 	}
@@ -350,10 +386,7 @@ func (b *batchIO) loadVersionRows() error {
 		if err != nil {
 			return err
 		}
-		if _, ok := b.byWrite[stored.WriteID]; !ok {
-			b.byWrite[stored.WriteID] = stored
-		}
-		key := ledgerKey(stored.LeaseEpoch, stored.QuestionID, stored.ClientVersion)
+		key := questionVersionKey{stored.LeaseEpoch, stored.QuestionID, stored.ClientVersion}
 		if _, ok := b.byQuestionVersion[key]; !ok {
 			b.byQuestionVersion[key] = stored
 		}
@@ -380,15 +413,14 @@ func (b *batchIO) ledgerByVersion(leaseEpoch uint64, questionID string, clientVe
 	if err := b.loadVersionRows(); err != nil {
 		return nil, err
 	}
-	if row := b.byQuestionVersion[ledgerKey(leaseEpoch, questionID, clientVersion)]; row != nil {
+	key := questionVersionKey{leaseEpoch, questionID, clientVersion}
+	if row := b.byQuestionVersion[key]; row != nil {
 		return row, nil
 	}
-	// A command earlier in this batch may already hold the key: today's loop
-	// sees the rows it has itself inserted, so the deferred writes are checked.
-	for i := range b.ledger {
-		if b.ledger[i].LeaseEpoch == leaseEpoch && b.ledger[i].QuestionID == questionID && b.ledger[i].ClientVersion == clientVersion {
-			return &ledgerRow{WriteID: b.ledger[i].WriteID}, nil
-		}
+	// A command earlier in this batch may already hold the key: a sequential
+	// loop sees the rows it has itself inserted, so the deferred writes count.
+	if writeID, ok := b.pendingVersions[key]; ok {
+		return &ledgerRow{WriteID: writeID}, nil
 	}
 	return nil, nil
 }
@@ -448,11 +480,20 @@ func (b *batchIO) owner(questionID string) (QuestionOwner, error) {
 	return b.owners.owner(b.ctx, b.q, questionID)
 }
 
-// applyProjection defers the accepted response. The legacy blob is read once
-// (lazily, on the first accepted command) and merged in memory here, so the
-// blob round trips stop scaling with the batch size while the merge rule stays
-// the shared mergeProjectionBlob.
+// applyProjection defers the accepted response and stages it as the question's
+// current projection. The legacy blob is read once (lazily, on the first
+// accepted command) and merged in memory here, so the blob round trips stop
+// scaling with the batch size while the merge rule stays the shared
+// mergeProjectionBlob.
 func (b *batchIO) applyProjection(w projectionWrite) error {
+	if err := b.loadProjections(); err != nil {
+		return err
+	}
+	lease, version, revision := w.LeaseEpoch, w.ClientVersion, w.ServerRevision
+	b.projections[w.QuestionID] = &projectionRow{
+		LeaseEpoch: &lease, ClientVersion: &version, ServerRevision: &revision,
+		CanonicalRaw: string(w.Canonical), ResponseHash: w.ResponseHash,
+	}
 	if !b.rowFirst {
 		if !b.blobLoaded {
 			b.blobLoaded = true
@@ -474,6 +515,13 @@ func (b *batchIO) applyProjection(w projectionWrite) error {
 }
 
 func (b *batchIO) insertLedger(w ledgerWrite) error {
+	if b.pendingVersions == nil {
+		b.pendingVersions = make(map[questionVersionKey]string, len(b.commands))
+	}
+	key := questionVersionKey{w.LeaseEpoch, w.QuestionID, w.ClientVersion}
+	if _, ok := b.pendingVersions[key]; !ok {
+		b.pendingVersions[key] = w.WriteID
+	}
 	b.ledger = append(b.ledger, w)
 	return nil
 }
@@ -498,9 +546,21 @@ func (b *batchIO) flush() error {
 		}
 	}
 	if len(b.responses) > 0 {
-		values := make([]string, 0, len(b.responses))
-		args := make([]any, 0, len(b.responses)*12)
+		// One row per question: an accepted command is always newer than the
+		// staged projection it replaced, so the last write is the final cell.
+		final := make([]projectionWrite, 0, len(b.responses))
+		at := make(map[string]int, len(b.responses))
 		for _, w := range b.responses {
+			if i, ok := at[w.QuestionID]; ok {
+				final[i] = w
+				continue
+			}
+			at[w.QuestionID] = len(final)
+			final = append(final, w)
+		}
+		values := make([]string, 0, len(final))
+		args := make([]any, 0, len(final)*12)
+		for _, w := range final {
 			values = append(values, "(?,?,?,?,?,?,?,?,?,?,?,?)")
 			args = append(args, w.AttemptID, w.QuestionID, w.ModuleID, w.LeaseEpoch, w.ControlEpoch, w.ClientVersion, w.WriteID, w.RequestHash, string(w.Canonical), w.ResponseHash, w.ServerRevision, w.Now)
 		}
@@ -589,26 +649,9 @@ func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
-func ledgerKey(leaseEpoch uint64, questionID string, clientVersion uint64) string {
-	return strconv.FormatUint(leaseEpoch, 10) + "\x00" + questionID + "\x00" + strconv.FormatUint(clientVersion, 10)
-}
-
 func uniqueStrings(commands []ResponseCommand, key func(ResponseCommand) string) []string {
 	out := make([]string, 0, len(commands))
 	seen := make(map[string]bool, len(commands))
-	for _, c := range commands {
-		v := key(c)
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	return out
-}
-
-func uniqueUint64(commands []ResponseCommand, key func(ResponseCommand) uint64) []uint64 {
-	out := make([]uint64, 0, len(commands))
-	seen := make(map[uint64]bool, len(commands))
 	for _, c := range commands {
 		v := key(c)
 		if !seen[v] {

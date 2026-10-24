@@ -26,6 +26,7 @@ describe('SatSingleChoiceAnswer', () => {
     const onChange = vi.fn();
     render(<SatSingleChoiceAnswer questionId="q1" options={options} eliminatedOptionIds={new Set()} eliminationMode={false} disabled={false} onChange={onChange} onToggleElimination={vi.fn()} />);
     const radio = screen.getByRole('radio', { name: /Option A.*First answer/i });
+    expect(radio).toHaveAttribute('data-testid', 'sat-answer-control');
     expect(radio.closest('label')).toHaveClass('sat-answer-choice');
     fireEvent.click(screen.getByText('First answer'));
     expect(onChange).toHaveBeenCalledWith('a');

@@ -1027,7 +1027,7 @@ func TestSATPublishRequiresCompleteConverterMySQL(t *testing.T) {
 		raw, err := json.Marshal(map[string]any{
 			"converterVersion": "classroom-v1", "scoreType": "estimated_sat", "calibrationSource": "staff_approved",
 			"sections": map[string]any{"reading-writing": map[string]string{"full_lower": "full", "full_higher": "full"}, "math": math},
-			"tables":   map[string]any{"full": table(3)},
+			"tables":   map[string]any{"full": table(6)},
 		})
 		if err != nil {
 			t.Fatal(err)

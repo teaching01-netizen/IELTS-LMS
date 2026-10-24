@@ -33,13 +33,14 @@ func (s *Service) StartBreak(ctx context.Context, scheduleID, attemptID, urlSche
 		return nil, err
 	}
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
-		if err := s.ensureAttemptCanWorkTx(ctx, t, bound, attemptID); err != nil {
+		var authority attemptAuthoritySnapshot
+		if err := s.ensureAttemptCanWorkWithAuthorityTx(ctx, t, bound, attemptID, nil, &authority); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, bound, attemptID, writerBinding...); err != nil {
+		if err := enforceWriterSessionWithAuthorityTx(ctx, t, bound, attemptID, writerBinding, &authority); err != nil {
 			return err
 		}
-		if err := enforceControlEpochTx(ctx, t, attemptID, controlEpoch); err != nil {
+		if err := enforceControlEpochSnapshot(attemptID, &authority, controlEpoch); err != nil {
 			return err
 		}
 		now, err := personalRuntimeNowTx(ctx, t, bound)
@@ -128,13 +129,14 @@ func (s *Service) EnterBreak(ctx context.Context, scheduleID, attemptID, urlSche
 		return nil, err
 	}
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
-		if err := s.ensureAttemptCanWorkTx(ctx, t, bound, attemptID); err != nil {
+		var authority attemptAuthoritySnapshot
+		if err := s.ensureAttemptCanWorkWithAuthorityTx(ctx, t, bound, attemptID, nil, &authority); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, bound, attemptID, writerBinding...); err != nil {
+		if err := enforceWriterSessionWithAuthorityTx(ctx, t, bound, attemptID, writerBinding, &authority); err != nil {
 			return err
 		}
-		if err := enforceControlEpochTx(ctx, t, attemptID, req.ControlEpoch); err != nil {
+		if err := enforceControlEpochSnapshot(attemptID, &authority, req.ControlEpoch); err != nil {
 			return err
 		}
 		now, err := personalRuntimeNowTx(ctx, t, bound)
@@ -197,13 +199,14 @@ func (s *Service) MarkBreakVisible(ctx context.Context, scheduleID, attemptID, u
 		return nil, err
 	}
 	if err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
-		if err := s.ensureAttemptCanWorkTx(ctx, t, bound, attemptID); err != nil {
+		var authority attemptAuthoritySnapshot
+		if err := s.ensureAttemptCanWorkWithAuthorityTx(ctx, t, bound, attemptID, nil, &authority); err != nil {
 			return err
 		}
-		if err := enforceWriterSessionTx(ctx, t, bound, attemptID, writerBinding...); err != nil {
+		if err := enforceWriterSessionWithAuthorityTx(ctx, t, bound, attemptID, writerBinding, &authority); err != nil {
 			return err
 		}
-		if err := enforceControlEpochTx(ctx, t, attemptID, req.ControlEpoch); err != nil {
+		if err := enforceControlEpochSnapshot(attemptID, &authority, req.ControlEpoch); err != nil {
 			return err
 		}
 		now, err := personalRuntimeNowTx(ctx, t, bound)

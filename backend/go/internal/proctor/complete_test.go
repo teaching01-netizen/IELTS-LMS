@@ -84,8 +84,8 @@ func TestCompleteExamCustomReasonKeepsVocabularyPayload(t *testing.T) {
 	// waiting for the runtime. Ordered expectations pin that order.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id = ? FOR UPDATE")).
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
-			AddRow("sched-1", "exam-1", "sat", "", "proctor", "ver-1", "live", 4, 154))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
+			AddRow("sched-1", "exam-1", "sat", "", "", "proctor", "ver-1", "live", 4, 154))
 	// lockScheduleScope (B2 narrowed): runtime id + sections only — no
 	// schedule-wide attempt sweep.
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE")).
@@ -99,12 +99,15 @@ func TestCompleteExamCustomReasonKeepsVocabularyPayload(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_lifecycle_receipts WHERE scope_kind = ? AND scope_id = ? AND operation_id = ?")).
 		WillReturnError(sql.ErrNoRows)
+	// Explicit End Exam closes Eva SIM before the runtime read.
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET eva_sim_closed_at")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	// CompleteExam runtime row.
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "revision"}).AddRow("rt-1", "live", 7))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtimes SET status = 'completed'")).
-		WithArgs("rt-1").WillReturnResult(sqlmock.NewResult(0, 1))
+		WithArgs(terminalization.ReasonProctorComplete, "rt-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections SET status = 'completed'")).
 		WithArgs(terminalization.ReasonProctorComplete, "rt-1").WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET status = 'completed'")).

@@ -27,6 +27,56 @@ func deliveryCodeOf(err error) apperrors.Code {
 
 func deliverySvc(db *sql.DB) *Service { return NewService(db, tx.NewRunner(db)) }
 
+func TestAttemptWorkSnapshotFoldsSATPolicyAndPendingBreak(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
+		WithArgs("att-1", "sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required",
+			"sat_start_code_accepted_at", "active_client_session_id", "lease_epoch", "control_epoch",
+		}).AddRow("active", "running", nil, "exam", false, nil, "sess-test", 1, 1))
+	mock.ExpectQuery("FROM exam_session_runtimes rt.*FOR SHARE").
+		WithArgs("att-1", "sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "timing_model", "active_section_key", "handoff_mode", "sat_delivery_policy",
+			"policy_timing_model", "pending_break",
+		}).AddRow("live", "sat_personal_v1", nil, "server_start",
+			`{"version":"sat_recovery_v1","recoverySeconds":120,"entryRecoverySeconds":120,"lateAnswerPolicy":"frozen_arrival_window"}`,
+			"sat_personal_v1", true))
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runtime moduleTimingRuntimeSnapshot
+	var authority attemptAuthoritySnapshot
+	if err := deliverySvc(db).ensureAttemptCanStartModuleWithAuthorityTx(
+		context.Background(), tx, "sched-1", "att-1", &runtime, &authority,
+	); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("ensure attempt workability: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if !runtime.pendingBreak {
+		t.Fatal("pending break was not folded into the runtime snapshot")
+	}
+	if runtime.recoveryPolicy == nil || runtime.recoveryPolicy.Version != "sat_recovery_v1" {
+		t.Fatalf("recovery policy was not parsed from the runtime snapshot: %#v", runtime.recoveryPolicy)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // URL schedule id must equal the bearer schedule id: FORBIDDEN before any DB
 // access, mirroring the auth boundary in Bootstrap.
 func TestDeliveryBootstrapScheduleMismatchForbidden(t *testing.T) {
@@ -188,6 +238,12 @@ func deliverySaveBegin(mock sqlmock.Sqlmock) {
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
 }
 
+func deliverySATPolicyRead(mock sqlmock.Sqlmock, attemptID string) {
+	mock.ExpectQuery("FROM student_attempts a").
+		WithArgs(attemptID).
+		WillReturnRows(sqlmock.NewRows([]string{"sat_delivery_policy", "timing_model"}).AddRow(nil, nil))
+}
+
 func deliverySaveBinding(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules s JOIN exam_entities e")).
 		WithArgs("sched-1").
@@ -197,6 +253,13 @@ func deliverySaveBinding(mock sqlmock.Sqlmock) {
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id", "exam_id"}).
 			AddRow("att-1", "sched-1", "exam-1"))
+}
+
+func deliveryStartModuleBinding(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery(regexp.QuoteMeta("JOIN student_attempts a ON a.schedule_id = s.id AND a.exam_id = s.exam_id")).
+		WithArgs("sched-1", "att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "published_version_id", "exam_type"}).
+			AddRow("sched-1", "exam-1", "sat", "pv-1", "Academic"))
 }
 
 // deliverySaveProtocol mocks the D1 transport fence read. The compatibility
@@ -209,26 +272,20 @@ func deliverySaveProtocol(mock sqlmock.Sqlmock) {
 }
 
 // deliveryWriterClaimTx mocks the in-tx writer-session fence: revocation
-// re-check + conditional claim UPDATE (no-op match) + SELECT FOR UPDATE
-// returning the same session. Every mutation-tx test needs it after the
-// writability probe.
+// re-checks the session token; the locked attempt row already supplied the
+// active writer and lease values.
 func deliveryWriterClaimTx(mock sqlmock.Sqlmock, session string) {
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions")).
 		WithArgs("tok-1").
-		WillReturnRows(sqlmock.NewRows([]string{"token_id", "revoked_at"}).AddRow("tok-1", nil))
-	mock.ExpectExec(regexp.QuoteMeta("SET active_client_session_id")).
-		WithArgs(session, "att-1", "sched-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT active_client_session_id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
-		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow(session))
+		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "attempt_id", "client_session_id", "expires_at", "lease_epoch"}).
+			AddRow("sched-1", "att-1", session, time.Now().Add(time.Hour), 1))
 }
 
 func deliverySaveWorkableTx(mock sqlmock.Sqlmock, startedAt time.Time) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at"}).
-			AddRow("active", "running", nil, "exam", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "active_client_session_id", "lease_epoch", "control_epoch"}).
+			AddRow("active", "running", nil, "exam", false, nil, "sess-test", 1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))

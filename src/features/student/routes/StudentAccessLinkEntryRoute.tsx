@@ -19,6 +19,7 @@ import {
   SatEntryStatus,
   SatEntrySubmit,
   focusFirstInvalidField,
+  satCheckInStep,
 } from "../../student-delivery/api/satEntryPortal";
 import { resumeSatStudentSession } from "../../student-delivery/api/satResume";
 import {
@@ -40,6 +41,12 @@ import {
   type PublicStudentAccessLink,
 } from "../contracts/access-link/PublicStudentAccessLink";
 import { hasBackendStatusCode } from "../api/backendStatus";
+import {
+  SatRegistrationGroup,
+  useRegistrationAnswers,
+  type RegistrationSubmission,
+} from "@/src/features/assessment-forms/api/assessmentForms";
+import { studentAccessLinkGateway } from "../infrastructure/access-link/studentAccessLinkGateway";
 
 /**
  * The scope copy for a narrowed link, or null when the link admits every
@@ -57,6 +64,8 @@ interface AccessForm {
   studentCode: string;
   studentName: string;
   email: string;
+  /** Exact registration submission carried through queue polling. */
+  registrationForm?: RegistrationSubmission | undefined;
 }
 
 const STUDENT_LINK_PROFILE_PREFIX = "student-access-link-profile:";
@@ -263,6 +272,15 @@ export function StudentAccessLinkEntryRoute() {
   }, [accessLinkId, initial]);
 
   const link = linkQuery.data ?? null;
+  const registration = useRegistrationAnswers(
+    link?.providerKey === "sat" ? (link.registrationForm ?? null) : null
+  );
+  const handleRegistrationError = registration.handleError;
+  const reloadRegistrationForm = useCallback(
+    async () =>
+      accessLinkId ? ((await studentAccessLinkGateway.load(accessLinkId)).registrationForm ?? null) : null,
+    [accessLinkId]
+  );
   const canEnter = link?.status === "live";
   const locatorForThisLink = Boolean(
     link &&
@@ -433,6 +451,7 @@ export function StudentAccessLinkEntryRoute() {
         email: normalizedEmail,
         studentName: normalizedName,
         ...(clientSessionId ? { clientSessionId } : {}),
+        ...(submitted.registrationForm ? { registrationForm: submitted.registrationForm } : {}),
       });
     },
     [studentEntry]
@@ -453,7 +472,8 @@ export function StudentAccessLinkEntryRoute() {
     if (!normalizedName) nextErrors.studentName = "Enter your full name.";
     if (!normalizedEmail || !isValidEmail(normalizedEmail))
       nextErrors.email = "Enter a valid email address.";
-    if (Object.keys(nextErrors).length) {
+    const prepared = link.providerKey === "sat" ? registration.prepare() : { valid: true };
+    if (Object.keys(nextErrors).length || !prepared.valid) {
       setErrors(nextErrors);
       if (link.providerKey === "sat")
         focusFirstInvalidField(event.currentTarget as HTMLFormElement);
@@ -468,6 +488,7 @@ export function StudentAccessLinkEntryRoute() {
       studentCode: normalizedCode,
       studentName: normalizedName,
       email: normalizedEmail,
+      ...(prepared.submission ? { registrationForm: prepared.submission } : {}),
     };
     try {
       const result = await submitEntry(link, submitted);
@@ -482,7 +503,12 @@ export function StudentAccessLinkEntryRoute() {
       clearPersistedAccessLinkQueue(accessLinkId);
       finishEntry(link, submitted, result);
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "Unable to enter this exam.");
+      if (link.providerKey === "sat" && (await handleRegistrationError(error, reloadRegistrationForm))) {
+        const formElement = (event.target as HTMLElement | null)?.closest("form");
+        if (formElement) focusFirstInvalidField(formElement);
+      } else {
+        setSubmitError(error instanceof Error ? error.message : "Unable to enter this exam.");
+      }
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -528,6 +554,15 @@ export function StudentAccessLinkEntryRoute() {
           clearPersistedAccessLinkQueue(accessLinkId);
           finishEntry(link, queuedForm, result);
         } catch (error) {
+          if (!cancelled && link.providerKey === "sat" && (await handleRegistrationError(error, reloadRegistrationForm))) {
+            // The queued answers no longer match the form: back to the card
+            // for review instead of polling with a stale submission.
+            clearPersistedAccessLinkQueue(accessLinkId);
+            setQueued(null);
+            setQueuedForm(null);
+            setLastQueuedTicket(null);
+            return;
+          }
           if (!cancelled) {
             const message =
               error instanceof Error
@@ -553,7 +588,17 @@ export function StudentAccessLinkEntryRoute() {
       cancelled = true;
       window.clearTimeout(timeout);
     };
-  }, [accessLinkId, finishEntry, link, queuePollFailure, queued, queuedForm, submitEntry]);
+  }, [
+    accessLinkId,
+    finishEntry,
+    handleRegistrationError,
+    link,
+    queuePollFailure,
+    queued,
+    queuedForm,
+    reloadRegistrationForm,
+    submitEntry,
+  ]);
 
   if (
     linkQuery.isLoading &&
@@ -631,6 +676,10 @@ export function StudentAccessLinkEntryRoute() {
         title="Exam Check-in"
         description="Check your details, then continue to the exam."
         helpText="Need help? Ask your teacher."
+        checkInStep={satCheckInStep({
+          code: link.accessMode === "student_code",
+          examDetails: (registration.form?.fields.length ?? 0) > 0,
+        })}
       >
         {scopeCopy ? (
           <SatEntryNotice tone="info" icon={<Clock3 size={18} />}>
@@ -715,6 +764,11 @@ export function StudentAccessLinkEntryRoute() {
             }}
             placeholder="you@example.com"
             autoComplete="email"
+          />
+          <SatRegistrationGroup
+            registration={registration}
+            idPrefix="student-link-registration"
+            disabled={locked}
           />
           <SatEntrySubmit disabled={locked} busy={locked}>
             {queued ? "Waiting…" : submitting ? "Checking…" : "Continue"}

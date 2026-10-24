@@ -54,18 +54,18 @@ func durabilityAttemptRowsAs(status string) *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
-		"response_revision", "deadline_at", "closing_grace_until",
+		"active_client_session_id", "response_revision", "deadline_at", "closing_grace_until",
 		"submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
-	}).AddRow("att-1", "sched-1", "u-1", "", 2, status, "exam", 3, 7, 9, nil, nil, nil, nil, "active", "", "")
+	}).AddRow("att-1", "sched-1", "u-1", "", 2, status, "exam", 3, 7, "sess-1", 9, nil, nil, nil, nil, "active", "", "")
 }
 
 func durabilitySATAttemptRows(deadline, grace time.Time) *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 		"delivery_status", "phase", "lease_epoch", "control_epoch",
-		"response_revision", "deadline_at", "closing_grace_until",
+		"active_client_session_id", "response_revision", "deadline_at", "closing_grace_until",
 		"submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
-	}).AddRow("att-1", "sched-1", "u-1", "", 2, "running", "exam", 3, 7, 9,
+	}).AddRow("att-1", "sched-1", "u-1", "", 2, "running", "exam", 3, 7, "sess-1", 9,
 		deadline, grace, nil, nil, "active", "sat", "")
 }
 
@@ -100,10 +100,7 @@ func TestDurabilityContractVersionReuseCollides(t *testing.T) {
 	durabilityFenceStubs(mock, attemptRows())
 	// exactReplay probe: write ID unseen -> not a replay.
 	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-new").WillReturnError(sql.ErrNoRows)
-	// Active-session check passes.
-	mock.ExpectQuery("SELECT active_client_session_id").WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	// Idempotency probe: write ID unseen.
-	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WithArgs("att-1", "w-new").WillReturnError(sql.ErrNoRows)
+	// The idempotency probe reuses that miss (same transaction, attempt locked).
 	// Version-collision probe: same lease/question/version already taken by
 	// w-other. Lease + version pinned as uint64 (v1.5.2 DeepEqual).
 	mock.ExpectQuery("SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id").
@@ -158,9 +155,7 @@ func TestDurabilityContractExactReplayIsDuplicate(t *testing.T) {
 		WithArgs("att-1", "w-1").
 		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "response_hash", "outcome", "server_revision", "canonical_response"}).
 			AddRow(reqHash, "resp-hash-1", "applied", uint64(4), durabilityReplayRaw))
-	mock.ExpectQuery("SELECT response_revision FROM student_attempts WHERE id").
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"response_revision"}).AddRow(uint64(9)))
+	// No revision re-read: the replay reports the locked attempt row's revision.
 	mock.ExpectCommit()
 
 	qr, rl := liveStubs()
@@ -225,9 +220,7 @@ func TestDurabilityContractExactReplaySurvivesTerminal(t *testing.T) {
 		WithArgs("att-1", "w-1").
 		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "response_hash", "outcome", "server_revision", "canonical_response"}).
 			AddRow(reqHash, "resp-hash-1", "applied", uint64(4), durabilityReplayRaw))
-	mock.ExpectQuery("SELECT response_revision FROM student_attempts WHERE id").
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"response_revision"}).AddRow(uint64(9)))
+	// No revision re-read: the replay reports the locked attempt row's revision.
 	mock.ExpectCommit()
 
 	qr, rl := liveStubs()
@@ -272,9 +265,7 @@ func TestDurabilityContractSATExactReplaySurvivesDeadline(t *testing.T) {
 		WithArgs("att-1", "w-1").
 		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "response_hash", "outcome", "server_revision", "canonical_response"}).
 			AddRow(reqHash, "resp-hash-1", "applied", uint64(4), durabilityReplayRaw))
-	mock.ExpectQuery("SELECT response_revision FROM student_attempts WHERE id").
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"response_revision"}).AddRow(uint64(9)))
+	// No revision re-read: the replay reports the locked attempt row's revision.
 	mock.ExpectCommit()
 
 	qr, rl := liveStubs()
@@ -304,10 +295,6 @@ func TestDurabilityContractSATFreshWriteRejectedAfterSaveGrace(t *testing.T) {
 	durabilityFenceStubs(mock, durabilitySATAttemptRows(now.Add(-4*time.Second), now.Add(26*time.Second)))
 	// The unseen id misses the replay probe, then lease/session fencing passes.
 	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-new").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").
-		WithArgs("att-1", "w-new").WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
 
 	cmd := SaveResponsesCommand{AttemptID: "att-1", LeaseEpoch: 3, ControlEpoch: 7,
@@ -376,9 +363,9 @@ func TestDurabilityContractControlMismatchStale(t *testing.T) {
 	bearer := mintToken(t, secret, baseClaims())
 
 	durabilityFenceStubs(mock, attemptRows())
-	// exactReplay short-circuits on the first miss: one probe for w-a,
-	// none for w-b, then the fence fires before any write.
-	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-a").WillReturnError(sql.ErrNoRows)
+	// The two-command set-based preflight checks both write IDs in one read;
+	// the control fence then fires before any write.
+	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-a", "w-b").WillReturnRows(sqlmock.NewRows(ledgerColumnNames()))
 	mock.ExpectRollback()
 
 	// Attempt control is 7; batch was built before the pause (control 6).
@@ -432,10 +419,7 @@ func TestDurabilityContractLowerUnusedVersionSuperseded(t *testing.T) {
 	durabilityFenceStubs(mock, attemptRows())
 	// exactReplay probe: write ID unseen -> not a replay.
 	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-stale").WillReturnError(sql.ErrNoRows)
-	// Active-session check passes.
-	mock.ExpectQuery("SELECT active_client_session_id").WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	// Idempotency probe: write ID unseen.
-	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WithArgs("att-1", "w-stale").WillReturnError(sql.ErrNoRows)
+	// The idempotency probe reuses that miss (same transaction, attempt locked).
 	// Version probe: version 5 unused by any write (uint64 pins).
 	mock.ExpectQuery("SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id").
 		WithArgs("att-1", uint64(3), "q-1", uint64(5)).WillReturnError(sql.ErrNoRows)
@@ -521,8 +505,6 @@ func TestDurabilityContractLeaseDominatedSupersede(t *testing.T) {
 
 	durabilityFenceStubs(mock, attemptRows())
 	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-oldlease").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WithArgs("att-1", "w-oldlease").WillReturnError(sql.ErrNoRows)
 	// Version 99 unused by any write: the version arm alone would call
 	// this write newer — the lease arm overrules it below.
 	mock.ExpectQuery("SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id").
@@ -605,12 +587,12 @@ func TestDurabilityContractWriteIDConflictOnReplayProbe(t *testing.T) {
 	}
 }
 
-// (e2) WRITE_ID_CONFLICT on the in-tx idempotency probe: exactReplay misses
-// but the per-command probe finds the same write ID with a different hash.
-// Realizable under READ COMMITTED when a concurrent batch commits between
-// the two SELECTs (TOCTOU) — the second probe must still refuse to
-// overwrite. Strict order pins the interleaving: miss, fence pass, active
-// pass, then conflict.
+// (e2) WRITE_ID_CONFLICT on the in-tx idempotency probe: the replay probe
+// short-circuits at the first unseen write id, so a later command's stored
+// row is first read by the in-loop probe. w-0 is new and applies; w-1 is in
+// the ledger with a different hash -> conflict, never overwrite, rollback.
+// The per-command strategy is forced so the probes stay one per write id;
+// strict order also pins that w-0's replay-probe miss is reused, not re-read.
 func TestDurabilityContractWriteIDConflictInTxProbe(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -618,16 +600,26 @@ func TestDurabilityContractWriteIDConflictInTxProbe(t *testing.T) {
 	}
 	defer db.Close()
 	secret := []byte("test-secret-32-bytes-long--------")
-	svc := testService(db, secret)
+	svc := testService(db, secret).SetBulkThresholdForTest(perCommandStrategyThreshold)
 	bearer := mintToken(t, secret, baseClaims())
 
 	durabilityFenceStubs(mock, attemptRows())
-	// exactReplay probe misses (row not yet committed at this read) ...
-	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-1").WillReturnError(sql.ErrNoRows)
-	// ... fencing passes (3/7 current) and the session stays active ...
-	mock.ExpectQuery("SELECT active_client_session_id").WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	// ... then the idempotency probe sees the concurrently committed row
-	// with different content -> conflict, never overwrite.
+	// exactReplay probe: w-0 unseen -> not a replay; w-1 is not probed yet.
+	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-0").WillReturnError(sql.ErrNoRows)
+	// w-0 applies (legacy projection path).
+	mock.ExpectQuery("SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id").
+		WithArgs("att-1", uint64(3), "q-0", uint64(10)).WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT lease_epoch, client_version, server_revision FROM attempt_responses_v2").
+		WithArgs("att-1", "q-0").WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT answers, writing_answers, flags FROM student_attempts").
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"answers", "writing_answers", "flags"}).AddRow("{}", "{}", "{}"))
+	mock.ExpectExec("UPDATE student_attempts SET answers=").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO attempt_responses_v2").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO attempt_mutations_v2").
+		WithArgs(sqlmock.AnyArg(), "att-1", "w-0", uint64(3), uint64(7), "q-0", uint64(10), sqlmock.AnyArg(), sqlmock.AnyArg(), "applied", uint64(10), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	// The in-loop probe for w-1 finds it stored with different content.
 	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").
 		WithArgs("att-1", "w-1").
 		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "response_hash", "outcome", "server_revision", "canonical_response"}).
@@ -635,7 +627,10 @@ func TestDurabilityContractWriteIDConflictInTxProbe(t *testing.T) {
 	mock.ExpectRollback()
 
 	cmd := SaveResponsesCommand{AttemptID: "att-1", LeaseEpoch: 3, ControlEpoch: 7,
-		Commands: []ResponseCommand{{WriteID: "w-1", QuestionID: "q-1", ClientVersion: 10, Response: ResponsePayload{Answer: "A"}}}}
+		Commands: []ResponseCommand{
+			{WriteID: "w-0", QuestionID: "q-0", ClientVersion: 10, Response: ResponsePayload{Answer: "B"}},
+			{WriteID: "w-1", QuestionID: "q-1", ClientVersion: 10, Response: ResponsePayload{Answer: "A"}},
+		}}
 	qr, rl := liveStubs()
 	_, err = svc.SaveResponses(context.Background(), bearer, cmd, qr, rl)
 	e := durabilityErr(t, err)
@@ -671,8 +666,6 @@ func TestDurabilityContractWriteIDConflictOnLedgerInsertDup(t *testing.T) {
 
 	durabilityFenceStubs(mock, attemptRows())
 	mock.ExpectQuery("FROM attempt_mutations_v2 WHERE attempt_id").WithArgs("att-1", "w-1").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
-	mock.ExpectQuery("SELECT request_hash, response_hash, outcome, server_revision").WithArgs("att-1", "w-1").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT client_write_id FROM attempt_mutations_v2 WHERE attempt_id").
 		WithArgs("att-1", uint64(3), "q-1", uint64(10)).WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT lease_epoch, client_version, server_revision FROM attempt_responses_v2").
@@ -790,9 +783,7 @@ func TestDurabilityContractReplayRejectsStaleClaimLease(t *testing.T) {
 		WithArgs("att-1", "w-1").
 		WillReturnRows(sqlmock.NewRows([]string{"request_hash", "response_hash", "outcome", "server_revision", "canonical_response"}).
 			AddRow(reqHash, "resp-hash-1", "applied", uint64(4), durabilityReplayRaw))
-	mock.ExpectQuery("SELECT response_revision FROM student_attempts WHERE id").
-		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"response_revision"}).AddRow(uint64(9)))
+	// No revision re-read: the replay reports the locked attempt row's revision.
 	// ... but the claim lease is stale, so the replay is fenced, never
 	// returned: rollback, no commit.
 	mock.ExpectRollback()
@@ -892,15 +883,14 @@ func TestDurabilityContractSubmitFinalCommandsControlSubstitution(t *testing.T) 
 	bearer := mintToken(t, secret, baseClaims())
 	qr, rl := liveStubs()
 
-	// Submit preamble: lock, session, receipt miss, submission-ID
-	// ownership miss, active session. (Runtime gate is stubbed: no SQL.)
+	// Submit preamble: lock, session, receipt miss, and submission-ID
+	// ownership miss. (Runtime gate is stubbed: no SQL.)
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM student_attempts WHERE id").WithArgs("att-1").WillReturnRows(attemptRows())
 	mock.ExpectQuery("FROM attempt_sessions WHERE token_id").WithArgs("tok-1").WillReturnRows(sessionRows())
 	mock.ExpectQuery("FROM attempt_submissions_v2 WHERE attempt_id").WithArgs("att-1").WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery("SELECT attempt_id FROM attempt_submissions_v2 WHERE submission_id").WithArgs("sub-9").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("SELECT active_client_session_id").WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
 	// Nested saveInTx for the final batch: re-lock + re-verify, replay
 	// probe misses, lease passes (3 == 3), then control 0 vs 7 fences.
 	mock.ExpectQuery("FROM student_attempts WHERE id").WithArgs("att-1").WillReturnRows(attemptRows())

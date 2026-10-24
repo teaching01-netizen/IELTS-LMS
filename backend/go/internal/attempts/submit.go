@@ -167,7 +167,7 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 	if claims.LeaseEpoch != nil && *claims.LeaseEpoch != attempt.LeaseEpoch {
 		return SubmitResult{}, leaseFenced()
 	}
-	if err := ensureActiveSession(ctx, q, attempt, claims); err != nil {
+	if err := ensureActiveSession(attempt, claims); err != nil {
 		return SubmitResult{}, err
 	}
 	if cmd.ExpectedRevision != nil && *cmd.ExpectedRevision != attempt.ResponseRevision {
@@ -204,7 +204,7 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 		// epoch so a pause/resume racing the submit cannot slip through
 		// on a fresh-read epoch.
 		saveCmd := SaveResponsesCommand{AttemptID: cmd.AttemptID, LeaseEpoch: cmd.LeaseEpoch, ControlEpoch: cmd.ExpectedControlEpoch, Commands: cmd.FinalCommands}
-		if _, err := s.saveInTx(ctx, q, claims, saveCmd, qr, rl); err != nil {
+		if _, err := s.saveInTx(ctx, q, claims, saveCmd, preparePayloads(saveCmd.Commands), qr, rl, ""); err != nil {
 			return SubmitResult{}, err
 		}
 		attempt, err = lockAttempt(ctx, q, cmd.AttemptID)
@@ -220,6 +220,11 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 		// Lifecycle invariant: SAT can be sealed only when every required module
 		// is terminal (see sat_modules.go).
 		if err := ensureSATModuleTopologyTx(ctx, q, cmd.AttemptID); err != nil {
+			return SubmitResult{}, err
+		}
+	}
+	if isPersonalIELSTimingModel(attempt.TimingModel) {
+		if err := ensureIELTSPersonalSectionsComplete(ctx, q, cmd.AttemptID, now); err != nil {
 			return SubmitResult{}, err
 		}
 	}
@@ -241,6 +246,30 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 		return SubmitResult{}, err
 	}
 	return result, nil
+}
+
+func ensureIELTSPersonalSectionsComplete(ctx context.Context, q tx.Tx, attemptID string, now time.Time) error {
+	if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
+		SET state = 'completed', finished_at = COALESCE(finished_at, deadline_at), revision = revision + 1
+		WHERE attempt_id = ? AND state = 'active' AND deadline_at IS NOT NULL AND deadline_at <= ?`, attemptID, now); err != nil {
+		return err
+	}
+	var remaining int
+	if err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM exam_session_runtime_sections rs
+		JOIN exam_session_runtimes rt ON rt.id = rs.runtime_id
+		JOIN student_attempts a ON a.schedule_id = rt.schedule_id
+		LEFT JOIN ielts_attempt_section_timelines t
+		  ON t.runtime_id = rt.id AND t.attempt_id = a.id AND t.section_key = rs.section_key
+		WHERE a.id = ? AND rs.section_key IN ('listening', 'reading', 'writing')
+		  AND (t.id IS NULL OR t.state <> 'completed' OR t.deadline_at IS NULL OR t.deadline_at > ?)`, attemptID, now).Scan(&remaining); err != nil {
+		return err
+	}
+	if remaining != 0 {
+		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "IELTS submission is available after your final section ends.", HTTPStatus: 422}
+	}
+	return nil
 }
 
 type storedReceipt struct {

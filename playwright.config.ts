@@ -193,7 +193,9 @@ export default defineConfig({
       reuseExistingServer: !process.env["CI"],
     },
     {
-      command: "cd backend/go && exec go run ./cmd/api",
+      // Playwright starts web servers before globalSetup. Migrate before the
+      // API's fail-closed schema guard so a fresh TEST_DATABASE_URL is usable.
+      command: "cd backend/go && go run ./cmd/migrate && exec go run ./cmd/api",
       env: backendRuntimeEnv,
       url: `${backendApiUrl}/healthz`,
       timeout: 180_000,

@@ -11,6 +11,12 @@ const entryInfoMock = vi.hoisted(() => vi.fn());
 const roleMock = vi.hoisted(() => ({ role: undefined as string | undefined }));
 const proctorGetMock = vi.hoisted(() => vi.fn());
 // The real controller always reports `scheduleMetrics`; fixtures only list what they exercise.
+const formStateMock = vi.hoisted(() => vi.fn(() => ({ data: undefined as unknown, refetch: vi.fn(async () => ({ data: undefined })) })));
+// Room form state has its own suite; rooms here have no Eva SIM.
+vi.mock('@/src/features/assessment-forms/api/assessmentForms', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/src/features/assessment-forms/api/assessmentForms')>()),
+  useScheduleFormState: () => formStateMock(),
+}));
 vi.mock('../../../../features/proctor/hooks/useProctorRouteController', () => ({
   useProctorRouteController: (...args: unknown[]) => ({ scheduleMetrics: {}, ...controllerMock(...args) }),
 }));

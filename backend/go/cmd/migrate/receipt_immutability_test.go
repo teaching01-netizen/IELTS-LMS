@@ -18,8 +18,10 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -170,19 +172,48 @@ func TestReceiptImmutabilityMySQL(t *testing.T) {
 	if triggerCount != 2 {
 		t.Skipf("immutability triggers not installed (found %d/2); apply 0056 first", triggerCount)
 	}
+	// Use a transactional fixture so a fresh schema with no receipts still
+	// proves both row guards. Foreign keys are disabled only on this pinned
+	// test connection because the trigger contract is independent of parent
+	// creation; rollback removes the probe row before the connection is reused.
+	if _, err := conn.ExecContext(ctx, `SET FOREIGN_KEY_CHECKS = 0`); err != nil {
+		t.Fatalf("disable foreign keys for isolated probe: %v", err)
+	}
+	defer func() {
+		if _, err := conn.ExecContext(ctx, `SET FOREIGN_KEY_CHECKS = 1`); err != nil {
+			t.Errorf("restore foreign keys after isolated probe: %v", err)
+		}
+	}()
+	probeTx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin immutability probe: %v", err)
+	}
+	defer probeTx.Rollback()
+	suffix := strconv.FormatInt(time.Now().UnixNano(), 36)
+	attemptID := "immutable-" + suffix
+	if _, err := probeTx.ExecContext(ctx, `
+		INSERT INTO attempt_terminalizations (
+			attempt_id, terminalization_id, schedule_id, outcome, reason, actor_kind,
+			effective_at, recorded_at, answer_revision, final_snapshot, request_id
+		) VALUES (?, ?, ?, 'submitted', 'legacy_unknown', 'system', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 0, JSON_OBJECT(), ?)
+	`, attemptID, "terminal-"+suffix, "schedule-"+suffix, "request-"+suffix); err != nil {
+		t.Fatalf("insert immutability probe row: %v", err)
+	}
 	// Post-migration, any UPDATE or DELETE must fail with the immutability
-	// error — and the app maps it sanely (a plain MySQL error, never a
-	// silent success or a panic). The probe touches a real row (LIMIT 1
-	// over the table): BEFORE triggers fire per matched row, so a
-	// zero-match predicate would succeed trivially and prove nothing.
-	if _, err := conn.ExecContext(ctx, `UPDATE attempt_terminalizations SET reason = 'time_expired' ORDER BY attempt_id LIMIT 1`); err == nil {
+	// error — and the app maps it sanely (a plain MySQL error, never a silent
+	// success or a panic). WHERE names the inserted row so zero matches cannot
+	// accidentally make the assertion pass.
+	if _, err := probeTx.ExecContext(ctx, `UPDATE attempt_terminalizations SET reason = 'time_expired' WHERE attempt_id = ?`, attemptID); err == nil {
 		t.Fatal("UPDATE on attempt_terminalizations must fail post-0056 (BEFORE UPDATE guard)")
 	} else if !strings.Contains(strings.ToLower(err.Error()), "immutable") {
 		t.Fatalf("UPDATE must fail with the immutability error, got: %v", err)
 	}
-	if _, err := conn.ExecContext(ctx, `DELETE FROM attempt_terminalizations ORDER BY attempt_id LIMIT 1`); err == nil {
+	if _, err := probeTx.ExecContext(ctx, `DELETE FROM attempt_terminalizations WHERE attempt_id = ?`, attemptID); err == nil {
 		t.Fatal("DELETE on attempt_terminalizations must fail post-0056 (BEFORE DELETE guard)")
 	} else if !strings.Contains(strings.ToLower(err.Error()), "immutable") {
 		t.Fatalf("DELETE must fail with the immutability error, got: %v", err)
+	}
+	if err := probeTx.Rollback(); err != nil {
+		t.Fatalf("rollback immutability probe row: %v", err)
 	}
 }

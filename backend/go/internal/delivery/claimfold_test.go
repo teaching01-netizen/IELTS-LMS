@@ -13,8 +13,8 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 )
 
-// B2 RED: claimWriterSessionTx claims a free slot in-tx (conditional UPDATE
-// matches) then verifies equality — one PK row, no separate pre-tx.
+// B2: claimWriterSessionTx locks the attempt, claims a free writer slot in-tx,
+// and commits without a separate pre-tx round trip.
 func TestClaimWriterSessionTxClaimsFree(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -28,15 +28,16 @@ func TestClaimWriterSessionTxClaimsFree(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Revocation re-check first: live token row.
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions")).
 		WithArgs("tok-1").
-		WillReturnRows(sqlmock.NewRows([]string{"token_id", "revoked_at"}).AddRow("tok-1", nil))
+		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "attempt_id", "client_session_id", "expires_at", "lease_epoch"}).
+			AddRow("sched-1", "att-1", "sess-mine", time.Now().Add(time.Hour), 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT active_client_session_id, lease_epoch FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
+		WithArgs("att-1", "sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id", "lease_epoch"}).AddRow(nil, 1))
 	mock.ExpectExec(regexp.QuoteMeta("SET active_client_session_id")).
 		WithArgs("sess-mine", "att-1", "sched-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT active_client_session_id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
-		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-mine"))
 	mock.ExpectCommit()
 	if err := claimWriterSessionTx(ctx, tx, "sched-1", "att-1", "sess-mine", "tok-1"); err != nil {
 		_ = tx.Rollback()
@@ -63,15 +64,13 @@ func TestClaimWriterSessionTxSuperseded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions")).
 		WithArgs("tok-1").
-		WillReturnRows(sqlmock.NewRows([]string{"token_id", "revoked_at"}).AddRow("tok-1", nil))
-	mock.ExpectExec(regexp.QuoteMeta("SET active_client_session_id")).
-		WithArgs("sess-mine", "att-1", "sched-1").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT active_client_session_id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
+		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "attempt_id", "client_session_id", "expires_at", "lease_epoch"}).
+			AddRow("sched-1", "att-1", "sess-mine", time.Now().Add(time.Hour), 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT active_client_session_id, lease_epoch FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-other"))
+		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id", "lease_epoch"}).AddRow("sess-other", 1))
 	mock.ExpectRollback()
 	err = claimWriterSessionTx(ctx, tx, "sched-1", "att-1", "sess-mine", "tok-1")
 	_ = tx.Rollback()
@@ -84,8 +83,8 @@ func TestClaimWriterSessionTxSuperseded(t *testing.T) {
 }
 
 // B2: folded claim fires INSIDE SaveResponse's mutation tx when a bearer
-// session is bound — no pre-tx round trip. Exact-replay path proves it: the
-// claim UPDATE + verify SELECT precede the workable reads in one tx.
+// session is bound — no pre-tx round trip. The locked writer/lease read
+// precedes the remaining workable reads in the same tx.
 func TestSaveResponseFoldedClaimInTx(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -97,25 +96,21 @@ func TestSaveResponseFoldedClaimInTx(t *testing.T) {
 	deliverySaveBinding(mock)
 	deliverySaveProtocol(mock)
 	deliverySaveBegin(mock)
-	// ensureAttemptCanWorkTx first (attempt row + runtime status)...
+	// ensureAttemptCanWorkTx reads the attempt state, including the writer
+	// authority that the later token check validates against.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at"}).
-			AddRow("active", "running", nil, "exam", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "active_client_session_id", "lease_epoch", "control_epoch"}).
+			AddRow("active", "running", nil, "exam", false, nil, "sess-1", 1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
-	// ...then the folded claim: revocation re-check + conditional UPDATE +
-	// FOR UPDATE verify...
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+	// ...then the folded claim: revocation re-check; attempt ownership came
+	// from the already-locked attempt snapshot.
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions")).
 		WithArgs("tok-1").
-		WillReturnRows(sqlmock.NewRows([]string{"token_id", "revoked_at"}).AddRow("tok-1", nil))
-	mock.ExpectExec(regexp.QuoteMeta("SET active_client_session_id")).
-		WithArgs("sess-1", "att-1", "sched-1").
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT active_client_session_id FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
-		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id"}).AddRow("sess-1"))
+		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "attempt_id", "client_session_id", "expires_at", "lease_epoch"}).
+			AddRow("sched-1", "att-1", "sess-1", time.Now().Add(time.Hour), 1))
 	// ...then the module + legacy-gate remainder.
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? AND state IN")).
 		WithArgs("att-1").
@@ -165,7 +160,7 @@ func TestClaimWriterSessionTxRevokedRejects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions")).
 		WithArgs("tok-revoked").
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()

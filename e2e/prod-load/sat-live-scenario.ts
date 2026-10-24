@@ -13,26 +13,184 @@ export interface SatScenarioContext {
 export interface SatAnswerableFrame {
   moduleId: string;
   latencyMs: number;
+  observedAtMs?: number;
+  deadlineToAnswerableMs?: number;
+}
+
+export interface SatDeadlineFrameSummary {
+  count: number;
+  p95Ms: number | null;
+  p99Ms: number | null;
+  maxMs: number | null;
+  gatePassed: boolean;
+}
+
+export interface SatSynchronizedDeadlineFrameSummary extends SatDeadlineFrameSummary {
+  studentsCovered: number;
+  expectedStudents: number;
+  minActiveStudentsAtFrame: number | null;
+}
+
+export function hasMeasuredDeadlineTransition(frames: Iterable<SatAnswerableFrame>): boolean {
+  for (const frame of frames) {
+    if (frame.deadlineToAnswerableMs !== undefined && Number.isFinite(frame.deadlineToAnswerableMs)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function hasCompleteDeadlineTransitionCoverage(
+  results: Iterable<{ answerableFrames?: SatAnswerableFrame[] }>,
+  expectedStudents: number,
+): boolean {
+  if (!Number.isInteger(expectedStudents) || expectedStudents < 1) return false;
+  const students = Array.from(results);
+  return students.length === expectedStudents && students.every((student) =>
+    hasMeasuredDeadlineTransition(student.answerableFrames ?? [])
+  );
+}
+
+export function summarizeDeadlineToAnswerableFrames(
+  results: Iterable<{ answerableFrames?: SatAnswerableFrame[] }>,
+): SatDeadlineFrameSummary {
+  const latencies = Array.from(results).flatMap((result) => result.answerableFrames
+    ?.flatMap((frame) => frame.deadlineToAnswerableMs === undefined ? [] : [frame.deadlineToAnswerableMs]) ?? [])
+    .sort((a, b) => a - b);
+  const percentile = (fraction: number) => latencies.length
+    ? latencies[Math.ceil(fraction * latencies.length) - 1]
+    : null;
+  const p95Ms = percentile(0.95);
+  const p99Ms = percentile(0.99);
+  return {
+    count: latencies.length,
+    p95Ms,
+    p99Ms,
+    maxMs: latencies.at(-1) ?? null,
+    gatePassed: latencies.length > 0 && p95Ms !== null && p95Ms <= 3000 && p99Ms !== null && p99Ms <= 5000,
+  };
+}
+
+/**
+ * Summarize one timed transition per student, only when every requested
+ * student's exam interval overlaps that student's answerable frame. This is
+ * the synchronized-cohort gate; sequential browser runs cannot pass it.
+ */
+export function summarizeSynchronizedDeadlineToAnswerableFrames(
+  results: Iterable<{
+    answerableFrames?: SatAnswerableFrame[];
+    examEnteredAtMs?: number;
+    examExitedAtMs?: number;
+  }>,
+  expectedStudents: number,
+): SatSynchronizedDeadlineFrameSummary {
+  const students = Array.from(results);
+  const selected: SatAnswerableFrame[] = [];
+  let minActiveStudentsAtFrame = Number.POSITIVE_INFINITY;
+
+  if (Number.isInteger(expectedStudents) && expectedStudents > 0 && students.length === expectedStudents) {
+    for (const student of students) {
+      const frame = (student.answerableFrames ?? []).find((candidate) => {
+        const transitionMs = candidate.deadlineToAnswerableMs;
+        const observedAtMs = candidate.observedAtMs;
+        if (!Number.isFinite(transitionMs) || transitionMs! < 0 || !Number.isFinite(observedAtMs)) {
+          return false;
+        }
+        const active = students.reduce((count, cohortStudent) => {
+          const entered = cohortStudent.examEnteredAtMs;
+          const exited = cohortStudent.examExitedAtMs;
+          if (!Number.isFinite(entered) || !Number.isFinite(exited)) return count;
+          return entered! <= observedAtMs! && observedAtMs! <= exited! ? count + 1 : count;
+        }, 0);
+        if (active !== expectedStudents) return false;
+        minActiveStudentsAtFrame = Math.min(minActiveStudentsAtFrame, active);
+        return true;
+      });
+      if (frame) selected.push(frame);
+    }
+  }
+
+  const latencies = selected
+    .map((frame) => frame.deadlineToAnswerableMs!)
+    .sort((a, b) => a - b);
+  const percentile = (fraction: number) => latencies.length
+    ? latencies[Math.ceil(fraction * latencies.length) - 1]
+    : null;
+  const p95Ms = percentile(0.95);
+  const p99Ms = percentile(0.99);
+  return {
+    count: latencies.length,
+    studentsCovered: selected.length,
+    expectedStudents: Number.isInteger(expectedStudents) && expectedStudents > 0 ? expectedStudents : 0,
+    minActiveStudentsAtFrame: Number.isFinite(minActiveStudentsAtFrame) ? minActiveStudentsAtFrame : null,
+    p95Ms,
+    p99Ms,
+    maxMs: latencies.at(-1) ?? null,
+    gatePassed: students.length === expectedStudents && selected.length === expectedStudents &&
+      p95Ms !== null && p95Ms <= 3000 && p99Ms !== null && p99Ms <= 5000,
+  };
 }
 
 /** Install before navigation so the first module's event cannot be missed. */
-export async function satCaptureAnswerableFrames(page: Page): Promise<void> {
+export async function satCaptureAnswerableFrames(
+  page: Page,
+  onDeadlineFrame?: () => void,
+): Promise<void> {
+  if (onDeadlineFrame) {
+    await page.exposeFunction('__satDeadlineFrameObserved', onDeadlineFrame);
+  }
   await page.addInitScript(() => {
-    const frames: { moduleId: string; latencyMs: number }[] = [];
+    const frames: {
+      moduleId: string;
+      latencyMs: number;
+      observedAtMs?: number;
+      deadlineToAnswerableMs?: number;
+    }[] = [];
     Object.defineProperty(window, '__satAnswerableFrames', { value: frames });
     window.addEventListener('student-observability-metric', (event) => {
       const detail = (event as CustomEvent).detail;
       if (detail?.name !== 'sat_first_answerable_frame_at') return;
       if (typeof detail.moduleId !== 'string' || typeof detail.authorizedAt !== 'number') return;
+      const transitionDeadlineAt = typeof detail.transitionDeadlineAt === 'number'
+        ? detail.transitionDeadlineAt
+        : undefined;
+      let deadlineFrameSignaled = false;
+      const isVisible = (element: HTMLElement) => {
+        const style = getComputedStyle(element);
+        const box = element.getBoundingClientRect();
+        return box.width > 0 && box.height > 0 && style.display !== 'none' && style.visibility === 'visible';
+      };
       const waitForControl = () => {
         const shell = document.querySelector('[data-testid="sat-exam-shell"]');
-        const controls = shell?.querySelectorAll<HTMLInputElement>('input[type="radio"], input[type="text"]');
-        const answerable = Array.from(controls ?? []).some((input) => !input.disabled && input.getClientRects().length > 0);
+        const controls = shell?.querySelectorAll<HTMLInputElement>('input[data-testid="sat-answer-control"]');
+        const answerable = Array.from(controls ?? []).some((input) => {
+          if (input.disabled) return false;
+          // Choice radios are visually hidden; their labelled answer rows are
+          // the actual interaction surface. SPR controls are visible inputs.
+          return input.type === 'radio'
+            ? Array.from(input.labels ?? []).some(isVisible)
+            : isVisible(input);
+        });
         if (!answerable) {
           requestAnimationFrame(waitForControl);
           return;
         }
-        frames.push({ moduleId: detail.moduleId, latencyMs: Date.now() - detail.authorizedAt });
+        const answerableAt = Date.now();
+        frames.push({
+          moduleId: detail.moduleId,
+          latencyMs: answerableAt - detail.authorizedAt,
+          observedAtMs: answerableAt,
+          ...(transitionDeadlineAt === undefined
+            ? {}
+            : { deadlineToAnswerableMs: answerableAt - transitionDeadlineAt }),
+        });
+        if (transitionDeadlineAt !== undefined && !deadlineFrameSignaled) {
+          deadlineFrameSignaled = true;
+          const notify = (window as Window & {
+            __satDeadlineFrameObserved?: () => Promise<void>;
+          }).__satDeadlineFrameObserved;
+          if (notify) void notify();
+        }
       };
       requestAnimationFrame(waitForControl);
     });
@@ -303,7 +461,8 @@ export async function satWaitForExamLive(page: Page, ctx: SatScenarioContext, on
 }
 
 /**
- * Continuous answering until SAT Complete / exam timeout.
+ * Continuous answering until SAT Complete / exam timeout, unless `shouldStop`
+ * signals that a bounded transition measurement has completed.
  * - single_choice: check one non-eliminated radio, cycling options per visit
  * - produced-response: fill textbox "Enter your answer"
  * - Next question after each answer; never submits modules (server-owned).
@@ -314,7 +473,8 @@ export async function satAnswerUntilComplete(
   ctx: SatScenarioContext,
   onProgress?: (answered: number) => void,
   onRecoveryScreen?: () => void,
-): Promise<{ answered: number }> {
+  shouldStop?: () => boolean,
+): Promise<{ answered: number; stoppedEarly?: boolean }> {
   const started = Date.now();
   let answered = 0;
   let optionCursor = Math.abs(hashString(user.userId)) % 4;
@@ -326,7 +486,7 @@ export async function satAnswerUntilComplete(
     onProgress?.(answered);
   };
 
-  while (Date.now() - started < ctx.examTimeoutMs) {
+  while (Date.now() - started < ctx.examTimeoutMs && !shouldStop?.()) {
     // Heartbeat so the run log + dashboard prove answering is progressing.
     // First answer reports immediately; afterwards at most every 30s.
     if (answered > lastReported && (lastReported === 0 || Date.now() - lastProgressAt > 30_000)) report();
@@ -423,6 +583,14 @@ export async function satAnswerUntilComplete(
     }
 
     await page.waitForTimeout(800);
+  }
+
+  if (shouldStop?.()) return { answered, stoppedEarly: true };
+
+  if (shouldStop) {
+    throw new Error(
+      `SAT_TRANSITION_FRAME_TIMEOUT: no timed answerable frame after ${answered} answers within ${ctx.examTimeoutMs}ms.`,
+    );
   }
 
   throw new Error(`SAT_NOT_FINISHED: timed out after ${answered} answers before SAT Complete.`);

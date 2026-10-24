@@ -11,6 +11,11 @@ export interface SatStudentStageHostProps {
    */
   stage: { readonly kind: SatStudentStageKind; readonly key: string };
   /**
+   * Identity of the visible stage context. SAT keeps one `exam` stage across
+   * module handoffs, so callers include the active module attempt here.
+   */
+  focusKey?: string | undefined;
+  /**
    * Replace the stage immediately, with no cross-fade.
    *
    * True when this render is not a transition at all: the route is carrying a
@@ -73,10 +78,34 @@ function SatStudentStageLayer({
  * Reduced motion renders the current layer with no presence at all: an instant
  * replacement, never a two-layer frame.
  */
-export function SatStudentStageHost({ stage, instant = false, children, onExitComplete }: SatStudentStageHostProps) {
+export function SatStudentStageHost({
+  stage,
+  focusKey = stage.key,
+  instant = false,
+  children,
+  onExitComplete,
+}: SatStudentStageHostProps) {
   const reducedMotion = Boolean(useReducedMotion());
   const [completedExits, setCompletedExits] = useState(0);
   const reportedExits = useRef(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const root = rootRef.current;
+      const headings = root?.querySelectorAll<HTMLElement>(
+        "[data-sat-stage]:not([data-sat-stage-exiting]) [data-sat-stage-heading]"
+      );
+      const heading = Array.from(headings ?? []).find(
+        (candidate) => candidate.getClientRects().length > 0
+      );
+      if (heading) {
+        heading.focus({ preventScroll: true });
+      } else if (root?.contains(document.activeElement)) {
+        (document.activeElement as HTMLElement).blur();
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusKey]);
   useEffect(() => {
     // Motion calls its callback before React removes the outgoing layer.
     // Notify after that commit so cached image URLs stay valid until unmount.
@@ -88,6 +117,7 @@ export function SatStudentStageHost({ stage, instant = false, children, onExitCo
 
   return (
     <div
+      ref={rootRef}
       data-sat-stage-root="true"
       className="relative min-h-[100dvh] w-full bg-[var(--sat-background)]"
     >
@@ -104,7 +134,10 @@ export function SatStudentStageHost({ stage, instant = false, children, onExitCo
           {children}
         </div>
       ) : (
-        <AnimatePresence initial={false} onExitComplete={() => setCompletedExits((count) => count + 1)}>
+        <AnimatePresence
+          initial={false}
+          onExitComplete={() => setCompletedExits((count) => count + 1)}
+        >
           <SatStudentStageLayer key={stage.key} stageKind={stage.kind} stageKey={stage.key}>
             {children}
           </SatStudentStageLayer>

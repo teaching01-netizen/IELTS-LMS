@@ -42,8 +42,8 @@ func expectPersonalSweepTxPrologue(mock sqlmock.Sqlmock, scheduleID, runtimeID, 
 	mock.ExpectExec(setTimeZone).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id = ? FOR UPDATE")).
 		WithArgs(scheduleID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
-			AddRow(scheduleID, "exam-1", "sat", timingModel, "proctor", "ver-1", "live", 3, 134))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
+			AddRow(scheduleID, "exam-1", "sat", timingModel, "", "proctor", "ver-1", "live", 3, 134))
 	mock.ExpectQuery(attemptsLock).
 		WithArgs(scheduleID).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
@@ -76,7 +76,7 @@ func expectPersonalSweepOpenProbe(mock sqlmock.Sqlmock, scheduleID string, open 
 // expectPersonalSweepCompletion programmes the completion effects.
 func expectPersonalSweepCompletion(mock sqlmock.Sqlmock, scheduleID, runtimeID string, revision int64) {
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtimes SET status = 'completed'")).
-		WithArgs(runtimeID).
+		WithArgs("admission_closed_attempts_terminal", runtimeID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_session_runtime_sections SET status = 'completed'")).
 		WithArgs("admission_closed_attempts_terminal", runtimeID).

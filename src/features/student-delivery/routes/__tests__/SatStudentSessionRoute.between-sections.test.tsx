@@ -476,3 +476,27 @@ describe("SatStudentSessionRoute module advance", () => {
     expect(screen.queryByRole("button", { name: /Retry now/ })).toBeNull();
   });
 });
+
+describe("section form after the break", () => {
+  beforeEach(() => { cleanup(); vi.clearAllMocks(); matchMediaMock(); });
+  const gate = { ready: false, loading: false, error: null, refresh: vi.fn(), state: {
+    versionId: "v", sectionKey: "math", formKey: "math_entry", moduleId: "math-m1", state: "required", canSubmit: true, canStart: false,
+    fields: [{ id: "class", type: "single_choice", label: "Expected Class", required: true, options: [{ id: "rank_1", label: "Rank 1" }] }],
+  } };
+  it("keeps Math questions hidden throughout the break", () => {
+    seed(mathData(), { breakSeconds: 60, waitSeconds: 0 });
+    Object.assign(controllerMock.current as object, { sectionEntry: gate });
+    render(<SatStudentSessionRoute {...(routeProps() as never)} />);
+    expect(screen.getByTestId("sat-scheduled-break")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Expected Class/)).not.toBeInTheDocument();
+  });
+  it("replaces the ended break with the Math form without an exam timer", () => {
+    seed(mathData(), { breakSeconds: 0, waitSeconds: 0 }, { phase: "break" });
+    Object.assign(controllerMock.current as object, { sectionEntry: gate });
+    render(<SatStudentSessionRoute {...(routeProps() as never)} />);
+    expect(screen.getByRole("heading", { name: "Before Math" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Expected Class/)).toHaveValue("");
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit and continue" })).toBeEnabled();
+  });
+});

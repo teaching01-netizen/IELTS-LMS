@@ -220,11 +220,11 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
     await flush();
     expect(polls.offsets()).toEqual([0]);
 
-    // Nothing may poll early, and the loop must keep polling: 20s apart.
-    await advance(19_000);
+    // Nothing may poll early, and the loop must keep polling: 60s apart.
+    await advance(59_999);
     expect(polls.offsets()).toEqual([0]);
-    await advance(61_000);
-    expect(polls.offsets()).toEqual([0, 20_000, 40_000, 60_000, 80_000]);
+    await advance(60_001);
+    expect(polls.offsets()).toEqual([0, 60_000, 120_000]);
     hook.unmount();
   });
 
@@ -236,11 +236,13 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
     polls.mock(() => deliveryPayload());
     const hook = mount(false);
     await flush();
-    // The window is 7.5–15s; at the top of it, 14.999s must not poll.
-    await advance(14_999);
+    // The window is 10–20s; at the top of it, 19.999s must not poll.
+    await advance(19_999);
     expect(polls.offsets()).toEqual([0]);
-    await advance(15_001);
-    expect(polls.offsets()).toEqual([0, 15_000, 30_000]);
+    await advance(1);
+    expect(polls.offsets()).toEqual([0, 20_000]);
+    await advance(20_000);
+    expect(polls.offsets()).toEqual([0, 20_000, 40_000]);
     hook.unmount();
   });
 
@@ -255,9 +257,9 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
     });
     const hook = mount(false);
     await flush();
-    // 15s -> 20s -> 20s (window held at the live cadence).
-    await advance(100_000);
-    expect(polls.offsets()).toEqual([0, 15_000, 35_000, 55_000, 75_000, 95_000]);
+    // 20s -> 40s -> 60s (window held at the 60s retry ceiling).
+    await advance(120_000);
+    expect(polls.offsets()).toEqual([0, 20_000, 60_000, 120_000]);
     hook.unmount();
   });
 
@@ -283,7 +285,7 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
 
     // Outage 1: the tick parks on the event instead of polling.
     setBrowserOnline(false);
-    await advance(15_000);
+    await advance(20_000);
     expect(polls.offsets()).toEqual([0]);
     await reconnect();
     const afterFirst = polls.offsets().length;
@@ -291,17 +293,17 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
 
     // Outage 2.
     setBrowserOnline(false);
-    await advance(15_000);
+    await advance(20_000);
     await reconnect();
     const afterSecond = polls.offsets().length;
     expect(afterSecond).toBe(afterFirst + 1);
     // ...and the loop is not doubled: the next window polls once.
-    await advance(15_000);
+    await advance(20_000);
     expect(polls.offsets().length).toBe(afterSecond + 1);
 
     // Outage 3.
     setBrowserOnline(false);
-    await advance(15_000);
+    await advance(20_000);
     await reconnect();
     expect(polls.offsets().length).toBe(afterSecond + 2);
     hook.unmount();
@@ -316,7 +318,7 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
     const hook = mount(false);
     await flush();
     setBrowserOnline(false);
-    await advance(15_000);
+    await advance(20_000);
     const parked = polls.offsets().length;
 
     hook.unmount();
@@ -333,7 +335,7 @@ describe("SAT recovery poll cadence (application/satPollCadence wired to the loo
     polls.mock((call) => deliveryPayload({ result: call > 1 }));
     const hook = mount(false);
     await flush();
-    await advance(15_000);
+    await advance(20_000);
     expect(hook.result.current.state.phase).toBe("complete");
     const atComplete = polls.offsets().length;
     await advance(30_000);
@@ -417,18 +419,18 @@ describe("SAT shared clock under a cohort pause", () => {
     const startSeconds = hook.result.current.remainingSeconds;
     expect(startSeconds).toBe(1_800);
 
-    // Outage spanning the +20s tick: the tick parks on `online`, no poll fires,
+    // Outage spanning the +60s tick: the tick parks on `online`, no poll fires,
     // but the deadline-anchored display still advances from server truth.
     setBrowserOnline(false);
-    await advance(25_000);
+    await advance(60_000);
     expect(polls.offsets()).toEqual([0]);
     expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(
-      startSeconds - 25,
+      startSeconds - 60,
     );
 
     // Reconnect: exactly one poll, and the reconciled display is still on
     // server truth (a stale receipt pairing would jump it back to 1800, a
-    // double-drain would read 1750).
+    // double-drain would read 1680).
     setBrowserOnline(true);
     await act(async () => {
       window.dispatchEvent(new Event("online"));
@@ -436,7 +438,7 @@ describe("SAT shared clock under a cohort pause", () => {
     await flush();
     expect(polls.offsets().length).toBe(2);
     expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(
-      startSeconds - 25,
+      startSeconds - 60,
     );
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     hook.unmount();
@@ -485,13 +487,13 @@ describe("SAT shared clock under a cohort pause", () => {
     await advance(60_000);
     expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(frozen);
 
-    // Server resumes (credited) and the next poll commits it: 20s of live
-    // time elapsed unobserved, so the display reads frozen - 20 — not
+    // Server resumes (credited) and the next poll commits it: 60s of live
+    // time elapsed unobserved, so the display reads frozen - 60 — not
     // frozen - 80 (uncredited) and not a stale-pairing jump.
     live = true;
-    await advance(20_000);
+    await advance(60_000);
     expect(deriveSatTemporalSnapshot(hook.result.current.temporalModel, Date.now()).displaySeconds).toBe(
-      frozen - 20,
+      frozen - 60,
     );
     expect(gatewayMocks.submitModule).not.toHaveBeenCalled();
     hook.unmount();

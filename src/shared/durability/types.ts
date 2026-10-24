@@ -63,6 +63,8 @@ export interface ResponseBatchRequestV2 {
   leaseEpoch: number;
   controlEpoch: number;
   commands: ResponseCommandV2[];
+  /** Present only after the owning SAT recovery boundary registered this exact frontier. */
+  moduleClose?: { moduleAttemptId: string; manifestHash: string };
 }
 
 export interface ResponseAcknowledgementV2 {

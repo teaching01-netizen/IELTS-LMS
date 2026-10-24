@@ -5,11 +5,15 @@ import { stubScreenDetails } from './support/studentUi';
 import { buildCompleteSatSample } from '../src/features/exam-authoring/providers/sat/sampleExam';
 import type { AssessmentAuthoringShell } from '../src/features/exam-authoring/contracts/assessment';
 
+test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
+
 async function createCodeSession(browser: Browser, page: Page) {
   // Authoring has its own E2E suite. Seed through real staff APIs so this
   // scenario exercises admission, Internal and delivery rather than depending
   // on authoring-workspace layout or collaboration navigation.
-  const origin = process.env['VITE_BACKEND_API_URL'] ?? 'http://localhost:4000';
+  // Keep the seeded staff cookie on its localhost origin. The frontend proxy
+  // forwards these fixture-setup calls to the configured Go API.
+  const origin = `http://localhost:${process.env['PLAYWRIGHT_FRONTEND_PORT'] ?? '3000'}`;
   const sessionResponse = await page.request.get(`${origin}/api/v1/auth/session`);
   expect(sessionResponse.ok()).toBe(true);
   const session = await sessionResponse.json();
@@ -35,6 +39,9 @@ async function createCodeSession(browser: Browser, page: Page) {
   await studentPage.goto(joinHref);
   await studentPage.getByLabel('Full name').fill('First code candidate');
   await studentPage.getByLabel('Email').fill(`first-${suffix}@example.com`);
+  await studentPage.getByLabel('Admission year (ค.ศ.)').fill('2027');
+  await studentPage.getByLabel('Seat number').fill('A-007');
+  await studentPage.getByLabel('Expected Class').selectOption('rank_1');
   await studentPage.getByRole('button', { name: /Continue/i }).click();
   await expect(studentPage.getByRole('heading', { name: 'Enter your exam start code' })).toBeVisible({ timeout: 45_000 });
   await page.goto(`/sat/sessions/${link.scheduleId}`);
@@ -52,12 +59,16 @@ test('starts candidates independently without staff Start and preserves the orig
     await secondPage.goto(fixture.joinHref);
     await secondPage.getByLabel('Full name').fill('Second code candidate');
     await secondPage.getByLabel('Email').fill(`second-${Date.now()}@example.com`);
+    await secondPage.getByLabel('Admission year (ค.ศ.)').fill('2027');
+    await secondPage.getByLabel('Seat number').fill('A-008');
+    await secondPage.getByLabel('Expected Class').selectOption('rank_1');
     await secondPage.getByRole('button', { name: /Continue/i }).click();
     await expect(secondPage.getByRole('heading', { name: 'Enter your exam start code' })).toBeVisible();
     await expect(fixture.studentPage.getByRole('heading', { name: 'Enter your exam start code' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Review and start exam' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Reveal code', exact: true }).click();
-    const code = (await page.getByLabel('6-digit exam start code', { exact: true }).innerText()).trim();
+    const codeControl = page.getByLabel('6-digit exam start code', { exact: true });
+    await expect(codeControl).toBeVisible();
+    const code = (await codeControl.innerText()).trim();
     await page.screenshot({ path: testInfo.outputPath('staff-code-controls.png'), fullPage: true });
     await fixture.studentPage.screenshot({ path: testInfo.outputPath('student-code-entry.png'), fullPage: true });
     expect(code).toMatch(/^[0-9]{6}$/);
@@ -111,8 +122,9 @@ test('recovers a committed start after losing both the response and the first st
     }
   });
   try {
-    await page.getByRole('button', { name: 'Reveal code', exact: true }).click();
-    const code = (await page.getByLabel('6-digit exam start code', { exact: true }).innerText()).trim();
+    const codeControl = page.getByLabel('6-digit exam start code', { exact: true });
+    await expect(codeControl).toBeVisible();
+    const code = (await codeControl.innerText()).trim();
     await student.getByLabel('6-digit exam start code').fill(code);
     const begin = student.getByRole('button', { name: 'Enter code and begin exam' });
     await begin.click();

@@ -3,12 +3,26 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 )
+
+// AttemptSessionLookupError marks failures reading the server-side bearer
+// binding. Callers can return a retryable service error without turning a
+// database outage into an invalid-credential response.
+type AttemptSessionLookupError struct {
+	Err error
+}
+
+func (e *AttemptSessionLookupError) Error() string {
+	return fmt.Sprintf("auth: attempt session lookup failed: %v", e.Err)
+}
+
+func (e *AttemptSessionLookupError) Unwrap() error { return e.Err }
 
 // VerifyAttemptRead verifies an attempt bearer for READ paths in every
 // verify posture (strict and stateless alike): HMAC + expiry, then a single
@@ -60,10 +74,10 @@ func VerifyAttemptReadBinding(ctx context.Context, db Querier, now time.Time, cl
 		`SELECT token_id, revoked_at, expires_at, lease_epoch FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL`,
 		claims.TokenID).Scan(&tokenID, &revokedAt, &expiresAt, &rowLease)
 	if err != nil && !isMissingColumn(err) {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return zero, fmt.Errorf("auth: unknown attempt session")
 		}
-		return zero, fmt.Errorf("auth: load attempt session: %w", err)
+		return zero, &AttemptSessionLookupError{Err: err}
 	}
 	if err != nil {
 		// Pre-migration schema: lease_epoch is absent; the
@@ -71,11 +85,11 @@ func VerifyAttemptReadBinding(ctx context.Context, db Querier, now time.Time, cl
 		err = db.QueryRowContext(ctx,
 			`SELECT token_id, revoked_at, expires_at FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL`,
 			claims.TokenID).Scan(&tokenID, &revokedAt, &expiresAt)
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return zero, fmt.Errorf("auth: unknown attempt session")
 		}
 		if err != nil {
-			return zero, fmt.Errorf("auth: load attempt session: %w", err)
+			return zero, &AttemptSessionLookupError{Err: err}
 		}
 		rowLease.Valid = false
 	}

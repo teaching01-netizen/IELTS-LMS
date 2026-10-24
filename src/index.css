@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Stage headings are programmatic focus targets on SAT transitions. Keep the
+   keyboard indicator on the same focus token used by interactive controls. */
+.sat-ui [data-sat-stage-heading]:focus-visible {
+  outline: 2px solid var(--sat-focus);
+  outline-offset: 2px;
+}
+
 @theme {
   /* Notion font stack: Inter (brand type) over Notion's system-ui fallback */
   --font-sans:

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAuthSession } from "../../../auth/authSession";
+import { useAuthSession } from "../../../auth/api/authSession";
 import { examAuthoringFacade } from "../../api/examAuthoringFacade";
 import { invalidateExamList } from "../../api/examQueries";
 import { useSatExamConfigDefaults } from "../../api/satExamConfigApi";

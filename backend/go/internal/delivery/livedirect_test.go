@@ -36,7 +36,8 @@ func TestAppendModuleEventsDirectSkipsBusSQL(t *testing.T) {
 	}
 }
 
-// C1 RED: db mode keeps both bus INSERTs (behavior-preserving ship state).
+// C1: db mode keeps both event rows in one bus INSERT (behavior-preserving
+// cross-instance delivery).
 func TestAppendModuleEventsDBKeepsBusSQL(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -48,9 +49,9 @@ func TestAppendModuleEventsDBKeepsBusSQL(t *testing.T) {
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"COALESCE(MAX(revision), 0)"}).AddRow(7))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO live_update_events")).
-		WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO live_update_events")).
-		WillReturnResult(sqlmock.NewResult(2, 1))
+		WithArgs("origin-1", liveupdates.KindAttempt, "att-1", int64(7), "module_started", nil,
+			"origin-1", liveupdates.KindScheduleRoster, "sched-1", int64(7), "module_started", nil).
+		WillReturnResult(sqlmock.NewResult(1, 2))
 	if _, err := svc.appendModuleEventsTx(context.Background(), db, "sched-1", "att-1", "module_started"); err != nil {
 		t.Fatalf("db append: %v", err)
 	}

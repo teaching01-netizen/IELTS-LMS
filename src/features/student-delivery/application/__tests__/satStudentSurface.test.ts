@@ -283,3 +283,9 @@ describe("deriveSatStudentStage — one stage per step, one key per stage", () =
     expect(new Set([module1.key, handoff.key, module2.key]).size).toBe(1);
   });
 });
+
+it("offers normal explicit entry after the break when a section form is skipped", () => {
+  const entry = { runnerPhase: "break" as const, explicitModuleEntryRequired: true, pendingModule: pending("Math 1", "math", true) };
+  expect(derive({ ...entry, pendingBreakSeconds: 60 })).toMatchObject({ kind: "scheduled-break" });
+  expect(derive({ ...entry, pendingBreakSeconds: 0 })).toMatchObject({ kind: "pre-start", reason: "module-entry" });
+});

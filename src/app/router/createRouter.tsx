@@ -119,6 +119,9 @@ const SatSessionRoomRoute = lazy(() =>
 const SatResultsRoute = lazy(() =>
   import("../../products/sat/routes/SatResultsRoute").then((module) => ({ default: module.SatResultsRoute }))
 );
+const SatFormResponsesRoute = lazy(() =>
+  import("../../products/sat/routes/SatFormResponsesRoute").then((module) => ({ default: module.SatFormResponsesRoute }))
+);
 const SatResultDetailRoute = lazy(() =>
   import("../../products/sat/routes/SatResultDetailRoute").then((module) => ({ default: module.SatResultDetailRoute }))
 );
@@ -153,6 +156,11 @@ const DevSatAccessibilityRoute = lazy(() =>
   }))
 );
 
+const DevSatFormsRoute = lazy(() =>
+  import("./dev/SatFormsDebugRoute").then((module) => ({
+    default: module.SatFormsDebugRoute,
+  }))
+);
 const DevSatAuthoringRoute = lazy(() =>
   import("./dev/SatAuthoringDebugRoute").then((module) => ({
     default: module.SatAuthoringDebugRoute,
@@ -390,6 +398,13 @@ const baseRoutes = [
             ),
           },
           {
+            path: "forms",
+            element: withAuth(
+              <Suspense fallback={<SatRouteLoadingFallback />}><SatFormResponsesRoute /></Suspense>,
+              ["admin", "proctor"]
+            ),
+          },
+          {
             path: "results/attempts/:attemptId",
             element: withAuth(
               <Suspense fallback={<SatRouteLoadingFallback />}><SatAttemptAnswersRoute /></Suspense>,
@@ -602,6 +617,15 @@ const devRoutes = import.meta.env.DEV
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <DevSatAccessibilityRoute />
+          </Suspense>
+        ),
+      },
+      {
+        path: "/__dev/sat-forms",
+        errorElement: <RouteErrorBoundary />,
+        element: (
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <DevSatFormsRoute />
           </Suspense>
         ),
       },

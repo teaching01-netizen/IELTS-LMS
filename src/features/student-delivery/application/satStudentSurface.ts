@@ -6,15 +6,16 @@ export const SAT_ENTRY_RECOVERY_SURFACE_MS = 5_000;
  * One student-visible stage (Stage model).
  *
  * Normal journey has only three interactive surfaces: WAITING ROOM, EXAM,
- * BREAK. Finalizing/complete/terminated/error are terminal/system states.
- * There is no entry-recovery, opening, restoring, or next-module waiting
- * surface: skew-hold is an internal technique that holds the previous frame
- * while state catches up, never a student-facing screen.
+ * BREAK. Explicit recovery resolution is a separate exception surface;
+ * skew-hold remains an internal technique that holds the previous frame while
+ * state catches up, never a student-facing screen.
  */
 export type SatStudentStageKind =
   | "exam"
   | "scheduled-break"
+  | "section-entry-form"
   | "pre-start"
+  | "recovery-exception"
   | "finalizing"
   | "awaiting-route"
   | "complete"
@@ -56,11 +57,16 @@ export interface SatScheduledBreakStage extends SatStudentStageBase {
   readonly nextSectionKey: SatSectionKey;
 }
 
-export type SatPreStartReason = "waiting" | "loading";
+export type SatPreStartReason = "waiting" | "loading" | "module-entry";
 
 export interface SatPreStartStage extends SatStudentStageBase {
   readonly kind: "pre-start";
   readonly reason: SatPreStartReason;
+}
+
+export interface SatRecoveryExceptionStage extends SatStudentStageBase {
+  readonly kind: "recovery-exception";
+  readonly moduleAttemptId: string;
 }
 
 export interface SatFinalizingStage extends SatStudentStageBase {
@@ -95,6 +101,7 @@ export type SatStudentStage =
   | SatExamStage
   | SatScheduledBreakStage
   | SatPreStartStage
+  | SatRecoveryExceptionStage
   | SatFinalizingStage
   | SatAwaitingRouteStage
   | SatCompleteStage
@@ -115,6 +122,8 @@ export interface DeriveSatStudentStageInput {
   finalizationFailed: boolean;
   /** Server says a staff_selects attempt is waiting for the teacher's Module 2 choice. */
   awaitingStaffRoute?: boolean;
+  /** A module is blocked on a server-recorded SAT recovery exception. */
+  recoveryModuleAttemptId?: string | null;
   /** Every module attempt is submitted/locked. */
   allModulesFinal: boolean;
   /** First module of the exam, still waiting for the proctor's start. */
@@ -127,6 +136,8 @@ export interface DeriveSatStudentStageInput {
     startsNewSection: boolean;
     started: boolean;
   } | null;
+  /** A recovered policy session requires a deliberate StartModule action. */
+  explicitModuleEntryRequired?: boolean;
   /** A retained exam frame exists (the last resolved module/review render). */
   hasExamFrame: boolean;
   /** That frame is inside the bounded skew window. */
@@ -167,11 +178,13 @@ export function deriveSatStudentStage({
   hasResult,
   terminated,
   terminatedByProctor,
+  recoveryModuleAttemptId = null,
   finalizationFailed,
   awaitingStaffRoute,
   allModulesFinal,
   isInitialEntry,
   pendingModule,
+  explicitModuleEntryRequired = false,
   hasExamFrame,
   frameFresh,
   moduleResolved,
@@ -196,6 +209,14 @@ export function deriveSatStudentStage({
     return { kind: "terminated", key: `terminated:${attemptKey}`, byProctor: terminatedByProctor };
   }
 
+  if (recoveryModuleAttemptId) {
+    return {
+      kind: "recovery-exception",
+      key: `recovery-exception:${attemptKey}:${recoveryModuleAttemptId}`,
+      moduleAttemptId: recoveryModuleAttemptId,
+    };
+  }
+
   // Before finalizing: with only Module 1 final the attempt looks finished,
   // but completing it would be refused until staff assign a route.
   if (awaitingStaffRoute) {
@@ -210,6 +231,16 @@ export function deriveSatStudentStage({
       kind: "finalizing",
       key: `finalizing:${attemptKey}`,
       failed: finalizationFailed,
+    };
+  }
+
+  // A skipped/disabled form still leads to the normal recovery-policy entry
+  // action when the real break ends, rather than holding the break forever.
+  if (explicitModuleEntryRequired && pendingModule && !pendingModule.started && pendingBreakSeconds <= 0 && pendingSectionWaitSeconds <= 0) {
+    return {
+      kind: "pre-start",
+      key: `pre-start:${attemptKey}:module-entry:${pendingModule.id}`,
+      reason: "module-entry",
     };
   }
 
@@ -233,6 +264,7 @@ export function deriveSatStudentStage({
       nextSectionKey: sectionKey,
     };
   }
+
 
   if (
     runnerPhase === "module" ||

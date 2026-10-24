@@ -166,23 +166,32 @@ async function installVisualViewportShim(page: Page) {
 }
 
 async function expectVisibleButtonsAtLeast44(page: Page) {
-  const failures = await page.locator(".sat-ui button:not([disabled])").evaluateAll((buttons) =>
-    buttons.flatMap((button) => {
-      const element = button as HTMLElement;
-      const rect = element.getBoundingClientRect();
-      if (!rect.width || !rect.height || getComputedStyle(element).visibility === "hidden")
-        return [];
-      return rect.width + 0.01 >= 44 && rect.height + 0.01 >= 44
-        ? []
-        : [
-            {
-              name: element.getAttribute("aria-label") || element.textContent?.trim() || "button",
-              width: rect.width,
-              height: rect.height,
-            },
-          ];
-    })
-  );
+  const measure = () =>
+    page.locator(".sat-ui button:not([disabled])").evaluateAll((buttons) =>
+      buttons.flatMap((button) => {
+        const element = button as HTMLElement;
+        const rect = element.getBoundingClientRect();
+        if (!rect.width || !rect.height || getComputedStyle(element).visibility === "hidden")
+          return [];
+        return rect.width + 0.01 >= 44 && rect.height + 0.01 >= 44
+          ? []
+          : [
+              {
+                name: element.getAttribute("aria-label") || element.textContent?.trim() || "button",
+                width: rect.width,
+                height: rect.height,
+              },
+            ];
+      })
+    );
+  let failures: Awaited<ReturnType<typeof measure>>;
+  try {
+    failures = await measure();
+  } catch (error) {
+    if (!String(error).includes("Execution context was destroyed")) throw error;
+    await page.waitForTimeout(250);
+    failures = await measure();
+  }
   expect(failures).toEqual([]);
 }
 

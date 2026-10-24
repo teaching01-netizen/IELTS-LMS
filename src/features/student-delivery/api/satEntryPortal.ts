@@ -1,4 +1,4 @@
-export { SatEntryLayout, SatEntryStatus } from '../ui/entry/SatEntryPortal';
+export { SatEntryLayout, SatEntryStatus, satCheckInStep } from '../ui/entry/SatEntryPortal';
 export {
   SatEntryButton,
   SatEntryField,

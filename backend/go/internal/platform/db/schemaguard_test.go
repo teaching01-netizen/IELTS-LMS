@@ -37,8 +37,8 @@ func TestVerifyFailsClosedOnMissingTable(t *testing.T) {
 }
 
 func TestSchemaGuardListSizes(t *testing.T) {
-	if len(RequiredTables) != 10 {
-		t.Fatalf("RequiredTables must include the authoring table, 3 existing SAT start-code tables, the 0081 slot table, the 3 0087 score-conversion tables, and the 0088 room-operation receipt, and the 0092 PDF export table; got %d", len(RequiredTables))
+	if len(RequiredTables) != 11 {
+		t.Fatalf("RequiredTables must include the authoring table, 3 existing SAT start-code tables, the 0081 slot table, the 3 0087 score-conversion tables, and the 0088 room-operation receipt, the 0092 PDF export table, and the 0101 form-response table; got %d", len(RequiredTables))
 	}
 	if len(RequiredIndexes) != 15 {
 		t.Fatalf("RequiredIndexes must include the 10 existing guards, 3 SAT slot indexes and 2 PDF export indexes, got %d", len(RequiredIndexes))
@@ -120,11 +120,24 @@ func TestVerifyPassesWhenAllPresent(t *testing.T) {
 		mock.ExpectQuery("information_schema.statistics").WillReturnRows(allPresentColumns())
 	}
 	mock.ExpectQuery("non_unique = 0").WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(1))
+	mock.ExpectQuery("information_schema.check_constraints").WillReturnRows(allPresentColumns())
 	v := &SchemaVerifier{DB: db}
 	if err := v.Verify(context.Background()); err != nil {
 		t.Fatalf("full schema must verify, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSectionFormVocabularyFailsClosed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("information_schema.check_constraints").WillReturnRows(sqlmock.NewRows([]string{"COUNT(*)"}).AddRow(0))
+	if err := (&SchemaVerifier{DB: db}).checkSectionFormVocabulary(context.Background()); err == nil {
+		t.Fatal("0101-only vocabulary must refuse traffic")
 	}
 }

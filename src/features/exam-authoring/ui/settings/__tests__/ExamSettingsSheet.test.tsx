@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExamEntity } from "../../../../../types/domain";
 
@@ -28,7 +29,11 @@ import { ExamSettingsSheet } from "../ExamSettingsSheet";
 const exam = { id: "exam-1", title: "Practice Test 06", canEdit: true, canPublish: true } as unknown as ExamEntity;
 
 function renderSheet(onClose = vi.fn(), onEditExam?: () => void) {
-  render(<ExamSettingsSheet examId="exam-1" open onClose={onClose} {...(onEditExam ? { onEditExam } : {})} />);
+  render(
+    <MemoryRouter>
+      <ExamSettingsSheet examId="exam-1" open onClose={onClose} {...(onEditExam ? { onEditExam } : {})} />
+    </MemoryRouter>
+  );
   return onClose;
 }
 

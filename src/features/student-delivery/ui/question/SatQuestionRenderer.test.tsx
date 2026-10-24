@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DeliveredQuestion } from '../../contracts/assessmentDelivery';
 import { createSatTextAnnotation, emptySatQuestionResponse } from '../../domain/satResponses';
@@ -266,6 +266,11 @@ describe('SAT choice annotations', () => {
     vi.useFakeTimers();
 
     fireEvent.pointerDown(selectionRoot, { pointerType: 'touch', pointerId: 1, clientX: 2, clientY: 10 });
+    // Touch selection must disambiguate a deliberate text gesture from the
+    // vertical swipe that scrolls the question pane.
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
     fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: 2, clientY: 25 });
     fireEvent.pointerMove(document, { pointerType: 'touch', pointerId: 1, clientX: 6, clientY: 25 });
     fireEvent.pointerUp(document, { pointerType: 'touch', pointerId: 1, clientX: 6, clientY: 25 });

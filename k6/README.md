@@ -108,12 +108,144 @@ first answerable browser frame, run `e2e:live-sat-runner` with
 `answerableFrameP99Ms`, and `answerableFrameMaxMs` in its summary. The browser
 runner collects each module's frame event, including adaptive modules.
 
+### SAT recovery lifecycle reads, up to 2,000 candidates
+
+`k6/sat-recovery-lifecycle-2000.js` repeatedly calls the read-only `/state`
+projection used by sessions pinned to `sat_recovery_v1`. It verifies the
+recovery policy and attempt identity, and fails if question content or answer
+rows appear in the lifecycle response. The script accepts credentials with a
+`scheduleId` per attempt for the many-room case; omit it and provide one
+`K6_SCHEDULE_ID` to test a single room. Every attempt must be synthetic and
+already admitted to the recovery policy. This measures the API/DB path only;
+it does not measure browser rendering or prove capacity for writes and closes.
+
+```bash
+K6_CONFIRM_SAT=true \
+K6_BASE_URL=https://staging.example.com \
+K6_ATTEMPT_TOKENS_PATH=/absolute/path/to/synthetic-attempt-creds.json \
+K6_VUS=2000 \
+bun run k6:sat-lifecycle
+```
+
+By default the first read wave is synchronized, followed by jittered polls every
+10–20 seconds for two minutes. Set `K6_INITIAL_JITTER_SECONDS=15` for a
+staggered comparison or `K6_DURATION=5m` for a longer steady-state sample. Run
+200, 500, then 2,000 VUs against the same isolated topology; record API and
+worker pool settings, DB query/lock metrics, and the k6 latency distribution.
+The script asserts response shape and zero unexpected failures but deliberately
+does not invent a latency threshold before a topology-specific baseline exists.
+
 Before the 2,000 candidate run, set `SHED_MODE=exam` and `VERSION_CACHE=on` and size
 `DB_POOL_MAX_API`, `DB_POOL_MAX_WORKER`, and `DB_POOL_MAX_IDLE` from the actual
 database connection budget. Reserve worker capacity so expired personal
 modules can finalize without competing with entry writes. Record the deployed
 settings and database saturation alongside the k6 output; a local `k6 inspect`
 only checks script configuration and does not establish the latency gate.
+
+### SAT frozen-answer close and recovery, up to 2,000 candidates
+
+`k6/sat-recovery-close-2000.js` drives a pre-deadline save, frozen frontier
+registration, bounded recovery writes, close receipt, idempotent close replay,
+and explicit next-module activation. By default it spreads 2,000 baseline saves
+uniformly across 10 seconds (200 requests/s) and jitters post-deadline close
+starts by up to 2 seconds, matching the current browser cohort behavior. Set
+`K6_SAVE_SPREAD_MS=0` and `K6_CLOSE_JITTER_MS=0` for a deliberately synchronized
+burst diagnostic. It assigns a configurable 20% of
+students to reconnect 45 seconds after Module 1 expires and a separate 1% to
+start Module 2 after a 60-second entry delay by default, safely inside the
+independent entry allowance, which starts when Module 2 becomes eligible. A
+119-second override is a near-cutoff diagnostic: request arrival can cross the
+deadline under load, so use the dedicated MySQL expiry E2E for deterministic
+cutoff verification.
+
+The script prepares deterministic answer hashes and the close envelope before
+the deadline, records that client-preparation cost as
+`sat_close_manifest_preparation_ms`, and sends the envelope at the deadline (or
+after reconnect for offline candidates). This keeps a single local k6 host's
+hashing work from being reported as API latency. The resulting
+deadline-to-start-ack metric is an API-protocol diagnostic; the browser runner
+remains the source for the deadline-to-first-answerable-frame gate.
+
+Use only an isolated synthetic schedule with recovery-policy sessions already
+admitted and active in Module 1. Set every Module 1 deadline to
+`K6_WAVE_AT_MS`. Provide one unique credential per VU; `questions` must contain
+valid synthetic question IDs and answers whose frozen values match the expected
+route. `scheduleId` may be provided per credential for the many-room case, or
+once through `K6_SCHEDULE_ID` for one synchronized room.
+
+```json
+[
+  {
+    "scheduleId": "optional-when-K6_SCHEDULE_ID-is-set",
+    "attemptId": "attempt-1",
+    "token": "synthetic-attempt-token",
+    "moduleId": "module-1-id",
+    "moduleAttemptId": "module-attempt-1-id",
+    "expectedNextModuleId": "expected-module-2-id",
+    "expectedUnchangedNextModuleId": "expected-lower-module-2-id",
+    "questions": [
+      {"questionId": "eq-1", "answer": "A", "frozenAnswer": "B"}
+    ]
+  }
+]
+```
+
+When `expectedUnchangedNextModuleId` is supplied, the unchanged-answer cohort
+must route to that branch; candidates that upload final edits use
+`expectedNextModuleId`. Omit it when every synthetic answer is expected to
+select the same branch.
+
+The script reads authoritative writer epochs and saves one answer set shortly
+before the deadline. Offline candidates make a second edit and upload that
+frozen version after reconnecting. By default, 10% of connected, non-delayed
+candidates make a final edit inside close; the remaining candidates reuse their
+confirmed writes in the manifest, matching the browser's durable close
+envelope. Set `K6_FINAL_EDIT_PERCENT=100` to stress a final-write burst or `0`
+to measure the unchanged-answer path. It validates the server's content hashes,
+every write acknowledgment, the selected next module, and close replay
+stability. The scale profile samples 1% of exact receipt
+replays by default (20 replays in a 2,000-VU wave) so the healthy transition
+measurement is not dominated by a second write per student. Set
+`K6_CLOSE_REPLAY_PERCENT=100` for a separate full replay-flood check; set it to
+`0` to disable replays. The opt-in Go/MySQL harness defaults to 100% for waves
+of 10 or fewer students and 1% above that; override with
+`SAT_RECOVERY_K6_CLOSE_REPLAY_PERCENT`. Requests are chunked below 150 KiB and
+at most 100 commands, within the current API envelope. Run 200, 500, then 2,000
+VUs for both one shared room and many rooms on the same representative topology:
+
+```bash
+bun run k6:sat-close -- \
+  -e K6_CONFIRM_SAT=true \
+  -e K6_BASE_URL=https://staging.example.com \
+  -e K6_SCHEDULE_ID=<schedule-id> \
+  -e K6_ATTEMPT_TOKENS_PATH=/absolute/path/to/synthetic-close-creds.json \
+  -e K6_VUS=2000 \
+  -e K6_WAVE_AT_MS=<shared-module-deadline-unix-ms> \
+  -e K6_OFFLINE_PERCENT=20 -e K6_OFFLINE_DELAY_SECONDS=45 \
+  -e K6_ENTRY_DELAY_PERCENT=1 -e K6_NEXT_ENTRY_DELAY_SECONDS=60
+```
+
+The hard thresholds are save acknowledgment p99 <=1s and healthy
+deadline-to-next-module-start-ack p95 <=3s / p99 <=5s. Offline recovery must
+settle within its fixed 120-second allowance; the separate next-module entry
+sample must start before its 120-second window expires. These are protocol
+metrics, not proof of a painted first answerable browser frame. Pair them with
+the SAT browser runner's `deadlineToAnswerableFrame*` measurements, which begin
+at the previous timed-out module's server deadline and end when a visible,
+enabled answer control is present. `SAT_ASSERT_ENTRY_FRAME=true` applies the
+same p95 <=3s / p99 <=5s hard gates to that complete browser path. Capture API/DB
+pool settings, lock waits, worker due lag, per-room distribution, and k6 output.
+The workload mutates its attempts and cannot certify production capacity unless
+the staging topology and data match the planned deployment.
+
+The opt-in local Go/MySQL harness provisions synthetic attempts and defaults to
+two local API processes. Set `SAT_K6_API_INSTANCES` (1–8) and
+`SAT_RECOVERY_K6_API_POOL` (1–200) to compare local topologies; MySQL must allow
+at least `instances × pool + 8` connections for API pools and fixture
+verification. It raises `RATE_LIMIT_MAX_KEYS` to at least the requested cohort
+size so an inherited development cap does not turn unrelated limiter eviction
+into a false workload failure. These settings affect only the local diagnostic;
+they do not change normal application runs or qualify production capacity.
 
 - `k6/prod-start-exam-200.js`
   - 200 students in the waiting room
@@ -142,6 +274,19 @@ only checks script configuration and does not establish the latency gate.
   - proctor completes the exam and the backend auto-submits the cohort
   - verifies `attempt.submittedAt` and `finalSubmission`
 
+### IELTS throughput, 500 then 2,000 candidates
+
+`k6/ielts-throughput.js` measures the IELTS answer path in three invocations
+(`IELTS_TP_PHASE=ready|steady|submit`): a readiness wave with a retry that must
+return the same persisted deadline, an open-loop mix of durable saves, 20-answer
+flushes, exact replays and runtime polls, and a submit wave with a resubmit that
+must return the same digest. It requires `K6_CONFIRM_IELTS=true`,
+`K6_CONFIRM_IELTS_TARGET=<host:port of K6_BASE_URL>` and a credential file
+marked `"synthetic": true`. Locally, `TestIELTSThroughputK6MySQL` seeds the
+fixture, runs all three phases with staff roster sweeps and the worker, and
+reconciles every candidate against the database. Procedure, knobs, connection
+budget and flag rollback: `docs/runbooks/ielts-capacity.md`.
+
 ## Data
 
 - `e2e/prod-data/prod-target.json` contains the non-secret target data, including 200 students.
@@ -149,7 +294,9 @@ only checks script configuration and does not establish the latency gate.
 
 ## Safety gate
 
-Set `K6_CONFIRM_PROD=true` before running any scenario. The scripts refuse to run without it.
+Set `K6_CONFIRM_PROD=true` before running the production load scenarios. SAT
+recovery rehearsal scripts require `K6_CONFIRM_SAT=true` and an isolated
+synthetic schedule. Never use real student attempts for load.
 
 ## Common overrides
 

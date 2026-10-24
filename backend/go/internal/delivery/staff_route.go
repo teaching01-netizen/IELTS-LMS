@@ -108,7 +108,7 @@ func (s *Service) AssignStaffRoute(ctx context.Context, actorID, scheduleID, att
 		if err := t.QueryRowContext(ctx, "SELECT break_after_seconds FROM assessment_sections WHERE id = ?", sectionID).Scan(&breakAfterSeconds); err != nil {
 			return err
 		}
-		if err := s.openFollowUpModuleTx(ctx, t, attemptID, sectionID, breakAfterSeconds, next, audit, routeBasisStaffSelected); err != nil {
+		if err := s.openFollowUpModuleTx(ctx, t, attemptID, sectionID, breakAfterSeconds, next, audit, routeBasisStaffSelected, nil); err != nil {
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"sectionKey": sectionKey, "route": route, "moduleId": next.id})

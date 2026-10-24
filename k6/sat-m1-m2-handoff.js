@@ -1,6 +1,7 @@
 import http from 'k6/http';
 import { fail, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
+import { SharedArray } from 'k6/data';
 import { satAttemptUrl, satBatchRequest, assertSatAcknowledgements, assertSatStoredResponses } from './sat-response-contract.js';
 
 // Use synthetic, preprovisioned attempts on one shared SAT runtime. Each
@@ -15,16 +16,23 @@ const vus = Number(__ENV.K6_VUS || 400);
 const windowSeconds = Number(__ENV.SAT_PERSONAL_CLOSE_WINDOW_SECS || 15);
 const baseline = __ENV.K6_BASELINE === '1';
 const delayMs = Number(__ENV.K6_FINAL_SAVE_DELAY_MS || 0);
-const credentials = JSON.parse(open(__ENV.K6_ATTEMPT_TOKENS_PATH || './attempt-creds.json'));
+const credentials = new SharedArray('SAT module handoff credentials', () => {
+  const parsed = JSON.parse(open(__ENV.K6_ATTEMPT_TOKENS_PATH || './attempt-creds.json'));
+  if (!Array.isArray(parsed) || parsed.length < vus) {
+    throw new Error('Credentials require one record per VU');
+  }
+  const selected = parsed.slice(0, vus);
+  if (new Set(selected.map((credential) => credential.attemptId)).size !== vus ||
+      selected.some((credential) => !credential.attemptId || !credential.token || !credential.moduleId || !credential.moduleAttemptId ||
+        !credential.expectedModuleId || !credential.otherModuleId || !Array.isArray(credential.answers) ||
+        credential.answers.length < 1 || credential.answers.length > 3 ||
+        credential.answers.some((answer) => !answer.questionId || !Number.isSafeInteger(answer.clientVersion) || answer.clientVersion < 1))) {
+    throw new Error('Credentials require distinct attempts, M1/M2 identities, and 1–3 final answers with increasing clientVersion values');
+  }
+  return selected;
+});
 if (!base || !schedule || !Number.isInteger(vus) || vus < 1 || credentials.length < vus) {
   throw new Error('Set K6_BASE_URL, K6_SCHEDULE_ID, and K6_ATTEMPT_TOKENS_PATH with one credential per VU');
-}
-if (new Set(credentials.slice(0, vus).map((c) => c.attemptId)).size !== vus ||
-    credentials.slice(0, vus).some((c) => !c.token || !c.moduleId || !c.moduleAttemptId ||
-      !c.expectedModuleId || !c.otherModuleId || !Array.isArray(c.answers) ||
-      c.answers.length < 1 || c.answers.length > 3 ||
-      c.answers.some((a) => !a.questionId || !Number.isSafeInteger(a.clientVersion) || a.clientVersion < 1))) {
-  throw new Error('Credentials require distinct attempts, M1/M2 identities, and 1–3 final answers with increasing clientVersion values');
 }
 
 const finalAck = new Trend('sat_final_batch_ack_after_deadline_seconds');

@@ -17,6 +17,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"fmt"
 	"sort"
@@ -72,6 +73,23 @@ type contextRow struct {
 	CandidateEmail  string
 	StartedAt       time.Time
 	SubmittedAt     sql.NullTime
+	ProtocolVersion int
+}
+
+// resolveRowAnswers replaces the blob answers of a protocol-2 attempt with the
+// attempt_responses_v2 materialization (the blobs are stale under row-first
+// writes until the seal); protocol-1 blobs stay authoritative.
+func (s *Service) resolveRowAnswers(ctx context.Context, c *contextRow) error {
+	if c.ProtocolVersion < 2 {
+		return nil
+	}
+	blobs, err := attempts.MaterializeBlobs(ctx, s.db, c.AttemptID)
+	if err != nil {
+		return err
+	}
+	c.Answers = json.RawMessage(blobs.Answers)
+	c.WritingAnswers = json.RawMessage(blobs.WritingAnswers)
+	return nil
 }
 
 // mutationRow is one student_attempt_mutations row in replay order.
@@ -95,7 +113,7 @@ func scanContext(row *sql.Row) (contextRow, error) {
 		&c.SubmissionID, &c.AttemptID, &c.ScheduleID, &c.ExamID, &c.ExamTitle,
 		&content, &config, &answers, &writing, &finalSub,
 		&c.CandidateID, &c.CandidateName, &c.CandidateEmail,
-		&started, &submitted,
+		&started, &submitted, &c.ProtocolVersion,
 	)
 	if err != nil {
 		return c, err
@@ -136,12 +154,15 @@ func (s *Service) loadContext(ctx context.Context, submissionID string) (context
 	if strings.TrimSpace(submissionID) == "" {
 		return zero, validationError("Submission id is required.")
 	}
-	row := s.db.QueryRowContext(ctx, "SELECT submissions.id AS submission_id, submissions.attempt_id AS attempt_id, submissions.schedule_id AS schedule_id, submissions.exam_id AS exam_id, submissions.cohort_name AS exam_title, versions.content_snapshot AS content_snapshot, versions.config_snapshot AS config_snapshot, attempts.answers AS answers, attempts.writing_answers AS writing_answers, attempts.final_submission AS final_submission, attempts.candidate_id AS candidate_id, attempts.candidate_name AS candidate_name, attempts.candidate_email AS candidate_email, attempts.created_at AS started_at, submissions.submitted_at AS submitted_at FROM student_submissions submissions JOIN student_attempts attempts ON attempts.id = submissions.attempt_id JOIN exam_versions versions ON versions.id = submissions.published_version_id WHERE submissions.id = ? LIMIT 1", submissionID)
+	row := s.db.QueryRowContext(ctx, "SELECT submissions.id AS submission_id, submissions.attempt_id AS attempt_id, submissions.schedule_id AS schedule_id, submissions.exam_id AS exam_id, submissions.cohort_name AS exam_title, versions.content_snapshot AS content_snapshot, versions.config_snapshot AS config_snapshot, attempts.answers AS answers, attempts.writing_answers AS writing_answers, attempts.final_submission AS final_submission, attempts.candidate_id AS candidate_id, attempts.candidate_name AS candidate_name, attempts.candidate_email AS candidate_email, attempts.created_at AS started_at, submissions.submitted_at AS submitted_at, COALESCE(attempts.protocol_version, 1) AS protocol_version FROM student_submissions submissions JOIN student_attempts attempts ON attempts.id = submissions.attempt_id JOIN exam_versions versions ON versions.id = submissions.published_version_id WHERE submissions.id = ? LIMIT 1", submissionID)
 	c, err := scanContext(row)
 	if err == sql.ErrNoRows {
 		return zero, notFoundError()
 	}
-	return c, err
+	if err != nil {
+		return zero, err
+	}
+	return c, s.resolveRowAnswers(ctx, &c)
 }
 
 func (s *Service) loadContextByAttempt(ctx context.Context, attemptID string) (contextRow, error) {
@@ -149,12 +170,15 @@ func (s *Service) loadContextByAttempt(ctx context.Context, attemptID string) (c
 	if strings.TrimSpace(attemptID) == "" {
 		return zero, validationError("Attempt id is required.")
 	}
-	row := s.db.QueryRowContext(ctx, "SELECT NULL AS submission_id, attempts.id AS attempt_id, attempts.schedule_id AS schedule_id, attempts.exam_id AS exam_id, attempts.exam_title AS exam_title, versions.content_snapshot AS content_snapshot, versions.config_snapshot AS config_snapshot, attempts.answers AS answers, attempts.writing_answers AS writing_answers, attempts.final_submission AS final_submission, attempts.candidate_id AS candidate_id, attempts.candidate_name AS candidate_name, attempts.candidate_email AS candidate_email, attempts.created_at AS started_at, attempts.submitted_at AS submitted_at FROM student_attempts attempts JOIN exam_versions versions ON versions.id = attempts.published_version_id WHERE attempts.id = ? LIMIT 1", attemptID)
+	row := s.db.QueryRowContext(ctx, "SELECT NULL AS submission_id, attempts.id AS attempt_id, attempts.schedule_id AS schedule_id, attempts.exam_id AS exam_id, attempts.exam_title AS exam_title, versions.content_snapshot AS content_snapshot, versions.config_snapshot AS config_snapshot, attempts.answers AS answers, attempts.writing_answers AS writing_answers, attempts.final_submission AS final_submission, attempts.candidate_id AS candidate_id, attempts.candidate_name AS candidate_name, attempts.candidate_email AS candidate_email, attempts.created_at AS started_at, attempts.submitted_at AS submitted_at, COALESCE(attempts.protocol_version, 1) AS protocol_version FROM student_attempts attempts JOIN exam_versions versions ON versions.id = attempts.published_version_id WHERE attempts.id = ? LIMIT 1", attemptID)
 	c, err := scanContext(row)
 	if err == sql.ErrNoRows {
 		return zero, notFoundError()
 	}
-	return c, err
+	if err != nil {
+		return zero, err
+	}
+	return c, s.resolveRowAnswers(ctx, &c)
 }
 
 func (s *Service) loadMutations(ctx context.Context, attemptID string) ([]mutationRow, error) {

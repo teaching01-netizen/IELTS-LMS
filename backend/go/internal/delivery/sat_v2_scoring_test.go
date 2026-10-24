@@ -84,6 +84,7 @@ func TestFinalizeModuleScoresV2AnswersWithoutLegacyRows(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "mod-higher", 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	deliverySATPolicyRead(mock, "att-1")
 	tx, txerr := db.BeginTx(context.Background(), nil)
 	if txerr != nil {
 		t.Fatal(txerr)
@@ -155,6 +156,7 @@ func TestFinalizeModuleLegacyFallbackWithoutV2Rows(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "mod-higher", 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	deliverySATPolicyRead(mock, "att-1")
 	tx, txerr := db.BeginTx(context.Background(), nil)
 	if txerr != nil {
 		t.Fatal(txerr)
@@ -231,6 +233,7 @@ func TestFinalizeModuleDedupsDualV2IdentityRows(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "mod-higher", 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	deliverySATPolicyRead(mock, "att-1")
 	tx, txerr := db.BeginTx(context.Background(), nil)
 	if txerr != nil {
 		t.Fatal(txerr)
@@ -305,6 +308,7 @@ func TestFinalizeModuleZeroAnswerPassRoutesLower(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_module_attempts")).
 		WithArgs(sqlmock.AnyArg(), "att-1", "mod-lower", 3600, sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
+	deliverySATPolicyRead(mock, "att-1")
 	tx, txerr := db.BeginTx(context.Background(), nil)
 	if txerr != nil {
 		t.Fatal(txerr)

@@ -54,7 +54,17 @@ function mapBackendSessionSummary(payload: {
   runtimeCurrentModuleId?: string | null | undefined;
   runtimeModuleAttemptId?: string | null | undefined;
   runtimeModuleAttemptRevision?: number | null | undefined;
+  satRecoveryModuleAttemptId?: StudentSession["satRecoveryModuleAttemptId"];
+  satRecoveryModuleTitle?: StudentSession["satRecoveryModuleTitle"];
+  satRecoveryPhase?: StudentSession["satRecoveryPhase"];
+  satRecoveryKind?: StudentSession["satRecoveryKind"];
+  satRecoveryDeadlineAt?: StudentSession["satRecoveryDeadlineAt"];
+  satRecoveryBoundaryRevision?: StudentSession["satRecoveryBoundaryRevision"];
   runtimeWaiting: boolean;
+  ieltsPersonalStatus?: StudentSession["ieltsPersonalStatus"] | null | undefined;
+  ieltsPersonalSectionKey?: StudentSession["ieltsPersonalSectionKey"] | null | undefined;
+  ieltsPersonalDeadlineAt?: string | null | undefined;
+  ieltsPersonalTimeRemainingSeconds?: number | null | undefined;
   violations: StudentSession["violations"];
   warnings: number;
   lastActivity: string;
@@ -91,8 +101,18 @@ function mapBackendSessionSummary(payload: {
     runtimeCurrentModuleId: payload.runtimeCurrentModuleId ?? null,
     runtimeModuleAttemptId: payload.runtimeModuleAttemptId ?? null,
     runtimeModuleAttemptRevision: payload.runtimeModuleAttemptRevision ?? null,
+    satRecoveryModuleAttemptId: payload.satRecoveryModuleAttemptId ?? null,
+    satRecoveryModuleTitle: payload.satRecoveryModuleTitle ?? null,
+    satRecoveryPhase: payload.satRecoveryPhase ?? null,
+    satRecoveryKind: payload.satRecoveryKind ?? null,
+    satRecoveryDeadlineAt: payload.satRecoveryDeadlineAt ?? null,
+    satRecoveryBoundaryRevision: payload.satRecoveryBoundaryRevision ?? null,
     runtimeSectionStatus: payload.runtimeSectionStatus ?? undefined,
     runtimeWaiting: payload.runtimeWaiting,
+    ieltsPersonalStatus: payload.ieltsPersonalStatus ?? undefined,
+    ieltsPersonalSectionKey: payload.ieltsPersonalSectionKey ?? undefined,
+    ieltsPersonalDeadlineAt: payload.ieltsPersonalDeadlineAt ?? null,
+    ieltsPersonalTimeRemainingSeconds: payload.ieltsPersonalTimeRemainingSeconds ?? null,
     violations: payload.violations ?? [],
     warnings: payload.warnings,
     lastActivity: payload.lastActivity,

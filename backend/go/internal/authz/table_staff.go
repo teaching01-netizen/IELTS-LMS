@@ -84,6 +84,8 @@ func init() {
 		"POST /schedules/{scheduleID}/breaks/visible":                {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/submit":                {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/close":                 {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /schedules/{scheduleID}/modules/close-intent":          {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /schedules/{scheduleID}/modules/recovery/resolve":      {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/modules/late-evidence":         {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /schedules/{scheduleID}/submit":                        {Bearer: true, Scope: ScopeAttemptOwner},
 		// student sessions: session-or-bearer STUDENT paths (handler:
@@ -145,6 +147,7 @@ func init() {
 		"POST /sessions/{scheduleID}/control/end-section-now": {MinRoles: []string{RoleAdmin, RoleBuilder, RoleProctor}},
 		"POST /sessions/{scheduleID}/control/extend-section":  {MinRoles: proctorRW},
 		"POST /sessions/{scheduleID}/control/complete-exam":   {MinRoles: proctorRW},
+		"GET /sessions/{scheduleID}/forms/state":              {MinRoles: proctorRW},
 		// Per-attempt commands: handler second layer checks
 		// proctorHasLiveAssignment for RoleProctor (404-collapse).
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/warn":                 {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
@@ -170,8 +173,9 @@ func init() {
 		"GET /sessions/{scheduleID}/entry-info": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		// SAT Practice Classroom staff-selected Module 2 (handler: org +
 		// live proctor assignment, 404-collapse).
-		"POST /sessions/{scheduleID}/attempts/{attemptID}/route": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
-		"GET /sessions/{scheduleID}/route-queue":                 {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/route":            {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/recovery/resolve": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"GET /sessions/{scheduleID}/route-queue":                            {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 
 		// library passages/questions.
 		"GET /passages":                         {MinRoles: readStaff},

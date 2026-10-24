@@ -1,3 +1,5 @@
+import type { PublicRegistrationForm } from '@/src/features/assessment-forms/api/assessmentForms';
+
 export type StudentAccessLinkStatus = 'live' | 'upcoming' | 'ended' | 'paused' | 'revoked';
 export type StudentAccessMode = 'student_code' | 'open';
 export type StudentAudienceType = 'anyone' | 'cohort' | 'selected_students';
@@ -61,4 +63,6 @@ export interface PublicStudentAccessLink {
   opensAt: string | null;
   closesAt: string | null;
   status: StudentAccessLinkStatus;
+  /** Applicable registration questions for new entries; null when none. */
+  registrationForm?: PublicRegistrationForm | null;
 }

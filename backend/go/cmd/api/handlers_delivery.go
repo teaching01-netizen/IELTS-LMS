@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -9,6 +11,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/sat"
 )
 
@@ -54,7 +57,7 @@ func deliveryBootstrapInnerMode(app *App, w http.ResponseWriter, r *http.Request
 	// ATTEMPT_VERIFY=stateless.
 	claims, err := verifyAttemptReadBearer(app, r, bearer)
 	if err != nil {
-		httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+		writeAttemptVerificationError(w, r, err)
 		return
 	}
 	if app.Delivery == nil || app.DB == nil {
@@ -73,7 +76,12 @@ func deliveryBootstrapInnerMode(app *App, w http.ResponseWriter, r *http.Request
 	// genuinely immutable static content tree (loadSections / authored plan),
 	// never to attempt state: the assembly below always runs so the response
 	// can never be older than the routing decision it must report.
-	out, err := app.Delivery.Bootstrap(r.Context(), claims.ScheduleID, claims.AttemptID, urlScheduleID)
+	var out *delivery.Bootstrap
+	if includeSections {
+		out, err = app.Delivery.Bootstrap(r.Context(), claims.ScheduleID, claims.AttemptID, urlScheduleID)
+	} else {
+		out, err = app.Delivery.LifecycleState(r.Context(), claims.ScheduleID, claims.AttemptID, urlScheduleID)
+	}
 	if err != nil {
 		httpx.WriteError(w, r, MapDBError(err))
 		return
@@ -96,18 +104,16 @@ func deliverySaveResponseHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		// Security P0: delivery writes take the session-bound verify in
-		// BOTH modes — a revoked or takeover-rotated bearer must not
-		// write, even when ATTEMPT_VERIFY=stateless.
-		claims, err := verifyAttemptReadBearer(app, r, bearer)
+		// The mutation transaction rechecks this token's live session binding
+		// while applying the write, so a revoke cannot race between auth and
+		// commit. Keep the edge check to signature + expiry only.
+		claims, err := verifyAttemptWriteBearer(app, r, bearer)
 		if err != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			writeAttemptVerificationError(w, r, err)
 			return
 		}
-		// Empty writer identity gets edge-only binding with no in-tx
-		// writer-session fence (claimWriterSessionTx skips ""). Every
-		// minted bearer carries a clientSessionId — reject the empty
-		// case loudly instead of silently weakening the binding.
+		// Every minted bearer carries a clientSessionId; reject an empty
+		// writer identity before entering the mutation transaction.
 		if claims.ClientSessionID == "" {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 			return
@@ -155,10 +161,11 @@ func deliveryStartModuleInner(app *App, w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	// Security P0: session-bound verify in both modes (see save).
-	claims, err := verifyAttemptReadBearer(app, r, bearer)
+	// The start transaction locks and verifies the live token session before
+	// changing module state; avoid a separate session lookup at the edge.
+	claims, err := verifyAttemptWriteBearer(app, r, bearer)
 	if err != nil {
-		httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+		writeAttemptVerificationError(w, r, err)
 		return
 	}
 	if claims.ClientSessionID == "" {
@@ -177,7 +184,9 @@ func deliveryStartModuleInner(app *App, w http.ResponseWriter, r *http.Request) 
 	// B2.4: writer claim folds into the mutation tx (claimWriterSessionTx
 	// re-checks token revocation + writer session in-tx); no separate
 	// pre-tx round trip.
+	serviceStartedAt := time.Now()
 	out, err := app.Delivery.StartModuleOfferAck(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req.ModuleID, req.Generation, req.ControlEpoch, req.NeedContent, claims.ClientSessionID, claims.TokenID)
+	telemetry.ObserveSeconds(telemetry.MSATTransitionServiceSeconds, time.Since(serviceStartedAt).Seconds(), "operation", "start")
 	if err != nil {
 		writeEntryError(w, r, err)
 		return
@@ -257,7 +266,7 @@ func deliveryModuleEntryStateHandler(app *App) http.HandlerFunc {
 			// in both modes, like the bootstrap read.
 			claims, err := verifyAttemptReadBearer(app, r, bearer)
 			if err != nil {
-				httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+				writeAttemptVerificationError(w, r, err)
 				return
 			}
 			if app.Delivery == nil || app.DB == nil {
@@ -344,20 +353,106 @@ func deliveryMarkBreakVisibleHandler(app *App) http.HandlerFunc {
 // it immediately instead of waiting out the close window.
 func deliveryCloseModuleHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		withQueryTimeout(w, r, DefaultSATCloseTimeout, func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+			if !ok {
+				return
+			}
+			closeCtx, releaseClose, err := app.Delivery.AcquireSATCloseAdmission(r.Context())
+			if err != nil {
+				writeDeliveryCloseError(w, r, err)
+				return
+			}
+			defer releaseClose()
+
+			// Admit the expensive close before its distributed write-rate-limit
+			// query. Saturated closes can return backpressure without touching MySQL.
+			limited := limitTier(app, httpx.TierWrites, attemptKey())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req delivery.ModuleCloseRequest
+				if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+					httpx.WriteError(w, r, err)
+					return
+				}
+				var out *delivery.SatModuleCloseAck
+				var closeErr error
+				serviceStartedAt := time.Now()
+				if req.Protocol != "" {
+					out, closeErr = app.Delivery.CloseModuleRecovery(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims, claims.ClientSessionID, claims.TokenID)
+				} else {
+					out, closeErr = app.Delivery.CloseModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+				}
+				telemetry.ObserveSeconds(telemetry.MSATTransitionServiceSeconds, time.Since(serviceStartedAt).Seconds(), "operation", "close")
+				if closeErr != nil {
+					writeDeliveryCloseError(w, r, closeErr)
+					return
+				}
+				httpx.WriteJSON(w, http.StatusOK, out)
+			}))
+			limited.ServeHTTP(w, r.WithContext(closeCtx))
+		})
+	}
+}
+
+func writeDeliveryCloseError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, delivery.ErrSATCloseAdmissionFull) {
+		httpx.WriteRateLimitExceeded(w, r, "sat-close", "attempt", time.Second)
+		return
+	}
+	if errors.Is(err, delivery.ErrSATCloseAdmissionUnavailable) {
+		writeEntryError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Module close is temporarily unavailable; please retry."))
+		return
+	}
+	writeEntryError(w, r, err)
+}
+
+// deliveryCloseIntentHandler registers the immutable frontier before a
+// recovery client uploads any post-grace chunks.
+func deliveryCloseIntentHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
 		if !ok {
 			return
 		}
-		var req delivery.ModuleCloseRequest
+		var req delivery.SATCloseIntentRequest
 		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		out, err := app.Delivery.CloseModule(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+		out, err := app.Delivery.RegisterSATCloseIntent(
+			r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"),
+			req, claims, claims.ClientSessionID, claims.TokenID,
+		)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.WriteJSON(w, http.StatusOK, out)
+	}
+}
+
+// deliveryRecoveryResolutionHandler records a practice student's explicit
+// choice to continue from the answer set already confirmed by the server.
+func deliveryRecoveryResolutionHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+		if !ok {
+			return
+		}
+		var req delivery.SATRecoveryResolutionRequest
+		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		out, err := app.Delivery.ResolveSATRecovery(
+			r.Context(), claims.ScheduleID, claims.AttemptID, req,
+			"student", claims.UserID, &claims, claims.ClientSessionID, claims.TokenID,
+		)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
 }
@@ -386,15 +481,19 @@ func deliveryLateEvidenceHandler(app *App) http.HandlerFunc {
 	}
 }
 
-// verifiedDeliveryWriterClaims shares the session-bound bearer and writer
-// identity gates used by delivery mutations.
+// verifiedDeliveryWriterClaims performs the signed-token and writer-identity
+// edge checks for mutations whose owning transaction rechecks session state.
 func verifiedDeliveryWriterClaims(app *App, w http.ResponseWriter, r *http.Request) (crypto.AttemptClaims, bool) {
 	bearer, ok := requireBearer(w, r)
 	if !ok {
 		return crypto.AttemptClaims{}, false
 	}
-	claims, err := verifyAttemptReadBearer(app, r, bearer)
-	if err != nil || claims.ClientSessionID == "" {
+	claims, err := verifyAttemptWriteBearer(app, r, bearer)
+	if err != nil {
+		writeAttemptVerificationError(w, r, err)
+		return crypto.AttemptClaims{}, false
+	}
+	if claims.ClientSessionID == "" {
 		httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
 		return crypto.AttemptClaims{}, false
 	}
@@ -415,10 +514,10 @@ func deliverySubmitModuleHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		// Security P0: session-bound verify in both modes (see save).
-		claims, err := verifyAttemptReadBearer(app, r, bearer)
+		// SubmitModule checks the live token session in its write transaction.
+		claims, err := verifyAttemptWriteBearer(app, r, bearer)
 		if err != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			writeAttemptVerificationError(w, r, err)
 			return
 		}
 		if claims.ClientSessionID == "" {
@@ -459,7 +558,7 @@ func deliverySubmitAssessmentHandler(app *App) http.HandlerFunc {
 		// Security P0: session-bound verify in both modes (see save).
 		claims, err := verifyAttemptReadBearer(app, r, bearer)
 		if err != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			writeAttemptVerificationError(w, r, err)
 			return
 		}
 		if claims.ScheduleID != chi.URLParam(r, "scheduleID") {

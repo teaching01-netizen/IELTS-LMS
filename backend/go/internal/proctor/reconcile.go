@@ -24,6 +24,74 @@ const autoSubmitExpr = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(v.config_snapshot, '$
 
 var responseSaveGraceSeconds = strconv.FormatInt(int64(attempts.ResponseSaveGrace/time.Second), 10)
 
+// reconcileDueSectionsSQL selects live section runtimes whose active section
+// is due for an automatic advance, start or overrun signal (binds: asOf x3,
+// limit). Migration 0103's (status, timing_model) index serves the status
+// filter, so a pass reads the live runtimes rather than every historical
+// section.
+var reconcileDueSectionsSQL = `
+		SELECT r.schedule_id, ` + autoSubmitExpr + ` = 'true', COALESCE(r.provider_key, '')
+			FROM exam_session_runtimes r
+			JOIN exam_session_runtime_sections rs
+			  ON rs.runtime_id = r.id
+			 AND rs.section_key = r.active_section_key
+			JOIN exam_schedules sch ON sch.id = r.schedule_id
+			JOIN exam_versions v ON v.id = sch.published_version_id
+			WHERE r.status = 'live'
+			  AND COALESCE(r.timing_model, '') <> 'sat_personal_v1'
+			  AND r.active_section_key IS NOT NULL
+			  AND (
+					-- Wait for the same final-response drain window used by the
+					-- section planner before attempting an automatic advance.
+					(
+					  rs.status = 'live'
+					  AND rs.actual_start_at IS NOT NULL
+					  AND ` + autoSubmitExpr + ` = 'true'
+					  AND ? >= DATE_ADD(
+							rs.actual_start_at,
+							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + ` + responseSaveGraceSeconds + `) SECOND
+						  )
+					)
+					-- Between sections: the authored gap has elapsed, start the next.
+					OR (
+					  rs.status = 'completed'
+					  AND r.waiting_for_next_section = true
+					  AND rs.actual_end_at IS NOT NULL
+					  AND ? >= DATE_ADD(rs.actual_end_at, INTERVAL rs.gap_after_minutes MINUTE)
+					)
+					-- Past the grace but not advanced (paused, or auto-submit
+					-- disabled): record the overrun signal for the proctor.
+					OR (
+					  rs.status = 'live'
+					  AND r.is_overrun = false
+					  AND rs.actual_start_at IS NOT NULL
+					  AND ? >= DATE_ADD(
+							rs.actual_start_at,
+							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + 30) SECOND
+						  )
+					)
+				  )
+			ORDER BY rs.actual_start_at ASC
+			LIMIT ?`
+
+// reconcileDrainedPersonalSQL selects personal SAT runtimes whose admission
+// has closed and whose attempts are all terminal (binds: asOf, limit).
+const reconcileDrainedPersonalSQL = `
+			SELECT r.schedule_id
+			FROM exam_session_runtimes r
+			JOIN exam_schedules sch ON sch.id = r.schedule_id
+			WHERE r.timing_model = 'sat_personal_v1'
+			  AND r.status IN ('live', 'paused')
+			  AND sch.end_time <= ?
+			  AND NOT EXISTS (
+			    SELECT 1 FROM student_attempts a
+			    WHERE a.schedule_id = r.schedule_id
+			      AND a.submitted_at IS NULL
+			      AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
+			  )
+			ORDER BY sch.end_time, r.schedule_id
+			LIMIT ?`
+
 func responseSaveGraceForProvider(providerKey string) time.Duration {
 	if providerKey == "sat" {
 		return attempts.SATSaveGrace
@@ -106,50 +174,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 	candidates := make([]sectionReconcileCandidate, 0)
 	personalCandidates := make([]string, 0)
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		rows, err := q.QueryContext(ctx, `
-		SELECT r.schedule_id, `+autoSubmitExpr+` = 'true', COALESCE(r.provider_key, '')
-			FROM exam_session_runtimes r
-			JOIN exam_session_runtime_sections rs
-			  ON rs.runtime_id = r.id
-			 AND rs.section_key = r.active_section_key
-			JOIN exam_schedules sch ON sch.id = r.schedule_id
-			JOIN exam_versions v ON v.id = sch.published_version_id
-			WHERE r.status = 'live'
-			  AND COALESCE(r.timing_model, '') <> 'sat_personal_v1'
-			  AND r.active_section_key IS NOT NULL
-			  AND (
-					-- Wait for the same final-response drain window used by the
-					-- section planner before attempting an automatic advance.
-					(
-					  rs.status = 'live'
-					  AND rs.actual_start_at IS NOT NULL
-					  AND `+autoSubmitExpr+` = 'true'
-					  AND ? >= DATE_ADD(
-							rs.actual_start_at,
-							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + `+responseSaveGraceSeconds+`) SECOND
-						  )
-					)
-					-- Between sections: the authored gap has elapsed, start the next.
-					OR (
-					  rs.status = 'completed'
-					  AND r.waiting_for_next_section = true
-					  AND rs.actual_end_at IS NOT NULL
-					  AND ? >= DATE_ADD(rs.actual_end_at, INTERVAL rs.gap_after_minutes MINUTE)
-					)
-					-- Past the grace but not advanced (paused, or auto-submit
-					-- disabled): record the overrun signal for the proctor.
-					OR (
-					  rs.status = 'live'
-					  AND r.is_overrun = false
-					  AND rs.actual_start_at IS NOT NULL
-					  AND ? >= DATE_ADD(
-							rs.actual_start_at,
-							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + 30) SECOND
-						  )
-					)
-				  )
-			ORDER BY rs.actual_start_at ASC
-			LIMIT ?`, asOf, asOf, asOf, limit)
+		rows, err := q.QueryContext(ctx, reconcileDueSectionsSQL, asOf, asOf, asOf, limit)
 		if err != nil {
 			return err
 		}
@@ -165,21 +190,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 			return err
 		}
 		rows.Close()
-		personalRows, err := q.QueryContext(ctx, `
-			SELECT r.schedule_id
-			FROM exam_session_runtimes r
-			JOIN exam_schedules sch ON sch.id = r.schedule_id
-			WHERE r.timing_model = 'sat_personal_v1'
-			  AND r.status IN ('live', 'paused')
-			  AND sch.end_time <= ?
-			  AND NOT EXISTS (
-			    SELECT 1 FROM student_attempts a
-			    WHERE a.schedule_id = r.schedule_id
-			      AND a.submitted_at IS NULL
-			      AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
-			  )
-			ORDER BY sch.end_time, r.schedule_id
-			LIMIT ?`, asOf, limit)
+		personalRows, err := q.QueryContext(ctx, reconcileDrainedPersonalSQL, asOf, limit)
 		if err != nil {
 			return err
 		}
@@ -708,8 +719,13 @@ const systemActor = "system"
 // startSectionEffect opens the successor section, re-projects the V2 clocks,
 // and clears the between-sections window.
 func (s *Service) startSectionEffect(ctx context.Context, q tx.Tx, scheduleID, runtimeID string, adv sectionAdvance) error {
+	var timingModel string
+	if err := q.QueryRowContext(ctx, `SELECT timing_model FROM exam_session_runtimes WHERE id = ?`, runtimeID).Scan(&timingModel); err != nil {
+		return err
+	}
+	prepare := adv.prepare && !examruntime.IsIELTSCohortPersonal(timingModel)
 	var sectionErr error
-	if adv.prepare {
+	if prepare {
 		_, sectionErr = q.ExecContext(ctx, `UPDATE exam_session_runtime_sections SET status = 'locked', available_at = UTC_TIMESTAMP(6), actual_start_at = NULL WHERE runtime_id = ? AND section_key = ?`, runtimeID, adv.nextKey)
 	} else {
 		_, sectionErr = q.ExecContext(ctx, `
@@ -734,11 +750,13 @@ func (s *Service) startSectionEffect(ctx context.Context, q tx.Tx, scheduleID, r
 	if err != nil {
 		return err
 	}
-	if err := examruntime.SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, adv.nextKey, strptr("running")); err != nil {
-		return err
+	if !examruntime.IsIELTSPersonal(timingModel) {
+		if err := examruntime.SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, adv.nextKey, strptr("running")); err != nil {
+			return err
+		}
 	}
 	auditEvent := "SECTION_START"
-	if adv.prepare {
+	if prepare {
 		auditEvent = "SECTION_PREPARE"
 	}
 	if err := insertAuditLog(ctx, q, scheduleID, adv.actor, auditEvent, nil, map[string]any{
@@ -752,12 +770,17 @@ func (s *Service) startSectionEffect(ctx context.Context, q tx.Tx, scheduleID, r
 // completeRuntimeEffect ends the schedule, queues auto-submit for every attempt
 // still open, and clears any between-sections window.
 func (s *Service) completeRuntimeEffect(ctx context.Context, q tx.Tx, scheduleID, runtimeID string, adv sectionAdvance) error {
+	var timingModel string
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(timing_model, '') FROM exam_session_runtimes WHERE id = ? FOR UPDATE`, runtimeID).Scan(&timingModel); err != nil {
+		return err
+	}
 	if _, err := q.ExecContext(ctx, `
 		UPDATE exam_session_runtimes
-		SET status = 'completed', actual_end_at = ?, active_section_key = NULL,
+		SET status = 'completed', actual_end_at = ?, completion_reason = ?, active_section_key = NULL,
 			current_section_key = NULL, current_section_remaining_seconds = 0,
 			waiting_for_next_section = false, is_overrun = false,
-			updated_at = UTC_TIMESTAMP(6), revision = revision + 1			WHERE id = ?`, adv.endAt, runtimeID); err != nil {
+			updated_at = UTC_TIMESTAMP(6), revision = revision + 1
+		WHERE id = ?`, adv.endAt, adv.reason, runtimeID); err != nil {
 		return err
 	}
 	revision, err := currentRuntimeRevision(ctx, q, runtimeID)
@@ -770,8 +793,10 @@ func (s *Service) completeRuntimeEffect(ctx context.Context, q tx.Tx, scheduleID
 		WHERE id = ?`, scheduleID); err != nil {
 		return err
 	}
-	if err := s.enqueueAutoSubmit(ctx, q, scheduleID, adv, revision); err != nil {
-		return err
+	if !examruntime.IsIELTSPersonal(timingModel) {
+		if err := s.enqueueAutoSubmit(ctx, q, scheduleID, adv, revision); err != nil {
+			return err
+		}
 	}
 	if err := insertAuditLog(ctx, q, scheduleID, adv.actor, "SESSION_END", nil, map[string]any{
 		"reason": adv.reason, "effectiveAt": adv.endAt,

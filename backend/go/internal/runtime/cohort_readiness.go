@@ -13,6 +13,17 @@ type CohortReadiness struct {
 	StartedAt         *time.Time `json:"startedAt"`
 	ServerNow         time.Time  `json:"serverNow"`
 	RemainingStudents int        `json:"remainingStudents"`
+	Status            string     `json:"status,omitempty"`
+	DeadlineAt        *time.Time `json:"deadlineAt,omitempty"`
+	ExpectedStartAt   *time.Time `json:"expectedStartAt,omitempty"`
+	PreparationEndsAt *time.Time `json:"preparationEndsAt,omitempty"`
+	Message           string     `json:"message,omitempty"`
+}
+
+type IELTSReadinessSignals struct {
+	ContentReady      *bool `json:"contentReady"`
+	LocalStorageReady *bool `json:"localStorageReady"`
+	AudioReady        *bool `json:"audioReady"`
 }
 
 // cohortStartLead covers readiness polling and delivery of the armed clock.
@@ -28,11 +39,29 @@ func cohortStartLead(roundTripMS int) time.Duration {
 }
 
 // ReadyCohortSection is idempotent and serializes with admission, proctor
-// commands, and response writes through the existing global lock order.
-func (s *Service) ReadyCohortSection(ctx context.Context, scheduleID, sectionKey, attemptID, actorUserID string, roundTripMS *int) (CohortReadiness, error) {
+// commands, and response writes through the existing global lock order. It
+// uses READ COMMITTED with bounded deadlock retries for concurrent readiness
+// writes that may otherwise contend on missing per-attempt timeline keys.
+func (s *Service) ReadyCohortSection(ctx context.Context, scheduleID, sectionKey, attemptID, actorUserID string, roundTripMS *int, signals ...IELTSReadinessSignals) (CohortReadiness, error) {
 	var out CohortReadiness
 	changed := false
-	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err := s.tx.WithTxRCRetry(ctx, 3, func(ctx context.Context, q tx.Tx) error {
+		out = CohortReadiness{}
+		changed = false
+		// Read the immutable timing choice before taking cohort locks. New IELTS
+		// sessions then lock only the requesting attempt, so hundreds of students
+		// can independently report readiness without serializing on every row.
+		var timingModel string
+		if err := q.QueryRowContext(ctx, `SELECT COALESCE(timing_model, '') FROM exam_session_runtimes WHERE schedule_id = ?`, scheduleID).Scan(&timingModel); err != nil {
+			return err
+		}
+		if IsIELTSPersonal(timingModel) {
+			var readiness IELTSReadinessSignals
+			if len(signals) > 0 {
+				readiness = signals[0]
+			}
+			return readyIELTSPersonalSectionInTx(ctx, q, scheduleID, sectionKey, attemptID, actorUserID, readiness, &out, &changed)
+		}
 		sch, err := LockScheduleRow(ctx, q, scheduleID)
 		if err != nil {
 			return err

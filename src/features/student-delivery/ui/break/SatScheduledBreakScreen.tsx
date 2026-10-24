@@ -10,10 +10,14 @@ export function SatScheduledBreakScreen({
   phase,
   nextSectionKey,
   remainingSeconds,
+  nextHasForm = false,
+  requiresEntryConfirmation = false,
 }: {
   phase: SatScheduledBreakPhase;
   nextSectionKey: "reading-writing" | "math";
   remainingSeconds: number | null;
+  nextHasForm?: boolean;
+  requiresEntryConfirmation?: boolean;
 }) {
   const temporal = useSatTemporalSnapshot();
   const liveRemainingSeconds = temporal
@@ -34,7 +38,7 @@ export function SatScheduledBreakScreen({
   const supportingCopy =
     phase === "waiting"
       ? `${nextSection} is next after your scheduled break.`
-      : "Your next section starts automatically.";
+      : nextHasForm ? "After your break, complete your section details before starting. Your exam timer starts after entry." : requiresEntryConfirmation ? "After your break, choose Begin module when you are ready." : "Your next section starts automatically.";
 
   return (
     <SatPresenceSurface
@@ -58,7 +62,13 @@ export function SatScheduledBreakScreen({
             {displayedTime}
           </p>
         ) : null}
-        <h1 className="mt-6 text-2xl font-semibold tracking-tight">{headline}</h1>
+        <h1
+          data-sat-stage-heading="true"
+          tabIndex={-1}
+          className="mt-6 text-2xl font-semibold tracking-tight"
+        >
+          {headline}
+        </h1>
         {phase !== "waiting" ? (
           <p className="mt-2 sat-type-control-primary font-medium text-[var(--sat-text)]">
             {nextSection} is next

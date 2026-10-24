@@ -7,7 +7,9 @@ package db
 // RED: snapshot mapping + role label.
 import (
 	"database/sql"
+	"strings"
 	"testing"
+	"time"
 
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
@@ -28,6 +30,37 @@ func TestReportPoolStats(t *testing.T) {
 	if got := telemetry.GaugeValueForTest(reg, telemetry.MPoolWait, "role", "api"); got != 42 {
 		t.Fatalf("pool wait api must be 42, got %v", got)
 	}
+	full := sql.DBStats{MaxOpenConnections: 40, Idle: 3, WaitDuration: 1500 * time.Millisecond, MaxIdleClosed: 4, MaxIdleTimeClosed: 5, MaxLifetimeClosed: 6}
+	ReportPoolStats(RoleAPI, full)
+	for _, c := range []struct {
+		name  string
+		gauge bool
+		want  float64
+		extra []string
+	}{
+		{telemetry.MPoolIdle, true, 3, nil},
+		{telemetry.MPoolMaxOpen, true, 40, nil},
+		{telemetry.MPoolWaitSeconds, false, 1.5, nil},
+		{telemetry.MPoolClosed, false, 4, []string{"reason", "max_idle"}},
+		{telemetry.MPoolClosed, false, 5, []string{"reason", "max_idle_time"}},
+		{telemetry.MPoolClosed, false, 6, []string{"reason", "max_lifetime"}},
+	} {
+		labels := append([]string{"role", "api"}, c.extra...)
+		got := telemetry.CounterValueForTest(reg, c.name, labels...)
+		if c.gauge {
+			got = telemetry.GaugeValueForTest(reg, c.name, labels...)
+		}
+		if got != c.want {
+			t.Fatalf("%s%v = %v, want %v", c.name, c.extra, got, c.want)
+		}
+	}
+	snap := reg.Snapshot()
+	for _, header := range []string{"# TYPE db_pool_wait_seconds_total counter", "# TYPE db_pool_closed_total counter", "# TYPE db_pool_idle gauge"} {
+		if !strings.Contains(snap, header) {
+			t.Fatalf("missing %q in:\n%s", header, snap)
+		}
+	}
+	ReportPoolStats(RoleAPI, st)
 	ReportPoolStats(RoleWorker, st)
 	if got := telemetry.GaugeValueForTest(reg, telemetry.MPoolOpen, "role", "worker"); got != 17 {
 		t.Fatalf("pool open worker must be 17, got %v", got)

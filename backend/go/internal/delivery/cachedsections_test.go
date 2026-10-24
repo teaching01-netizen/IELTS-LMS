@@ -13,25 +13,31 @@ func sectionListRows() *sqlmock.Rows {
 }
 
 func moduleListRows() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
-		AddRow("mod-1", "rw-1", "R/W 1", 1, 3600, 10, "base", `{}`, `{}`)
+	return sqlmock.NewRows([]string{"id", "section_id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
+		AddRow("mod-1", "sec-1", "rw-1", "R/W 1", 1, 3600, 10, "base", `{}`, `{}`)
 }
 
 func questionListRows() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}).
-		AddRow("eq-1", "q-1", 1, false, "mcq", `{}`, `{}`, `{"kind":"single_choice","options":[]}`, `{}`, `{}`)
+	return sqlmock.NewRows([]string{"module_id", "exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}).
+		AddRow("mod-1", "eq-1", "q-1", 1, false, "mcq", `{}`, `{}`, `{"kind":"single_choice","options":[]}`, `{}`, `{}`)
 }
 
-func expectFullTree(mock sqlmock.Sqlmock) {
+// expectFullTree stages the three version-scoped tree reads. A cached load
+// (observed >= 0) also reads the revision the same snapshot observed.
+func expectFullTree(mock sqlmock.Sqlmock, observed int64) {
 	mock.ExpectQuery("FROM assessment_sections").
 		WithArgs("v-1").WillReturnRows(sectionListRows())
 	mock.ExpectQuery("FROM assessment_modules").
-		WithArgs("sec-1").WillReturnRows(moduleListRows())
+		WithArgs("v-1").WillReturnRows(moduleListRows())
 	mock.ExpectQuery("FROM assessment_exam_questions").
-		WithArgs("mod-1").WillReturnRows(questionListRows())
+		WithArgs("v-1").WillReturnRows(questionListRows())
+	if observed >= 0 {
+		mock.ExpectQuery("SELECT revision FROM exam_versions").
+			WithArgs("v-1").WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(observed))
+	}
 }
 
-// D1 RED: first call loads the N+1 tree; second call at the same revision
+// D1 RED: first call loads the tree; second call at the same revision
 // issues ZERO section queries (cache hit).
 func TestCachedSectionsHitSkipsQueries(t *testing.T) {
 	db, mock, err := sqlmock.New()
@@ -41,7 +47,7 @@ func TestCachedSectionsHitSkipsQueries(t *testing.T) {
 	defer db.Close()
 	svc := NewService(db, nil).SetVersionCache(NewVersionCache(50))
 	ctx := context.Background()
-	expectFullTree(mock)
+	expectFullTree(mock, 7)
 	first, err := svc.cachedSections(ctx, "v-1", 7)
 	if err != nil {
 		t.Fatalf("first: %v", err)
@@ -71,11 +77,11 @@ func TestCachedSectionsRevBumpReloads(t *testing.T) {
 	defer db.Close()
 	svc := NewService(db, nil).SetVersionCache(NewVersionCache(50))
 	ctx := context.Background()
-	expectFullTree(mock)
+	expectFullTree(mock, 7)
 	if _, err := svc.cachedSections(ctx, "v-1", 7); err != nil {
 		t.Fatal(err)
 	}
-	expectFullTree(mock)
+	expectFullTree(mock, 8)
 	if _, err := svc.cachedSections(ctx, "v-1", 8); err != nil {
 		t.Fatalf("rev bump must reload: %v", err)
 	}
@@ -93,11 +99,11 @@ func TestCachedSectionsOffLoadsAlways(t *testing.T) {
 	defer db.Close()
 	svc := NewService(db, nil)
 	ctx := context.Background()
-	expectFullTree(mock)
+	expectFullTree(mock, -1)
 	if _, err := svc.cachedSections(ctx, "v-1", 7); err != nil {
 		t.Fatal(err)
 	}
-	expectFullTree(mock)
+	expectFullTree(mock, -1)
 	if _, err := svc.cachedSections(ctx, "v-1", 7); err != nil {
 		t.Fatalf("cache-off must reload: %v", err)
 	}

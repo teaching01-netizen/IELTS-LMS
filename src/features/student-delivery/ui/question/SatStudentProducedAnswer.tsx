@@ -53,6 +53,7 @@ export function SatStudentProducedAnswer({
         <span>Enter your answer</span>
         <input
           id={inputId}
+          data-testid="sat-answer-control"
           value={value}
           onChange={(event) => {
             if (error !== null) setError(null);

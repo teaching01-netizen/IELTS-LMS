@@ -33,6 +33,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/assessmentforms"
 	"fmt"
 	"strings"
 	"time"
@@ -527,6 +528,9 @@ func (s *Service) ExtendAttempt(ctx context.Context, actor Actor, scheduleID, at
 			}
 			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "The student does not have an active SAT module to extend.", HTTPStatus: 409}
 		}
+		if err := examruntime.RealignSATRecoveryBoundariesInTx(ctx, q, scheduleID, attemptID); err != nil {
+			return err
+		}
 		const dl = "UPDATE student_attempts SET deadline_at = CASE WHEN deadline_at IS NULL THEN NULL ELSE DATE_ADD(deadline_at, INTERVAL ? MINUTE) END, closing_grace_until = CASE WHEN deadline_at IS NULL THEN closing_grace_until WHEN closing_grace_until IS NULL THEN DATE_ADD(deadline_at, INTERVAL 30 SECOND) ELSE DATE_ADD(closing_grace_until, INTERVAL ? MINUTE) END, control_epoch = control_epoch + 1, revision = revision + 1, updated_at = UTC_TIMESTAMP(6) WHERE id = ? AND schedule_id = ? AND protocol_version = 2 AND submitted_at IS NULL AND COALESCE(delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')"
 		if _, err := q.ExecContext(ctx, dl, minutes, minutes, attemptID, scheduleID); err != nil {
 			return err
@@ -976,6 +980,12 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 		if stored != nil {
 			return nil
 		}
+		// Explicit staff End Exam closes Eva SIM even when the runtime already
+		// completed automatically (the no-op return below). Automatic
+		// completion never reaches this.
+		if err := assessmentforms.CloseEvaTx(ctx, q, scheduleID, actor.ID); err != nil {
+			return err
+		}
 		const selRt = "SELECT id, status, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
 		var runtimeID, status string
 		var revision int64
@@ -1234,6 +1244,31 @@ func (s *Service) updateAttemptStatus(ctx context.Context, actor Actor, schedule
 		}
 		if _, err := q.ExecContext(ctx, upd, proctorStatus, proctorStatus, proctorStatus, proctorStatus, proctorStatus, phase, reason, actor.ID, attemptID, scheduleID); err != nil {
 			return err
+		}
+		var timingModel, runtimeStatus string
+		runtimeErr := q.QueryRowContext(ctx, `SELECT COALESCE(timing_model, ''), status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE`, scheduleID).Scan(&timingModel, &runtimeStatus)
+		if runtimeErr != nil && runtimeErr != sql.ErrNoRows {
+			return runtimeErr
+		}
+		if runtimeErr == nil && examruntime.IsIELTSPersonal(timingModel) {
+			if proctorStatus == "paused" {
+				if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
+					SET paused_at = COALESCE(paused_at, UTC_TIMESTAMP(6)), revision = revision + 1
+					WHERE attempt_id = ? AND state IN ('preparing', 'active') AND paused_at IS NULL`, attemptID); err != nil {
+					return err
+				}
+			} else if proctorStatus == "active" && runtimeStatus != examruntime.StatusPaused {
+				if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
+					SET expected_start_at = DATE_ADD(expected_start_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND),
+					    preparation_deadline_at = DATE_ADD(preparation_deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND),
+					    started_at = CASE WHEN started_at IS NULL THEN NULL ELSE DATE_ADD(started_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) END,
+					    deadline_at = CASE WHEN deadline_at IS NULL THEN NULL ELSE DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) END,
+					    accumulated_paused_seconds = accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, paused_at, UTC_TIMESTAMP(6)), 0),
+					    paused_at = NULL, revision = revision + 1
+					WHERE attempt_id = ? AND state IN ('preparing', 'active') AND paused_at IS NOT NULL`, attemptID); err != nil {
+					return err
+				}
+			}
 		}
 		if err := examruntime.SyncSATPauseInTx(ctx, q, scheduleID, attemptID); err != nil {
 			return err

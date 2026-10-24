@@ -53,6 +53,7 @@ export const SAT_PUBLISH_READINESS_FAMILIES = [
     ],
   },
   { id: "score-converter", label: "Score converter", codes: ["sat.converter.invalid", "sat.converter.missing"] },
+  { id: "forms", label: "Registration form & Eva SIM", codes: ["sat.forms.invalid", "sat.forms.incomplete"] },
 ] as const;
 
 const SAT_PUBLISH_READINESS_CODES = new Set<string>(

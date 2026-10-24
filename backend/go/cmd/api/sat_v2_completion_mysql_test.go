@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/proctor"
 	"example.com/ielts-proctoring/internal/sat"
 	"example.com/ielts-proctoring/internal/terminalization"
 )
@@ -186,6 +188,110 @@ func TestSATV2SubmitWithoutScoringPolicySealsWithProductionSealer(t *testing.T) 
 		t.Fatal(err)
 	}
 	f.assertSealedWithoutScore(t)
+}
+
+func TestSATBlockedFinalRecoveryBoundaryBlocksCleanCompletionAndPreservesAuthorizedRoomEndMySQL(t *testing.T) {
+	f := newSATV2CompletionFixture(t)
+	ctx := context.Background()
+	var moduleAttemptID string
+	if err := f.db.QueryRowContext(ctx, `SELECT id FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ?`, f.attemptID, f.highModuleID).Scan(&moduleAttemptID); err != nil {
+		t.Fatal(err)
+	}
+	// Model the final module at the recovery cutoff: its timer ended, its
+	// boundary is blocked, and no authorized answer settlement occurred.
+	if _, err := f.db.ExecContext(ctx, `UPDATE assessment_module_attempts
+		SET state = 'active', submitted_at = NULL, started_at = UTC_TIMESTAMP(6) - INTERVAL 2 HOUR
+		WHERE id = ?`, moduleAttemptID); err != nil {
+		t.Fatal(err)
+	}
+	policy := `{"version":"sat_recovery_v1","recoverySeconds":120,"entryRecoverySeconds":120,"lateAnswerPolicy":"frozen_arrival_window"}`
+	if _, err := f.db.ExecContext(ctx, `UPDATE exam_schedules
+		SET sat_timing_model = 'sat_personal_v1', sat_delivery_policy = CAST(? AS JSON)
+		WHERE id = ?`, policy, f.scheduleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.ExecContext(ctx, `UPDATE exam_session_runtimes SET timing_model = 'sat_personal_v1' WHERE schedule_id = ?`, f.scheduleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.ExecContext(ctx, `INSERT INTO assessment_module_boundaries
+		(module_attempt_id, attempt_id, phase, policy_version)
+		VALUES (?, ?, 'blocked', 'sat_recovery_v1')`, moduleAttemptID, f.attemptID); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.submit(ctx); err == nil {
+		t.Fatal("V2 submit completed an attempt with an unresolved final SAT boundary")
+	} else if appErr, ok := apperrors.As(err); !ok || appErr.Code != apperrors.CodeConflict {
+		t.Fatalf("V2 submit error = %v, want conflict from the unfinished-module gate", err)
+	}
+	var submissions, terminalizations int
+	if err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM attempt_submissions_v2 WHERE attempt_id = ?`, f.attemptID).Scan(&submissions); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM attempt_terminalizations WHERE attempt_id = ?`, f.attemptID).Scan(&terminalizations); err != nil {
+		t.Fatal(err)
+	}
+	if submissions != 0 || terminalizations != 0 {
+		t.Fatalf("unresolved boundary created a clean completion receipt: submissions=%d terminalizations=%d", submissions, terminalizations)
+	}
+
+	seal := sat.NewService(f.db, tx.NewRunner(f.db), clock.System{}, nil).ReconcileInTxAdapter()
+	reconciler := delivery.NewService(f.db, tx.NewRunner(f.db)).SetSATTerminalizerInTx(seal)
+	if _, err := reconciler.ReconcileAttemptTimeout(ctx, f.scheduleID, f.attemptID, time.Now().UTC()); err != nil {
+		t.Fatalf("timeout reconciliation at blocked boundary: %v", err)
+	}
+	var moduleState, boundaryPhase string
+	if err := f.db.QueryRowContext(ctx, `SELECT ma.state, b.phase
+		FROM assessment_module_attempts ma JOIN assessment_module_boundaries b ON b.module_attempt_id = ma.id
+		WHERE ma.id = ?`, moduleAttemptID).Scan(&moduleState, &boundaryPhase); err != nil {
+		t.Fatal(err)
+	}
+	if moduleState != "active" || boundaryPhase != "blocked" {
+		t.Fatalf("timeout reconciliation bypassed the unresolved boundary: module=%q boundary=%q", moduleState, boundaryPhase)
+	}
+	if err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM attempt_terminalizations WHERE attempt_id = ?`, f.attemptID).Scan(&terminalizations); err != nil {
+		t.Fatal(err)
+	}
+	if terminalizations != 0 {
+		t.Fatalf("timeout reconciliation terminalized a blocked attempt: %d receipts", terminalizations)
+	}
+
+	// A proctor may explicitly end the room. That must follow the existing
+	// forced-auto-submit policy and leave the SAT result pending, rather than
+	// turning an unresolved boundary into a clean scored completion.
+	terminalizer := terminalization.NewService(tx.NewRunner(f.db), nil, nil)
+	room := proctor.NewService(tx.NewRunner(f.db), f.db, terminalizer, nil, nil)
+	actor := proctor.Actor{ID: "sat-room-end-admin", Role: proctor.RoleAdmin, CSRFVerified: true}
+	if err := room.CompleteExam(ctx, actor, f.scheduleID, proctor.CompleteExamCommand{OperationID: uuid.NewString()}); err != nil {
+		t.Fatalf("complete SAT room with an explicit staff action: %v", err)
+	}
+	if err := room.AutoSubmitScheduleAfterComplete(ctx, actor, f.scheduleID); err != nil {
+		t.Fatalf("apply the authorized room-end policy: %v", err)
+	}
+	var outcome, reason, actorKind, releaseStatus string
+	var finalSubmission []byte
+	if err := f.db.QueryRowContext(ctx, `SELECT t.outcome, t.reason, t.actor_kind, a.final_submission
+		FROM attempt_terminalizations t JOIN student_attempts a ON a.id = t.attempt_id
+		WHERE t.attempt_id = ?`, f.attemptID).Scan(&outcome, &reason, &actorKind, &finalSubmission); err != nil {
+		t.Fatal(err)
+	}
+	var projection map[string]any
+	if err := json.Unmarshal(finalSubmission, &projection); err != nil {
+		t.Fatalf("decode explicit room-end projection: %v", err)
+	}
+	if outcome != terminalization.OutcomeSubmitted || reason != terminalization.ReasonProctorComplete || actorKind != terminalization.ActorProctor ||
+		projection["autoSubmission"] != true || projection["submissionPolicy"] != "forced_auto_submit" {
+		t.Fatalf("room completion did not retain its explicit forced-submit policy: outcome=%q reason=%q actor=%q projection=%s", outcome, reason, actorKind, finalSubmission)
+	}
+	var resultStatus string
+	var totalScore sql.NullInt64
+	if err := f.db.QueryRowContext(ctx, `SELECT outcome_status, total_score, release_status
+		FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat'`, f.attemptID).Scan(&resultStatus, &totalScore, &releaseStatus); err != nil {
+		t.Fatal(err)
+	}
+	if resultStatus != terminalization.SATPending || totalScore.Valid || releaseStatus != "pending" {
+		t.Fatalf("room completion exposed a clean SAT result for a blocked boundary: status=%q score=%v release=%q", resultStatus, totalScore, releaseStatus)
+	}
 }
 
 func TestSATV2SubmitAndTimeoutReconcileRaceWithProductionSealer(t *testing.T) {

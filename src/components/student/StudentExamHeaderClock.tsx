@@ -5,13 +5,14 @@ import type { StudentHighlightColor } from './highlightPalette';
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 import type { ExamType } from '../../types';
 import { useStudentRuntimeClock } from './providers/StudentRuntimeProvider';
+import type { StudentAutoSaveStatus } from './saveStatusPresentation';
 
 interface StudentExamHeaderClockProps {
   compact: boolean;
   examType?: ExamType | undefined;
   moduleLabel: string;
   testTakerId?: string | undefined;
-  autoSaveStatus?: 'saved' | 'saving' | 'syncing' | 'offline' | 'error' | null | undefined;
+  autoSaveStatus?: StudentAutoSaveStatus | null | undefined;
   highlightEnabled?: boolean | undefined;
   highlightToolMode?: StudentHighlightToolMode | undefined;
   highlightColor?: StudentHighlightColor | undefined;

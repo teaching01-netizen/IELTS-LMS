@@ -2,8 +2,29 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SatBreakScreen } from "./SatBreakScreen";
 import { SatAwaitingRouteScreen, SatCompleteScreen } from "./SatCompleteScreen";
+import { SatPreStartScreen } from "./SatPreStartScreen";
 
 describe("SAT transition screens (Phase 6c)", () => {
+  it("makes next-module entry explicit and keeps the timer promise clear", () => {
+    const onStartModule = vi.fn();
+    render(
+      <SatPreStartScreen
+        reason="module-entry"
+        moduleTitle="Math Module 2"
+        runtimeStatus="live"
+        proctorStatus="ready"
+        stageReady
+        onStartModule={onStartModule}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Math Module 2 is ready" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/2-minute entry window starts when the module becomes available/);
+    expect(screen.getByRole("status")).toHaveTextContent(/module timer starts when you begin/);
+    screen.getByRole("button", { name: "Begin module" }).click();
+    expect(onStartModule).toHaveBeenCalledOnce();
+  });
+
   it("gives waiting and break distinct titles with the auto-advance promise", () => {
     const { rerender } = render(
       <SatBreakScreen nextSectionKey="math" remainingSeconds={300} mode="waiting" />
@@ -41,7 +62,7 @@ describe("SAT transition screens (Phase 6c)", () => {
   it("disambiguates whole-test scope on Complete with a dashboard exit", () => {
     render(<SatCompleteScreen result={null} onExit={vi.fn()} />);
     expect(screen.getByRole("heading", { name: "SAT Complete" })).toBeInTheDocument();
-    expect(screen.getByText(/All responses submitted/)).toBeInTheDocument();
+    expect(screen.getByText("Submission confirmed.")).toBeInTheDocument();
     expect(screen.queryByText(/score/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Back to dashboard" })).toBeInTheDocument();
   });

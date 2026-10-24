@@ -25,6 +25,7 @@ func TestK6SATExamDayRoutesExist(t *testing.T) {
 		{"sat-v1-bootstrap", http.MethodPost, "/api/v1/student/sessions/sched-1/bootstrap"},
 		{"sat-delivery-bootstrap", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/bootstrap"},
 		{"sat-close-module", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/modules/close"},
+		{"sat-close-intent", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/modules/close-intent"},
 		{"sat-start-module", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/modules/start"},
 		{"sat-enter-module", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/modules/enter"},
 		{"sat-mark-stage-visible", http.MethodPost, "/api/v1/assessment-delivery/schedules/sched-1/modules/visible"},

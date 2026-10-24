@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { ExamType } from '../../../types';
 import type { StudentLayoutMode } from './studentLayoutMode';
 import { getStudentLayoutModeClassName } from './studentLayoutTokens';
+import { StudentExamTypeContext } from './studentExamTypeContext';
 
 interface StudentExamShellProps {
   readonly children: ReactNode;
@@ -37,18 +38,20 @@ export function StudentExamShell({
         };
 
   return (
-    <div
-      className={`student-exam-shell w-full min-h-0 bg-exam-canvas font-sans text-foreground ${
-        highContrast ? 'high-contrast' : ''
-      } ${getStudentLayoutModeClassName(layoutMode)}`}
-      data-student-layout-mode={layoutMode}
-      data-student-touch-mode={touchMode ? 'true' : 'false'}
-      data-exam-type={examType}
-      data-student-keyboard-open={keyboardOpen ? 'true' : 'false'}
-      data-testid="student-exam-shell"
-      style={shellStyle}
-    >
-      {children}
-    </div>
+    <StudentExamTypeContext.Provider value={examType ?? null}>
+      <div
+        className={`student-exam-shell w-full min-h-0 bg-exam-canvas font-sans text-foreground ${
+          highContrast ? 'high-contrast' : ''
+        } ${getStudentLayoutModeClassName(layoutMode)}`}
+        data-student-layout-mode={layoutMode}
+        data-student-touch-mode={touchMode ? 'true' : 'false'}
+        data-exam-type={examType}
+        data-student-keyboard-open={keyboardOpen ? 'true' : 'false'}
+        data-testid="student-exam-shell"
+        style={shellStyle}
+      >
+        {children}
+      </div>
+    </StudentExamTypeContext.Provider>
   );
 }

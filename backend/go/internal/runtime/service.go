@@ -29,7 +29,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/assessmentforms"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -225,6 +228,7 @@ type StartSchedule struct {
 	ExamID                 string
 	ProviderKey            string
 	SatTimingModel         string
+	IeltsTimingModel       string
 	SatStartMode           string
 	PublishedVersionID     string
 	Status                 string
@@ -266,9 +270,9 @@ func ShareScheduleRow(ctx context.Context, q tx.Tx, scheduleID string) (*StartSc
 }
 
 func lockScheduleRow(ctx context.Context, q tx.Tx, scheduleID, lockClause string) (*StartSchedule, error) {
-	sel := "SELECT id, exam_id, provider_key, COALESCE(sat_timing_model, ''), COALESCE(sat_start_mode, 'proctor'), published_version_id, status, revision, planned_duration_minutes FROM exam_schedules WHERE id = ?" + lockClause
+	sel := "SELECT id, exam_id, provider_key, COALESCE(sat_timing_model, ''), COALESCE(ielts_timing_model, ''), COALESCE(sat_start_mode, 'proctor'), published_version_id, status, revision, planned_duration_minutes FROM exam_schedules WHERE id = ?" + lockClause
 	var sch StartSchedule
-	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&sch.ID, &sch.ExamID, &sch.ProviderKey, &sch.SatTimingModel, &sch.SatStartMode, &sch.PublishedVersionID, &sch.Status, &sch.Revision, &sch.PlannedDurationMinutes); err != nil {
+	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&sch.ID, &sch.ExamID, &sch.ProviderKey, &sch.SatTimingModel, &sch.IeltsTimingModel, &sch.SatStartMode, &sch.PublishedVersionID, &sch.Status, &sch.Revision, &sch.PlannedDurationMinutes); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Schedule not found.", HTTPStatus: 404}
 		}
@@ -428,8 +432,8 @@ func (s *Service) insertLiveRuntimeTx(ctx context.Context, q tx.Tx, sch *StartSc
 		handoffMode = "client_start"
 	}
 	planJSON, _ := json.Marshal(plan)
-	const ins = "INSERT INTO exam_session_runtimes (id, schedule_id, exam_id, provider_key, status, plan_snapshot, timing_model, sat_handoff_mode, actual_start_at, actual_end_at, active_section_key, current_section_key, current_section_remaining_seconds, waiting_for_next_section, is_overrun, total_paused_seconds, created_at, updated_at, revision) VALUES (?, ?, ?, ?, 'live', ?, ?, ?, UTC_TIMESTAMP(6), NULL, ?, ?, ?, false, false, 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 1)"
-	if _, err := q.ExecContext(ctx, ins, runtimeID, sch.ID, sch.ExamID, providerKey, string(planJSON), timingModel, handoffMode, firstKey, firstKey, firstSecs); err != nil {
+	const ins = "INSERT INTO exam_session_runtimes (id, schedule_id, exam_id, provider_key, status, plan_snapshot, timing_model, ielts_preparation_seconds, sat_handoff_mode, actual_start_at, actual_end_at, active_section_key, current_section_key, current_section_remaining_seconds, waiting_for_next_section, is_overrun, total_paused_seconds, created_at, updated_at, revision) VALUES (?, ?, ?, ?, 'live', ?, ?, ?, ?, UTC_TIMESTAMP(6), NULL, ?, ?, ?, false, false, 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 1)"
+	if _, err := q.ExecContext(ctx, ins, runtimeID, sch.ID, sch.ExamID, providerKey, string(planJSON), timingModel, ieltsPreparationAllowanceSeconds(), handoffMode, firstKey, firstKey, firstSecs); err != nil {
 		if isDupKey(err) {
 			return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "Runtime already exists for this schedule.", HTTPStatus: 409}
 		}
@@ -442,7 +446,7 @@ func (s *Service) insertLiveRuntimeTx(ctx context.Context, q tx.Tx, sch *StartSc
 			status = SectionLive
 			availExpr = "UTC_TIMESTAMP(6)"
 			startExpr = "UTC_TIMESTAMP(6)"
-			if providerKey == "ielts" {
+			if providerKey == "ielts" && !IsIELTSPersonal(timingModel) {
 				status = SectionLocked
 				startExpr = "NULL"
 			}
@@ -471,6 +475,19 @@ func (s *Service) insertLiveRuntimeTx(ctx context.Context, q tx.Tx, sch *StartSc
 		return nil, &apperrors.Error{Code: apperrors.CodeConflict, Message: "Schedule changed while starting; refresh before retrying.", HTTPStatus: 409}
 	}
 	return plan, nil
+}
+
+func ieltsPreparationAllowanceSeconds() int {
+	const defaultSeconds = 120
+	raw := strings.TrimSpace(os.Getenv("IELTS_PREPARATION_ALLOWANCE_SECONDS"))
+	if raw == "" {
+		return defaultSeconds
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < 0 || seconds > 3600 {
+		return defaultSeconds
+	}
+	return seconds
 }
 
 // OpenForCodeStartInTx opens the personal runtime for the FIRST code-start
@@ -555,6 +572,13 @@ func (s *Service) Pause(ctx context.Context, scheduleID string, fence RevisionFe
 		if _, err := q.ExecContext(ctx, secPaused, rt.ID, active); err != nil {
 			return err
 		}
+		if IsIELTSPersonal(rt.TimingModel) {
+			if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
+				SET paused_at = UTC_TIMESTAMP(6), revision = revision + 1
+				WHERE runtime_id = ? AND state IN ('preparing', 'active') AND paused_at IS NULL`, rt.ID); err != nil {
+				return err
+			}
+		}
 		if err := SyncSATPauseInTx(ctx, q, scheduleID, ""); err != nil {
 			return err
 		}
@@ -619,6 +643,23 @@ func (s *Service) Resume(ctx context.Context, scheduleID string, fence RevisionF
 		const secLive = "UPDATE exam_session_runtime_sections SET status = 'live', paused_at = NULL, accumulated_paused_seconds = accumulated_paused_seconds + ? WHERE runtime_id = ? AND section_key = ?"
 		if _, err := q.ExecContext(ctx, secLive, pausedSecs, rt.ID, active); err != nil {
 			return err
+		}
+		if IsIELTSPersonal(rt.TimingModel) {
+			// A candidate pause can overlap a room pause. Keep that candidate's
+			// personal clock frozen until both pause owners have resumed; the
+			// effective paused interval is applied once by the final resume.
+			if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines t
+				JOIN student_attempts a ON a.id = t.attempt_id
+				SET t.expected_start_at = DATE_ADD(t.expected_start_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, t.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND),
+				    t.preparation_deadline_at = DATE_ADD(t.preparation_deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, t.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND),
+				    t.started_at = CASE WHEN t.started_at IS NULL THEN NULL ELSE DATE_ADD(t.started_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, t.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) END,
+				    t.deadline_at = CASE WHEN t.deadline_at IS NULL THEN NULL ELSE DATE_ADD(t.deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, t.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) END,
+				    t.accumulated_paused_seconds = t.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, t.paused_at, UTC_TIMESTAMP(6)), 0),
+				    t.paused_at = NULL, t.revision = t.revision + 1
+				WHERE t.runtime_id = ? AND t.state IN ('preparing', 'active') AND t.paused_at IS NOT NULL
+				  AND COALESCE(a.proctor_status, 'active') <> 'paused'`, rt.ID); err != nil {
+				return err
+			}
 		}
 		if err := SyncSATPauseInTx(ctx, q, scheduleID, ""); err != nil {
 			return err
@@ -704,6 +745,11 @@ func (s *Service) Complete(ctx context.Context, scheduleID, completionReason, ac
 		if err != nil {
 			return err
 		}
+		// Explicit authorized complete command: close Eva SIM before the
+		// terminal no-op. Automatic paths call CompleteInTx directly.
+		if err := assessmentforms.CloseEvaTx(ctx, q, scheduleID, actorID); err != nil {
+			return err
+		}
 		if rt.Status == StatusCompleted || rt.Status == StatusCancelled {
 			return nil
 		}
@@ -781,8 +827,8 @@ func syncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, secti
 		"JOIN exam_session_runtime_sections rs ON rs.runtime_id = ? AND rs.section_key = ? " +
 		"JOIN exam_session_runtimes rt ON rt.id = rs.runtime_id " +
 		"SET " + lifecycleAssign +
-		" sa.deadline_at = CASE WHEN rt.timing_model = '" + TimingModelPersonal + "' THEN NULL WHEN rs.actual_start_at IS NULL THEN sa.deadline_at ELSE DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND) END," +
-		" sa.closing_grace_until = CASE WHEN rt.timing_model = '" + TimingModelPersonal + "' THEN NULL WHEN rs.actual_start_at IS NULL THEN sa.closing_grace_until ELSE DATE_ADD(DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND), INTERVAL 30 SECOND) END," +
+		" sa.deadline_at = CASE WHEN rt.timing_model IN ('" + TimingModelPersonal + "'," + IELTSPersonalTimingModelsSQL + ") THEN NULL WHEN rs.actual_start_at IS NULL THEN sa.deadline_at ELSE DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND) END," +
+		" sa.closing_grace_until = CASE WHEN rt.timing_model IN ('" + TimingModelPersonal + "'," + IELTSPersonalTimingModelsSQL + ") THEN NULL WHEN rs.actual_start_at IS NULL THEN sa.closing_grace_until ELSE DATE_ADD(DATE_ADD(rs.actual_start_at, INTERVAL (((rs.planned_duration_minutes + rs.extension_minutes) * 60) + rs.accumulated_paused_seconds) SECOND), INTERVAL 30 SECOND) END," +
 		" sa.control_epoch = sa.control_epoch + 1," +
 		" sa.revision = sa.revision + 1," +
 		" sa.updated_at = UTC_TIMESTAMP(6) " +
@@ -813,8 +859,8 @@ func (s *Service) emitRuntimeChanged(ctx context.Context, q tx.Tx, scheduleID st
 // proctor CompleteExam path calls it too, so the two completion owners the
 // earlier passes kept in sync by hand cannot drift again.
 func CompleteInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, completionReason string) error {
-	const doneRt = "UPDATE exam_session_runtimes SET status = 'completed', actual_end_at = UTC_TIMESTAMP(6), active_section_key = NULL, current_section_key = NULL, current_section_remaining_seconds = 0, waiting_for_next_section = false, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-	if _, err := q.ExecContext(ctx, doneRt, runtimeID); err != nil {
+	const doneRt = "UPDATE exam_session_runtimes SET status = 'completed', actual_end_at = UTC_TIMESTAMP(6), completion_reason = ?, active_section_key = NULL, current_section_key = NULL, current_section_remaining_seconds = 0, waiting_for_next_section = false, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
+	if _, err := q.ExecContext(ctx, doneRt, completionReason, runtimeID); err != nil {
 		return err
 	}
 	const doneSec = "UPDATE exam_session_runtime_sections SET status = 'completed', actual_end_at = COALESCE(actual_end_at, UTC_TIMESTAMP(6)), completion_reason = COALESCE(completion_reason, ?), paused_at = NULL WHERE runtime_id = ?"
@@ -867,7 +913,37 @@ func SyncSATPauseInTx(ctx context.Context, q tx.Tx, scheduleID, attemptID string
 		"b.deadline_at = CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL THEN DATE_ADD(b.deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) ELSE b.deadline_at END, " +
 		"b.paused_at = CASE WHEN " + effective + " THEN COALESCE(b.paused_at, UTC_TIMESTAMP(6)) ELSE NULL END, b.revision = b.revision + 1 WHERE " + scope +
 		" AND b.state = 'active' AND (" + effective + " AND b.paused_at IS NULL OR NOT " + effective + " AND b.paused_at IS NOT NULL)"
-	_, err := q.ExecContext(ctx, breaks, args...)
+	if _, err := q.ExecContext(ctx, breaks, args...); err != nil {
+		return err
+	}
+	return RealignSATRecoveryBoundariesInTx(ctx, q, scheduleID, attemptID)
+}
+
+// RealignSATRecoveryBoundariesInTx re-derives the deadlines of working SAT
+// recovery boundaries from their module clocks, so the boundary stays the one
+// timer owner after a pause/resume or extension changes the module clock.
+// Callers run it in the transaction that changed the clock; attemptID "" means
+// the whole schedule. Only rows whose work deadline actually moved change.
+func RealignSATRecoveryBoundariesInTx(ctx context.Context, q tx.Tx, scheduleID, attemptID string) error {
+	const workDeadline = "TIMESTAMPADD(SECOND, ma.allocated_seconds + ma.extension_seconds + ma.accumulated_paused_seconds, ma.started_at)"
+	stmt := `UPDATE assessment_module_boundaries b
+		JOIN assessment_module_attempts ma ON ma.id = b.module_attempt_id
+		JOIN student_attempts sa ON sa.id = ma.attempt_id
+		JOIN exam_schedules s ON s.id = sa.schedule_id
+		SET b.work_deadline_at = ` + workDeadline + `,
+		    b.recovery_deadline_at = TIMESTAMPADD(SECOND, CAST(JSON_EXTRACT(s.sat_delivery_policy, '$.recoverySeconds') AS SIGNED), ` + workDeadline + `),
+		    b.next_action_at = ` + workDeadline + `,
+		    b.revision = b.revision + 1
+		WHERE sa.schedule_id = ?`
+	args := []any{scheduleID}
+	if attemptID != "" {
+		stmt += " AND sa.id = ?"
+		args = append(args, attemptID)
+	}
+	stmt += ` AND b.phase = 'working' AND s.sat_delivery_policy IS NOT NULL
+		  AND ma.state IN ('active', 'review') AND ma.started_at IS NOT NULL
+		  AND NOT (b.work_deadline_at <=> ` + workDeadline + `)`
+	_, err := q.ExecContext(ctx, stmt, args...)
 	return err
 }
 
@@ -892,8 +968,10 @@ func extendSATModules(ctx context.Context, q tx.Tx, scheduleID string, minutes i
 		SET b.deadline_at = DATE_ADD(b.deadline_at, INTERVAL (? * 60) SECOND),
 		    b.revision = b.revision + 1
 		WHERE sa.schedule_id = ? AND b.state = 'active' AND b.deadline_at IS NOT NULL`
-	_, err := q.ExecContext(ctx, breaks, minutes, scheduleID)
-	return err
+	if _, err := q.ExecContext(ctx, breaks, minutes, scheduleID); err != nil {
+		return err
+	}
+	return RealignSATRecoveryBoundariesInTx(ctx, q, scheduleID, "")
 }
 
 // RearmPersonalStageInTx grants one attempt-owned stage — a module or a

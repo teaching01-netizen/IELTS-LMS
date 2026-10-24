@@ -39,49 +39,15 @@ func bulkDeliverySPRAnswer(response string) string {
 		response + `]}`
 }
 
+// nestedLoaderGolden is the exact JSON the retired nested (1 + S + M)
+// loader produced for the fixture below, captured before LoadSections moved
+// onto the bulk reads.
+const nestedLoaderGolden = `[{"id":"sec-rw","sectionKey":"reading-writing","title":"Reading \u0026 Writing","displayOrder":0,"durationSeconds":3840,"breakAfterSeconds":600,"instructions":{"version":1,"nodes":[]},"modules":[{"id":"mod-1","moduleKey":"rw-m1","title":"Module 1","displayOrder":0,"durationSeconds":1920,"targetQuestionCount":27,"adaptiveRole":"base","instructions":null,"toolPolicy":["calculator"],"questions":[{"examQuestionId":"eq-1","questionId":"q-1","displayOrder":0,"questionType":"single_choice","stimulus":{"version":2,"nodes":[]},"prompt":{"version":2,"nodes":[]},"answer":{"kind":"single_choice","options":[{"content":{"text":"Option A"},"id":"A"},{"content":{"text":"Option B"},"id":"B"},{"content":{"text":"Option C"},"id":"C"},{"content":{"text":"Option D"},"id":"D"}]},"metadata":{"tags":["t"]},"accessibility":{"version":1,"nodes":[]}},{"examQuestionId":"eq-2","questionId":"q-2","displayOrder":1,"questionType":"student_produced_response","stimulus":null,"prompt":{"version":2,"nodes":[]},"answer":{"kind":"student_produced_response","normalizeDecimal":true,"normalizeFraction":true,"numericTolerance":null},"metadata":{"tags":["t"]},"accessibility":null}]},{"id":"mod-2","moduleKey":"rw-m2-lower","title":"Module 2 - Lower","displayOrder":1,"durationSeconds":1920,"targetQuestionCount":27,"adaptiveRole":"lower_branch","instructions":null,"toolPolicy":null,"questions":[]}]}]`
+
 // TestDeliveryBulkEquivalence is the delivery-side AT-01 proof: the bulk
 // loader must produce byte-identical JSON to the nested loader for the same
 // version, including empty-array-not-null for the module with no questions.
 func TestDeliveryBulkEquivalence(t *testing.T) {
-	// --- Nested path: sections, then one modules probe + one questions probe
-	// per module, exactly as LoadSections issues them.
-	dbNested, mockNested, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = dbNested.Close() })
-	mockNested.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id = ?")).
-		WithArgs("v-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions"}).
-			AddRow("sec-rw", "reading-writing", "Reading & Writing", 0, 3840, 600, `{"version":1,"nodes":[]}`))
-	mockNested.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules WHERE section_id = ?")).
-		WithArgs("sec-rw").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "module_key", "title", "display_order", "duration_seconds", "target_question_count", "adaptive_role", "instructions", "tool_policy"}).
-			AddRow("mod-1", "rw-m1", "Module 1", 0, 1920, 27, "base", nil, `["calculator"]`).
-			AddRow("mod-2", "rw-m2-lower", "Module 2 - Lower", 1, 1920, 27, "lower_branch", nil, nil))
-	questionColumns := []string{"exam_question_id", "question_id", "display_order", "is_pretest", "question_type", "stimulus", "prompt", "answer_definition", "metadata", "accessibility"}
-	mockNested.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions qr")).
-		WithArgs("mod-1").
-		WillReturnRows(sqlmock.NewRows(questionColumns).
-			AddRow("eq-1", "q-1", 0, false, "single_choice",
-				`{"version":2,"nodes":[]}`, `{"version":2,"nodes":[]}`,
-				bulkDeliverySingleChoiceAnswer(), `{"tags":["t"]}`, `{"version":1,"nodes":[]}`).
-			AddRow("eq-2", "q-2", 1, true, "student_produced_response",
-				nil, `{"version":2,"nodes":[]}`,
-				bulkDeliverySPRAnswer("3"), `{"tags":["t"]}`, nil))
-	// mod-2 has no questions: the nested loader issues its probe and gets none.
-	mockNested.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq JOIN assessment_question_revisions qr")).
-		WithArgs("mod-2").
-		WillReturnRows(sqlmock.NewRows(questionColumns))
-
-	nested, err := NewService(dbNested, nil).LoadSections(context.Background(), "v-1")
-	if err != nil {
-		t.Fatalf("LoadSections: %v", err)
-	}
-	if err := mockNested.ExpectationsWereMet(); err != nil {
-		t.Fatalf("nested delivery statement shape drifted: %v", err)
-	}
-
 	// --- Bulk path: THREE version-scoped statements, no transaction (nil runner).
 	dbBulk, mockBulk, err := sqlmock.New()
 	if err != nil {
@@ -115,10 +81,7 @@ func TestDeliveryBulkEquivalence(t *testing.T) {
 		t.Fatalf("bulk delivery statement shape drifted: %v", err)
 	}
 
-	nestedJSON, err := json.Marshal(nested)
-	if err != nil {
-		t.Fatal(err)
-	}
+	nestedJSON := []byte(nestedLoaderGolden)
 	bulkJSON, err := json.Marshal(bulk)
 	if err != nil {
 		t.Fatal(err)

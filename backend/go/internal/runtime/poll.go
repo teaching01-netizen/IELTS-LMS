@@ -43,7 +43,7 @@ func (s *Service) PollView(ctx context.Context, q SnapshotQuerier, scheduleID st
 	var snap Snapshot
 	var err error
 	if s != nil && s.snapshots != nil {
-		snap, err = s.snapshots.Get(scheduleID, now, func() (Snapshot, error) {
+		snap, err = s.snapshots.Get(ctx, scheduleID, now, func() (Snapshot, error) {
 			return LoadSnapshot(ctx, q, scheduleID, now)
 		})
 	} else {

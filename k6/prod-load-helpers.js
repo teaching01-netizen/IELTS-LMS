@@ -1,7 +1,7 @@
-import { practiceEntrySession } from './practice-entry.js';
-import http from 'k6/http';
-import { randomBytes } from 'k6/crypto';
-import { sleep } from 'k6';
+import { practiceEntrySession } from "./practice-entry.js";
+import http from "k6/http";
+import { randomBytes } from "k6/crypto";
+import { sleep } from "k6";
 
 const EXPECT_2XX_OR_409 = http.expectedStatuses({ min: 200, max: 299 }, 409);
 
@@ -23,7 +23,7 @@ export function uuidV4() {
   const b = new Uint8Array(randomBytes(16));
   b[6] = (b[6] & 0x0f) | 0x40;
   b[8] = (b[8] & 0x3f) | 0x80;
-  const hex = Array.from(b, (x) => (`0${x.toString(16)}`).slice(-2)).join('');
+  const hex = Array.from(b, (x) => `0${x.toString(16)}`.slice(-2)).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
@@ -44,7 +44,8 @@ export function computeJitterSeconds(runId, wcode, maxSeconds) {
 
 export function resolveBaseUrl(target) {
   if (__ENV.K6_BASE_URL) return __ENV.K6_BASE_URL;
-  const scheduleUrl = __ENV.K6_REGISTER_URL || __ENV.K6_SCHEDULE_URL || __ENV.K6_EXAM_URL || __ENV.K6_ENTRY_URL;
+  const scheduleUrl =
+    __ENV.K6_REGISTER_URL || __ENV.K6_SCHEDULE_URL || __ENV.K6_EXAM_URL || __ENV.K6_ENTRY_URL;
   if (scheduleUrl) {
     const match = String(scheduleUrl).match(/^(https?:\/\/[^/]+)\//i);
     if (match) return match[1];
@@ -53,7 +54,7 @@ export function resolveBaseUrl(target) {
 }
 
 function parseScheduleIdFromUrl(url) {
-  if (!url) return '';
+  if (!url) return "";
   const value = String(url);
   const patterns = [
     /\/student\/([0-9a-fA-F-]{36})\/register(?:[/?#].*)?$/i,
@@ -65,15 +66,16 @@ function parseScheduleIdFromUrl(url) {
     const match = value.match(pattern);
     if (match) return match[1];
   }
-  return '';
+  return "";
 }
 
 export function resolveScheduleId(target) {
   if (__ENV.K6_SCHEDULE_ID) return __ENV.K6_SCHEDULE_ID;
-  const scheduleUrl = __ENV.K6_REGISTER_URL || __ENV.K6_SCHEDULE_URL || __ENV.K6_EXAM_URL || __ENV.K6_ENTRY_URL;
+  const scheduleUrl =
+    __ENV.K6_REGISTER_URL || __ENV.K6_SCHEDULE_URL || __ENV.K6_EXAM_URL || __ENV.K6_ENTRY_URL;
   const parsed = parseScheduleIdFromUrl(scheduleUrl);
   if (parsed) return parsed;
-  const runtimePath = __ENV.K6_RUNTIME_PATH || '../e2e/.generated/prod-runtime.json';
+  const runtimePath = __ENV.K6_RUNTIME_PATH || "../e2e/.generated/prod-runtime.json";
   try {
     const runtime = readJson(runtimePath);
     if (runtime && runtime.scheduleId) return runtime.scheduleId;
@@ -84,11 +86,11 @@ export function resolveScheduleId(target) {
 }
 
 export function jsonHeaders(extra) {
-  return Object.assign({ 'content-type': 'application/json' }, extra || {});
+  return Object.assign({ "content-type": "application/json" }, extra || {});
 }
 
 function bodyPreview(resp) {
-  return String((resp && resp.body) || '').slice(0, 200);
+  return String((resp && resp.body) || "").slice(0, 200);
 }
 
 export function cookieValue(jar, baseUrl, candidates) {
@@ -97,25 +99,25 @@ export function cookieValue(jar, baseUrl, candidates) {
     const values = cookies[name];
     if (values && values.length > 0) return values[0];
   }
-  return '';
+  return "";
 }
 
 export function csrfHeader(jar, baseUrl) {
   const configured = __ENV.AUTH_CSRF_COOKIE_NAME;
   const candidates = [
     configured && configured.length > 0 ? configured : null,
-    '__Host-csrf',
-    'csrf',
+    "__Host-csrf",
+    "csrf",
   ].filter(Boolean);
   const token = cookieValue(jar, baseUrl, candidates);
-  return token ? { 'x-csrf-token': token } : {};
+  return token ? { "x-csrf-token": token } : {};
 }
 
 export function pickFirstQuestionId(snapshot) {
   const stack = [snapshot];
   while (stack.length) {
     const value = stack.pop();
-    if (!value || typeof value !== 'object') continue;
+    if (!value || typeof value !== "object") continue;
     if (Array.isArray(value)) {
       for (let i = 0; i < value.length; i += 1) stack.push(value[i]);
       continue;
@@ -123,19 +125,19 @@ export function pickFirstQuestionId(snapshot) {
     if (Array.isArray(value.questions)) {
       for (let i = 0; i < value.questions.length; i += 1) {
         const q = value.questions[i];
-        if (q && typeof q === 'object' && typeof q.id === 'string' && q.id.length > 0) return q.id;
+        if (q && typeof q === "object" && typeof q.id === "string" && q.id.length > 0) return q.id;
       }
     }
     for (const k of Object.keys(value)) stack.push(value[k]);
   }
-  return '';
+  return "";
 }
 
 export function pickFirstWritingTaskId(snapshot) {
   const stack = [snapshot];
   while (stack.length) {
     const value = stack.pop();
-    if (!value || typeof value !== 'object') continue;
+    if (!value || typeof value !== "object") continue;
     if (Array.isArray(value)) {
       for (let i = 0; i < value.length; i += 1) stack.push(value[i]);
       continue;
@@ -143,12 +145,12 @@ export function pickFirstWritingTaskId(snapshot) {
     if (Array.isArray(value.tasks)) {
       for (let i = 0; i < value.tasks.length; i += 1) {
         const t = value.tasks[i];
-        if (t && typeof t === 'object' && typeof t.id === 'string' && t.id.length > 0) return t.id;
+        if (t && typeof t === "object" && typeof t.id === "string" && t.id.length > 0) return t.id;
       }
     }
     for (const k of Object.keys(value)) stack.push(value[k]);
   }
-  return '';
+  return "";
 }
 
 export function collectObjectiveQuestionIds(snapshot) {
@@ -157,7 +159,7 @@ export function collectObjectiveQuestionIds(snapshot) {
   const stack = [snapshot];
   while (stack.length) {
     const value = stack.pop();
-    if (!value || typeof value !== 'object') continue;
+    if (!value || typeof value !== "object") continue;
     if (Array.isArray(value)) {
       for (let i = 0; i < value.length; i += 1) stack.push(value[i]);
       continue;
@@ -165,8 +167,8 @@ export function collectObjectiveQuestionIds(snapshot) {
     if (Array.isArray(value.questions)) {
       for (let i = 0; i < value.questions.length; i += 1) {
         const q = value.questions[i];
-        const id = q && typeof q === 'object' ? q.id : '';
-        if (typeof id === 'string' && id.trim() && !seen.has(id)) {
+        const id = q && typeof q === "object" ? q.id : "";
+        if (typeof id === "string" && id.trim() && !seen.has(id)) {
           seen.add(id);
           ordered.push(id);
         }
@@ -183,7 +185,7 @@ export function collectWritingTaskIds(snapshot) {
   const stack = [snapshot];
   while (stack.length) {
     const value = stack.pop();
-    if (!value || typeof value !== 'object') continue;
+    if (!value || typeof value !== "object") continue;
     if (Array.isArray(value)) {
       for (let i = 0; i < value.length; i += 1) stack.push(value[i]);
       continue;
@@ -191,8 +193,8 @@ export function collectWritingTaskIds(snapshot) {
     if (Array.isArray(value.tasks)) {
       for (let i = 0; i < value.tasks.length; i += 1) {
         const task = value.tasks[i];
-        const id = task && typeof task === 'object' ? task.id : '';
-        if (typeof id === 'string' && id.trim() && !seen.has(id)) {
+        const id = task && typeof task === "object" ? task.id : "";
+        if (typeof id === "string" && id.trim() && !seen.has(id)) {
           seen.add(id);
           ordered.push(id);
         }
@@ -215,7 +217,8 @@ export function loginControlStaff(baseUrl, scheduleId, creds, preferEditor = tru
   const jar = http.cookieJar();
   const staffCandidates = selectStaffCandidates(creds, preferEditor);
   let authorized = false;
-  let selectedStaffEmail = '';
+  let selectedStaffEmail = "";
+  let lastFailure = "No staff credential was available.";
 
   for (const staff of staffCandidates) {
     jar.clear(baseUrl);
@@ -223,7 +226,10 @@ export function loginControlStaff(baseUrl, scheduleId, creds, preferEditor = tru
       jar,
       headers: jsonHeaders(),
     });
-    if (loginResp.status !== 200) continue;
+    if (loginResp.status !== 200) {
+      lastFailure = `Login failed for ${staff.email || "staff account"} with HTTP ${loginResp.status}.`;
+      continue;
+    }
 
     const probe = http.get(`${baseUrl}/api/v1/proctor/sessions/${scheduleId}`, {
       jar,
@@ -231,22 +237,29 @@ export function loginControlStaff(baseUrl, scheduleId, creds, preferEditor = tru
     });
     if (probe.status === 200) {
       authorized = true;
-      selectedStaffEmail = staff.email || '';
+      selectedStaffEmail = staff.email || "";
       break;
     }
+    lastFailure = `Login succeeded for ${staff.email || "staff account"}, but the proctor view returned HTTP ${probe.status}: ${bodyPreview(probe)}.`;
   }
 
   if (!authorized) {
     throw new Error(
       `No authorized staff account could access proctor view for scheduleId=${scheduleId}. ` +
-        `Use a schedule that has at least one assigned proctor/admin. `,
+        `Use a schedule that has at least one assigned proctor/admin. ${lastFailure}`
     );
   }
 
   return { jar, selectedStaffEmail };
 }
 
-export function ensureStudentRegistrations(baseUrl, scheduleId, creds, students, preferEditor = true) {
+export function ensureStudentRegistrations(
+  baseUrl,
+  scheduleId,
+  creds,
+  students,
+  preferEditor = true
+) {
   const { jar, selectedStaffEmail } = loginControlStaff(baseUrl, scheduleId, creds, preferEditor);
   const registrations = [];
 
@@ -261,13 +274,13 @@ export function ensureStudentRegistrations(baseUrl, scheduleId, creds, students,
       {
         jar,
         headers: jsonHeaders(csrfHeader(jar, baseUrl)),
-        tags: { name: 'schedule_register' },
-      },
+        tags: { name: "schedule_register" },
+      }
     );
 
     if (resp.status !== 200) {
       throw new Error(
-        `Student registration failed (${student.wcode}): status=${resp.status} body=${bodyPreview(resp)}`,
+        `Student registration failed (${student.wcode}): status=${resp.status} body=${bodyPreview(resp)}`
       );
     }
 
@@ -282,100 +295,149 @@ export function ensureStudentRegistrations(baseUrl, scheduleId, creds, students,
 }
 
 export function shouldAutoRegisterStudents() {
-  return __ENV.K6_AUTO_REGISTER === 'true';
+  return __ENV.K6_AUTO_REGISTER === "true";
 }
 
 export function ensureProdRunAllowed() {
-  if (__ENV.K6_CONFIRM_PROD !== 'true') {
-    throw new Error('Set K6_CONFIRM_PROD=true to run this load test against production.');
+  if (__ENV.K6_CONFIRM_PROD !== "true") {
+    throw new Error("Set K6_CONFIRM_PROD=true to run this load test against production.");
   }
 }
 
 export function buildStudentSlice(target, count, offset) {
   const allStudents = target.students || [];
-  const studentCount = clampInt(count || '1', 1, allStudents.length || 1);
-  const studentOffset = clampInt(offset || '0', 0, Math.max(0, (allStudents.length || 1) - 1));
+  const studentCount = clampInt(count || "1", 1, allStudents.length || 1);
+  const studentOffset = clampInt(offset || "0", 0, Math.max(0, (allStudents.length || 1) - 1));
   const students = allStudents.slice(studentOffset, studentOffset + studentCount);
   if (students.length !== studentCount) {
     throw new Error(
-      `Not enough students in prod-target.json for K6_STUDENTS=${studentCount} at K6_STUDENT_OFFSET=${studentOffset}`,
+      `Not enough students in prod-target.json for K6_STUDENTS=${studentCount} at K6_STUDENT_OFFSET=${studentOffset}`
     );
   }
   return { students, studentCount, studentOffset };
 }
 
-export function bootstrapStudentSession(baseUrl, scheduleId, student, jar, clientSessionId) {
-  const entryResp = http.post(
-    `${baseUrl}/api/v1/auth/student/entry`,
-    JSON.stringify({
-      scheduleId,
-      wcode: student.wcode,
-      email: student.email,
-      studentName: student.fullName,
-      entrySession: practiceEntrySession(scheduleId, student),
-    }),
-    { jar, headers: jsonHeaders() },
-  );
+export function bootstrapStudentSession(
+  baseUrl,
+  scheduleId,
+  student,
+  jar,
+  clientSessionId,
+  options = {}
+) {
+  const entryRetries = clampInt(options.entryRetries || "0", 0, 5);
+  const bootstrapRetries = clampInt(options.bootstrapRetries || "0", 0, 5);
+  const precheckRetries = clampInt(options.precheckRetries || "0", 0, 5);
+  let entryResp;
+  for (let attempt = 0; attempt <= entryRetries; attempt += 1) {
+    entryResp = http.post(
+      `${baseUrl}/api/v1/auth/student/entry`,
+      JSON.stringify({
+        scheduleId,
+        wcode: student.wcode,
+        email: student.email,
+        studentName: student.fullName,
+        entrySession: practiceEntrySession(scheduleId, student),
+      }),
+      {
+        jar,
+        headers: jsonHeaders(),
+        responseCallback: http.expectedStatuses(200, 429, 500, 502, 503, 504),
+      }
+    );
+    options.onEntryResponse?.(entryResp, attempt);
+    if (
+      entryResp.status === 200 ||
+      !isTransientHttpFailure(entryResp.status) ||
+      attempt === entryRetries
+    ) {
+      break;
+    }
+    sleep(transientRetryDelay(entryResp, attempt));
+  }
   if (entryResp.status !== 200) {
     throw new Error(
-      `Student entry failed (${student.wcode}): status=${entryResp.status} body=${bodyPreview(entryResp)}`,
+      `Student entry failed (${student.wcode}): status=${entryResp.status} body=${bodyPreview(entryResp)}`
     );
   }
 
-  const bootstrapResp = http.post(
-    `${baseUrl}/api/v1/student/sessions/${scheduleId}/bootstrap`,
-    JSON.stringify({
-      wcode: student.wcode,
-      email: student.email,
-      studentKey: '',
-      candidateId: '',
-      candidateName: '',
-      candidateEmail: '',
-      clientSessionId,
-    }),
-    { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)) },
-  );
+  let bootstrapResp;
+  for (let attempt = 0; attempt <= bootstrapRetries; attempt += 1) {
+    bootstrapResp = http.post(
+      `${baseUrl}/api/v1/student/sessions/${scheduleId}/bootstrap`,
+      JSON.stringify({
+        studentKey: "",
+        candidateId: student.wcode,
+        candidateName: student.fullName,
+        candidateEmail: student.email,
+        clientSessionId,
+      }),
+      {
+        jar,
+        headers: jsonHeaders(csrfHeader(jar, baseUrl)),
+        responseCallback: http.expectedStatuses(200, 429, 500, 502, 503, 504),
+      }
+    );
+    options.onBootstrapResponse?.(bootstrapResp, attempt);
+    if (
+      bootstrapResp.status === 200 ||
+      !isTransientHttpFailure(bootstrapResp.status) ||
+      attempt === bootstrapRetries
+    )
+      break;
+    sleep(transientRetryDelay(bootstrapResp, attempt));
+  }
   if (bootstrapResp.status !== 200) {
     throw new Error(
-      `Bootstrap failed (${student.wcode}): status=${bootstrapResp.status} body=${bodyPreview(bootstrapResp)}`,
+      `Bootstrap failed (${student.wcode}): status=${bootstrapResp.status} body=${bodyPreview(bootstrapResp)}`
     );
   }
 
   const bootstrapJson = bootstrapResp.json();
-  const ctx = bootstrapJson && bootstrapJson.data;
+  const ctx = (bootstrapJson && bootstrapJson.data) || bootstrapJson;
   const attempt = ctx && ctx.attempt;
-  const attemptId = (attempt && attempt.id) || '';
-  const attemptToken = (ctx && ctx.attemptCredential && ctx.attemptCredential.attemptToken) || '';
+  const attemptId = (attempt && attempt.id) || "";
+  const attemptToken = (ctx && ctx.attemptCredential && ctx.attemptCredential.attemptToken) || "";
   const contentSnapshot = (ctx && ctx.version && ctx.version.contentSnapshot) || null;
 
   if (!attemptId || !attemptToken) {
     throw new Error(`Missing attemptId/attemptToken after bootstrap for ${student.wcode}`);
   }
 
-  const precheckResp = http.post(
-    `${baseUrl}/api/v1/student/sessions/${scheduleId}/precheck`,
-    JSON.stringify({
-      wcode: student.wcode,
-      email: student.email,
-      studentKey: '',
-      candidateId: '',
-      candidateName: '',
-      candidateEmail: '',
-      clientSessionId,
-      preCheck: {
-        browser: 'chromium',
-        fullscreen: true,
-        storage: true,
-        network: true,
-        screenDetails: true,
-      },
-      deviceFingerprintHash: null,
-    }),
-    { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)) },
-  );
+  let precheckResp;
+  for (let attempt = 0; attempt <= precheckRetries; attempt += 1) {
+    precheckResp = http.post(
+      `${baseUrl}/api/v1/student/sessions/${scheduleId}/precheck`,
+      JSON.stringify({
+        attemptId,
+        clientSessionId,
+        preCheck: {
+          browser: "chromium",
+          fullscreen: true,
+          storage: true,
+          network: true,
+          screenDetails: true,
+        },
+        deviceFingerprintHash: null,
+      }),
+      {
+        jar,
+        headers: jsonHeaders(csrfHeader(jar, baseUrl)),
+        responseCallback: http.expectedStatuses(200, 429, 500, 502, 503, 504),
+      }
+    );
+    options.onPrecheckResponse?.(precheckResp, attempt);
+    if (
+      precheckResp.status === 200 ||
+      !isTransientHttpFailure(precheckResp.status) ||
+      attempt === precheckRetries
+    )
+      break;
+    sleep(transientRetryDelay(precheckResp, attempt));
+  }
   if (precheckResp.status !== 200) {
     throw new Error(
-      `Precheck failed (${student.wcode}): status=${precheckResp.status} body=${bodyPreview(precheckResp)}`,
+      `Precheck failed (${student.wcode}): status=${precheckResp.status} body=${bodyPreview(precheckResp)}`
     );
   }
 
@@ -389,8 +451,22 @@ export function bootstrapStudentSession(baseUrl, scheduleId, student, jar, clien
   };
 }
 
+function isTransientHttpFailure(status) {
+  return status === 0 || [429, 500, 502, 503, 504].includes(status);
+}
+
+function transientRetryDelay(response, attempt) {
+  let retryAfterSeconds = 0;
+  try {
+    retryAfterSeconds = Number(response.json()?.details?.retryAfterSeconds || 0);
+  } catch (_) {
+    // Invalid response bodies use the bounded exponential delay below.
+  }
+  return Math.max(retryAfterSeconds, Math.min(0.25 * 2 ** attempt, 2)) + Math.random() * 0.25;
+}
+
 export function getStudentSession(baseUrl, scheduleId, jar, query, tags) {
-  const suffix = query ? `?${query}` : '';
+  const suffix = query ? `?${query}` : "";
   return http.get(`${baseUrl}/api/v1/student/sessions/${scheduleId}${suffix}`, {
     jar,
     headers: jsonHeaders(),
@@ -399,14 +475,14 @@ export function getStudentSession(baseUrl, scheduleId, jar, query, tags) {
 }
 
 export function waitForStudentSession(baseUrl, scheduleId, jar, options) {
-  const timeoutSeconds = clampInt(options.timeoutSeconds || '60', 1, 7200);
+  const timeoutSeconds = clampInt(options.timeoutSeconds || "60", 1, 7200);
   const pollSeconds = Number(options.pollSeconds || 1);
   const startedAt = Date.now();
   let lastResponse = null;
   let lastJson = null;
 
   while (Date.now() - startedAt < timeoutSeconds * 1000) {
-    const resp = getStudentSession(baseUrl, scheduleId, jar, options.query || '', options.tags);
+    const resp = getStudentSession(baseUrl, scheduleId, jar, options.query || "", options.tags);
     lastResponse = resp;
     if (resp.status === 200) {
       try {
@@ -429,18 +505,26 @@ export function waitForStudentSession(baseUrl, scheduleId, jar, options) {
 
   throw new Error(
     options.timeoutMessage ||
-      `Timed out waiting for student session readiness after ${timeoutSeconds}s (last status=${lastResponse ? lastResponse.status : 'n/a'}).`,
+      `Timed out waiting for student session readiness after ${timeoutSeconds}s (last status=${lastResponse ? lastResponse.status : "n/a"}).`
   );
 }
 
-export function sendHeartbeat(baseUrl, scheduleId, jar, attemptId, attemptToken, clientSessionId, tags) {
+export function sendHeartbeat(
+  baseUrl,
+  scheduleId,
+  jar,
+  attemptId,
+  attemptToken,
+  clientSessionId,
+  tags
+) {
   return http.post(
     `${baseUrl}/api/v1/student/sessions/${scheduleId}/heartbeat`,
     JSON.stringify({
       attemptId,
-      studentKey: '',
+      studentKey: "",
       clientSessionId,
-      eventType: 'heartbeat',
+      eventType: "heartbeat",
       payload: null,
       clientTimestamp: new Date().toISOString(),
     }),
@@ -450,7 +534,7 @@ export function sendHeartbeat(baseUrl, scheduleId, jar, attemptId, attemptToken,
         authorization: `Bearer ${attemptToken}`,
       }),
       tags,
-    },
+    }
   );
 }
 
@@ -462,90 +546,118 @@ function coerceRevision(value) {
 }
 
 function toOperationCommand(mutation, baseRevision) {
-  if (!mutation || typeof mutation !== 'object') return null;
+  if (!mutation || typeof mutation !== "object") return null;
 
   if (
-    typeof mutation.mutationId === 'string' &&
+    typeof mutation.mutationId === "string" &&
     mutation.mutationId.length > 0 &&
-    typeof mutation.type === 'string' &&
-    typeof mutation.baseRevision === 'number'
+    typeof mutation.type === "string" &&
+    typeof mutation.baseRevision === "number"
   ) {
     return mutation;
   }
 
-  const mutationId = typeof mutation.id === 'string' && mutation.id.length > 0 ? mutation.id : uuidV4();
-  const payload = mutation.payload && typeof mutation.payload === 'object' ? mutation.payload : {};
-  const mutationType = typeof mutation.mutationType === 'string' ? mutation.mutationType : '';
+  const mutationId =
+    typeof mutation.id === "string" && mutation.id.length > 0 ? mutation.id : uuidV4();
+  const payload = mutation.payload && typeof mutation.payload === "object" ? mutation.payload : {};
+  const mutationType = typeof mutation.mutationType === "string" ? mutation.mutationType : "";
 
-  if (mutationType === 'answer') {
-    const questionId = typeof payload.questionId === 'string' ? payload.questionId : '';
+  if (mutationType === "answer") {
+    const questionId = typeof payload.questionId === "string" ? payload.questionId : "";
     if (!questionId) return null;
     const slotIndex = Number(payload.slotIndex);
-    const hasSlot = Number.isFinite(slotIndex) && slotIndex >= 0 && Math.trunc(slotIndex) === slotIndex;
+    const hasSlot =
+      Number.isFinite(slotIndex) && slotIndex >= 0 && Math.trunc(slotIndex) === slotIndex;
     const value = payload.value;
 
     if (hasSlot) {
       if (Array.isArray(value)) {
         if (slotIndex >= value.length) return null;
         const slotValue = value[slotIndex];
-        if (typeof slotValue === 'string' && slotValue.trim().length > 0) {
-          return { mutationId, baseRevision, type: 'SetSlot', questionId, slotIndex, value: slotValue };
+        if (typeof slotValue === "string" && slotValue.trim().length > 0) {
+          return {
+            mutationId,
+            baseRevision,
+            type: "SetSlot",
+            questionId,
+            slotIndex,
+            value: slotValue,
+          };
         }
-        if (slotValue === null || (typeof slotValue === 'string' && slotValue.trim().length === 0)) {
-          return { mutationId, baseRevision, type: 'ClearSlot', questionId, slotIndex };
+        if (
+          slotValue === null ||
+          (typeof slotValue === "string" && slotValue.trim().length === 0)
+        ) {
+          return { mutationId, baseRevision, type: "ClearSlot", questionId, slotIndex };
         }
         return null;
       }
 
-      if (typeof value === 'string') {
+      if (typeof value === "string") {
         if (value.trim().length > 0) {
-          return { mutationId, baseRevision, type: 'SetSlot', questionId, slotIndex, value };
+          return { mutationId, baseRevision, type: "SetSlot", questionId, slotIndex, value };
         }
-        return { mutationId, baseRevision, type: 'ClearSlot', questionId, slotIndex };
+        return { mutationId, baseRevision, type: "ClearSlot", questionId, slotIndex };
       }
 
-      if (value === null) return { mutationId, baseRevision, type: 'ClearSlot', questionId, slotIndex };
+      if (value === null)
+        return { mutationId, baseRevision, type: "ClearSlot", questionId, slotIndex };
       return null;
     }
 
     if (Array.isArray(value)) {
-      const values = value.filter((entry) => typeof entry === 'string' && entry.trim().length > 0);
-      if (values.length === 0) return { mutationId, baseRevision, type: 'ClearChoice', questionId };
-      return { mutationId, baseRevision, type: 'SetChoice', questionId, value: values };
+      const values = value.filter((entry) => typeof entry === "string" && entry.trim().length > 0);
+      if (values.length === 0) return { mutationId, baseRevision, type: "ClearChoice", questionId };
+      return { mutationId, baseRevision, type: "SetChoice", questionId, value: values };
     }
 
-    if (typeof value === 'string') {
-      if (value.trim().length === 0) return { mutationId, baseRevision, type: 'ClearChoice', questionId };
-      return { mutationId, baseRevision, type: 'SetChoice', questionId, value: [value] };
+    if (typeof value === "string") {
+      if (value.trim().length === 0)
+        return { mutationId, baseRevision, type: "ClearChoice", questionId };
+      return { mutationId, baseRevision, type: "SetChoice", questionId, value: [value] };
     }
 
-    if (value === null || value === undefined) return { mutationId, baseRevision, type: 'ClearChoice', questionId };
+    if (value === null || value === undefined)
+      return { mutationId, baseRevision, type: "ClearChoice", questionId };
     return null;
   }
 
-  if (mutationType === 'writing_answer') {
-    const taskId = typeof payload.taskId === 'string' ? payload.taskId : '';
+  if (mutationType === "writing_answer") {
+    const taskId = typeof payload.taskId === "string" ? payload.taskId : "";
     if (!taskId) return null;
     const value = payload.value;
-    if (typeof value === 'string' && value.trim().length > 0) {
-      return { mutationId, baseRevision, type: 'SetEssayText', taskId, value };
+    if (typeof value === "string" && value.trim().length > 0) {
+      return { mutationId, baseRevision, type: "SetEssayText", taskId, value };
     }
-    return { mutationId, baseRevision, type: 'ClearEssayText', taskId };
+    return { mutationId, baseRevision, type: "ClearEssayText", taskId };
   }
 
-  if (mutationType === 'flag') {
-    const questionId = typeof payload.questionId === 'string' ? payload.questionId : '';
-    if (!questionId || typeof payload.value !== 'boolean') return null;
-    return { mutationId, baseRevision, type: 'SetChoice', questionId, value: payload.value };
+  if (mutationType === "flag") {
+    const questionId = typeof payload.questionId === "string" ? payload.questionId : "";
+    if (!questionId || typeof payload.value !== "boolean") return null;
+    return { mutationId, baseRevision, type: "SetChoice", questionId, value: payload.value };
   }
 
   return null;
 }
 
-export function sendMutationBatch(baseUrl, scheduleId, jar, attemptId, attemptToken, clientSessionId, mutations, tags) {
-  let baseRevision = attemptRevisionCache.has(attemptId) ? attemptRevisionCache.get(attemptId) : null;
+export function sendMutationBatch(
+  baseUrl,
+  scheduleId,
+  jar,
+  attemptId,
+  attemptToken,
+  clientSessionId,
+  mutations,
+  tags
+) {
+  let baseRevision = attemptRevisionCache.has(attemptId)
+    ? attemptRevisionCache.get(attemptId)
+    : null;
   if (baseRevision === null || baseRevision === undefined) {
-    const sessionResp = getStudentSession(baseUrl, scheduleId, jar, '', { name: 'student_session_for_revision' });
+    const sessionResp = getStudentSession(baseUrl, scheduleId, jar, "", {
+      name: "student_session_for_revision",
+    });
     if (sessionResp.status === 200) {
       try {
         const json = sessionResp.json();
@@ -590,11 +702,11 @@ export function sendMutationBatch(baseUrl, scheduleId, jar, attemptId, attemptTo
         jar,
         headers: jsonHeaders({
           authorization: `Bearer ${attemptToken}`,
-          'Idempotency-Key': uuidV4(),
+          "Idempotency-Key": uuidV4(),
         }),
         responseCallback: EXPECT_2XX_OR_409,
         tags,
-      },
+      }
     );
 
   const resp = doPost(operationMutations);
@@ -603,7 +715,7 @@ export function sendMutationBatch(baseUrl, scheduleId, jar, attemptId, attemptTo
     try {
       const json = resp.json();
       const data = (json || {}).data || {};
-      const revision = data.revision !== undefined ? data.revision : ((data.attempt || {}).revision);
+      const revision = data.revision !== undefined ? data.revision : (data.attempt || {}).revision;
       attemptRevisionCache.set(attemptId, coerceRevision(revision));
     } catch (_) {}
   }
@@ -612,7 +724,9 @@ export function sendMutationBatch(baseUrl, scheduleId, jar, attemptId, attemptTo
 }
 
 export function submitAttempt(baseUrl, scheduleId, jar, attemptId, attemptToken, tags) {
-  const sessionResp = getStudentSession(baseUrl, scheduleId, jar, '', { name: 'student_session_for_submit' });
+  const sessionResp = getStudentSession(baseUrl, scheduleId, jar, "", {
+    name: "student_session_for_submit",
+  });
   let lastSeenRevision = 0;
   let serverAcceptedThroughSeq = 0;
   if (sessionResp.status === 200) {
@@ -620,7 +734,9 @@ export function submitAttempt(baseUrl, scheduleId, jar, attemptId, attemptToken,
       const json = sessionResp.json();
       const attempt = ((json || {}).data || {}).attempt || {};
       lastSeenRevision = coerceRevision(attempt.revision);
-      serverAcceptedThroughSeq = coerceRevision((((attempt || {}).recovery || {}).serverAcceptedThroughSeq));
+      serverAcceptedThroughSeq = coerceRevision(
+        ((attempt || {}).recovery || {}).serverAcceptedThroughSeq
+      );
     } catch (_) {}
   }
 
@@ -638,10 +754,10 @@ export function submitAttempt(baseUrl, scheduleId, jar, attemptId, attemptToken,
       jar,
       headers: jsonHeaders({
         authorization: `Bearer ${attemptToken}`,
-        'Idempotency-Key': uuidV4(),
+        "Idempotency-Key": uuidV4(),
       }),
       responseCallback: EXPECT_2XX_OR_409,
       tags,
-    },
+    }
   );
 }

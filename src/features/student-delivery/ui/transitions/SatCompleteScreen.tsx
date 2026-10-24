@@ -1,31 +1,64 @@
+import type { ReactNode } from "react";
 import { SAT_COPY } from "../../domain/satCopy";
-import type { AssessmentResult } from "../../contracts/assessmentDelivery";
+import type { AssessmentResult, SATRecoveryResolutionReceipt } from "../../contracts/assessmentDelivery";
 import { classroomReport, SatScoreReport, type AnsweredExamSource } from "./SatScoreReport";
+
+export interface SATCompletionRecoveryException {
+  moduleTitle: string;
+  receipt: SATRecoveryResolutionReceipt;
+}
 
 /** Confirms that the SAT exam is complete; shows the score report only when the exam's report setting released one. */
 export function SatCompleteScreen({
   result,
   onExit,
   answered = null,
+  recoveryExceptions = [],
+  eva = null,
 }: {
   result: AssessmentResult | null;
   onExit: () => void | Promise<void>;
   answered?: AnsweredExamSource | null;
+  recoveryExceptions?: readonly SATCompletionRecoveryException[];
+  /** The shared Eva SIM status group, identical in both branches. */
+  eva?: ReactNode;
 }) {
   const report = classroomReport(result);
-  if (!report) return <SatCompletionOnly onExit={onExit} />;
-  return <SatScoreReport report={report} answered={answered} onExit={onExit} />;
+  if (!report) return <SatCompletionOnly onExit={onExit} recoveryExceptions={recoveryExceptions} eva={eva} />;
+  return <SatScoreReport report={report} answered={answered} onExit={onExit} recoveryExceptions={recoveryExceptions} eva={eva} />;
 }
 
-function SatCompletionOnly({ onExit }: { onExit: () => void | Promise<void> }) {
+function SatCompletionOnly({ onExit, recoveryExceptions, eva }: {
+  onExit: () => void | Promise<void>;
+  recoveryExceptions: readonly SATCompletionRecoveryException[];
+  eva: ReactNode;
+}) {
+  const hasRecoveryException = recoveryExceptions.length > 0;
   return (
     <div className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] pl-[calc(1.25rem+var(--student-safe-left))] pr-[calc(1.25rem+var(--student-safe-right))] pt-[var(--student-safe-top)] pb-[var(--student-safe-bottom)] text-center text-[var(--sat-text)]">
       <main className="w-full max-w-lg border-y border-[var(--sat-divider)] py-10">
         <p className="text-[14px] font-semibold text-[var(--sat-text-secondary)]">Digital SAT</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">{SAT_COPY.transitions.completeTitle}</h1>
+        <h1
+          data-sat-stage-heading="true"
+          tabIndex={-1}
+          className="mt-2 text-3xl font-semibold tracking-tight"
+        >
+          {hasRecoveryException ? SAT_COPY.transitions.completeRecoveryTitle : SAT_COPY.transitions.completeTitle}
+        </h1>
         <p className="mt-3 text-[14px] leading-6 text-[var(--sat-text-secondary)]">
-          {SAT_COPY.transitions.completeSubtitle}
+          {hasRecoveryException ? SAT_COPY.transitions.completeRecoverySubtitle : SAT_COPY.transitions.completeSubtitle}
         </p>
+        {hasRecoveryException ? (
+          <ul className="mt-4 space-y-2 text-left text-[14px] leading-5 text-[var(--sat-text-secondary)]" aria-label="Recovery decisions recorded">
+            {recoveryExceptions.map(({ moduleTitle, receipt }) => (
+              <li key={receipt.receiptId} className="rounded-lg border border-[var(--sat-divider)] p-3">
+                <span className="font-semibold text-[var(--sat-text)]">{moduleTitle}</span>
+                <span className="mt-1 block">Recovery record {receipt.receiptId}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {eva}
         <button
           type="button"
           onClick={() => void onExit()}
@@ -44,7 +77,13 @@ export function SatAwaitingRouteScreen({ onExit }: { onExit: () => void | Promis
     <div className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] pl-[calc(1.25rem+var(--student-safe-left))] pr-[calc(1.25rem+var(--student-safe-right))] pt-[var(--student-safe-top)] pb-[var(--student-safe-bottom)] text-center text-[var(--sat-text)]">
       <main role="status" className="w-full max-w-lg border-y border-[var(--sat-divider)] py-10">
         <p className="text-[14px] font-semibold text-[var(--sat-text-secondary)]">Digital SAT</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Awaiting teacher assignment</h1>
+        <h1
+          data-sat-stage-heading="true"
+          tabIndex={-1}
+          className="mt-2 text-3xl font-semibold tracking-tight"
+        >
+          Awaiting teacher assignment
+        </h1>
         <p className="mt-3 text-[14px] leading-6 text-[var(--sat-text-secondary)]">
           Your answers are saved. Your teacher will choose your next module. This page updates automatically.
         </p>
@@ -71,7 +110,13 @@ export function SatTerminatedScreen({
     <div className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] pl-[calc(1.25rem+var(--student-safe-left))] pr-[calc(1.25rem+var(--student-safe-right))] pt-[var(--student-safe-top)] pb-[var(--student-safe-bottom)] text-center text-[var(--sat-text)]">
       <main className="w-full max-w-lg border-y border-[var(--sat-divider)] py-10">
         <p className="text-[14px] font-semibold text-[var(--sat-danger)]">Session ended</p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Your SAT attempt has ended</h1>
+        <h1
+          data-sat-stage-heading="true"
+          tabIndex={-1}
+          className="mt-2 text-3xl font-semibold tracking-tight"
+        >
+          Your SAT attempt has ended
+        </h1>
         <p className="mt-3 text-[14px] leading-6 text-[var(--sat-text-secondary)]">
           {note || "Please contact the proctor if you need assistance."}
         </p>

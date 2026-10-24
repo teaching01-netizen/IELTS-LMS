@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { ExamEntity } from "../../../../types/domain";
 import { requestAuthoringDraftOnEntry } from "../../application/authoringEntryIntent";
@@ -12,8 +12,10 @@ import { DeliverySettingsPanel } from "./DeliverySettingsPanel";
 import { ScoreConverterPanel } from "../release/ScoreConverterPanel";
 import { ScoreReportSettingPanel } from "../release/ScoreReportSettingPanel";
 import { useExamQuery } from "../../api/examQueries";
+import { FormsSettingsPanel } from "./FormsSettingsPanel";
 
 const SETTINGS_SCORING_PANEL_ID = "sat-settings-scoring";
+export const SETTINGS_FORMS_PANEL_ID = "sat-settings-forms";
 
 /**
  * Settings tab: always a full page, so the tab behaves like every other tab
@@ -25,7 +27,14 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
   const [searchParams] = useSearchParams();
   const examQuery = useExamQuery(exam.id);
   const chrome = useExamWorkspaceChrome(exam.id);
-  const [dirtyCount, setDirtyCount] = useState(0);
+  // Counted per owner so a saved delivery panel cannot clear unsaved forms.
+  const [deliveryDirty, setDeliveryDirty] = useState(0);
+  const [formsDirty, setFormsDirty] = useState(0);
+  const dirtyCount = deliveryDirty + formsDirty;
+  const clearDirty = useCallback(() => {
+    setDeliveryDirty(0);
+    setFormsDirty(0);
+  }, []);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,16 +48,17 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
   }, [dirtyCount]);
 
   // A create-room finding about the converter deep-links here with ?panel=scoring.
-  const focusScoring = searchParams.get("panel") === "scoring";
+  const panel = searchParams.get("panel");
+  const focusPanelId = panel === "scoring" ? SETTINGS_SCORING_PANEL_ID : panel === "forms" ? SETTINGS_FORMS_PANEL_ID : null;
   useEffect(() => {
-    if (!focusScoring) return;
+    if (!focusPanelId) return;
     const frame = window.requestAnimationFrame(() => {
-      const target = document.getElementById(SETTINGS_SCORING_PANEL_ID);
+      const target = document.getElementById(focusPanelId);
       target?.scrollIntoView?.({ block: "start" });
       target?.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focusScoring]);
+  }, [focusPanelId]);
   const go = (path: string) => {
     if (dirtyCount > 0) setPendingPath(path);
     else navigate(path);
@@ -81,13 +91,24 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
           <DeliverySettingsPanel
             exam={exam}
             showRuntimePolicy
-            onDirtyCountChange={setDirtyCount}
+            onDirtyCountChange={setDeliveryDirty}
             onEditExam={() => {
               requestAuthoringDraftOnEntry(exam.id);
               go(examWorkspacePath(exam.id, "questions"));
             }}
           />
         </section>
+        <div id={SETTINGS_FORMS_PANEL_ID} tabIndex={-1} className="outline-none">
+          <FormsSettingsPanel
+            examId={exam.id}
+            canEdit={exam.canEdit}
+            onDirtyCountChange={setFormsDirty}
+            onEditExam={() => {
+              requestAuthoringDraftOnEntry(exam.id);
+              go(examWorkspacePath(exam.id, "questions"));
+            }}
+          />
+        </div>
         {/* One addressable home for exam-level score policy, so a create-room
             finding about the converter has somewhere to land. */}
         <section
@@ -110,13 +131,13 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
       <AuthoringConfirmDialog
         open={pendingPath !== null}
         title="Leave with unsaved changes?"
-        description="Your delivery settings have not been saved. Leaving now discards those changes."
+        description="Your settings have not been saved. Leaving now discards those changes."
         confirmLabel="Leave without saving"
         onCancel={() => setPendingPath(null)}
         onConfirm={() => {
           const path = pendingPath;
           setPendingPath(null);
-          setDirtyCount(0);
+          clearDirty();
           if (path) navigate(path);
         }}
       />

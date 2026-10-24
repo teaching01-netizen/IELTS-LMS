@@ -7,9 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
+	"github.com/go-sql-driver/mysql"
 )
 
 // DefaultQueryTimeout bounds hot read paths (plan E1: poll/bootstrap/roster
@@ -29,11 +31,38 @@ const DefaultQueryTimeout = 10 * time.Second
 // (<500ms) with room for a cold first request.
 const DefaultEntryTimeout = 1500 * time.Millisecond
 
+// DefaultSATCloseTimeout bounds one close request below the browser's six
+// second transport timeout. An ambiguous commit remains safe to recover by
+// replaying the same close ID or reading lifecycle state.
+const DefaultSATCloseTimeout = 5 * time.Second
+
 func writeEntryError(w http.ResponseWriter, r *http.Request, err error) {
+	if r != nil && r.Context().Err() != nil {
+		// database/sql can return ErrTxDone after the request deadline has
+		// already rolled back its transaction; retain the retryable cause.
+		err = errors.Join(err, r.Context().Err())
+	}
 	mapped := MapDBError(err)
 	if appErr, ok := apperrors.As(mapped); ok && appErr.Code == apperrors.CodeServiceUnavailable {
 		w.Header().Set("Retry-After", "1")
 		appErr.Details = map[string]any{"retryAfterSeconds": 1}
+	}
+	httpx.WriteError(w, r, mapped)
+}
+
+func attemptVerificationError(err error) error {
+	var lookupErr *auth.AttemptSessionLookupError
+	if errors.As(err, &lookupErr) {
+		return apperrors.New(apperrors.CodeServiceUnavailable, "Attempt verification is temporarily unavailable; please retry.")
+	}
+	return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+}
+
+func writeAttemptVerificationError(w http.ResponseWriter, r *http.Request, err error) {
+	mapped := attemptVerificationError(err)
+	if appErr, ok := apperrors.As(mapped); ok && appErr.Code == apperrors.CodeServiceUnavailable {
+		writeEntryError(w, r, mapped)
+		return
 	}
 	httpx.WriteError(w, r, mapped)
 }
@@ -60,10 +89,10 @@ func QueryContext(r *http.Request, maxWait time.Duration) (context.Context, cont
 	return context.WithTimeout(r.Context(), maxWait)
 }
 
-// MapDBError translates a wedged-MySQL failure to the honest envelope
-// (plan E1): context deadline/cancel (budget exhausted, readiness probe
-// timeout) -> retryable 503 SERVICE_UNAVAILABLE. Anything else passes
-// through untouched (WriteError maps unknown to 500 INTERNAL).
+// MapDBError translates bounded database failures to a retryable response.
+// Context exhaustion and the transient MySQL errors retried by tx.Runner map
+// to 503; after the retry budget is exhausted, returning an opaque 500 would
+// make clients stop retrying precisely while the database is contended.
 func MapDBError(err error) error {
 	// errors.Is (not ==): sql + service layers wrap ctx.Err() with %w.
 	// Round 157: string-fallback mirrors auth.isClientGone — the mysql
@@ -75,6 +104,10 @@ func MapDBError(err error) error {
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return apperrors.New(apperrors.CodeServiceUnavailable, "Database budget exhausted; please retry.")
+	}
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1205 || mysqlErr.Number == 1213) {
+		return apperrors.New(apperrors.CodeServiceUnavailable, "Database is temporarily busy; please retry.")
 	}
 	s := strings.ToLower(err.Error())
 	if strings.Contains(s, "context canceled") || strings.Contains(s, "context deadline exceeded") {

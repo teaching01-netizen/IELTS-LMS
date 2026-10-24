@@ -11,11 +11,11 @@ import {
 } from './accessibilityScale';
 import { STUDENT_PLAYBACK_RATES, type StudentPlaybackRate } from './accessibilityPreferences';
 
-const STUDENT_ZOOM_MIN = 0.85;
-const STUDENT_ZOOM_MAX = 1.5;
-const STUDENT_ZOOM_STEP = 0.1;
+export const STUDENT_ZOOM_MIN = 0.85;
+export const STUDENT_ZOOM_MAX = 1.5;
+export const STUDENT_ZOOM_STEP = 0.1;
 
-interface AccessibilitySettingsProps {
+export interface AccessibilitySettingsProps {
   isOpen: boolean;
   onClose: () => void;
   fontSize: StudentFontSize;

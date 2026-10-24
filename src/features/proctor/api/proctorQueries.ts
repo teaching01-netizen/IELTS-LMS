@@ -68,7 +68,17 @@ export type ProctorSessionDetailPayload = {
     runtimeCurrentModuleId?: string | null | undefined;
     runtimeModuleAttemptId?: string | null | undefined;
     runtimeModuleAttemptRevision?: number | null | undefined;
+    satRecoveryModuleAttemptId?: StudentSession["satRecoveryModuleAttemptId"];
+    satRecoveryModuleTitle?: StudentSession["satRecoveryModuleTitle"];
+    satRecoveryPhase?: StudentSession["satRecoveryPhase"];
+    satRecoveryKind?: StudentSession["satRecoveryKind"];
+    satRecoveryDeadlineAt?: StudentSession["satRecoveryDeadlineAt"];
+    satRecoveryBoundaryRevision?: StudentSession["satRecoveryBoundaryRevision"];
     runtimeWaiting: boolean;
+    ieltsPersonalStatus?: StudentSession['ieltsPersonalStatus'] | null | undefined;
+    ieltsPersonalSectionKey?: StudentSession['ieltsPersonalSectionKey'] | null | undefined;
+    ieltsPersonalDeadlineAt?: string | null | undefined;
+    ieltsPersonalTimeRemainingSeconds?: number | null | undefined;
     violations: StudentSession['violations'];
     warnings: number;
     lastActivity: string;

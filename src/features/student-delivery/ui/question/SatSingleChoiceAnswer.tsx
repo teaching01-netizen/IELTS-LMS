@@ -71,6 +71,7 @@ export function SatSingleChoiceAnswer(props: SatSingleChoiceAnswerProps) {
               <input
                 id={inputId}
                 type="radio"
+                data-testid="sat-answer-control"
                 name={`sat-answer-${props.questionId}`}
                 value={option.id}
                 checked={selected}

@@ -20,6 +20,7 @@ import (
 	"log"
 	"strings"
 
+	"example.com/ielts-proctoring/internal/platform/tx"
 	"github.com/google/uuid"
 )
 
@@ -49,7 +50,7 @@ func newRequeueToken() string {
 // is a no-op success, preserving MarkFailed's historical behavior. The
 // retry (non-terminal) path stays in MarkFailed, byte-identical.
 func (r *Repository) markTerminal(ctx context.Context, claimToken, id string, attempts int, message string) error {
-	startedTx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	startedTx, err := tx.Begin(ctx, r.db, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}
@@ -59,9 +60,6 @@ func (r *Repository) markTerminal(ctx context.Context, claimToken, id string, at
 			_ = startedTx.Rollback()
 		}
 	}()
-	if _, err := startedTx.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-		return err
-	}
 	var kind, aggregateID, family, payload string
 	var revision int64
 	if err := startedTx.QueryRowContext(ctx, `
@@ -139,7 +137,7 @@ func (r *Repository) QuarantineAttempt(ctx context.Context, source Event, attemp
 // exactly one DLQ row; a second requeue of the same letter fails closed
 // (already resolved) instead of duplicating work. Returns the new event id.
 func (r *Repository) RequeueDeadLetter(ctx context.Context, dlqID string) (string, error) {
-	startedTx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	startedTx, err := tx.Begin(ctx, r.db, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return "", err
 	}
@@ -149,9 +147,6 @@ func (r *Repository) RequeueDeadLetter(ctx context.Context, dlqID string) (strin
 			_ = startedTx.Rollback()
 		}
 	}()
-	if _, err := startedTx.ExecContext(ctx, "SET time_zone = '+00:00'"); err != nil {
-		return "", err
-	}
 	var kind, aggregateID, family, payload, token string
 	var revision int64
 	var resolved sql.NullTime

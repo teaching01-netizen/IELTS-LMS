@@ -229,7 +229,7 @@ func TestStartModuleReconcilesWhenTheModuleRowDoesNotExistYet(t *testing.T) {
 	defer db.Close()
 	now := time.Now().UTC()
 
-	deliverySaveBinding(mock)
+	deliveryStartModuleBinding(mock)
 	// The probe finds nothing: the branch has not been routed yet.
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT state FROM assessment_module_attempts WHERE attempt_id = ? AND module_id = ?")).
 		WithArgs("att-1", "mod-1").
@@ -238,10 +238,9 @@ func TestStartModuleReconcilesWhenTheModuleRowDoesNotExistYet(t *testing.T) {
 	// row), and its drained shape is staged as usual.
 	personalReconcileDrained(mock)
 	deliverySaveBegin(mock)
-	deliveryModuleWorkableTx(mock)
+	deliveryModuleStartWorkableTx(mock, examruntime.TimingModelPersonal, nil)
 	personalModuleRow(mock, "not_started", 120, nil)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, false)
+	personalTimingGateFromSnapshot(mock, now)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
 		WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -249,8 +248,8 @@ func TestStartModuleReconcilesWhenTheModuleRowDoesNotExistYet(t *testing.T) {
 		WithArgs("att-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	deliveryMaxRevision(mock, 7)
-	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+	deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+		"schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
 	deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "active")
 

@@ -36,6 +36,7 @@ export const routeManifest = {
       sessions: '/sat/sessions',
       results: '/sat/results',
       resultDetail: '/sat/results/:resultId',
+      forms: '/sat/forms',
       attemptAnswers: '/sat/results/attempts/:attemptId',
       examDetail: '/sat/exams/:examId',
       examRelease: '/sat/exams/:examId/release',

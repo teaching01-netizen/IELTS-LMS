@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"example.com/ielts-proctoring/internal/app"
 	"example.com/ielts-proctoring/internal/background"
@@ -34,6 +35,7 @@ func main() {
 		log.Fatalf("worker: open db: %v", err)
 	}
 	defer pool.Close()
+	log.Printf("worker: db connection cap %d; the fleet budget sums every replica, worker and deploy overlap", cfg.DBPoolMaxWorker)
 	defer tx.SetRetryHook(func(err error) {
 		kind := "conntransient"
 		lower := strings.ToLower(err.Error())
@@ -43,6 +45,9 @@ func main() {
 			kind = "lockwait"
 		}
 		telemetry.IncCounter(telemetry.MDeadlocks, "kind", kind)
+	})()
+	defer tx.SetDurationHook(func(duration time.Duration, outcome string) {
+		telemetry.ObserveSeconds(telemetry.MTxDur, duration.Seconds(), "outcome", outcome)
 	})()
 	if err := db.VerifyRuntimeSchema(context.Background(), pool); err != nil {
 		log.Fatalf("worker: runtime schema guard: %v", err)

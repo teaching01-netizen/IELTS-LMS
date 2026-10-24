@@ -30,6 +30,8 @@ vi.mock("../../collaboration/CollaborationHeaderCluster", () => ({
 vi.mock("../../release/ScoreReportSettingPanel", () => ({
   ScoreReportSettingPanel: () => <div data-testid="score-report-panel" />,
 }));
+// The forms editor has its own suite; this page suite owns delivery + guard.
+vi.mock("../FormsSettingsPanel", () => ({ FormsSettingsPanel: () => null }));
 vi.mock("../../release/ScoreConverterPanel", () => ({
   ScoreConverterPanel: () => <div data-testid="score-converter-panel" />,
 }));

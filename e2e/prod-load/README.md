@@ -153,14 +153,40 @@ Required envs:
 - `USERS_FILE` (`userId,email,password,candidateId` — `candidateId` is the student code on `student_code` links)
 
 Optional envs: same as IELTS runner, plus `EXAM_TIMEOUT_MS` (default `9000000` = 150 min for a full SAT),
-`CONTEXTS_PER_BROWSER` (default `5`), `ABORT_ON_FATAL_JOIN` (default `true`), and
-`JOIN_FAILURE_ABORT_THRESHOLD` (default `8`). Set `SAT_ASSERT_ENTRY_FRAME=true`
-for a SAT personal entry rehearsal. The runner captures every
+`CONTEXTS_PER_BROWSER` (default `5`, or `50` in synchronized gate mode),
+`ABORT_ON_FATAL_JOIN` (default `true`), and
+`JOIN_FAILURE_ABORT_THRESHOLD` (default `8`),
+`SAT_COHORT_BARRIER_TIMEOUT_MS` (default `1200000`), and
+`SAT_TRANSITION_FRAME_TIMEOUT_MS` (default `5400000`), and
+`SAT_EXPECTED_COHORT_SIZE` (default `2000`). Set
+`SAT_ASSERT_ENTRY_FRAME=true` for a synchronized transition-gate rehearsal. The
+runner requires the loaded roster to match `SAT_EXPECTED_COHORT_SIZE` and
+`MAX_CONCURRENT_USERS` to cover it,
+holds every browser at an exam-ready barrier, and disables dashboard and
+failure screenshots during the measurement. The exam-ready barrier is bounded by
+`SAT_COHORT_BARRIER_TIMEOUT_MS`. The timed-frame and post-frame barrier waits
+are bounded by `SAT_TRANSITION_FRAME_TIMEOUT_MS`. It captures every
 `sat_first_answerable_frame_at` browser event before navigation, fails a
-candidate with no event, a recovery screen, or any module at 5 seconds or more, and writes p95,
-p99, and max frame latency into the summary JSON. Use `MAX_CONCURRENT_USERS`
-and enough load generators to reach the intended 2,000-browser concurrency;
-`USER_COUNT=2000` alone does not make a synchronized 2,000-browser wave.
+candidate with no event or a recovery screen, and writes request-to-frame plus
+deadline-to-answerable-frame percentiles into the summary JSON. The latter
+starts at the previous timed-out module's server deadline and includes close,
+reconnect, entry, and rendering. The assertion requires an observed timed
+transition and applies the hard p95 <= 3 s / p99 <= 5 s gates to that measure.
+Every requested student's exam-active interval must contain each measured
+transition frame, so sequential or partial-roster runs cannot pass. One runner
+must own the full cohort for the synchronized 2,000-student gate; separate
+runner processes have separate barriers and provide diagnostic samples only.
+The summary records measured versus expected students, minimum active students
+at a measured frame, and whether the barrier passed. `USER_COUNT=2000` without
+`MAX_CONCURRENT_USERS=2000` cannot make a synchronized 2,000-browser wave.
+Smaller cohort values are useful for synchronized diagnostics but do not satisfy
+the 2,000-student release gate; the release-gate field stays false and the runner
+exits non-zero for any configured cohort size other than 2,000.
+In gate mode, the answering loop stops at each student's first timed
+post-deadline answerable frame; a second barrier holds everyone in the next
+module until all frames are captured, then the runner exits without completing
+the full SAT. If no frame arrives within `SAT_TRANSITION_FRAME_TIMEOUT_MS`, the
+run fails with a bounded timeout.
 
 ### Browsers
 

@@ -42,6 +42,7 @@ export type SatEntryReason =
   | "initial-entry"
   | "next-section-entry"
   | "next-module-entry"
+  | "explicit-module-entry"
   | "handoff-entry"
   | "start-code-required";
 
@@ -80,6 +81,7 @@ export interface SatEntryDecisionInput {
   breakSeconds: number;
   sectionWaitSeconds: number;
   phase: string;
+  explicitEntryRequired?: boolean;
 }
 
 /**
@@ -195,16 +197,31 @@ export function previousModuleTimedOut(
   payload: AssessmentDeliveryBootstrap,
   module: AssessmentDeliveryModule,
 ): boolean {
+  return previousTimedOutModuleDeadlineAt(payload, module) !== null;
+}
+
+/**
+ * Return the latest deadline among this section's finished modules that ended
+ * on their own clock. Browser transition telemetry uses this origin so its
+ * latency covers the full deadline-to-answerable path, including close and
+ * reconnect work before StartModule is sent.
+ */
+export function previousTimedOutModuleDeadlineAt(
+  payload: AssessmentDeliveryBootstrap,
+  module: AssessmentDeliveryModule,
+): string | null {
   const section = sectionForModule(payload, module.id);
-  if (!section) return false;
-  return section.modules.some(
-    (candidate) =>
-      candidate.id !== module.id &&
-      moduleAttemptEndedByOwnClock(
-        findAttemptForModule(payload, candidate.id),
-        payload.serverNow,
-      ),
-  );
+  if (!section) return null;
+  let latestDeadline: string | null = null;
+  for (const candidate of section.modules) {
+    if (candidate.id === module.id) continue;
+    const attempt = findAttemptForModule(payload, candidate.id);
+    if (!moduleAttemptEndedByOwnClock(attempt, payload.serverNow) || !attempt?.deadlineAt) continue;
+    if (latestDeadline === null || Date.parse(attempt.deadlineAt) > Date.parse(latestDeadline)) {
+      latestDeadline = attempt.deadlineAt;
+    }
+  }
+  return latestDeadline;
 }
 
 /** Not enterable, but the automatic path still owns the module. */
@@ -228,6 +245,7 @@ export function deriveSatEntryDecision({
   breakSeconds,
   sectionWaitSeconds,
   phase,
+  explicitEntryRequired = false,
 }: SatEntryDecisionInput): SatEntryDecision {
   if (phase !== "directions" && phase !== "break") {
     return waiting("phase-not-entering");
@@ -244,6 +262,8 @@ export function deriveSatEntryDecision({
   if (blocked) return waiting(blocked);
   if (!module) return waiting("no-module");
   if (!sectionForModule(data, module.id)) return waiting("unknown-section");
+
+  if (explicitEntryRequired) return waiting("explicit-module-entry");
 
   const attempt = data.attempt.moduleAttempts.find(
     (candidate) => candidate.moduleId === module.id,
@@ -295,7 +315,7 @@ export function deriveSatEntryDecision({
  */
 export const SAT_ENTRY_RETRY_WINDOW_MS = 2_000;
 
-export type SatEntryOutcome = "opened" | "noop" | "failed";
+export type SatEntryOutcome = "opened" | "noop" | "failed" | "expired";
 
 export interface SatEntryAttempt {
   key: string;

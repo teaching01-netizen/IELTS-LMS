@@ -1,5 +1,5 @@
 /* eslint-disable jsx-a11y/control-has-associated-label -- Presentational, aria-hidden print tables use rows and cells for native page repetition. */
-import { useEffect, useMemo, type Ref } from "react";
+import { useEffect, useMemo, type ReactNode, type Ref } from "react";
 import "./score-report/sat-answered-paper.css";
 import warwickWatermark from "../../../../assets/warwick-institute-logo.png";
 import { SatPrintedQuestion } from "./score-report/SatPrintedQuestion";
@@ -7,6 +7,7 @@ import type {
   AssessmentAnsweredExam,
   AssessmentDeliverySection,
   AssessmentResult,
+  SATRecoveryResolutionReceipt,
 } from "../../contracts/assessmentDelivery";
 import { logWarn } from "../../../../shared/observability/errorLogger";
 import { SatKnowledgeSkills } from "./score-report/SatKnowledgeSkills";
@@ -122,10 +123,15 @@ export function SatScoreReport({
   report,
   answered,
   onExit,
+  recoveryExceptions = [],
+  eva = null,
 }: {
   report: ClassroomReport;
   answered: AnsweredExamSource | null;
   onExit: () => void | Promise<void>;
+  recoveryExceptions?: readonly { moduleTitle: string; receipt: SATRecoveryResolutionReceipt }[];
+  /** The shared Eva SIM status group (see SatCompleteScreen). */
+  eva?: ReactNode;
 }) {
   const view = useMemo(
     () => buildStudentScoreReportView(report, answered?.sections),
@@ -143,6 +149,22 @@ export function SatScoreReport({
         <main className="mx-auto w-full max-w-[920px]">
           <section aria-label="Score report">
             <SatReportHeader title={view.title} />
+            {recoveryExceptions.length ? (
+              <aside role="status" className="mt-5 rounded-xl border border-[var(--sat-divider)] bg-[var(--sat-surface)] p-4 print:hidden">
+                <h2 className="text-[16px] font-semibold">Submission confirmed with a recovery exception</h2>
+                <p className="mt-1 text-[14px] leading-5 text-[var(--sat-text-secondary)]">
+                  Some answers saved only on the original device were not confirmed by the exam and were excluded from scoring and routing.
+                </p>
+                <ul className="mt-3 space-y-2 text-[14px] leading-5 text-[var(--sat-text-secondary)]" aria-label="Recovery decisions recorded">
+                  {recoveryExceptions.map(({ moduleTitle, receipt }) => (
+                    <li key={receipt.receiptId}>
+                      <span className="font-semibold text-[var(--sat-text)]">{moduleTitle}</span>
+                      <span className="ml-2">Recovery record {receipt.receiptId}</span>
+                    </li>
+                  ))}
+                </ul>
+              </aside>
+            ) : null}
             <SatReportDownload
               canPrint={answered !== null}
               download={download}
@@ -155,6 +177,7 @@ export function SatScoreReport({
             <SatSubjectPerformance view={view} />
             <SatKnowledgeSkills subjects={view.subjects} />
             <SatReportMethodology methodology={view.methodology} />
+            {eva ? <div className="print:hidden">{eva}</div> : null}
             <SatReportActions onExit={() => void onExit()} />
           </section>
         </main>

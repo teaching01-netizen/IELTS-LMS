@@ -1,0 +1,73 @@
+{
+  "responses": [
+    {
+      "name": "null-defaults-and-unicode-html-escaping",
+      "payload": {
+        "answer": "Bangkok <& — café",
+        "markedForReview": false,
+        "eliminatedOptions": ["choice-2"],
+        "annotations": []
+      },
+      "hash": "764d62bff42cf8606395ac1c8be99e12539d0c0f4d0cccd0c45e6a58b849fcaf"
+    },
+    {
+      "name": "sat-annotations-and-legacy-annotation",
+      "payload": {
+        "answer": ["A", "B"],
+        "markedForReview": true,
+        "eliminatedOptions": [],
+        "annotations": [
+          {
+            "id": "sat-annotations",
+            "kind": "sat_annotations",
+            "version": 2,
+            "legacyQuestionNote": "",
+            "annotations": [
+              {
+                "id": "ann-1",
+                "kind": "highlight",
+                "color": "yellow",
+                "anchor": {
+                  "nodeId": "node-1",
+                  "startOffset": 0,
+                  "endOffset": 3,
+                  "exact": "A & B",
+                  "prefix": "left",
+                  "suffix": "right"
+                },
+                "note": "ℹ️ café",
+                "createdAt": "2026-10-21T00:00:00Z",
+                "updatedAt": "2026-10-21T00:00:01Z"
+              }
+            ]
+          },
+          {
+            "id": "ann-2",
+            "kind": "highlight",
+            "start": 0,
+            "end": 3,
+            "text": "<note>&"
+          }
+        ]
+      },
+      "hash": "8f0a791fe48d11296de71daa6badea43c241ef65d0a72917e60f0fd36322133d"
+    }
+  ],
+  "manifest": {
+    "entries": [
+      {
+        "questionId": "q-a",
+        "writeId": "w-a",
+        "clientVersion": 1,
+        "contentHash": "764d62bff42cf8606395ac1c8be99e12539d0c0f4d0cccd0c45e6a58b849fcaf"
+      },
+      {
+        "questionId": "q-b",
+        "writeId": "w-b",
+        "clientVersion": 2,
+        "contentHash": "8f0a791fe48d11296de71daa6badea43c241ef65d0a72917e60f0fd36322133d"
+      }
+    ],
+    "hash": "ba87e5816ef7bdcbd6a1fa0cd45f6cc316d1b0e1ec7f319c8bc69b0ff324620d"
+  }
+}

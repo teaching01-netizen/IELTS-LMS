@@ -47,6 +47,8 @@ func TestExtendMovesTheActivePersonalBreakDeadline(t *testing.T) {
 		"WHERE sa.schedule_id = \\? AND b.state = 'active' AND b.deadline_at IS NOT NULL").
 		WithArgs(int64(5), "sched-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_boundaries b")).WithArgs("sched-1").
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("deadline_at = CASE WHEN rt.timing_model")).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	// NO outbox INSERT: exec-only skips runtime_changed.

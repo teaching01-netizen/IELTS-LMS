@@ -222,4 +222,13 @@ describe("SAT module-close refusal policy", () => {
     expect(classifySatCloseRejection(apiError("SERVICE_UNAVAILABLE", undefined, 503))).toEqual({ kind: "backoff" });
     expect(classifySatCloseRejection(new TypeError("Failed to fetch"))).toEqual({ kind: "backoff" });
   });
+
+  it("honors Retry-After on bounded close backpressure", () => {
+    expect(classifySatCloseRejection(new ApiError({
+      code: "RATE_LIMIT_EXCEEDED",
+      message: "close capacity is full",
+      status: 429,
+      details: { retryAfterSeconds: 1 },
+    }))).toEqual({ kind: "backoff", retryAfterMs: 1_000 });
+  });
 });

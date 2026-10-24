@@ -10,20 +10,21 @@
  * counter; this owns only how long to wait.
  */
 
-/** Steady cadence while the live socket is connected. */
-export const SAT_POLL_LIVE_CADENCE_MS = 20_000;
+/** Maximum retry window and healthy-socket cadence ceiling. */
+export const SAT_POLL_LIVE_CADENCE_MS = 60_000;
 /**
- * Cadence without the live socket. The state read is a full attempt assembly,
- * so it is recovery only: room transitions refresh on the runtime-poll
- * revision and module deadlines on the temporal-boundary timers. This bounds
- * per-student proctor actions (server write gates enforce them immediately).
+ * Cadence without the live socket. The lifecycle read is mutable-only, so keep
+ * the recovery path bounded while still checking reachable HTTP more often
+ * than the healthy-socket fallback. Writes and explicit transitions remain
+ * event-driven and do not wait for this timer.
  */
-export const SAT_POLL_OFFLINE_CADENCE_MS = 15_000;
+export const SAT_POLL_OFFLINE_CADENCE_MS = 20_000;
 
 export function satPollDelayMs(input: {
   liveSocketConnected: boolean;
   failures: number;
   random: number;
+  retryAfterMs?: number;
 }): number {
   const baseMs = input.liveSocketConnected
     ? SAT_POLL_LIVE_CADENCE_MS
@@ -32,6 +33,11 @@ export function satPollDelayMs(input: {
     baseMs * 2 ** Math.min(Math.max(input.failures, 0), 3),
     SAT_POLL_LIVE_CADENCE_MS,
   );
-  // Full jitter: half fixed, half random across the window.
-  return backoffMs / 2 + input.random * (backoffMs / 2);
+  // Full jitter: half fixed, half random across the window. Retry-After is a
+  // lower bound from the server, capped by the policy's 60-second ceiling.
+  const jitteredMs = backoffMs / 2 + input.random * (backoffMs / 2);
+  const retryAfterMs = Number.isFinite(input.retryAfterMs)
+    ? Math.max(0, Math.min(input.retryAfterMs ?? 0, SAT_POLL_LIVE_CADENCE_MS))
+    : 0;
+  return Math.max(jitteredMs, retryAfterMs);
 }

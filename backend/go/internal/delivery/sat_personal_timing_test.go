@@ -59,6 +59,7 @@ func personalReconcileDrained(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("SELECT COALESCE\\(sat_handoff_mode").WillReturnRows(sqlmock.NewRows([]string{"mode"}).AddRow("server_start"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(time.Now().UTC()))
+	deliverySATPolicyRead(mock, "att-1")
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_attempt_breaks")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM assessment_attempt_breaks")).
@@ -78,16 +79,17 @@ func personalReconcileDrained(mock sqlmock.Sqlmock) {
 // personalTimingGate stages moduleTimingGateTx on a live personal runtime: the
 // model and the in-tx instant, with no stage/room window.
 func personalTimingGate(mock sqlmock.Sqlmock, now time.Time) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT timing_model, active_section_key, status, COALESCE(sat_handoff_mode, 'server_start') FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key"}).
-			AddRow(examruntime.TimingModelPersonal, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"timing_model", "active_section_key", "status", "sat_handoff_mode"}).
+			AddRow(examruntime.TimingModelPersonal, nil, "live", "server_start"))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
 		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(now))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT status FROM exam_session_runtimes WHERE schedule_id = ?")).
-		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
-	mock.ExpectQuery("SELECT COALESCE\\(sat_handoff_mode").WillReturnRows(sqlmock.NewRows([]string{"mode"}).AddRow("server_start"))
+}
+
+func personalTimingGateFromSnapshot(mock sqlmock.Sqlmock, now time.Time) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).
+		WillReturnRows(sqlmock.NewRows([]string{"ts"}).AddRow(now))
 }
 
 // personalModuleRow stages the locked module attempt with the authored allotment.
@@ -135,22 +137,22 @@ func personalModuleAwaitingStartProbe(mock sqlmock.Sqlmock, state string) {
 // staged: sqlmock fails on an unexpected statement, which is what pins the
 // entry-reliability fast path — a transition that pays for attempt + runtime +
 // module FOR UPDATE locks on every entry (plan 2026-09-24) fails here.
-func personalStartModulePrologue(mock sqlmock.Sqlmock) {
-	deliverySaveBinding(mock)
+func personalStartModulePrologue(mock sqlmock.Sqlmock, pendingBreak ...bool) {
+	deliveryStartModuleBinding(mock)
 	personalModuleAwaitingStartProbe(mock, "not_started")
 	deliverySaveBegin(mock)
-	deliveryModuleWorkableTx(mock)
+	deliveryModuleStartWorkableTx(mock, examruntime.TimingModelPersonal, nil, pendingBreak...)
 }
 
 // personalStartModulePrologueReconciling is the same prologue for a module that
 // is already active: a reload whose expired clock may still need finalizing, so
 // reconciliation must run before the transition transaction.
 func personalStartModulePrologueReconciling(mock sqlmock.Sqlmock) {
-	deliverySaveBinding(mock)
+	deliveryStartModuleBinding(mock)
 	personalModuleAwaitingStartProbe(mock, "active")
 	personalReconcileDrained(mock)
 	deliverySaveBegin(mock)
-	deliveryModuleWorkableTx(mock)
+	deliveryModuleStartWorkableTx(mock, examruntime.TimingModelPersonal, nil)
 }
 
 // A personal StartModule activates immediately at DATABASE time (single
@@ -167,8 +169,7 @@ func TestStartModulePersonalArmsTheOfferAtDatabaseTimePlusTheLead(t *testing.T) 
 
 	personalStartModulePrologue(mock)
 	personalModuleRow(mock, "not_started", 120, nil)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, false)
+	personalTimingGateFromSnapshot(mock, now)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
 		WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -176,8 +177,8 @@ func TestStartModulePersonalArmsTheOfferAtDatabaseTimePlusTheLead(t *testing.T) 
 		WithArgs("att-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	deliveryMaxRevision(mock, 7)
-	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+	deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+		"schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
 	deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "active")
 
@@ -197,18 +198,28 @@ func TestStartModulePersonalArmsTheOfferAtDatabaseTimePlusTheLead(t *testing.T) 
 	}
 }
 
-func TestStartModuleOfferAckAvoidsAttemptProjection(t *testing.T) {
+func TestStartModuleOfferAckReusesBindingForColdContent(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 	svc := deliverySvc(db)
+	svc.versions = NewVersionCache(2)
+	if _, _, err := svc.versions.Get(context.Background(), "pv-1", func() ([]DeliverySection, int64, error) {
+		return []DeliverySection{{SectionKey: "reading-writing", Modules: []DeliveryModule{{ID: "mod-1"}}}}, 7, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
-	personalStartModulePrologue(mock)
+	mock.ExpectQuery(regexp.QuoteMeta(startModuleContentPreflightQuery)).
+		WithArgs("mod-1", "sched-1", "att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "exam_id", "provider_key", "version_id", "exam_type", "revision", "sat_publish_scope", "enabled_sections", "state"}).
+			AddRow("sched-1", "exam-1", "sat", "pv-1", "sat", 7, nil, nil, "not_started"))
+	deliverySaveBegin(mock)
+	deliveryModuleStartWorkableTx(mock, examruntime.TimingModelPersonal, nil)
 	personalModuleRow(mock, "not_started", 120, nil)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, false)
+	personalTimingGateFromSnapshot(mock, now)
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
 		WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -216,16 +227,64 @@ func TestStartModuleOfferAckAvoidsAttemptProjection(t *testing.T) {
 		WithArgs("att-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	deliveryMaxRevision(mock, 7)
-	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+	deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+		"schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
 	entryStateRow(mock, "active", 0, nil, nil, nil, now, examruntime.TimingModelPersonal, now)
-	ack, err := svc.StartModuleOfferAck(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", nil, nil, false, "sess-test", "tok-1")
+	ack, err := svc.StartModuleOfferAck(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", nil, nil, true, "sess-test", "tok-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ack.State != "active" || ack.StartedAt == nil {
+	if ack.State != "active" || ack.StartedAt == nil || ack.SelectedSection == nil || len(ack.SelectedSection.Modules) != 1 {
 		t.Fatalf("unexpected compact active ack: %+v", ack)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartModuleBindingUsesOneOwnedRead(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	deliveryStartModuleBinding(mock)
+	id, examID, provider, versionID, err := deliverySvc(db).startModuleBinding(context.Background(), "sched-1", "att-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "sched-1" || examID != "exam-1" || provider != "sat" || versionID != "pv-1" {
+		t.Fatalf("unexpected binding: id=%q exam=%q provider=%q version=%q", id, examID, provider, versionID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStartModuleBindingPreservesOwnershipErrorOnFallback(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(regexp.QuoteMeta("JOIN student_attempts a ON a.schedule_id = s.id AND a.exam_id = s.exam_id")).
+		WithArgs("sched-1", "att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "published_version_id", "exam_type"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules s JOIN exam_entities e")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "published_version_id", "exam_type"}).
+			AddRow("sched-1", "exam-1", "sat", "pv-1", "Academic"))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "schedule_id", "exam_id"}).
+			AddRow("att-1", "other-schedule", "exam-1"))
+
+	_, _, _, _, err = deliverySvc(db).startModuleBinding(context.Background(), "sched-1", "att-1")
+	if deliveryCodeOf(err) != apperrors.CodeValidation {
+		t.Fatalf("expected attempt ownership validation, got %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -255,8 +314,8 @@ func TestEnterModuleAckAvoidsAttemptProjection(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE student_attempts SET phase = 'exam'")).
 		WithArgs("att-1").WillReturnResult(sqlmock.NewResult(0, 1))
 	deliveryMaxRevision(mock, 7)
-	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+	deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+		"schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
 	entryStateRow(mock, "active", 1, startsAt, now, nil, startsAt, examruntime.TimingModelPersonal, now)
 	ack, err := svc.EnterModuleAck(context.Background(), "sched-1", "att-1", "sched-1", ModuleEntryRequest{ModuleID: "mod-1", Generation: 1}, "sess-test", "tok-1")
@@ -285,8 +344,7 @@ func TestStartModulePersonalReloadKeepsTheSameOffer(t *testing.T) {
 
 	personalStartModulePrologueReconciling(mock)
 	personalModuleRow(mock, "active", 120, startedAt)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, false)
+	personalTimingGateFromSnapshot(mock, now)
 	// No UPDATE is staged: sqlmock fails on any unexpected statement, so a
 	// reallocation would surface as an error rather than a silent reset.
 	mock.ExpectCommit()
@@ -324,8 +382,7 @@ func TestStartModulePersonalIgnoresStaleOfferColumnsAndActivates(t *testing.T) {
 
 			personalStartModulePrologue(mock)
 			personalModuleRow(mock, "not_started", 120, nil)
-			personalTimingGate(mock, now)
-			personalBreakPendingLookup(mock, false)
+			personalTimingGateFromSnapshot(mock, now)
 			mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
 				WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
 				WillReturnResult(sqlmock.NewResult(0, 1))
@@ -333,8 +390,8 @@ func TestStartModulePersonalIgnoresStaleOfferColumnsAndActivates(t *testing.T) {
 				WithArgs("att-1").
 				WillReturnResult(sqlmock.NewResult(0, 1))
 			deliveryMaxRevision(mock, 7)
-			deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-			deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+			deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+				"schedule_roster", "sched-1", "sat_module_started", 7)
 			mock.ExpectCommit()
 			deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "active")
 
@@ -363,10 +420,9 @@ func TestStartModulePersonalRefusesWhileTheScheduledBreakIsPending(t *testing.T)
 	svc := deliverySvc(db)
 	now := time.Now().UTC()
 
-	personalStartModulePrologue(mock)
+	personalStartModulePrologue(mock, true)
 	personalModuleRow(mock, "not_started", 120, nil)
-	personalTimingGate(mock, now)
-	personalBreakPendingLookup(mock, true)
+	personalTimingGateFromSnapshot(mock, now)
 	mock.ExpectRollback()
 
 	_, err = svc.StartModule(context.Background(), "sched-1", "att-1", "sched-1", "mod-1", "sess-test", "tok-1")
@@ -408,8 +464,8 @@ func TestEnterModuleAnchorsTheAuthoredWindowToTheOfferStart(t *testing.T) {
 		WithArgs("att-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	deliveryMaxRevision(mock, 7)
-	deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-	deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+	deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+		"schedule_roster", "sched-1", "sat_module_started", 7)
 	mock.ExpectCommit()
 	deliveryBootstrapLoadsForModel(mock, startsAt, examruntime.TimingModelPersonal, "active")
 
@@ -766,8 +822,7 @@ func TestStartModulePersonalActivatesWithoutProctorGrant(t *testing.T) {
 
 			personalStartModulePrologue(mock)
 			personalModuleRow(mock, "not_started", 120, nil)
-			personalTimingGate(mock, now)
-			personalBreakPendingLookup(mock, false)
+			personalTimingGateFromSnapshot(mock, now)
 			mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_module_attempts SET state = 'active'")).
 				WithArgs(120, sqlmock.AnyArg(), sqlmock.AnyArg(), "ma-1").
 				WillReturnResult(sqlmock.NewResult(0, 1))
@@ -775,8 +830,8 @@ func TestStartModulePersonalActivatesWithoutProctorGrant(t *testing.T) {
 				WithArgs("att-1").
 				WillReturnResult(sqlmock.NewResult(0, 1))
 			deliveryMaxRevision(mock, 7)
-			deliveryBusInsert(mock, "attempt", "att-1", "sat_module_started", 7)
-			deliveryBusInsert(mock, "schedule_roster", "sched-1", "sat_module_started", 7)
+			deliveryBusPairInsert(mock, "attempt", "att-1", "sat_module_started", 7,
+				"schedule_roster", "sched-1", "sat_module_started", 7)
 			mock.ExpectCommit()
 			deliveryBootstrapLoadsForModel(mock, now, examruntime.TimingModelPersonal, "active")
 

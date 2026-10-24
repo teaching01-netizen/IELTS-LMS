@@ -1,34 +1,25 @@
 package delivery
 
-// Phase 02: version-scoped bulk delivery loader.
+// Version-scoped bulk delivery loader.
 //
-// LoadSections (service.go) walks the delivery tree with one statement per
-// section plus one per module: 1 + S + M statements (9 for a full SAT draft:
-// 1 sections + 2 module probes + 6 question probes). On MySQL each statement
-// costs three protocol round trips, so the authoring Preview endpoint — which
-// runs LoadSections over the SAME version it already walked for Shell() — pays
-// 27 extra round trips for content it already had.
-//
-// LoadSectionsBulk reads the identical projection in THREE version-scoped
-// statements (sections, modules, questions) inside one read-only REPEATABLE
-// READ snapshot, then assembles the tree in memory.
+// Every delivery tree load (LoadSections, the version cache loader and the
+// authoring Preview) reads the projection in THREE version-scoped statements
+// (sections, modules, questions) and assembles the tree in memory, instead of
+// the retired nested walk's 1 + S + M statements. The cache loader runs them
+// inside one read-only REPEATABLE READ snapshot together with the revision
+// probe, so the stored revision describes the stored tree.
 //
 // REDACTION IS NOT FORKED. The question projection calls the same rawJSON +
-// deliveredAnswer helpers loadQuestions uses, so the answer-key allowlist has
-// exactly one implementation. TestDeliveryBulkEquivalence and the authoring
-// equivalence harness both assert the bulk tree is byte-identical to
-// LoadSections and carries no key material.
+// deliveredAnswer helpers every delivery read uses, so the answer-key
+// allowlist has exactly one implementation. TestDeliveryBulkEquivalence pins
+// the tree byte-identical to the nested loader's output, with no key material.
 //
-// ORDERING is byte-identical to LoadSections: sections by display_order,
-// modules by display_order within a section, questions by display_order
-// within a module. The nested loader used a single leading key per statement
-// because it filtered to one parent; the bulk statements prepend the parent
-// keys, which are constant per group, so per-group order is unchanged. No id
-// tie-break is added: the nested loader had none, and adding one would both
-// change the contract and defeat the (parent_id, display_order) indexes the
-// baseline report confirms are already optimal.
-//
-// Nothing calls LoadSectionsBulk yet — Phase 03 wires it into Preview.
+// ORDERING is the nested loader's: sections by display_order, modules by
+// display_order within a section, questions by display_order within a module.
+// The bulk statements prepend the parent keys, which are constant per group,
+// so per-group order is unchanged. No id tie-break is added: the nested loader
+// had none, and adding one would both change the contract and defeat the
+// (parent_id, display_order) indexes.
 
 import (
 	"context"

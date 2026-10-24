@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/assessmentforms"
 	"net/http"
 	"sort"
 	"strings"
@@ -43,7 +44,8 @@ var _ attempts.QuestionResolver = v2Resolver{}
 func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID string) (attempts.QuestionOwner, error) {
 	const sel = `SELECT m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key,` +
 		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds,` +
-		` COALESCE(r.timing_model, ''), ma.entry_confirmed_at, ma.entry_entered_at` +
+		` COALESCE(r.timing_model, ''), ma.entry_confirmed_at, ma.entry_entered_at,` +
+		` COALESCE(its.state, ''), its.started_at, its.deadline_at, its.paused_at` +
 		` FROM assessment_exam_questions eq` +
 		` JOIN assessment_modules m ON m.id = eq.module_id` +
 		` JOIN assessment_sections s ON s.id = m.section_id` +
@@ -52,22 +54,28 @@ func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID st
 		` JOIN student_attempts sa ON sa.id = ?` +
 		` LEFT JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id` +
 		` LEFT JOIN assessment_module_attempts ma ON ma.module_id = m.id AND ma.attempt_id = ?` +
+		` LEFT JOIN ielts_attempt_section_timelines its ON its.attempt_id = sa.id AND its.section_key = s.section_key` +
 		` WHERE (eq.id = ? OR eq.question_id = ?)` +
 		` AND s.exam_version_id = sa.published_version_id` +
 		` ORDER BY CASE WHEN eq.id = ? THEN 0 ELSE 1 END LIMIT 1`
 	var owner attempts.QuestionOwner
 	var state string
 	var providerKey sql.NullString
-	var startedAt, entryConfirmedAt, entryEnteredAt sql.NullTime
+	var startedAt, entryConfirmedAt, entryEnteredAt, timelineStartedAt, timelineDeadlineAt, timelinePausedAt sql.NullTime
 	var allocated, extension, accumulatedPaused sql.NullInt64
+	var timelineState string
 	err := q.QueryRowContext(ctx, sel, attemptID, attemptID, questionID, questionID, questionID).Scan(
 		&owner.ModuleID, &owner.SectionKey, &state, &providerKey,
 		&startedAt, &allocated, &extension, &accumulatedPaused,
 		&owner.TimingModel, &entryConfirmedAt, &entryEnteredAt,
+		&timelineState, &timelineStartedAt, &timelineDeadlineAt, &timelinePausedAt,
 	)
 	if err == sql.ErrNoRows {
 		owner, fallbackErr := resolveSnapshotQuestionForProvider(ctx, q, attemptID, questionID)
 		if fallbackErr != nil {
+			return attempts.QuestionOwner{}, fallbackErr
+		}
+		if fallbackErr = attachIELTSTimeline(ctx, q, attemptID, &owner); fallbackErr != nil {
 			return attempts.QuestionOwner{}, fallbackErr
 		}
 		return owner, nil
@@ -85,6 +93,10 @@ func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID st
 		return owner, nil
 	}
 	owner.ModuleState = state
+	owner.SectionTimelineState = timelineState
+	owner.SectionTimelineStartedAt = studentNullTimePtr(timelineStartedAt)
+	owner.SectionTimelineDeadlineAt = studentNullTimePtr(timelineDeadlineAt)
+	owner.SectionTimelinePausedAt = studentNullTimePtr(timelinePausedAt)
 	if startedAt.Valid {
 		value := startedAt.Time.UTC()
 		owner.ModuleStartedAt = &value
@@ -189,6 +201,62 @@ func snapshotOwnerFor(root map[string]any, questionID string) (attempts.Question
 	return attempts.QuestionOwner{}, false
 }
 
+// snapshotOwnersFor is the batch form of snapshotOwnerFor: one walk of the
+// eligible roots, in snapshotQuestionRoots order, resolves every requested ID,
+// so the first root containing an ID owns it exactly as in the per-question
+// walk. IDs absent from the snapshot are absent from the result. The result is
+// static content membership only; callers attach current timeline state and
+// the write gate still decides writability.
+func snapshotOwnersFor(root map[string]any, questionIDs []string) map[string]attempts.QuestionOwner {
+	walker := snapshotOwnerWalker{
+		wanted: make(map[string]struct{}, len(questionIDs)),
+		owners: make(map[string]attempts.QuestionOwner, len(questionIDs)),
+	}
+	for _, id := range questionIDs {
+		walker.wanted[id] = struct{}{}
+	}
+	for _, candidate := range snapshotQuestionRoots(root) {
+		if len(walker.wanted) == 0 {
+			break
+		}
+		walker.owner = attempts.QuestionOwner{ModuleID: candidate.moduleKey, SectionKey: candidate.sectionKey, ModuleState: "active"}
+		walker.visit(candidate.value)
+	}
+	return walker.owners
+}
+
+type snapshotOwnerWalker struct {
+	wanted map[string]struct{}
+	owners map[string]attempts.QuestionOwner
+	owner  attempts.QuestionOwner
+}
+
+func (w *snapshotOwnerWalker) visit(value any) {
+	if len(w.wanted) == 0 {
+		return
+	}
+	switch node := value.(type) {
+	case map[string]any:
+		// Same identifier spellings as snapshotContainsQuestion, including the
+		// legacy IELTS Writing taskId.
+		for _, key := range [...]string{"id", "questionId", "questionID", "taskId", "taskID"} {
+			if id, ok := node[key].(string); ok {
+				if _, needed := w.wanted[id]; needed {
+					w.owners[id] = w.owner
+					delete(w.wanted, id)
+				}
+			}
+		}
+		for _, child := range node {
+			w.visit(child)
+		}
+	case []any:
+		for _, child := range node {
+			w.visit(child)
+		}
+	}
+}
+
 // errQuestionNotInExam is the shared not-found verdict for an unknown question.
 func errQuestionNotInExam() error {
 	return apperrors.New(apperrors.CodeNotFound, "Question is not part of the attempt exam.")
@@ -235,14 +303,87 @@ func (v2Resolver) ResolveMany(ctx context.Context, q tx.Tx, attemptID string, qu
 	if err != nil {
 		return nil, err
 	}
+	model, timelines, err := loadIELTSTimelines(ctx, q, attemptID)
+	if err != nil {
+		return nil, err
+	}
+	// One traversal of the snapshot for the whole batch; a single fallback ID
+	// keeps the short-circuiting per-question walk and builds no lookup maps.
+	var owners map[string]attempts.QuestionOwner
+	if len(missing) > 1 {
+		owners = snapshotOwnersFor(root, missing)
+	}
 	for _, questionID := range missing {
-		if owner, ok := snapshotOwnerFor(root, questionID); ok {
+		var owner attempts.QuestionOwner
+		var ok bool
+		if owners != nil {
+			owner, ok = owners[questionID]
+		} else {
+			owner, ok = snapshotOwnerFor(root, questionID)
+		}
+		if ok {
+			if runtime.IsIELTSPersonal(model) {
+				owner.TimingModel = model
+				applyIELTSTimeline(&owner, timelines[owner.SectionKey])
+			}
 			verdicts[questionID] = attempts.QuestionVerdict{Owner: owner}
 			continue
 		}
 		verdicts[questionID] = attempts.QuestionVerdict{Err: errQuestionNotInExam()}
 	}
 	return verdicts, nil
+}
+
+type ieltsTimelineOwner struct {
+	state                           string
+	startedAt, deadlineAt, pausedAt sql.NullTime
+}
+
+func attachIELTSTimeline(ctx context.Context, q tx.Tx, attemptID string, owner *attempts.QuestionOwner) error {
+	model, timelines, err := loadIELTSTimelines(ctx, q, attemptID)
+	if err != nil {
+		return err
+	}
+	if runtime.IsIELTSPersonal(model) {
+		owner.TimingModel = model
+		applyIELTSTimeline(owner, timelines[owner.SectionKey])
+	}
+	return nil
+}
+
+func loadIELTSTimelines(ctx context.Context, q tx.Tx, attemptID string) (string, map[string]ieltsTimelineOwner, error) {
+	var model string
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(rt.timing_model, '')
+		FROM student_attempts a LEFT JOIN exam_session_runtimes rt ON rt.schedule_id = a.schedule_id
+		WHERE a.id = ?`, attemptID).Scan(&model); err != nil {
+		return "", nil, err
+	}
+	rowsBySection := make(map[string]ieltsTimelineOwner)
+	if !runtime.IsIELTSPersonal(model) {
+		return model, rowsBySection, nil
+	}
+	rows, err := q.QueryContext(ctx, `SELECT section_key, state, started_at, deadline_at, paused_at
+		FROM ielts_attempt_section_timelines WHERE attempt_id = ?`, attemptID)
+	if err != nil {
+		return "", nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key string
+		var timeline ieltsTimelineOwner
+		if err := rows.Scan(&key, &timeline.state, &timeline.startedAt, &timeline.deadlineAt, &timeline.pausedAt); err != nil {
+			return "", nil, err
+		}
+		rowsBySection[key] = timeline
+	}
+	return model, rowsBySection, rows.Err()
+}
+
+func applyIELTSTimeline(owner *attempts.QuestionOwner, timeline ieltsTimelineOwner) {
+	owner.SectionTimelineState = timeline.state
+	owner.SectionTimelineStartedAt = studentNullTimePtr(timeline.startedAt)
+	owner.SectionTimelineDeadlineAt = studentNullTimePtr(timeline.deadlineAt)
+	owner.SectionTimelinePausedAt = studentNullTimePtr(timeline.pausedAt)
 }
 
 func (v2Resolver) CanonicalizeQuestions(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]attempts.QuestionOwner, error) {
@@ -254,7 +395,8 @@ func (v2Resolver) CanonicalizeQuestions(ctx context.Context, q tx.Tx, attemptID 
 func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]attempts.QuestionOwner, error) {
 	query := `SELECT eq.id, eq.question_id, m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key,` +
 		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds,` +
-		` COALESCE(r.timing_model, ''), ma.entry_confirmed_at, ma.entry_entered_at` +
+		` COALESCE(r.timing_model, ''), ma.entry_confirmed_at, ma.entry_entered_at,` +
+		` COALESCE(its.state, ''), its.started_at, its.deadline_at, its.paused_at` +
 		` FROM assessment_exam_questions eq` +
 		` JOIN assessment_modules m ON m.id = eq.module_id` +
 		` JOIN assessment_sections s ON s.id = m.section_id` +
@@ -263,6 +405,7 @@ func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, qu
 		` JOIN student_attempts sa ON sa.id = ?` +
 		` LEFT JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id` +
 		` LEFT JOIN assessment_module_attempts ma ON ma.module_id = m.id AND ma.attempt_id = ?` +
+		` LEFT JOIN ielts_attempt_section_timelines its ON its.attempt_id = sa.id AND its.section_key = s.section_key` +
 		` WHERE (eq.id IN (` + sqlPlaceholders(len(questionIDs)) + `) OR eq.question_id IN (` + sqlPlaceholders(len(questionIDs)) + `))` +
 		` AND s.exam_version_id = sa.published_version_id`
 	args := make([]any, 0, 2*len(questionIDs)+2)
@@ -285,17 +428,23 @@ func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, qu
 	for rows.Next() {
 		var examQuestionID, questionID, moduleID, sectionKey, state string
 		var providerKey sql.NullString
-		var startedAt, entryConfirmedAt, entryEnteredAt sql.NullTime
+		var startedAt, entryConfirmedAt, entryEnteredAt, timelineStartedAt, timelineDeadlineAt, timelinePausedAt sql.NullTime
 		var allocated, extension, accumulatedPaused sql.NullInt64
 		var ownerTimingModel string
+		var timelineState string
 		if err := rows.Scan(
 			&examQuestionID, &questionID, &moduleID, &sectionKey, &state, &providerKey,
 			&startedAt, &allocated, &extension, &accumulatedPaused,
 			&ownerTimingModel, &entryConfirmedAt, &entryEnteredAt,
+			&timelineState, &timelineStartedAt, &timelineDeadlineAt, &timelinePausedAt,
 		); err != nil {
 			return nil, err
 		}
 		owner := attempts.QuestionOwner{CanonicalQuestionID: examQuestionID, ModuleID: moduleID, SectionKey: sectionKey, TimingModel: ownerTimingModel}
+		owner.SectionTimelineState = timelineState
+		owner.SectionTimelineStartedAt = studentNullTimePtr(timelineStartedAt)
+		owner.SectionTimelineDeadlineAt = studentNullTimePtr(timelineDeadlineAt)
+		owner.SectionTimelinePausedAt = studentNullTimePtr(timelinePausedAt)
 		if startedAt.Valid {
 			value := startedAt.Time.UTC()
 			owner.ModuleStartedAt = &value
@@ -447,7 +596,8 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 	var timingModel sql.NullString
 	var active sql.NullString
 	var waiting sql.NullBool
-	err := q.QueryRowContext(ctx, `SELECT id, status, timing_model, active_section_key, waiting_for_next_section FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE`, scheduleID).Scan(&id, &status, &timingModel, &active, &waiting)
+	var completionReason sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT id, status, timing_model, active_section_key, waiting_for_next_section, COALESCE(completion_reason, '') FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE`, scheduleID).Scan(&id, &status, &timingModel, &active, &waiting, &completionReason)
 	now, terr := dbNow(ctx, q)
 	if terr != nil {
 		return attempts.RuntimeGate{}, terr
@@ -464,6 +614,7 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 		}
 	}
 	gate.Now = now
+	gate.CompletionReason = completionReason.String
 	if timingModel.Valid {
 		gate.TimingModel = timingModel.String
 	}
@@ -545,13 +696,24 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 		reqID = uuid.NewString()
 	}
 	snapshotFields := map[string]any{"attemptId": attemptID, "scheduleId": scheduleID, "digest": digest, "submissionId": submissionID}
+	// Seal-time answer authority, resolved once: ACT scoring (which needs it
+	// first) and the compatibility projection read the same materialized answers.
+	var storedAnswers, storedWriting, storedFlags sql.NullString
+	sealed := false
 	if provider == "act" && s.scorer != nil {
-		var answers []byte
-		var versionID string
-		if err := q.QueryRowContext(ctx, `SELECT answers, published_version_id FROM student_attempts WHERE id = ? FOR UPDATE`, attemptID).Scan(&answers, &versionID); err != nil {
+		if storedAnswers, storedWriting, storedFlags, err = sealAnswerBlobs(ctx, q, attemptID); err != nil {
 			return err
 		}
-		fields, err := s.scorer.ScoreAttempt(ctx, q, attemptID, versionID, json.RawMessage(answers))
+		sealed = true
+		answers := json.RawMessage(storedAnswers.String)
+		if !storedAnswers.Valid {
+			answers = nil
+		}
+		var versionID string
+		if err := q.QueryRowContext(ctx, `SELECT published_version_id FROM student_attempts WHERE id = ?`, attemptID).Scan(&versionID); err != nil {
+			return err
+		}
+		fields, err := s.scorer.ScoreAttempt(ctx, q, attemptID, versionID, answers)
 		if err != nil {
 			return err
 		}
@@ -559,7 +721,7 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 			snapshotFields[key] = value
 		}
 		if detailed, ok := s.scorer.(terminalization.DetailedAttemptScorer); ok {
-			details, err := detailed.ScoreAttemptDetails(ctx, q, attemptID, versionID, json.RawMessage(answers))
+			details, err := detailed.ScoreAttemptDetails(ctx, q, attemptID, versionID, answers)
 			if err != nil {
 				return err
 			}
@@ -598,7 +760,12 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 	// answer map and a fully answered exam read as "answers were not saved" in
 	// review — for every question type, because the loss was the whole map.
 	// Publish the same sealed answer maps the terminalization seal publishes.
-	answers, writingAnswers, flags, err := sealCompatibilityAnswerMaps(ctx, q, attemptID)
+	if !sealed {
+		if storedAnswers, storedWriting, storedFlags, err = sealAnswerBlobs(ctx, q, attemptID); err != nil {
+			return err
+		}
+	}
+	answers, writingAnswers, flags, err := decodeSealAnswerMaps(storedAnswers, storedWriting, storedFlags)
 	if err != nil {
 		return err
 	}
@@ -632,33 +799,39 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 	return outbox.EnqueueInTx(ctx, q, "attempt_terminalization", attemptID, revision+1, "attempt_terminalized", json.RawMessage(payload))
 }
 
-// sealCompatibilityAnswerMaps returns the answer maps the compatibility
-// final_submission carries. Protocol-2 (row-first) attempts rebuild the legacy
-// blob columns from attempt_responses_v2 rows — the seal-time correctness
-// point, so grading never sees a stale blob — and protocol-1 attempts keep
-// their authoritative V1 blobs untouched.
-func sealCompatibilityAnswerMaps(ctx context.Context, q tx.Tx, attemptID string) (map[string]any, map[string]any, map[string]any, error) {
+// sealAnswerBlobs returns the answer blobs a seal publishes. Protocol-2
+// (row-first) attempts rebuild the legacy blob columns from
+// attempt_responses_v2 rows — the seal-time correctness point, so scoring and
+// grading never see a stale blob — and protocol-1 attempts keep their
+// authoritative V1 blobs untouched.
+func sealAnswerBlobs(ctx context.Context, q tx.Tx, attemptID string) (storedAnswers, storedWriting, storedFlags sql.NullString, err error) {
 	var protocolVersion int
-	var storedAnswers, storedWriting, storedFlags sql.NullString
-	if err := q.QueryRowContext(ctx,
+	if err = q.QueryRowContext(ctx,
 		`SELECT COALESCE(protocol_version, 1), answers, writing_answers, flags FROM student_attempts WHERE id = ? FOR UPDATE`,
 		attemptID).Scan(&protocolVersion, &storedAnswers, &storedWriting, &storedFlags); err != nil {
-		return nil, nil, nil, err
+		return
 	}
 	if protocolVersion >= 2 {
-		blobs, err := attempts.MaterializeBlobs(ctx, q, attemptID)
-		if err != nil {
-			return nil, nil, nil, err
+		blobs, merr := attempts.MaterializeBlobs(ctx, q, attemptID)
+		if merr != nil {
+			err = merr
+			return
 		}
-		if _, err := q.ExecContext(ctx,
+		if _, err = q.ExecContext(ctx,
 			`UPDATE student_attempts SET answers=?, writing_answers=?, flags=? WHERE id=?`,
 			blobs.Answers, blobs.WritingAnswers, blobs.Flags, attemptID); err != nil {
-			return nil, nil, nil, err
+			return
 		}
 		storedAnswers = sql.NullString{String: blobs.Answers, Valid: true}
 		storedWriting = sql.NullString{String: blobs.WritingAnswers, Valid: true}
 		storedFlags = sql.NullString{String: blobs.Flags, Valid: true}
 	}
+	return
+}
+
+// decodeSealAnswerMaps decodes the sealed blobs into the answer maps the
+// compatibility final_submission carries.
+func decodeSealAnswerMaps(storedAnswers, storedWriting, storedFlags sql.NullString) (map[string]any, map[string]any, map[string]any, error) {
 	decode := func(raw sql.NullString) (map[string]any, error) {
 		out := map[string]any{}
 		if !raw.Valid || strings.TrimSpace(raw.String) == "" {
@@ -700,9 +873,10 @@ func v2BatchHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var body struct {
-			LeaseEpoch   uint64                     `json:"leaseEpoch"`
-			ControlEpoch uint64                     `json:"controlEpoch"`
-			Commands     []attempts.ResponseCommand `json:"commands"`
+			LeaseEpoch   uint64                               `json:"leaseEpoch"`
+			ControlEpoch uint64                               `json:"controlEpoch"`
+			Commands     []attempts.ResponseCommand           `json:"commands"`
+			ModuleClose  *attempts.SATModuleCloseWriteContext `json:"moduleClose,omitempty"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &body); err != nil {
 			httpx.WriteError(w, r, err)
@@ -718,7 +892,7 @@ func v2BatchHandler(app *App) http.HandlerFunc {
 		}
 		// B2: locker routes via RUNTIME_SNAPSHOT (snapshot pre-gate when on,
 		// today's FOR UPDATE path when off). Rollback = off.
-		res, err := app.Attempts.SaveResponses(r.Context(), bearer, attempts.SaveResponsesCommand{AttemptID: chi.URLParam(r, "attemptID"), LeaseEpoch: body.LeaseEpoch, ControlEpoch: body.ControlEpoch, Commands: body.Commands}, v2Resolver{}, app.RuntimeLockerFor())
+		res, err := app.Attempts.SaveResponses(r.Context(), bearer, attempts.SaveResponsesCommand{AttemptID: chi.URLParam(r, "attemptID"), LeaseEpoch: body.LeaseEpoch, ControlEpoch: body.ControlEpoch, Commands: body.Commands, ModuleClose: body.ModuleClose}, v2Resolver{}, app.RuntimeLockerFor())
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -822,18 +996,57 @@ func loadV2SubmitResponse(ctx context.Context, db *sql.DB, attemptID string, res
 	}, nil
 }
 
+// v2AckColumns is the acknowledgement projection shared by the batched and
+// the single-id lookup.
+const v2AckColumns = `SELECT client_write_id, question_id, client_version, outcome, server_revision, response_hash, CAST(canonical_response AS CHAR) FROM attempt_mutations_v2 WHERE attempt_id = ? AND `
+
+// loadV2Acknowledgements returns the stored ack for each write id, in the
+// given order, skipping ids with no ledger row. The immutable ledger rows are
+// read with one IN statement per attempts.MaxBatchCommands distinct ids
+// (a validated submit carries at most that many) instead of one per id.
 func loadV2Acknowledgements(ctx context.Context, db *sql.DB, attemptID string, writeIDs []string) ([]attempts.Ack, error) {
 	acks := make([]attempts.Ack, 0, len(writeIDs))
+	if len(writeIDs) == 0 {
+		return acks, nil
+	}
+	unique := make([]string, 0, len(writeIDs))
+	seen := make(map[string]struct{}, len(writeIDs))
 	for _, writeID := range writeIDs {
-		var ack attempts.Ack
-		var raw string
-		if err := db.QueryRowContext(ctx, `SELECT client_write_id, question_id, client_version, outcome, server_revision, response_hash, CAST(canonical_response AS CHAR) FROM attempt_mutations_v2 WHERE attempt_id = ? AND client_write_id = ?`, attemptID, writeID).Scan(&ack.WriteID, &ack.QuestionID, &ack.ClientVersion, &ack.Outcome, &ack.ServerRevision, &ack.ContentHash, &raw); err != nil {
-			if err == sql.ErrNoRows {
-				continue
-			}
+		if _, ok := seen[writeID]; !ok {
+			seen[writeID] = struct{}{}
+			unique = append(unique, writeID)
+		}
+	}
+	stored := make(map[string]v2StoredAck, len(unique))
+	for start := 0; start < len(unique); start += attempts.MaxBatchCommands {
+		chunk := unique[start:min(start+attempts.MaxBatchCommands, len(unique))]
+		args := make([]any, 0, len(chunk)+1)
+		args = append(args, attemptID)
+		for _, writeID := range chunk {
+			args = append(args, writeID)
+		}
+		if err := scanV2Acks(ctx, db, v2AckColumns+"client_write_id IN ("+sqlPlaceholders(len(chunk))+")", args, stored); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal([]byte(raw), &ack.CanonicalResponse); err != nil {
+	}
+	for _, writeID := range writeIDs {
+		row, ok := stored[writeID]
+		if !ok {
+			// client_write_id compares under utf8mb4_unicode_ci, so a stored id
+			// may differ in bytes from the requested one; the single-id lookup
+			// keeps that collation-equal match exactly as before.
+			var found bool
+			var err error
+			row, found, err = loadV2AckByWriteID(ctx, db, attemptID, writeID)
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				continue
+			}
+		}
+		ack := row.ack
+		if err := json.Unmarshal([]byte(row.raw), &ack.CanonicalResponse); err != nil {
 			return nil, err
 		}
 		if ack.CanonicalResponse.EliminatedOptions == nil {
@@ -845,6 +1058,38 @@ func loadV2Acknowledgements(ctx context.Context, db *sql.DB, attemptID string, w
 		acks = append(acks, ack)
 	}
 	return acks, nil
+}
+
+// v2StoredAck is one ledger row before its canonical response is decoded.
+type v2StoredAck struct {
+	ack attempts.Ack
+	raw string
+}
+
+func scanV2Acks(ctx context.Context, db *sql.DB, query string, args []any, into map[string]v2StoredAck) error {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row v2StoredAck
+		if err := rows.Scan(&row.ack.WriteID, &row.ack.QuestionID, &row.ack.ClientVersion, &row.ack.Outcome, &row.ack.ServerRevision, &row.ack.ContentHash, &row.raw); err != nil {
+			return err
+		}
+		into[row.ack.WriteID] = row
+	}
+	return rows.Err()
+}
+
+func loadV2AckByWriteID(ctx context.Context, db *sql.DB, attemptID, writeID string) (v2StoredAck, bool, error) {
+	var row v2StoredAck
+	err := db.QueryRowContext(ctx, v2AckColumns+"client_write_id = ?", attemptID, writeID).
+		Scan(&row.ack.WriteID, &row.ack.QuestionID, &row.ack.ClientVersion, &row.ack.Outcome, &row.ack.ServerRevision, &row.ack.ContentHash, &row.raw)
+	if err == sql.ErrNoRows {
+		return row, false, nil
+	}
+	return row, err == nil, err
 }
 
 // v2ProviderResolver implements attempts.ProviderResolver: the provider
@@ -946,7 +1191,7 @@ func v2SnapshotHandler(app *App) http.HandlerFunc {
 		// render 401 even when ATTEMPT_VERIFY=stateless).
 		claims, verr := verifyAttemptReadBearer(app, r, bearer)
 		if verr != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential."))
+			writeAttemptVerificationError(w, r, verr)
 			return
 		}
 		if claims.AttemptID != attemptID {
@@ -1093,6 +1338,8 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 			ClientSessionID string  `json:"clientSessionId"`
 			Nickname        *string `json:"nickname"`
 			IELTSCourse     *string `json:"ieltsCourse"`
+			// Configurable SAT registration answers; omitted on legacy forms.
+			RegistrationForm *assessmentforms.RegistrationSubmission `json:"registrationForm"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &body); err != nil {
 			httpx.WriteError(w, r, err)
@@ -1267,6 +1514,7 @@ func studentEntryHandler(app *App) http.HandlerFunc {
 		writeStudentEntry(w, r, app, studentEntryIdentity{
 			UserID: userID, DisplayName: displayName, Email: email, ScheduleID: scheduleID,
 			Code: wcode, AttemptID: att.AttemptID, ClientSessionID: clientSessionID, Proof: proof,
+			Registration: body.RegistrationForm,
 		})
 	}
 }
@@ -1286,6 +1534,16 @@ func studentEntryScheduleHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		var form *assessmentforms.PublicRegistrationForm
+		if app.DB != nil {
+			if form, err = assessmentforms.ScheduleRegistrationForm(r.Context(), app.DB, out.ID); err != nil {
+				httpx.WriteError(w, r, MapDBError(err))
+				return
+			}
+		}
+		httpx.WriteJSON(w, http.StatusOK, struct {
+			schedules.Schedule
+			RegistrationForm *assessmentforms.PublicRegistrationForm `json:"registrationForm"`
+		}{out, form})
 	}
 }

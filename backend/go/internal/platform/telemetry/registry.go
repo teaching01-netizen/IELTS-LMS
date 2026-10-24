@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -18,16 +19,41 @@ import (
 // schedule, user or session ids as label values; those belong in
 // logs/traces, never in metric labels.
 type Registry struct {
-	mu         sync.Mutex
-	counters   map[string]float64
-	gauges     map[string]float64
-	names      map[string]string
-	histograms map[string]map[string]float64
+	mu       sync.Mutex
+	counters map[string]float64
+	gauges   map[string]float64
+	names    map[string]string
+	// histograms: metric name -> normalized label set (labelSetKey) -> series.
+	histograms map[string]map[string]*histogramSeries
 }
 
 // NewRegistry builds an empty registry.
 func NewRegistry() *Registry {
-	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, names: map[string]string{}, histograms: map[string]map[string]float64{}}
+	return &Registry{counters: map[string]float64{}, gauges: map[string]float64{}, names: map[string]string{}, histograms: map[string]map[string]*histogramSeries{}}
+}
+
+// histogramBounds are the finite bucket upper bounds, ascending. The
+// millisecond bounds make single SQL statements and short transactions
+// visible; the rest serve the SAT handoff p99 alerts.
+var histogramBounds = [...]float64{0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5, 1, 2, 3, 5, 10, 15, 20, 30, 60, 120}
+
+// histogramLe is the exposition "le" value of each bound, then "+Inf".
+var histogramLe = func() []string {
+	le := make([]string, 0, len(histogramBounds)+1)
+	for _, bound := range histogramBounds {
+		le = append(le, fmt.Sprint(bound))
+	}
+	return append(le, "+Inf")
+}()
+
+// histogramSeries is one label set of a histogram as plain numbers. buckets
+// are NON-cumulative (index len(histogramBounds) is the overflow above the
+// last bound); Snapshot accumulates them into Prometheus "le" buckets.
+type histogramSeries struct {
+	labels  []labelPair
+	buckets [len(histogramBounds) + 1]uint64
+	count   uint64
+	sum     float64
 }
 
 // ObserveSeconds records a duration using bounded buckets suitable for SAT
@@ -41,27 +67,25 @@ func (r *Registry) ObserveSeconds(name string, value float64, labels ...string) 
 		return
 	}
 	name = sanitizeMetricName(name)
+	pairs := normalizeLabels(labels)
+	key := labelSetKey(pairs)
+	// First bound >= value: the one bucket this observation lands in.
+	bucket := sort.SearchFloat64s(histogramBounds[:], value)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	samples := r.histograms[name]
-	if samples == nil {
-		samples = map[string]float64{}
-		r.histograms[name] = samples
+	series := r.histograms[name]
+	if series == nil {
+		series = map[string]*histogramSeries{}
+		r.histograms[name] = series
 	}
-	for _, bound := range []float64{0.1, 0.5, 1, 2, 3, 5, 10, 15, 20, 30, 60, 120} {
-		key, _ := seriesKey(name+"_bucket", append(append([]string{}, labels...), "le", fmt.Sprint(bound)))
-		if value <= bound {
-			samples[key]++
-		} else if _, exists := samples[key]; !exists {
-			samples[key] = 0
-		}
+	h := series[key]
+	if h == nil {
+		h = &histogramSeries{labels: pairs}
+		series[key] = h
 	}
-	inf, _ := seriesKey(name+"_bucket", append(append([]string{}, labels...), "le", "+Inf"))
-	count, _ := seriesKey(name+"_count", labels)
-	sum, _ := seriesKey(name+"_sum", labels)
-	samples[inf]++
-	samples[count]++
-	samples[sum] += value
+	h.buckets[bucket]++
+	h.count++
+	h.sum += value
 	r.names[name] = "histogram"
 }
 
@@ -83,6 +107,28 @@ func newDefaultRegistry() *Registry {
 		{MSATFinalizeTotal, []string{"outcome", FinalizeRejected}},
 		{MSATHeartbeatTotal, []string{"path", HeartbeatMemory}},
 		{MSATHeartbeatTotal, []string{"path", HeartbeatInline}},
+		{MSATRecoveryBoundaryTotal, []string{"event", "opened"}},
+		{MSATRecoveryBoundaryTotal, []string{"event", "settled"}},
+		{MSATRecoveryBoundaryTotal, []string{"event", "expired"}},
+		{MSATRecoveryBoundaryTotal, []string{"event", "entry_expired"}},
+		{MSATRecoveryBoundaryTotal, []string{"event", "entry_resolved"}},
+		{MSATRecoveryBoundaryTotal, []string{"event", "resolved"}},
+		{MSATRecoveryRegistrationTotal, []string{"outcome", "registered"}},
+		{MSATRecoveryRegistrationTotal, []string{"outcome", "replayed"}},
+		{MSATRecoveryRegistrationTotal, []string{"outcome", "expired"}},
+		{MSATCloseAdmissionTotal, []string{"outcome", "admitted"}},
+		{MSATCloseAdmissionTotal, []string{"outcome", "admitted_after_wait"}},
+		{MSATCloseAdmissionTotal, []string{"outcome", "rejected"}},
+		{MSATCloseAdmissionTotal, []string{"outcome", "cancelled"}},
+		{MSATCloseAdmissionTotal, []string{"outcome", "timed_out"}},
+		{MSATRecoveryResolutionTotal, []string{"action", "continue_confirmed", "actor", "student", "outcome", "committed"}},
+		{MSATRecoveryResolutionTotal, []string{"action", "continue_confirmed", "actor", "student", "outcome", "replayed"}},
+		{MSATRecoveryResolutionTotal, []string{"action", "continue_confirmed", "actor", "staff", "outcome", "committed"}},
+		{MSATRecoveryResolutionTotal, []string{"action", "continue_confirmed", "actor", "staff", "outcome", "replayed"}},
+		{MSATRecoveryResolutionTotal, []string{"action", "activate_entry", "actor", "student", "outcome", "committed"}},
+		{MSATRecoveryResolutionTotal, []string{"action", "activate_entry", "actor", "student", "outcome", "replayed"}},
+		{MSATRecoveryResolutionTotal, []string{"action", "activate_entry", "actor", "staff", "outcome", "committed"}},
+		{MSATRecoveryResolutionTotal, []string{"action", "activate_entry", "actor", "staff", "outcome", "replayed"}},
 	} {
 		r.RegisterCounter(series.name, series.labels...)
 	}
@@ -108,6 +154,17 @@ func (r *Registry) RegisterCounter(name string, labelPairs ...string) {
 	if _, exists := r.counters[key]; !exists {
 		r.counters[key] = 0
 	}
+	r.names[mname] = "counter"
+}
+
+// SetCounter sets the counter series name{labelPairs...} to value. It is for
+// cumulative totals owned by another component (e.g. database/sql DBStats),
+// which only ever grow while that component lives.
+func (r *Registry) SetCounter(name string, value float64, labelPairs ...string) {
+	key, mname := seriesKey(name, labelPairs)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.counters[key] = value
 	r.names[mname] = "counter"
 }
 
@@ -149,7 +206,12 @@ func ResetForTest(r *Registry) {
 	defer r.mu.Unlock()
 	r.counters = map[string]float64{}
 	r.gauges = map[string]float64{}
-	r.histograms = map[string]map[string]float64{}
+	r.histograms = map[string]map[string]*histogramSeries{}
+}
+
+// SetCounter sets a cumulative counter on the process registry.
+func SetCounter(name string, value float64, labelPairs ...string) {
+	DefaultRegistry.SetCounter(name, value, labelPairs...)
 }
 
 // SetGauge sets a gauge on the process registry.
@@ -161,29 +223,66 @@ func SetGauge(name string, value float64, labelPairs ...string) {
 // Label pairs sort by key so insertion order never forks a series.
 func seriesKey(name string, pairs []string) (key, metricName string) {
 	metricName = sanitizeMetricName(name)
-	type kv struct{ k, v string }
-	var kvs []kv
+	return renderSeries(metricName, normalizeLabels(pairs), "", ""), metricName
+}
+
+type labelPair struct{ k, v string }
+
+// normalizeLabels sanitizes alternating key,value strings (a dangling key or
+// an empty sanitized key is dropped) and sorts them by key.
+func normalizeLabels(pairs []string) []labelPair {
+	var kvs []labelPair
 	for i := 0; i+1 < len(pairs); i += 2 {
 		k := sanitizeLabelName(pairs[i])
 		if k == "" {
 			continue
 		}
-		kvs = append(kvs, kv{k, pairs[i+1]})
+		kvs = append(kvs, labelPair{k, pairs[i+1]})
 	}
 	sort.Slice(kvs, func(i, j int) bool { return kvs[i].k < kvs[j].k })
+	return kvs
+}
+
+// labelSetKey identifies a normalized label set; only equality matters.
+func labelSetKey(kvs []labelPair) string {
+	if len(kvs) == 0 {
+		return ""
+	}
+	return renderSeries("", kvs, "", "")
+}
+
+// renderSeries writes metricName{k="v",...}, with the optional extra pair
+// (the histogram "le") inserted at its sorted position.
+func renderSeries(metricName string, kvs []labelPair, extraK, extraV string) string {
 	var sb strings.Builder
 	sb.WriteString(metricName)
-	if len(kvs) > 0 {
-		sb.WriteString("{")
-		for i, p := range kvs {
-			if i > 0 {
-				sb.WriteString(",")
-			}
-			fmt.Fprintf(&sb, "%s=%q", p.k, p.v)
-		}
-		sb.WriteString("}")
+	if len(kvs) == 0 && extraK == "" {
+		return sb.String()
 	}
-	return sb.String(), metricName
+	sb.WriteString("{")
+	n := 0
+	write := func(k, v string) {
+		if n > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(k)
+		sb.WriteString("=")
+		sb.WriteString(strconv.Quote(v))
+		n++
+	}
+	extraDone := extraK == ""
+	for _, p := range kvs {
+		if !extraDone && extraK < p.k {
+			write(extraK, extraV)
+			extraDone = true
+		}
+		write(p.k, p.v)
+	}
+	if !extraDone {
+		write(extraK, extraV)
+	}
+	sb.WriteString("}")
+	return sb.String()
 }
 
 func sanitizeMetricName(s string) string {
@@ -226,9 +325,14 @@ func (r *Registry) Snapshot() string {
 		value float64
 	}
 	var all []series
-	for name, samples := range r.histograms {
-		for key, value := range samples {
-			all = append(all, series{name: name, key: key, kind: "histogram", value: value})
+	type histogramCopy struct {
+		name string
+		histogramSeries
+	}
+	var histograms []histogramCopy
+	for name, set := range r.histograms {
+		for _, h := range set {
+			histograms = append(histograms, histogramCopy{name, *h})
 		}
 	}
 	for k, v := range r.counters {
@@ -242,6 +346,18 @@ func (r *Registry) Snapshot() string {
 		names[n] = kind
 	}
 	r.mu.Unlock()
+	// Exposition strings are built outside the lock, from the copied numbers.
+	for _, h := range histograms {
+		var cumulative uint64
+		for i, le := range histogramLe {
+			cumulative += h.buckets[i]
+			all = append(all, series{name: h.name, key: renderSeries(h.name+"_bucket", h.labels, "le", le), kind: "histogram", value: float64(cumulative)})
+		}
+		all = append(all,
+			series{name: h.name, key: renderSeries(h.name+"_count", h.labels, "", ""), kind: "histogram", value: float64(h.count)},
+			series{name: h.name, key: renderSeries(h.name+"_sum", h.labels, "", ""), kind: "histogram", value: h.sum},
+		)
+	}
 	sort.Slice(all, func(i, j int) bool {
 		if all[i].name != all[j].name {
 			return all[i].name < all[j].name
