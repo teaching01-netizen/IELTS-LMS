@@ -761,6 +761,20 @@
   }
 
   /*
+   * IELTS: a full-width bar flush with the viewport edges instead of a floating,
+   * width-capped card. Padding lives here so it can include the safe areas.
+   */
+  .student-exam-shell .student-exam-footer.student-ielts-footer,
+  .student-exam-footer.student-ielts-footer {
+    max-inline-size: none;
+    margin: 0;
+    border-width: 1px 0 0;
+    border-radius: 0;
+    padding-block: 0.25rem max(0.25rem, var(--student-safe-bottom));
+    padding-inline: max(0.5rem, var(--student-safe-left)) max(0.5rem, var(--student-safe-right));
+  }
+
+  /*
    * While the software keyboard is open the footer keeps its grid row but is
    * visually hidden and inert. display:none is intentionally avoided because
    * it would collapse the `auto` grid row and reflow the workspace.

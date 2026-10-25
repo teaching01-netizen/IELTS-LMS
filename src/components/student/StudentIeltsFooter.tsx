@@ -1,6 +1,5 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { Button } from '../ui/Button';
 import {
   countAnsweredQuestions,
   countQuestionSlots,
@@ -14,8 +13,19 @@ import type { StudentAnswer } from './providers/StudentRuntimeProvider';
 
 const pressClassName =
   'transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out';
+const focusClassName =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1';
+// 36px with a mouse, 44px under touch (HIG minimum) — one height for every control.
+const controlHeightClassName = 'h-9 min-w-9 pointer-coarse:h-11 pointer-coarse:min-w-11';
 
-const navButtonClassName = `${pressClassName} flex size-12 flex-shrink-0 items-center justify-center rounded-lg text-gray-900 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent`;
+// Chips start at full size and shrink (not wrap) when a long part meets a
+// narrow screen, so the bar stays one row; past the minimum the rail scrolls
+// and keeps the current question in view.
+const chipHeightClassName = 'h-9 pointer-coarse:h-11';
+const chipWidthClassName = 'w-9 min-w-7 pointer-coarse:w-11';
+const wideChipWidthClassName = 'w-14 min-w-12 pointer-coarse:w-16';
+
+const navButtonClassName = `${pressClassName} ${focusClassName} ${controlHeightClassName} flex flex-shrink-0 items-center justify-center rounded-lg text-gray-900 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent`;
 
 interface StudentIeltsFooterProps {
   questions: StudentQuestionDescriptor[];
@@ -28,9 +38,11 @@ interface StudentIeltsFooterProps {
 }
 
 /**
- * IELTS question footer for tablet widths. Row one holds the parts, position,
- * and Finish; row two shows every question number of the active part. Nothing
- * scrolls sideways: numbers wrap, so no question is hidden behind a rail.
+ * IELTS question footer for tablet widths, laid out like the computer-delivered
+ * test: one full-width track where the active part expands inline to its
+ * question numbers and every other part stretches to fill the rest as a
+ * "Part N a/b" tab. Finish shows only when submission is offered (self-paced);
+ * proctored delivery hides it.
  */
 export function StudentIeltsFooter({
   questions,
@@ -41,10 +53,6 @@ export function StudentIeltsFooter({
   onSubmit,
   showSubmitButton = true,
 }: StudentIeltsFooterProps) {
-  const totalQuestions = countQuestionSlots(questions);
-  const answeredCount = countAnsweredQuestions(questions, answers);
-  const hasUnanswered = totalQuestions > 0 && answeredCount < totalQuestions;
-
   const { items, currentIndex, canGoPrevious, canGoNext } = getStudentQuestionNavigationViewModel({
     questions,
     answers,
@@ -66,57 +74,118 @@ export function StudentIeltsFooter({
   }
   const parts = Array.from(itemsByPart, ([groupId, partItems]) => ({ groupId, items: partItems }));
   const activeGroupId = currentItem?.groupId ?? null;
-  const activePartIndex = parts.findIndex((part) => part.groupId === activeGroupId);
-  const activeItems = activePartIndex >= 0 ? (parts[activePartIndex]?.items ?? []) : [];
+
+  const activeChipsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    activeChipsRef.current
+      ?.querySelector('[aria-current="true"]')
+      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [currentQuestionId]);
 
   return (
     <footer
-      className="student-exam-footer student-ielts-footer flex flex-col gap-2 px-2 py-2 md:px-3"
+      className="student-exam-footer student-ielts-footer @container flex items-center gap-2 md:gap-3"
       role="contentinfo"
       aria-label="Question navigation and progress"
     >
-      <div className="flex min-w-0 items-center gap-2 md:gap-3">
-        <div
-          role="group"
-          aria-label="Parts"
-          className="flex min-w-0 flex-1 gap-1 rounded-xl bg-gray-100 p-1"
-        >
-          {parts.map((part, index) => {
-            const isActive = part.groupId === activeGroupId;
-            const partQuestions = questions.filter((question) => question.groupId === part.groupId);
-            const partTotal = countQuestionSlots(partQuestions);
-            const partAnswered = countAnsweredQuestions(partQuestions, answers);
-            const firstItem = part.items[0];
+      <div
+        role="group"
+        aria-label="Parts"
+        className="flex min-w-0 flex-1 items-center gap-1 rounded-xl bg-gray-100 p-0.5"
+      >
+        {parts.map((part, index) => {
+          const partNumber = index + 1;
 
+          if (part.groupId === activeGroupId) {
             return (
-              <button
+              <div
                 key={part.groupId}
-                type="button"
-                aria-current={isActive ? 'true' : undefined}
-                aria-label={`Part ${index + 1}, ${partAnswered} of ${partTotal} answered${isActive ? ', current' : ''}`}
-                onClick={() => {
-                  if (!isActive && firstItem) onNavigate(firstItem.navigationId);
-                }}
-                className={`${pressClassName} flex min-h-12 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-[length:var(--student-control-font-size)] font-semibold tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
-                  isActive ? 'bg-white text-gray-950 shadow-sm' : 'text-gray-700 hover:bg-gray-200'
-                }`}
+                className="flex min-w-0 items-center gap-1 rounded-lg bg-white py-0.5 pr-0.5 shadow-sm"
               >
-                <span className="truncate">Part {index + 1}</span>
-                <span className="flex-shrink-0 text-[length:var(--student-meta-font-size)] font-medium text-gray-600">
-                  {partAnswered}/{partTotal}
+                <span
+                  aria-hidden="true"
+                  className={`${controlHeightClassName} flex flex-shrink-0 items-center whitespace-nowrap px-2 text-[length:var(--student-control-font-size)] font-semibold text-gray-950`}
+                >
+                  Part {partNumber}
                 </span>
-              </button>
+                <div
+                  ref={activeChipsRef}
+                  role="group"
+                  aria-label={`Part ${partNumber} questions`}
+                  className="flex min-w-0 gap-0.5 overflow-x-auto p-0.5 @4xl:gap-1"
+                >
+                  {part.items.map((item) => {
+                    const isCurrent = item.current;
+                    const isFlagged = item.flagged;
+                    const isAnswered = item.answered;
+
+                    return (
+                      <button
+                        type="button"
+                        key={item.navigationId}
+                        onClick={() => onNavigate(item.navigationId)}
+                        className={`${pressClassName} ${focusClassName} ${chipHeightClassName} ${
+                          item.label.length > 2 ? wideChipWidthClassName : chipWidthClassName
+                        } relative flex items-center justify-center whitespace-nowrap rounded-lg border text-[length:var(--student-chip-font-size)] font-bold tabular-nums ${
+                          isCurrent
+                            ? 'border-blue-800 bg-blue-800 text-white hover:bg-blue-700'
+                            : isFlagged
+                              ? 'border-amber-700 bg-amber-100 text-amber-900 hover:bg-amber-200'
+                              : isAnswered
+                                ? 'border-green-700 bg-green-200 text-green-900 hover:bg-green-300'
+                                : 'border-gray-300 bg-white text-gray-800 hover:bg-gray-50'
+                        }`}
+                        aria-label={`Question ${item.label}${isCurrent ? ', current' : ''}${isFlagged ? ', flagged' : ''}${isAnswered ? ', answered' : ', not answered'}`}
+                        aria-current={isCurrent ? 'true' : undefined}
+                      >
+                        {item.label}
+                        {/* Answered is also a shape (underline), not only green. */}
+                        {isAnswered && !isCurrent ? (
+                          <span
+                            aria-hidden="true"
+                            className="absolute inset-x-2 bottom-1 h-0.5 rounded-full bg-current"
+                          />
+                        ) : null}
+                        {isFlagged && !isCurrent ? (
+                          <span
+                            aria-hidden="true"
+                            className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border border-white bg-amber-700"
+                          />
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             );
-          })}
-        </div>
+          }
 
-        <p className="hidden flex-shrink-0 whitespace-nowrap text-[length:var(--student-meta-font-size)] tabular-nums text-gray-600 sm:block">
-          <span className="font-semibold text-gray-900">{answeredCount}</span> of {totalQuestions}{' '}
-          answered
-        </p>
+          const partQuestions = questions.filter((question) => question.groupId === part.groupId);
+          const partTotal = countQuestionSlots(partQuestions);
+          const partAnswered = countAnsweredQuestions(partQuestions, answers);
+          const firstItem = part.items[0];
 
+          return (
+            <button
+              type="button"
+              aria-label={`Part ${partNumber}, ${partAnswered} of ${partTotal} answered`}
+              onClick={() => {
+                if (firstItem) onNavigate(firstItem.navigationId);
+              }}
+              className={`${pressClassName} ${focusClassName} ${chipHeightClassName} flex min-w-fit flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-[length:var(--student-control-font-size)] @4xl:px-2.5 font-semibold tabular-nums text-gray-700 hover:bg-gray-200`}
+            >
+              Part {partNumber}
+              <span className="hidden text-[length:var(--student-meta-font-size)] font-medium text-gray-500 @4xl:inline">
+                {partAnswered}/{partTotal}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-shrink-0 items-center gap-1">
         {items.length > 0 ? (
-          <div className="flex flex-shrink-0 items-center gap-1">
+          <>
             <button
               type="button"
               className={navButtonClassName}
@@ -129,10 +198,6 @@ export function StudentIeltsFooter({
             >
               <ChevronLeft size={22} aria-hidden="true" />
             </button>
-            <span className="min-w-[4.5rem] whitespace-nowrap text-center text-[length:var(--student-control-font-size)] font-semibold tabular-nums text-gray-900">
-              <span className="sr-only">Current question </span>
-              {currentItem ? currentItem.label : '—'} of {totalQuestions}
-            </span>
             <button
               type="button"
               className={navButtonClassName}
@@ -145,68 +210,19 @@ export function StudentIeltsFooter({
             >
               <ChevronRight size={22} aria-hidden="true" />
             </button>
-          </div>
+          </>
         ) : null}
 
         {showSubmitButton ? (
-          <Button
-            variant={hasUnanswered ? 'warning' : 'primary'}
-            size="sm"
-            className="min-w-[4.5rem] flex-shrink-0"
+          <button
+            type="button"
             onClick={onSubmit}
+            className={`${pressClassName} ${focusClassName} ${controlHeightClassName} ml-1 flex flex-shrink-0 items-center rounded-lg bg-gray-900 px-4 text-[length:var(--student-control-font-size)] font-semibold text-white hover:bg-gray-800 active:bg-gray-950`}
           >
             Finish
-          </Button>
+          </button>
         ) : null}
       </div>
-
-      {activeItems.length > 0 ? (
-        <div
-          role="group"
-          aria-label={`Part ${activePartIndex + 1} questions`}
-          className="flex flex-wrap gap-1.5"
-        >
-          {activeItems.map((item) => {
-            const isCurrent = item.current;
-            const isFlagged = item.flagged;
-            const isAnswered = item.answered;
-
-            return (
-              <button
-                type="button"
-                key={item.navigationId}
-                onClick={() => onNavigate(item.navigationId)}
-                className={`${pressClassName} relative flex size-12 items-center justify-center rounded-lg border text-[length:var(--student-chip-font-size)] font-bold tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1 ${
-                  isCurrent
-                    ? 'border-blue-800 bg-blue-800 text-white hover:bg-blue-700'
-                    : isFlagged
-                      ? 'border-amber-700 bg-amber-100 text-amber-900 hover:bg-amber-200'
-                      : isAnswered
-                        ? 'border-green-700 bg-green-200 text-green-900 hover:bg-green-300'
-                        : 'border-gray-300 bg-white text-gray-800 hover:bg-gray-100'
-                }`}
-                aria-label={`Question ${item.label}${isCurrent ? ', current' : ''}${isFlagged ? ', flagged' : ''}${isAnswered ? ', answered' : ', not answered'}`}
-                aria-current={isCurrent ? 'true' : undefined}
-              >
-                {item.label}
-                {/* Answered is also a shape (underline), not only green. */}
-                {isAnswered && !isCurrent ? (
-                  <span
-                    aria-hidden="true"
-                    className="absolute inset-x-2 bottom-1 h-0.5 rounded-full bg-current"
-                  />
-                ) : null}
-                {isFlagged && !isCurrent ? (
-                  <span
-                    aria-hidden="true"
-                    className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border border-white bg-amber-700"
-                  />
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
     </footer>
   );
 }

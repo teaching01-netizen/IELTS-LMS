@@ -41,13 +41,13 @@ function renderFooter(overrides: Partial<Parameters<typeof StudentIeltsFooter>[0
 }
 
 describe('StudentIeltsFooter', () => {
-  it('shows every question of the active part in one wrapping group', () => {
+  it('shows every question of the active part in one row', () => {
     renderFooter();
 
     const partQuestions = screen.getByRole('group', { name: 'Part 1 questions' });
     const chips = within(partQuestions).getAllByRole('button');
 
-    expect(partQuestions).toHaveClass('flex-wrap');
+    expect(partQuestions).not.toHaveClass('flex-wrap');
     expect(chips).toHaveLength(13);
     expect(chips.filter((chip) => chip.hasAttribute('aria-current'))).toHaveLength(1);
   });
