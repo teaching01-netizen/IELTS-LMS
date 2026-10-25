@@ -42,23 +42,49 @@ export function useConfigRouteController(
   const examRef = useRef<ExamEntity | undefined>(undefined);
   const versionRef = useRef<ExamVersion | null>(null);
   const isSavingRef = useRef(false);
+  // Loads are fenced by request generation: only the newest load for the
+  // current exam may install state. Edits are counted so a load (including
+  // the post-save refresh) that started before a newer edit never resets it.
+  const loadSeqRef = useRef(0);
+  const editSeqRef = useRef(0);
+  /** Edit sequence the server has acknowledged (loaded or saved). */
+  const ackEditSeqRef = useRef(0);
 
   const loadExam = useCallback(async () => {
+    const seq = ++loadSeqRef.current;
+    const isCurrent = () => seq === loadSeqRef.current;
+    if (examRef.current && examRef.current.id !== examId) {
+      // A real entity transition: never let the previous exam stand in for this one.
+      examRef.current = undefined;
+      versionRef.current = null;
+      editSeqRef.current = 0;
+      ackEditSeqRef.current = 0;
+      setExam(undefined);
+      setConfig(undefined);
+      setIsDirty(false);
+    }
     if (!examId) {
       setError('Exam ID not found');
       setIsLoading(false);
       return;
     }
 
+    const editSeqAtStart = editSeqRef.current;
     setIsLoading(true);
     setError(null);
 
     try {
       const entity = await examAuthoringFacade.repository.getExamById(examId);
+      if (!isCurrent()) return;
       if (!entity) {
         // Exam was deleted or never existed: leave exam/config unset and error
         // null so the route renders an "Exam Not Found" surface with a way
         // back to Admin, instead of a Retry that can never succeed.
+        examRef.current = undefined;
+        versionRef.current = null;
+        setExam(undefined);
+        setConfig(undefined);
+        setIsDirty(false);
         return;
       }
 
@@ -73,27 +99,35 @@ export function useConfigRouteController(
         entity.currentPublishedVersionId,
       ].filter((candidate): candidate is string => Boolean(candidate));
       if (candidateVersionIds.length === 0) {
+        versionRef.current = null;
+        setConfig(undefined);
         setError('No version exists for this exam');
-        setIsLoading(false);
         return;
       }
 
       let currentVersion: ExamVersion | null = null;
       for (const candidateId of candidateVersionIds) {
         currentVersion = await examAuthoringFacade.repository.getVersionById(candidateId);
+        if (!isCurrent()) return;
         if (currentVersion?.configSnapshot) break;
       }
       if (currentVersion?.configSnapshot) {
         versionRef.current = currentVersion;
-        setConfig(currentVersion.configSnapshot);
-        setIsDirty(false);
+        // Server config replaces local config only when no unacknowledged
+        // edit exists and none arrived while this load was in flight.
+        if (editSeqRef.current === editSeqAtStart && editSeqRef.current === ackEditSeqRef.current) {
+          setConfig(currentVersion.configSnapshot);
+          setIsDirty(false);
+        }
       } else {
+        versionRef.current = null;
         setError('Current version not found');
       }
     } catch (loadError) {
+      if (!isCurrent()) return;
       setError(loadError instanceof Error ? loadError.message : 'Failed to load exam');
     } finally {
-      setIsLoading(false);
+      if (isCurrent()) setIsLoading(false);
     }
   }, [examId]);
 
@@ -108,6 +142,7 @@ export function useConfigRouteController(
       }
 
       const syncedConfig = syncConfigWithStandards(nextConfig);
+      editSeqRef.current += 1;
       setConfig(syncedConfig);
       setIsDirty(true);
     },
@@ -125,10 +160,11 @@ export function useConfigRouteController(
 
     const entity = examRef.current;
     const version = versionRef.current;
-    if (!entity || !version) {
+    if (!entity || entity.id !== examId || !version) {
       setError('Current draft version not found');
       return false;
     }
+    const savedEditSeq = editSeqRef.current;
 
     isSavingRef.current = true;
     setIsSaving(true);
@@ -148,7 +184,11 @@ export function useConfigRouteController(
         return false;
       }
 
-      setIsDirty(false);
+      if (examRef.current?.id !== examId) return true;
+      // Edits typed while the save was in flight stay dirty for the next save;
+      // the refresh below only adopts server config when none exist.
+      ackEditSeqRef.current = savedEditSeq;
+      if (editSeqRef.current === savedEditSeq) setIsDirty(false);
       await loadExam();
       return true;
     } finally {

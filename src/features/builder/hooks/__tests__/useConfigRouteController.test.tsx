@@ -394,3 +394,110 @@ describe('useConfigRouteController', () => {
     expect(result.current.isSaving).toBe(false);
   });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+function examFixture(id: string) {
+  const config = createDefaultConfig('Academic', 'Academic');
+  config.general.title = `Title ${id}`;
+  const content = createInitialExamState(`Title ${id}`, 'Academic');
+  content.config = config;
+  return {
+    entity: { id, currentDraftVersionId: `ver-${id}` },
+    version: { id: `ver-${id}`, configSnapshot: config, contentSnapshot: content },
+  };
+}
+
+describe('useConfigRouteController entity identity (F3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('a slow load for A cannot install A after navigating to B', async () => {
+    const a = examFixture('a');
+    const b = examFixture('b');
+    const slowA = deferred<typeof a.entity>();
+    mockGetExamById.mockImplementation((id: string) => (id === 'a' ? slowA.promise : Promise.resolve(b.entity)));
+    mockGetVersionById.mockImplementation((id: string) => Promise.resolve(id === 'ver-a' ? a.version : b.version));
+
+    const { result, rerender } = renderHook(({ examId }) => useConfigRouteController(examId), {
+      initialProps: { examId: 'a' },
+    });
+    rerender({ examId: 'b' });
+    await waitFor(() => expect(result.current.config?.general.title).toBe('Title b'));
+
+    await act(async () => {
+      slowA.resolve(a.entity);
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.exam?.id).toBe('b');
+    expect(result.current.config?.general.title).toBe('Title b');
+  });
+
+  it('navigating to a missing exam never shows the previous exam as the new one', async () => {
+    const a = examFixture('a');
+    mockGetExamById.mockImplementation((id: string) => Promise.resolve(id === 'a' ? a.entity : null));
+    mockGetVersionById.mockResolvedValue(a.version);
+
+    const { result, rerender } = renderHook(({ examId }) => useConfigRouteController(examId), {
+      initialProps: { examId: 'a' },
+    });
+    await waitFor(() => expect(result.current.config?.general.title).toBe('Title a'));
+
+    rerender({ examId: 'missing' });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.exam).toBeUndefined();
+    expect(result.current.config).toBeUndefined();
+
+    await act(async () => {
+      expect(await result.current.handleSaveConfig()).toBe(false);
+    });
+    expect(mockSaveDraft).not.toHaveBeenCalled();
+  });
+
+  it('a save acknowledgement keeps edits made while the save was in flight', async () => {
+    const a = examFixture('a');
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockResolvedValue(a.version);
+    const save = deferred<{ success: boolean }>();
+    mockSaveDraft.mockReturnValueOnce(save.promise).mockResolvedValue({ success: true });
+
+    const { result } = renderHook(() => useConfigRouteController('a'));
+    await waitFor(() => expect(result.current.config).toBeDefined());
+    const base = result.current.config!;
+
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...base, general: { ...base.general, title: 'Edit 1' } });
+    });
+    let saving!: Promise<boolean>;
+    act(() => {
+      saving = result.current.handleSaveConfig();
+    });
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...base, general: { ...base.general, title: 'Edit 2' } });
+    });
+    await act(async () => {
+      save.resolve({ success: true });
+      await saving;
+    });
+
+    await waitFor(() => expect(result.current.isSaving).toBe(false));
+    expect(result.current.config?.general.title).toBe('Edit 2');
+
+    await act(async () => {
+      await result.current.handleSaveConfig();
+    });
+    expect(mockSaveDraft).toHaveBeenLastCalledWith(
+      'a',
+      expect.objectContaining({ config: expect.objectContaining({ general: expect.objectContaining({ title: 'Edit 2' }) }) }),
+      'Builder User',
+    );
+  });
+});
