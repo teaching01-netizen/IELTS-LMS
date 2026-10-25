@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -1024,7 +1025,28 @@ func (s *Service) Publish(ctx context.Context, examID string, actorID string, re
 		return nil
 	})
 	emission.flush(err)
+	if err == nil {
+		s.warmPublishedMedia(ctx, out)
+	}
 	return out, err
+}
+
+// warmPublishedMedia starts the student renditions of figures that published
+// content references by URL (IELTS), so a room's first open of a figure is
+// not served the full-size original. SAT question media is warmed by its
+// publish preflight. Best effort: publish has committed, so a failure only
+// leaves the figure to render on first open.
+func (s *Service) warmPublishedMedia(ctx context.Context, version Version) {
+	if s.mediaVerifier == nil {
+		return
+	}
+	ids := media.ManagedAssetIDs(string(version.Content))
+	if len(ids) == 0 {
+		return
+	}
+	if _, err := s.mediaVerifier.VerifyRenderableAssets(ctx, ids); err != nil {
+		slog.WarnContext(ctx, "publish: warm media renditions failed", "exam_id", version.ExamID, "version_id", version.ID, "error", err)
+	}
 }
 
 // PublishPreflight is the draft identity a media preflight verified. A zero

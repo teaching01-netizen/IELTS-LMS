@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	examdomain "example.com/ielts-proctoring/internal/exams"
+	"example.com/ielts-proctoring/internal/media"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/satpublish"
 )
@@ -115,7 +116,9 @@ func moduleMediaIndex(sections []DeliverySection) map[string]map[string]struct{}
 					// with assetId fields, so index exact managed-media paths from the
 					// pinned Science version too. Other exam sections remain unchanged.
 					if section.SectionKey == "science" {
-						addLegacyManagedMediaReferences(assets, string(content.raw))
+						for _, id := range media.ManagedAssetIDs(string(content.raw)) {
+							assets[id] = struct{}{}
+						}
 					}
 				}
 			}
@@ -123,27 +126,6 @@ func moduleMediaIndex(sections []DeliverySection) map[string]map[string]struct{}
 		}
 	}
 	return index
-}
-
-func addLegacyManagedMediaReferences(assets map[string]struct{}, raw string) {
-	const pathPrefix = "/api/v1/media/"
-	const contentSuffix = "/content"
-	for {
-		prefixIndex := strings.Index(raw, pathPrefix)
-		if prefixIndex < 0 {
-			return
-		}
-		raw = raw[prefixIndex+len(pathPrefix):]
-		suffixIndex := strings.Index(raw, contentSuffix)
-		if suffixIndex < 0 {
-			return
-		}
-		assetID := raw[:suffixIndex]
-		if assetID != "" && !strings.ContainsAny(assetID, "/\\?#\"'<> \t\r\n") {
-			assets[assetID] = struct{}{}
-		}
-		raw = raw[suffixIndex+len(contentSuffix):]
-	}
 }
 
 type mediaIndexKey struct {
