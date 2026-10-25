@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
-import { gradingGateway } from '../infrastructure/gradingGateway';
-import type { SessionDetailFilters, ReviewDraft, StudentResult, WritingAnnotation } from '../../../types/grading';
+import { filterStudentSubmissions, gradingGateway } from '../infrastructure/gradingGateway';
+import type {
+  SessionDetailFilters,
+  ReviewDraft,
+  StudentResult,
+  StudentSubmission,
+  WritingAnnotation,
+} from '../../../types/grading';
 
 type GradingServiceResult<T> = Readonly<{
   success: boolean;
@@ -62,14 +68,21 @@ export function useSessionQueueSummary() {
   });
 }
 
+/**
+ * The submissions response does not depend on the filters (they are applied
+ * client-side), so the cache holds the unfiltered list under the session key
+ * and each observer derives its own view.
+ */
 export function useSessionSubmissions(sessionId: string, filters?: SessionDetailFilters) {
   return useQuery({
     queryKey: gradingKeys.submissions(sessionId),
     queryFn: async () =>
       requireResultData(
-        await gradingGateway.service.getSessionStudentSubmissions(sessionId, filters),
+        await gradingGateway.service.getSessionStudentSubmissions(sessionId),
         'Failed to load session submissions',
       ),
+    select: (submissions: StudentSubmission[]) =>
+      filters ? filterStudentSubmissions(submissions, filters) : submissions,
     enabled: sessionId.length > 0,
     ...liveQueryPolicy,
     refetchInterval: pollingIntervalWithJitter,

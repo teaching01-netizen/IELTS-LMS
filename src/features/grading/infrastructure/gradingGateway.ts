@@ -3,6 +3,7 @@ import { gradingErrorMessage, gradingService } from '../../../services/gradingSe
 import type { ReviewDraft, SessionDetailFilters, WritingAnnotation } from '../../../types/grading';
 
 export { gradingErrorMessage, gradingRepository, gradingService };
+export { filterStudentSubmissions } from '../../../services/gradingFilters';
 export { backendGet, backendPost, isBackendNotFound } from '@services/backendBridge';
 
 export const gradingGateway = {
