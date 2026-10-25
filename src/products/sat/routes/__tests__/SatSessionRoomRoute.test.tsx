@@ -113,6 +113,38 @@ describe('SatSessionRoomRoute', () => {
     });
   });
 
+  it('carries confirmed creation into the ready room and focuses its title', async () => {
+    const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+    render(<MemoryRouter initialEntries={[{ pathname: '/sat/sessions/sched-1', state: { satCreatedRoom: 'sched-1' } }]}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.getByText('Room created.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Morning', level: 1 })).toHaveFocus());
+    expect(scroll).toHaveBeenCalledWith({ top: 0, behavior: 'instant' });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss room creation confirmation' }));
+    expect(screen.queryByText('Room created.')).not.toBeInTheDocument();
+    scroll.mockRestore();
+  });
+
+  it('keeps creation confirmed while its page loads, including a partial snapshot', () => {
+    controllerMock.mockReturnValue({ schedules: [schedule], runtimeSnapshots: [], sessions: [], alerts: [], error: null, isLoading: true, reload: vi.fn() });
+    render(<MemoryRouter initialEntries={[{ pathname: '/sat/sessions/sched-1', state: { satCreatedRoom: 'sched-1' } }]}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.getByText('Room created. Opening your room…')).toBeInTheDocument();
+    expect(screen.queryByText('SAT room not found')).not.toBeInTheDocument();
+  });
+
+  it('retries loading the confirmed room without suggesting creation again', () => {
+    const reload = vi.fn();
+    controllerMock.mockReturnValue({ schedules: [], runtimeSnapshots: [], sessions: [], alerts: [], error: 'Connection interrupted', isLoading: false, reload });
+    render(<MemoryRouter initialEntries={[{ pathname: '/sat/sessions/sched-1', state: { satCreatedRoom: 'sched-1' } }]}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.getByText('Room created, but its page could not load')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('does not show another room’s creation confirmation on an ordinary visit', () => {
+    render(<MemoryRouter initialEntries={[{ pathname: '/sat/sessions/sched-1', state: { satCreatedRoom: 'different-room' } }]}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.queryByText('Room created.')).not.toBeInTheDocument();
+  });
+
   it('returns Back to the originating test and selected room', () => {
     const from = '/sat/exams/sat-1/access?link=link-1';
     render(

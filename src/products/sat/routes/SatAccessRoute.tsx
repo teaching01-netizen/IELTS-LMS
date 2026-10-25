@@ -1,5 +1,6 @@
+import { useSatNavigate } from "../ui/useSatNavigate";
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { SatPageError, SatPageLoading } from '../ui/SatPage';
 import { useAccessDistributionOverview } from '../../../features/exam-authoring/api/assessmentAccessLinkQueries';
 import { useExamQuery } from '../../../features/exam-authoring/api/examQueries';
@@ -27,7 +28,7 @@ import { satListReturnTarget } from '../ui/useSatListReturn';
  */
 export function SatAccessRoute() {
   const { examId } = useParams<{ examId: string }>();
-  const navigate = useNavigate();
+  const navigate = useSatNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const existingCollaboration = useSatAuthoringCollaboration();
   const examQuery = useExamQuery(examId ?? '');
@@ -60,11 +61,11 @@ export function SatAccessRoute() {
   const canRunSessions = canViewExamResponses(role);
   const session = useAccessSessionBindings({
     canRun: canRunSessions,
-    onOpenRoom: (scheduleId) => {
+    onOpenRoom: (scheduleId, options) => {
       const linkId = distributionQuery.data?.links.find((link) => link.scheduleId === scheduleId)?.id ?? searchParams.get('link');
       const params = new URLSearchParams(linkId ? { link: linkId } : {});
       navigate(`/sat/sessions/${encodeURIComponent(scheduleId)}`, {
-        state: { from: examId ? `${examWorkspacePath(examId, 'delivery')}${params.size ? `?${params}` : ''}` : '/sat/exams' },
+        state: { satCreatedRoom: options?.created ? scheduleId : undefined, from: examId ? `${examWorkspacePath(examId, 'delivery')}${params.size ? `?${params}` : ''}` : '/sat/exams' },
       });
     },
     onOpenResults: (scheduleId) => navigate(examId ? `${examWorkspacePath(examId, 'responses')}?${new URLSearchParams({ access: scheduleId })}` : '/sat/results'),

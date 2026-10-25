@@ -1,6 +1,6 @@
+import { useSatNavigate } from "../../../products/sat/ui/useSatNavigate";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
 import type {
   AssessmentAuthoringShell,
   AssessmentValidationIssue,
@@ -132,7 +132,7 @@ export interface AuthoringWorkspaceProps {
 
 export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", chrome = DEFAULT_CHROME }: AuthoringWorkspaceProps) {
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
+  const navigate = useSatNavigate();
   const authSession = useOptionalAuthSession();
   const workspaceCollaboration = useSatAuthoringCollaboration();
   const announceWorkspaceCommand = useCallback(
@@ -1028,7 +1028,7 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
         setCreateRoomOpen(false);
         const returnToDelivery = `${examWorkspacePath(examId, "delivery")}?${new URLSearchParams({ link: link.id })}`;
         if (chrome.showResponses) {
-          navigate(`/sat/sessions/${encodeURIComponent(link.scheduleId)}`, { state: { from: returnToDelivery } });
+          navigate(`/sat/sessions/${encodeURIComponent(link.scheduleId)}`, { state: { from: returnToDelivery, satCreatedRoom: link.scheduleId } });
         } else {
           navigate(returnToDelivery);
         }

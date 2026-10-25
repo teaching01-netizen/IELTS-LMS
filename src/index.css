@@ -5970,3 +5970,53 @@ textarea.sat-input {
     background: white !important;
   }
 }
+
+/* SAT navigation: a stable header and one brief content handoff. Native view
+ * transitions preserve the old pixels until the router commits the next page;
+ * unsupported browsers use the same restrained, mount-only content entrance. */
+.sat-product .sat-workspace-enter {
+  animation: sat-workspace-in var(--sat-staff-duration-panel, 180ms) var(--sat-staff-ease-standard, cubic-bezier(0.4, 0, 0.2, 1)) both;
+}
+@keyframes sat-workspace-in {
+  from { opacity: 0.88; }
+  to { opacity: 1; }
+}
+/* Snapshot geometry never interpolates between editor, settings and room. */
+::view-transition-group(sat-workspace),
+::view-transition-group(sat-exam-header) {
+  animation: none;
+}
+/* Never layer readable old and new questions over each other. */
+::view-transition-old(sat-workspace) { display: none; }
+::view-transition-new(sat-workspace) {
+  animation: sat-workspace-in 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  mix-blend-mode: normal;
+}
+::view-transition-old(sat-exam-header) { display: none; }
+::view-transition-new(sat-exam-header) { animation: none; }
+html:has(.sat-staff-root)::view-transition { pointer-events: none; }
+html:has(.sat-staff-root)::view-transition-old(root) { display: none; }
+html:has(.sat-staff-root)::view-transition-new(root) { animation: none; }
+/* Native-capable browsers use snapshots for navigation. Disabling the mount
+ * fallback permanently prevents a second entrance when the snapshot ends. */
+@supports (view-transition-name: sat-workspace) {
+  .sat-product .sat-workspace-enter { animation: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sat-product .sat-workspace-enter,
+  ::view-transition-group(sat-workspace),
+  ::view-transition-group(sat-exam-header),
+  ::view-transition-old(sat-workspace),
+  ::view-transition-new(sat-workspace) {
+    animation: none !important;
+  }
+  ::view-transition-old(sat-workspace) { display: none; }
+}
+/* Network/chunk waiting is a truthful status, never an invented progress bar. */
+.sat-navigation-pending {
+  opacity: 0;
+  animation: sat-workspace-in 100ms ease-out 200ms forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sat-navigation-pending { animation: none; opacity: 1; }
+}

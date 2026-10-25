@@ -1,5 +1,6 @@
+import { useSatNavigate } from "../../../../products/sat/ui/useSatNavigate";
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import type { ExamEntity } from "../../../../types/domain";
 import { requestAuthoringDraftOnEntry } from "../../application/authoringEntryIntent";
 import { AuthoringConfirmDialog } from "../authoringPrimitives";
@@ -23,7 +24,7 @@ export const SETTINGS_FORMS_PANEL_ID = "sat-settings-forms";
  * `ExamSettingsSheet` from the header's Quick settings action.
  */
 export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
-  const navigate = useNavigate();
+  const navigate = useSatNavigate();
   const [searchParams] = useSearchParams();
   const examQuery = useExamQuery(exam.id);
   const chrome = useExamWorkspaceChrome(exam.id);
@@ -80,7 +81,7 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
         onPreview={() => go(`/sat/exams/${encodeURIComponent(exam.id)}/preview`)}
         {...(chrome.canCreateSession ? { onCreateSession: () => go(deliveryDestination(exam.id)) } : {})}
       />
-      <div className="mx-auto w-full max-w-[920px] px-4 pb-20 pt-8 sm:px-6">
+      <div className="sat-workspace-enter mx-auto w-full max-w-[920px] px-4 pb-20 pt-8 sm:px-6">
         <section aria-labelledby="exam-settings-delivery">
           <div className="mb-6">
             <h2 id="exam-settings-delivery" className="text-[length:var(--sat-staff-type-title-size,28px)] font-semibold leading-[var(--sat-staff-type-title-line,34px)] tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">Settings</h2>

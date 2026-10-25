@@ -1,6 +1,7 @@
+import { useSatNavigate } from "../ui/useSatNavigate";
 import { BarChart3 } from 'lucide-react';
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useExamQuery } from '../../../features/exam-authoring/api/examQueries';
 import { ExamSettingsSheet } from '../../../features/exam-authoring/ui/settings/ExamSettingsSheet';
 import { ExamWorkspaceHeader } from '../../../features/exam-authoring/ui/shell/ExamWorkspaceHeader';
@@ -18,7 +19,7 @@ import { SatResultsContent } from './SatResultsRoute';
  */
 export function SatExamResponsesRoute() {
   const { examId } = useParams<{ examId: string }>();
-  const navigate = useNavigate();
+  const navigate = useSatNavigate();
   const examQuery = useExamQuery(examId);
   const chrome = useExamWorkspaceChrome(examId ?? '');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -54,6 +55,7 @@ export function SatExamResponsesRoute() {
         onPreview={() => navigate(`/sat/exams/${encodeURIComponent(exam.id)}/preview`)}
         {...(chrome.canCreateSession ? { onCreateSession: () => navigate(deliveryDestination(exam.id)) } : {})}
       />
+      <div className="sat-workspace-enter">
       <SatResultsContent
         lockedExamId={exam.id}
         basePath={examWorkspacePath(exam.id, 'responses')}
@@ -66,6 +68,7 @@ export function SatExamResponsesRoute() {
           />
         }
       />
+      </div>
       {settingsOpen ? <ExamSettingsSheet examId={exam.id} open onClose={() => setSettingsOpen(false)} onEditExam={() => navigate(examWorkspacePath(exam.id, 'questions'))} /> : null}
     </div>
   );

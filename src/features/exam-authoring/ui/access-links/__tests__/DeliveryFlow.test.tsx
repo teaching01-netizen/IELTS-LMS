@@ -140,7 +140,7 @@ describe("Delivery: first-time setup", () => {
     const bindings = session({ "sched-new": READY });
     renderDashboard([link("new", "New group")], { createRequest: { id: 1 }, session: bindings });
     fireEvent.click(await screen.findByRole("button", { name: "Finish create" }));
-    expect(bindings.onOpenRoom).toHaveBeenCalledWith("sched-new");
+    expect(bindings.onOpenRoom).toHaveBeenCalledWith("sched-new", { created: true });
     // The row confirms in place, should the host keep the viewer here.
     expect(within(screen.getByRole("button", { name: "Open New group" })).getByText("Room created")).toBeInTheDocument();
   });

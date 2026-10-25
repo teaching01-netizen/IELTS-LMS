@@ -42,7 +42,7 @@ export function SpineLayout({
       </a>
       {header}
       {banner}
-      <div className="sat-spine__body">
+      <div className="sat-spine__body sat-workspace-enter">
         {queue ? (
           <div className="sat-spine__queue" aria-label="Question queue">
             {queue}

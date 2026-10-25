@@ -127,6 +127,6 @@ export interface AccessSessionBindings {
   stale: boolean;
   refreshing: boolean;
   onRefresh: () => void;
-  onOpenRoom: (scheduleId: string) => void;
+  onOpenRoom: (scheduleId: string, options?: { created?: boolean }) => void;
   onOpenResults: (scheduleId: string) => void;
 }

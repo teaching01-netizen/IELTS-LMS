@@ -1,6 +1,6 @@
+import { useSatNavigate } from "../ui/useSatNavigate";
 import { useMemo, useState } from 'react';
 import { ArrowRight, CalendarPlus, Radio, SearchX, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthSession } from '../../../features/auth/authSession';
 import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/api/authoringEntryIntent';
@@ -71,7 +71,7 @@ const BUCKET_LABEL: Record<SatListBucket, string> = { upcoming: 'Upcoming', live
 const ROW_GRID = 'grid-cols-[minmax(0,1fr)_16px] gap-x-4 md:grid-cols-[minmax(0,1fr)_184px_112px_136px_16px]';
 
 export function SatSessionsRoute() {
-  const navigate = useNavigate();
+  const navigate = useSatNavigate();
   const queryClient = useQueryClient();
   const { session } = useAuthSession();
   const summariesQuery = useProctorSessionSummaries(4_000, 'sat');
@@ -247,7 +247,7 @@ export function SatSessionsRoute() {
           onCreated={(scheduleId) => {
             void queryClient.invalidateQueries({ queryKey: proctorKeys.sessions('sat') });
             setCreateOpen(false);
-            navigate('/sat/sessions/' + encodeURIComponent(scheduleId));
+            navigate('/sat/sessions/' + encodeURIComponent(scheduleId), { state: { satCreatedRoom: scheduleId } });
           }}
         />
       ) : null}

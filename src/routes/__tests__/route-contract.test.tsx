@@ -1,3 +1,4 @@
+import { isValidElement } from 'react';
 import { describe, expect, it } from 'vitest';
 import { matchRoutes } from 'react-router-dom';
 import { appRoutes } from '../index';
@@ -36,6 +37,24 @@ describe('route contracts', () => {
     // Session room is nested under the /sat parent, so the leaf path is
     // relative (same URL /sat/sessions/:scheduleId as the manifest entry).
     expect(getLeafPath('/sat/sessions/session-1')).toBe('sessions/:scheduleId');
+  });
+
+  it.each([
+    ['/sat/exams/exam-1', ['admin', 'builder']],
+    ['/sat/exams/exam-1/settings', ['admin', 'builder']],
+    ['/sat/exams/exam-1/access', ['admin', 'builder']],
+    ['/sat/exams/exam-1/responses', ['admin']],
+    ['/sat/exams/exam-1/preview', ['admin', 'builder']],
+    ['/sat/exams/exam-1/release', ['admin', 'builder']],
+    ['/sat/sessions/session-1', ['admin', 'proctor']],
+  ])('loads %s before changing screens and retains its authorization boundary', async (path, roles) => {
+    const leaf = matchRoutes(appRoutes, path)?.at(-1)?.route;
+    expect(typeof leaf?.lazy).toBe('function');
+    if (typeof leaf?.lazy !== 'function') throw new Error('Missing route loader');
+    const resolved = await leaf.lazy();
+    expect(isValidElement(resolved.element)).toBe(true);
+    if (!isValidElement<{ allowedRoles?: string[] }>(resolved.element)) throw new Error('Missing authorization boundary');
+    expect(resolved.element.props.allowedRoles).toEqual(roles);
   });
 
   it('treats student phases as internal runtime state', () => {

@@ -714,6 +714,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
     audienceChoice === "listed" || accessMode === "student_code" ? "Student code" : "Name + email",
     audienceLabel.trim() || "No class label",
   ].join(" · ");
+  const openedPathRef = useRef(window.location.pathname);
   const headerExamTitle = isSat ? props.link?.examTitle ?? props.examTitle ?? null : null;
 
   return (
@@ -735,7 +736,7 @@ export function AccessLinkEditorSheet(props: AccessLinkEditorSheetProps) {
           event.preventDefault();
           const opener = restoreFocusRef.current;
           restoreFocusRef.current = null;
-          restoreAuthoringFocus(opener);
+          if (window.location.pathname === openedPathRef.current) restoreAuthoringFocus(opener);
         }}
         className="sat-product sat-staff-root authoring-mobile-sheet au-elevation-sheet flex h-full w-full max-w-[560px] flex-col gap-0 border-l border-[var(--sat-staff-border-hairline)] bg-white p-0 sm:max-w-[560px]"
       >

@@ -1,5 +1,5 @@
 import { lazy, Suspense } from "react";
-import { Navigate, createBrowserRouter, useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, createBrowserRouter, useNavigate, useNavigation, useSearchParams } from "react-router-dom";
 import { AppShell } from "../../components/AppShell";
 import { AppLoadingSkeleton } from "../../components/ui/AppLoadingSkeleton";
 import { SatListSkeleton } from "../../products/sat/ui/SatPage";
@@ -113,9 +113,6 @@ const SatExamLibraryRoute = lazy(() =>
 const SatSessionsRoute = lazy(() =>
   import("../../products/sat/routes/SatSessionsRoute").then((module) => ({ default: module.SatSessionsRoute }))
 );
-const SatSessionRoomRoute = lazy(() =>
-  import("../../products/sat/routes/SatSessionRoomRoute").then((module) => ({ default: module.SatSessionRoomRoute }))
-);
 const SatResultsRoute = lazy(() =>
   import("../../products/sat/routes/SatResultsRoute").then((module) => ({ default: module.SatResultsRoute }))
 );
@@ -128,22 +125,12 @@ const SatResultDetailRoute = lazy(() =>
 const SatAttemptAnswersRoute = lazy(() =>
   import("../../products/sat/routes/SatAttemptAnswersRoute").then((module) => ({ default: module.SatAttemptAnswersRoute }))
 );
-const SatAccessRoute = lazy(() =>
-  import("../../products/sat/routes/SatAccessRoute").then((module) => ({ default: module.SatAccessRoute }))
-);
-const SatExamResponsesRoute = lazy(() =>
-  import("../../products/sat/routes/SatExamResponsesRoute").then((module) => ({ default: module.SatExamResponsesRoute }))
-);
 const SatScoreConversionRoute = lazy(() =>
   import("../../products/sat/routes/SatScoreConversionRoute").then((module) => ({ default: module.SatScoreConversionRoute }))
 );
 const SatAnsweredPrintRoute = lazy(() =>
   import("../../features/student-delivery/routes/SatAnsweredPrintRoute").then((module) => ({ default: module.SatAnsweredPrintRoute }))
 );
-const ExamSettingsRoute = lazy(() =>
-  import("../../features/exam-authoring/routes/ExamSettingsRoute").then((module) => ({ default: module.ExamSettingsRoute }))
-);
-
 const DevHighlightSelectionRoute = lazy(() =>
   import("./dev/HighlightSelectionDebugRoute").then((module) => ({
     default: module.HighlightSelectionDebugRoute,
@@ -242,6 +229,24 @@ function withAuth(
   allowedRoles?: Array<"admin" | "builder" | "proctor" | "grader" | "student">
 ) {
   return <RequireAuth allowedRoles={allowedRoles}>{element}</RequireAuth>;
+}
+
+/** Data-route chunks load before the workspace changes, preserving context. */
+function SatWorkspaceRoot() {
+  const navigation = useNavigation();
+  const createdRoom = navigation.location?.state?.satCreatedRoom;
+  const openingCreatedRoom = typeof createdRoom === "string"
+    && navigation.location?.pathname === `/sat/sessions/${encodeURIComponent(createdRoom)}`;
+  return (
+    <>
+      <SatRoot />
+      {navigation.state !== "idle" ? (
+        <p role="status" className="sat-product sat-staff-root sat-navigation-pending fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-surface)] px-4 py-2 text-[14px] text-[var(--sat-staff-text-secondary)] shadow-sm">
+          {openingCreatedRoom ? "Room created. Opening your room…" : "Opening workspace…"}
+        </p>
+      ) : null}
+    </>
+  );
 }
 
 const baseRoutes = [
@@ -370,7 +375,7 @@ const baseRoutes = [
         errorElement: <RouteErrorBoundary />,
         element: withAuth(
           <Suspense fallback={<SatRouteLoadingFallback />}>
-            <SatRoot />
+            <SatWorkspaceRoot />
           </Suspense>,
           ["admin", "builder", "proctor", "grader"]
         ),
@@ -427,60 +432,60 @@ const baseRoutes = [
           },
           {
             path: "sessions/:scheduleId",
-            element: withAuth(
-              <Suspense fallback={<SatRouteLoadingFallback />}><SatSessionRoomRoute /></Suspense>,
-              ["admin", "proctor"]
-            ),
+            lazy: async () => {
+              const { SatSessionRoomRoute } = await import("../../products/sat/routes/SatSessionRoomRoute");
+              return { element: withAuth(<SatSessionRoomRoute />, ["admin", "proctor"]) };
+            },
           },
           {
             path: "exams/:examId",
             errorElement: <RouteErrorBoundary />,
-            element: withAuth(
-              <Suspense fallback={<RouteLoadingFallback />}><ProviderBuilderRoute /></Suspense>,
-              ["admin", "builder"]
-            ),
+            lazy: async () => {
+              const { ProviderBuilderRoute } = await import("../../features/exam-authoring/routes/ProviderBuilderRoute");
+              return { element: withAuth(<ProviderBuilderRoute />, ["admin", "builder"]) };
+            },
           },
           {
             path: "exams/:examId/release",
             errorElement: <RouteErrorBoundary />,
-            element: withAuth(
-              <Suspense fallback={<RouteLoadingFallback />}><ProviderReviewRoute /></Suspense>,
-              ["admin", "builder"]
-            ),
+            lazy: async () => {
+              const { ProviderReviewRoute } = await import("../../features/exam-authoring/routes/ProviderReviewRoute");
+              return { element: withAuth(<ProviderReviewRoute />, ["admin", "builder"]) };
+            },
           },
           {
             path: "exams/:examId/preview",
             errorElement: <RouteErrorBoundary />,
-            element: withAuth(
-              <Suspense fallback={<RouteLoadingFallback />}><ProviderPreviewRoute /></Suspense>,
-              ["admin", "builder"]
-            ),
+            lazy: async () => {
+              const { ProviderPreviewRoute } = await import("../../features/exam-authoring/routes/ProviderPreviewRoute");
+              return { element: withAuth(<ProviderPreviewRoute />, ["admin", "builder"]) };
+            },
           },
           {
             path: "exams/:examId/access",
             errorElement: <RouteErrorBoundary />,
-            element: withAuth(
-              <Suspense fallback={<SatRouteLoadingFallback />}><SatAccessRoute /></Suspense>,
-              ["admin", "builder"]
-            ),
+            lazy: async () => {
+              const { SatAccessRoute } = await import("../../products/sat/routes/SatAccessRoute");
+              return { element: withAuth(<SatAccessRoute />, ["admin", "builder"]) };
+            },
           },
           {
             path: "exams/:examId/settings",
             errorElement: <RouteErrorBoundary />,
-            element: withAuth(
-              <Suspense fallback={<SatRouteLoadingFallback />}><ExamSettingsRoute /></Suspense>,
-              ["admin", "builder"]
-            ),
+            lazy: async () => {
+              const { ExamSettingsRoute } = await import("../../features/exam-authoring/routes/ExamSettingsRoute");
+              return { element: withAuth(<ExamSettingsRoute />, ["admin", "builder"]) };
+            },
           },
           {
             // Results are admin/grader/proctor only; the builder role must not
             // gain read access to results through the exam workspace.
             path: "exams/:examId/responses",
             errorElement: <RouteErrorBoundary />,
-            element: withAuth(
-              <Suspense fallback={<SatRouteLoadingFallback />}><SatExamResponsesRoute /></Suspense>,
-              ["admin"]
-            ),
+            lazy: async () => {
+              const { SatExamResponsesRoute } = await import("../../products/sat/routes/SatExamResponsesRoute");
+              return { element: withAuth(<SatExamResponsesRoute />, ["admin"]) };
+            },
           },
         ],
       },

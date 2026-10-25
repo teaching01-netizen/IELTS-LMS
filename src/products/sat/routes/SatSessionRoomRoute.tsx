@@ -1,6 +1,7 @@
+import { useSatNavigate } from "../ui/useSatNavigate";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, UserRound } from 'lucide-react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useParams } from 'react-router-dom';
 import { isExamDeliveryPath } from './satReturnPath';
 import { SatButton, SatPageError, SatPageLoading } from '../ui/SatPage';
 import { logError, logInfo } from '../../../shared/observability/errorLogger';
@@ -42,9 +43,14 @@ import '../ui/sat-session-room.css';
 const RELOAD_FAILED_SUFFIX = ' However, the live view could not refresh. Retry to confirm.';
 export function SatSessionRoomRoute() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
-  const navigate = useNavigate();
+  const navigate = useSatNavigate();
   // Arriving from a test's Sessions tab keeps Back pointed at that test and session.
-  const from = (useLocation().state as { from?: unknown } | null)?.from;
+  const location = useLocation();
+  const arrival = location.state as { from?: unknown; satCreatedRoom?: unknown } | null;
+  const from = arrival?.from;
+  const createdRoom = Boolean(scheduleId && arrival?.satCreatedRoom === scheduleId);
+  const [dismissedCreation, setDismissedCreation] = useState<string | null>(null);
+  const creationDismissed = dismissedCreation === scheduleId;
   const deliveryReturn = isExamDeliveryPath(from) ? from : null;
   const { session } = useAuthSession();
   const controller = useProctorRouteController({ providerKey: 'sat', initialScheduleId: scheduleId ?? null });
@@ -74,6 +80,18 @@ export function SatSessionRoomRoute() {
 
   const schedule = controller.schedules.find((item) => item.id === scheduleId) ?? null;
   const runtime = controller.runtimeSnapshots.find((item) => item.scheduleId === scheduleId) ?? null;
+  const roomReady = Boolean(schedule && runtime);
+  useEffect(() => {
+    if (!createdRoom || !roomReady) return;
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      const active = document.activeElement;
+      if (active === document.body || active?.id === 'sat-main') {
+        document.querySelector<HTMLElement>('[data-sat-room-title]')?.focus({ preventScroll: true });
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [createdRoom, roomReady, location.key]);
   const rememberedExamId = schedule?.examId ?? null;
   useEffect(() => {
     if (scheduleId && rememberedExamId) rememberRoom(scheduleId, rememberedExamId);
@@ -387,8 +405,8 @@ export function SatSessionRoomRoute() {
       );
 
   if (!scheduleId) return <SatPageError title="SAT room not found" description="A valid SAT room is required." retryLabel="Back to Rooms" onRetry={() => navigate('/sat/sessions')} />;
-  if (controller.isLoading && !schedule) return <SatPageLoading label="Opening SAT room…" />;
-  if (controller.error && !schedule) return <SatPageError title="SAT room could not load" description={controller.error} retryLabel="Retry" onRetry={() => void controller.reload()} />;
+  if (controller.isLoading && (!schedule || !runtime)) return <SatPageLoading label={createdRoom ? "Room created. Opening your room…" : "Opening SAT room…"} />;
+  if (controller.error && (!schedule || !runtime)) return <SatPageError title={createdRoom ? "Room created, but its page could not load" : "SAT room could not load"} description={controller.error} retryLabel="Retry" onRetry={() => void controller.reload()} />;
   if (!schedule || !runtime) return <SatPageError title="SAT room not found" description="This room is not part of the Digital SAT workspace." retryLabel="Back to Rooms" onRetry={() => navigate('/sat/sessions')} />;
 
   // The exam's Rooms tab reopens with this room highlighted and its settings open.
@@ -439,8 +457,14 @@ export function SatSessionRoomRoute() {
   const roomPanels = roomMode === 'prestart'
     ? [startCodePanel, entryPanel, attentionPanel]
     : [startCodePanel, attentionPanel, entryPanel];
-  const notices = isStale || message ? (
+  const notices = isStale || message || (createdRoom && !creationDismissed) ? (
     <>
+      {createdRoom && !creationDismissed ? (
+        <div role="status" className="flex min-w-0 items-center justify-between gap-3 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-surface)] px-4 py-2 text-[14px]">
+          <p><span className="font-semibold">Room created.</span> Your room is ready to manage.</p>
+          <SatButton variant="quiet" onClick={() => setDismissedCreation(scheduleId ?? null)} aria-label="Dismiss room creation confirmation">Dismiss</SatButton>
+        </div>
+      ) : null}
       {isStale ? (
         <div role="alert" className="sat-banner-enter flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-[var(--sat-staff-radius-card,14px)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-4 py-2 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
           <p className="min-w-0 flex-1 basis-60"><span className="font-semibold">Data may be out of date.</span> Risky room actions are paused until reconnection.</p>

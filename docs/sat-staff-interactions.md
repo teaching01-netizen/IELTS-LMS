@@ -75,3 +75,45 @@ Automated coverage includes staff portal scoping (and its absence outside SAT), 
 Existing action logging, API request identities, save-state/live-region semantics, Radix `data-state`, `aria-busy`, and list-return markers remain the observation points. This change introduces no analytics service or collection of student information. Timing values are design budgets, not measured production latency or frame-rate claims.
 
 Browser review uses the real shared components in a development-only fixture. Authenticated production journeys, physical-device profiling, actual OS reduced-motion settings, and full assistive-technology sessions require separate verification; component/CSS tests do not establish those results.
+
+## Authoring section and created-room handoffs (2026-10-25)
+
+**PROPOSED SAT adaptation of the explicitly requested `instacart-rappi-commerce-interaction-engineering` skill.** The task is repeated staff navigation (Questions ↔ Settings ↔ Rooms ↔ Responses), followed by managing a newly created room. React web, the installed React Router 7/Motion 12 stack, and existing save, authorization, and room-operation contracts remain the platform assumptions. These choices do not describe proprietary Instacart/Rappi behavior.
+
+```text
+Questions --flush acknowledged edits--> Settings / Rooms / Responses / Preview
+Settings --save or existing discard decision--> another exam section
+section click --> router loads destination module (source stays usable)
+              --> guarded route commits --> content reveals; header stays steady
+              --> saved window scroll and section-button focus restored
+
+Create room --> syncing --> creating --> confirmed receipt
+                                  |--> invalid / failed / unknown (existing recovery)
+confirmed receipt --> open /sat/sessions/:scheduleId
+                  --> loading: "Room created. Opening your room…"
+                  --> ready: full room + dismissible confirmation + heading focus
+                  --> read failure: creation remains confirmed; Retry reloads that room
+```
+
+| Component / variant | Contract and choreography |
+| --- | --- |
+| `useSatNavigate` / forward, replace, history | Uses the router's `viewTransition` option after the caller's existing save/unsaved-settings gate. Preserves state, replace, and history semantics. OS reduced motion skips native snapshots. Explicit opt-out remains available. |
+| SAT data routes / module pending | The router awaits the exam/room route module before replacing the source. A quiet status appears after 200ms for longer waits; confirmed creation has its own pending copy. No arbitrary navigation timeout or invented percentage. |
+| `ExamWorkspaceHeader` / selected section | Separate named snapshot prevents header travel or geometry interpolation. Selected-page semantics remain on real section actions. |
+| Content / native, fallback, reduced | New content fades from 0.88 to 1 over 180ms. Old readable content is not layered with new text. No directional slide, zoom, blur, spring, stagger, or exit wait. Native snapshot and live entrance do not stack. Unsupported browsers use a mount-only content entrance. Reduced motion is immediate. |
+| Window scroll / section arrival | Existing scroll-memory owner also restores forward section visits. Waits for the selected destination marker if content is lazy. New sections start at zero. Query-only edits do not trigger section focus. Existing inner editor state remains under its own controller. |
+| Focus / tab or created room | Section changes focus the current section button; confirmed room arrival focuses the room heading without scrolling. A newly active field/sheet keeps its focus. Route-changing room sheets do not restore focus into the source page. |
+| Created room / pending, ready, failed read | Confirmation travels with the returned schedule ID, never a speculative ID. A partial loading snapshot remains loading. Read errors retry the existing room; they do not restart creation. Existing offline, validation, unknown-result and idempotency recovery remain unchanged. |
+
+Existing backend TypeScript interfaces remain `CreateSatRoomRequest`, `CreateRoomState`, and `SatRoomReceipt` in `contracts/satCreateRoom.ts`. The receipt's `room.scheduleId` is the destination; the router marker `{ satCreatedRoom: scheduleId }` is a local confirmation cue, not a new API or authorization decision. `AccessSessionBindings.onOpenRoom(scheduleId, { created: true })` carries the cue from the exam's Rooms list. Ordinary room opens omit it. A successful create still invokes `onRoomCreated(room, receipt)` only after the existing authoritative operation resolves.
+
+Observable acceptance coverage:
+
+- Preserve the route's authorization guard when loading its module before navigation.
+- Preserve navigation state/options and skip native snapshots under reduced motion.
+- Wait for a delayed section, then restore its window scroll/focus; do not steal focus from an active field.
+- Keep confirmed room creation visible through loading/partial data and a failed destination read; Retry reads that room.
+- Focus the created room title, allow dismissing its confirmation, and reject another room's marker.
+- Keep the existing create failure, duplicate-submit, unknown-result recovery, dirty-settings and authoring save-gate tests passing.
+
+Instrumentation uses existing router navigation state, Radix focus state, the selected-section `data-sat-exam-section` marker, the room-title marker and live-region copy. No analytics service or new collection of student data is introduced. The ignored `e2e/.generated/sat-navigation-review.html` fixture exercises actual shared header/sheet/room primitives and router navigation with clearly labeled local sample content. Its native handoff count verifies the browser integration, not production performance. Authenticated staff journeys, OS-level preference toggling and physical-device profiling remain unverified.

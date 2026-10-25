@@ -179,7 +179,7 @@ export function SatRoot() {
         )}
 
         <SatWorkspaceNavContext.Provider value={workspaceItems}>
-        <main id="sat-main" tabIndex={-1} className={`min-h-screen focus:outline-none ${isDetailPage ? '' : 'pb-20 md:pb-0'}`}>
+        <main id="sat-main" tabIndex={-1} style={{ viewTransitionName: 'sat-workspace' }} className={`min-h-screen focus:outline-none ${isDetailPage ? '' : 'pb-20 md:pb-0'}`}>
           {collaborationExamId ? (
             <Suspense
               fallback={

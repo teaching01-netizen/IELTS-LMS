@@ -113,13 +113,38 @@ export function useSatScrollMemory(): void {
     };
   }, [key]);
 
+  const previousPath = useRef(location.pathname);
   const returning = navigationType === 'POP' || Boolean((location.state as ListReturnState)?.satLastOpened);
   useLayoutEffect(() => {
-    if (!returning) return;
+    const examSection = /^\/sat\/exams\/([^/]+)(?:\/(access|settings|responses))?\/?$/;
+    const previousExam = previousPath.current.match(examSection);
+    const nextExam = location.pathname.match(examSection);
+    const sectionChanged = previousPath.current !== location.pathname && Boolean(previousExam && nextExam && previousExam[1] === nextExam[1]);
+    previousPath.current = location.pathname;
+    if (!returning && !sectionChanged) return;
     const saved = readScroll(key);
-    if (saved === null) return;
-    // One frame lets cached list data render before the offset is applied.
-    const frame = window.requestAnimationFrame(() => window.scrollTo({ top: saved }));
-    return () => window.cancelAnimationFrame(frame);
-  }, [key, location.key, returning]);
+    if (saved === null && !sectionChanged) return;
+    let frame = 0;
+    const section = nextExam?.[2] === 'access' ? 'delivery' : nextExam?.[2] ?? 'questions';
+    const restore = () => {
+      const target = document.querySelector<HTMLElement>(`[data-sat-exam-section="${section}"][aria-current="page"]`);
+      if (sectionChanged && !target) return;
+      observer.disconnect();
+      frame = window.requestAnimationFrame(() => {
+        window.scrollTo({ top: saved ?? 0, behavior: 'instant' });
+        // A newly opened sheet or a user who has already started interacting
+        // owns focus; a route arrival must never take it back from them.
+        if (sectionChanged && (document.activeElement === document.body || document.activeElement?.id === 'sat-main')) {
+          target?.focus({ preventScroll: true });
+        }
+      });
+    };
+    const observer = new MutationObserver(restore);
+    if (sectionChanged) observer.observe(document.getElementById('sat-main') ?? document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-current', 'data-sat-exam-section'] });
+    restore();
+    return () => {
+      observer.disconnect();
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [key, location.key, location.pathname, returning]);
 }

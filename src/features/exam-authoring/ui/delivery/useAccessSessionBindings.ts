@@ -12,7 +12,7 @@ const POLL_MS = 6_000;
 interface Options {
   /** Only roles whose routes allow running sessions read session state at all. */
   canRun: boolean;
-  onOpenRoom: (scheduleId: string) => void;
+  onOpenRoom: (scheduleId: string, options?: { created?: boolean }) => void;
   onOpenResults: (scheduleId: string) => void;
 }
 

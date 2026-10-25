@@ -37,7 +37,7 @@ export function SatRoomWorkspace({
   return (
     <div
       ref={layoutRef}
-      className="sat-room sat-product bg-[var(--sat-staff-canvas,#f7f7f8)] text-[var(--sat-staff-text-primary,#1d1d1f)]"
+      className="sat-room sat-product sat-workspace-enter bg-[var(--sat-staff-canvas,#f7f7f8)] text-[var(--sat-staff-text-primary,#1d1d1f)]"
       data-sat-room-mode={mode}
       data-room-layout={layout}
     >

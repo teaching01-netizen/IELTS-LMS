@@ -480,7 +480,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     showToast("Room created");
     // The session is the object staff work with next: take runners straight to its waiting room.
     // Staff who cannot run sessions stay here, on the new row, which they can share.
-    if (session?.canRun) session.onOpenRoom(created.scheduleId);
+    if (session?.canRun) session.onOpenRoom(created.scheduleId, { created: true });
   };
 
   const rosterSource = prefillLink;
@@ -545,7 +545,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     return (
       <div className="sat-product min-h-screen bg-au-fill">
         {workspaceHeader}
-        <SatContainer>
+        <SatContainer className="sat-workspace-enter">
           <SatPageHeader eyebrow="Digital SAT" title="Rooms" description="Find a room for this exam and open it to share, start and monitor." />
           <SatListSkeleton rows={3} label="Loading Rooms" />
         </SatContainer>
@@ -556,7 +556,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     return (
       <div className="sat-product min-h-screen bg-au-fill">
         {workspaceHeader}
-        <SatContainer>
+        <SatContainer className="sat-workspace-enter">
           <div role="alert" className="mt-8 rounded-2xl border border-black/[0.06] bg-white p-6">
             <h1 className="text-[16px] font-semibold text-slate-900">Rooms could not load</h1>
             <p className="mt-1.5 text-[14px] leading-5 text-slate-500">{error}</p>
@@ -573,7 +573,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     return (
       <div className="sat-product min-h-screen bg-au-fill">
         {workspaceHeader}
-        <SatContainer>
+        <SatContainer className="sat-workspace-enter">
           <SatEmptyState
             icon={<Link2 size={20} aria-hidden="true" />}
             title="Create your first room"
@@ -610,7 +610,7 @@ export function StudentLinksDashboard({ exam, overview, isLoading, error, onRefr
     <div className="sat-product min-h-screen bg-au-fill text-slate-950">
       {workspaceHeader}
 
-      <SatContainer>
+      <SatContainer className="sat-workspace-enter">
         <SatPageHeader
           eyebrow={`${exam.title} · Version ${version.versionNumber}`}
           title="Rooms"

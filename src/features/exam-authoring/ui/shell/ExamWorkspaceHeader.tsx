@@ -97,7 +97,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
     ...(onQuickSettings ? [{ id: "quick-settings", label: "Quick settings", icon: Settings2, separatorBefore: true, onSelect: onQuickSettings }] : []),
   ];
   return (
-    <header className="exam-workspace-header sticky top-0 z-40 shrink-0 border-b border-[var(--sat-staff-border-header)] bg-[var(--sat-staff-surface-solid-fallback,#fff)]" data-testid="exam-workspace-header">
+    <header style={{ viewTransitionName: "sat-exam-header" }} className="exam-workspace-header sticky top-0 z-40 shrink-0 border-b border-[var(--sat-staff-border-header)] bg-[var(--sat-staff-surface-solid-fallback,#fff)]" data-testid="exam-workspace-header">
       <div className="mx-auto flex w-full max-w-[1240px] flex-wrap items-center gap-x-3 gap-y-2 px-4 pb-1 pt-2 sm:px-6">
         <div className="flex min-w-0 flex-1 basis-56 items-center gap-1">
           <nav aria-label="Breadcrumb" className="sat-breadcrumbs shrink-0">
@@ -188,6 +188,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
                 <button
                   type="button"
                   onClick={() => onSelectTab(tab)}
+                  data-sat-exam-section={tab}
                   aria-current={current ? "page" : undefined}
                   className={`exam-workspace-tab relative inline-flex min-h-11 items-center rounded-t-[var(--sat-staff-radius-control-sm,8px)] px-3 text-[14px] font-semibold leading-5 transition-colors focus-visible:outline-none sm:px-4 ${current ? "text-[var(--sat-staff-text-primary,#1d1d1f)]" : "text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)] hover:text-[var(--sat-staff-text-primary,#1d1d1f)]"}`}
                 >
