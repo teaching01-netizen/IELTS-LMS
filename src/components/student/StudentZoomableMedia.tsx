@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Minus, Plus, X } from 'lucide-react';
+import { isIeltsExamType, useStudentExamType } from './layout/studentExamTypeContext';
 
 type StudentZoomableMediaProps = {
   sources: string[];
@@ -44,7 +46,7 @@ export function StudentZoomableMedia({
   const normalizedSources = useMemo(
     () => sources.map((source) => source.trim()).filter(Boolean),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sourcesKey],
+    [sourcesKey]
   );
   const [sourceIndex, setSourceIndex] = useState(0);
   const [isOpen, setIsOpen] = useState(openOnMount);
@@ -56,6 +58,9 @@ export function StudentZoomableMedia({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const triggerButtonRef = useRef<HTMLButtonElement | null>(null);
   const focusRestoreTimerRef = useRef<number | null>(null);
+
+  // IELTS gets a full-screen viewer; ACT keeps the framed card.
+  const isIelts = isIeltsExamType(useStudentExamType());
 
   const safeSourceIndex = Math.min(sourceIndex, Math.max(0, normalizedSources.length - 1));
   const currentSource = normalizedSources[safeSourceIndex] ?? '';
@@ -95,8 +100,8 @@ export function StudentZoomableMedia({
       }
       const focusable = Array.from(
         dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        ),
+          'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
       );
       if (focusable.length === 0) {
         return;
@@ -140,8 +145,12 @@ export function StudentZoomableMedia({
     }
 
     const viewportRect = viewportRef.current.getBoundingClientRect();
-    const maxWidth = Math.max(1, viewportRect.width);
-    const maxHeight = Math.max(1, viewportRect.height);
+    // Fit inside the padding so 100% never scrolls.
+    const style = window.getComputedStyle(viewportRef.current);
+    const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    const maxWidth = Math.max(1, viewportRect.width - padX);
+    const maxHeight = Math.max(1, viewportRect.height - padY);
     const naturalWidth = Math.max(1, intrinsicSize.width);
     const naturalHeight = Math.max(1, intrinsicSize.height);
     const computed = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight);
@@ -226,6 +235,207 @@ export function StudentZoomableMedia({
 
   const annotationScale = zoom / DEFAULT_ZOOM;
 
+  const zoomedImage = (
+    <div
+      className={`relative ${isIelts ? 'overflow-hidden rounded-md bg-white shadow-2xl' : ''}`}
+      style={
+        intrinsicSize
+          ? {
+              width: `${renderedWidthPx}px`,
+              height: `${renderedHeightPx}px`,
+            }
+          : undefined
+      }
+    >
+      <img
+        src={currentSource}
+        alt={alt}
+        className={`block h-auto w-full object-contain ${modalImageClassName ?? ''}`}
+        data-testid="zoom-media-image"
+        draggable={false}
+        referrerPolicy="no-referrer"
+        onError={handleImageError}
+        onLoad={handleModalImageLoad}
+        onContextMenu={handleContextMenu}
+        onDragStart={handleContextMenu}
+        style={{
+          ...imageZoomStyle,
+          WebkitTouchCallout: 'none',
+          WebkitUserSelect: 'none',
+          userSelect: 'none',
+        }}
+      />
+      {renderOverlay ? (
+        <div className="pointer-events-none absolute inset-0">{renderOverlay(annotationScale)}</div>
+      ) : null}
+    </div>
+  );
+
+  // Quick Look style: a full-screen cover outside the exam's zoomed shell, with
+  // the title and Done on top and a zoom capsule at the bottom. Tapping the
+  // empty area around the image closes it.
+  const zoomControlClassName =
+    'inline-flex size-11 items-center justify-center rounded-full text-white transition-colors duration-100 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-35 disabled:hover:bg-transparent';
+  const ieltsViewer = (
+    <div
+      ref={dialogRef}
+      className="fixed inset-0 z-[70] flex flex-col bg-neutral-950 text-white"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${label} zoomed view`}
+      onContextMenu={handleContextMenu}
+    >
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 pb-2 pl-[max(1rem,var(--student-safe-left,0px))] pr-[max(1rem,var(--student-safe-right,0px))] pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <span aria-hidden="true" />
+        <h2 className="min-w-0 truncate text-center text-[17px] font-semibold">{label}</h2>
+        <button
+          type="button"
+          onClick={handleClose}
+          ref={closeButtonRef}
+          className="h-11 justify-self-end rounded-full bg-white/15 px-5 text-[17px] font-semibold text-white transition-colors duration-100 hover:bg-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80"
+          aria-label="Close image zoom"
+        >
+          Done
+        </button>
+      </div>
+
+      <div
+        className="min-h-0 flex-1 overflow-auto overscroll-contain p-4 md:p-6"
+        data-testid="zoom-media-viewport"
+        ref={viewportRef}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) handleClose();
+        }}
+      >
+        <div
+          className="flex min-h-full w-max min-w-full items-center justify-center"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) handleClose();
+          }}
+        >
+          {zoomedImage}
+        </div>
+      </div>
+
+      <div className="flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
+        <div className="flex items-center gap-1 rounded-full bg-white/15 p-1">
+          <button
+            type="button"
+            onClick={() => adjustZoom(-zoomStep)}
+            disabled={zoom <= MIN_ZOOM}
+            className={zoomControlClassName}
+            aria-label="Zoom out image"
+          >
+            <Minus size={20} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoom(DEFAULT_ZOOM)}
+            className="h-11 min-w-16 rounded-full px-3 text-[15px] font-semibold tabular-nums text-white transition-colors duration-100 hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            aria-label="Reset image zoom"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={() => adjustZoom(zoomStep)}
+            disabled={zoom >= MAX_ZOOM}
+            className={zoomControlClassName}
+            aria-label="Zoom in image"
+          >
+            <Plus size={20} aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const framedViewer = (
+    <div
+      ref={dialogRef}
+      className="fixed inset-0 z-[70] bg-gray-900/80 backdrop-blur-sm p-3 md:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${label} zoomed view`}
+      onClick={handleClose}
+      onContextMenu={handleContextMenu}
+    >
+      <div
+        className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-xl"
+        onClick={(event) => event.stopPropagation()}
+        onContextMenu={handleContextMenu}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3 md:px-6">
+          <div className="min-w-0">
+            <div className="text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-600">
+              Zoomed View
+            </div>
+            <div className="truncate text-[length:var(--student-control-font-size)] font-bold text-gray-900">
+              {label}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => adjustZoom(-zoomStep)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
+              aria-label="Zoom out image"
+            >
+              <Minus size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoom(DEFAULT_ZOOM)}
+              className="rounded-full border border-gray-200 bg-white px-3 py-2 text-[length:var(--student-control-font-size)] font-bold text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
+              aria-label="Reset image zoom"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              type="button"
+              onClick={() => adjustZoom(zoomStep)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
+              aria-label="Zoom in image"
+            >
+              <Plus size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={handleClose}
+              ref={closeButtonRef}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
+              aria-label="Close image zoom"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+
+        <div
+          className="flex-1 overflow-auto bg-gray-100 p-4 md:p-6"
+          data-testid="zoom-media-viewport"
+          ref={viewportRef}
+        >
+          <div className="mx-auto flex min-h-full w-full justify-center">{zoomedImage}</div>
+        </div>
+
+        <div className="border-t border-gray-200 bg-white px-4 py-3 md:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-[length:var(--student-meta-font-size)] text-gray-600">
+              Zoom only. Save and download controls are disabled here.
+            </p>
+            {hasMultipleSources ? (
+              <p className="text-[length:var(--student-meta-font-size)] font-semibold text-gray-500">
+                Alternate image sources are being used if needed.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   if (!currentSource) {
     return null;
   }
@@ -260,127 +470,15 @@ export function StudentZoomableMedia({
               }}
             />
             {renderOverlay ? (
-              <div className="pointer-events-none absolute inset-0">
-                {renderOverlay(1)}
-              </div>
+              <div className="pointer-events-none absolute inset-0">{renderOverlay(1)}</div>
             ) : null}
           </div>
         </button>
       ) : null}
 
-      {isOpen ? (
-        <div
-          ref={dialogRef}
-          className="fixed inset-0 z-[70] bg-gray-900/80 backdrop-blur-sm p-3 md:p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-label={`${label} zoomed view`}
-          onClick={handleClose}
-          onContextMenu={handleContextMenu}
-        >
-          <div
-            className="mx-auto flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-xl"
-            onClick={(event) => event.stopPropagation()}
-            onContextMenu={handleContextMenu}
-          >
-            <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3 md:px-6">
-              <div className="min-w-0">
-                <div className="text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-600">
-                  Zoomed View
-                </div>
-                <div className="truncate text-[length:var(--student-control-font-size)] font-bold text-gray-900">
-                  {label}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => adjustZoom(-zoomStep)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
-                  aria-label="Zoom out image"
-                >
-                  <Minus size={16} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setZoom(DEFAULT_ZOOM)}
-                  className="rounded-full border border-gray-200 bg-white px-3 py-2 text-[length:var(--student-control-font-size)] font-bold text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
-                  aria-label="Reset image zoom"
-                >
-                  {Math.round(zoom * 100)}%
-                </button>
-                <button
-                  type="button"
-                  onClick={() => adjustZoom(zoomStep)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
-                  aria-label="Zoom in image"
-                >
-                  <Plus size={16} />
-                </button>
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  ref={closeButtonRef}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-700 shadow-sm hover:border-gray-300 hover:bg-gray-50"
-                  aria-label="Close image zoom"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-auto bg-gray-100 p-4 md:p-6" data-testid="zoom-media-viewport" ref={viewportRef}>
-              <div className="mx-auto flex min-h-full w-full justify-center">
-                <div
-                  className="relative"
-                  style={
-                    intrinsicSize
-                      ? {
-                          width: `${renderedWidthPx}px`,
-                          height: `${renderedHeightPx}px`,
-                        }
-                      : undefined
-                  }
-                >
-                  <img
-                    src={currentSource}
-                    alt={alt}
-                    className={`block h-auto w-full object-contain ${modalImageClassName ?? ''}`}
-                    data-testid="zoom-media-image"
-                    draggable={false}
-                    referrerPolicy="no-referrer"
-                    onError={handleImageError}
-                    onLoad={handleModalImageLoad}
-                    onContextMenu={handleContextMenu}
-                    onDragStart={handleContextMenu}
-                    style={{
-                      ...imageZoomStyle,
-                      WebkitTouchCallout: 'none',
-                      WebkitUserSelect: 'none',
-                      userSelect: 'none',
-                    }}
-                  />
-                  {renderOverlay ? <div className="pointer-events-none absolute inset-0">{renderOverlay(annotationScale)}</div> : null}
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t border-gray-200 bg-white px-4 py-3 md:px-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-[length:var(--student-meta-font-size)] text-gray-600">
-                  Zoom only. Save and download controls are disabled here.
-                </p>
-                {hasMultipleSources ? (
-                  <p className="text-[length:var(--student-meta-font-size)] font-semibold text-gray-500">
-                    Alternate image sources are being used if needed.
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {isOpen && typeof document !== 'undefined'
+        ? createPortal(isIelts ? ieltsViewer : framedViewer, document.body)
+        : null}
     </>
   );
 }

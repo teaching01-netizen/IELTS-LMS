@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { StudentZoomableMedia } from '../StudentZoomableMedia';
+import { StudentExamTypeContext } from '../layout/studentExamTypeContext';
 
 describe('StudentZoomableMedia', () => {
   it('falls back to alternate sources and opens a zoom-only viewer', () => {
@@ -75,5 +76,25 @@ describe('StudentZoomableMedia', () => {
     expect(screen.getByRole('button', { name: /reset image zoom/i })).toHaveTextContent('100%');
     expect(parseFloat(image.style.width)).toBeCloseTo(333.3333, 3);
     expect(parseFloat(image.style.height)).toBeCloseTo(500, 3);
+  });
+
+  it('opens the IELTS viewer full screen on the body, outside the exam layout', () => {
+    const { container } = render(
+      <StudentExamTypeContext.Provider value="Academic">
+        <div style={{ transform: 'translateZ(0)' }}>
+          <StudentZoomableMedia sources={['/ants.png']} alt="Ant trap" label="Ant trap" />
+        </div>
+      </StudentExamTypeContext.Provider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^ant trap$/i }));
+
+    const viewer = screen.getByRole('dialog', { name: 'Ant trap zoomed view' });
+    expect(viewer.parentElement).toBe(document.body);
+    expect(container).not.toContainElement(viewer);
+    expect(viewer).toHaveClass('fixed', 'inset-0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close image zoom' }));
+    expect(screen.queryByRole('dialog', { name: 'Ant trap zoomed view' })).not.toBeInTheDocument();
   });
 });
