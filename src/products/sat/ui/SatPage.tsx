@@ -1,4 +1,4 @@
-import { forwardRef, useId, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react';
+import { forwardRef, useId, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 
 /**
@@ -226,6 +226,7 @@ export const SatButton = forwardRef<HTMLButtonElement, SatButtonProps>(function 
   ref,
 ) {
   const spinner = <span aria-hidden="true" className={'sat-btn__spinner' + (icon || iconOnly ? '' : ' sat-btn__spinner--overlay')} />;
+  const blocked = pending || rest['aria-disabled'] === true || rest['aria-disabled'] === 'true';
   return (
     <button
       ref={ref}
@@ -233,9 +234,9 @@ export const SatButton = forwardRef<HTMLButtonElement, SatButtonProps>(function 
       {...rest}
       disabled={disabled}
       aria-busy={pending || undefined}
-      aria-disabled={pending || rest['aria-disabled'] ? true : undefined}
+      aria-disabled={blocked || undefined}
       onClick={(event) => {
-        if (pending) {
+        if (blocked) {
           event.preventDefault();
           return;
         }
@@ -498,7 +499,7 @@ export function SatListRow({
   ariaLabel?: string;
   disabled?: boolean;
   children: ReactNode;
-  /** Optional position for a capped stagger (first 6 rows). Omit for no entrance. */
+  /** Supplying a position opts into a simultaneous, opacity-only entrance. */
   index?: number;
   /** Record id, so a page can return focus to the record it opened. */
   rowId?: string;
@@ -513,7 +514,6 @@ export function SatListRow({
       aria-current={current ? 'true' : undefined}
       data-sat-row-id={rowId}
       disabled={disabled}
-      style={index !== undefined ? ({ '--sat-row-index': index } as CSSProperties) : undefined}
       className={
         'sat-list-row group flex min-h-14 w-full items-center bg-[var(--sat-staff-surface,#fff)] px-4 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--sat-staff-accent,#0071e3)] aria-[current=true]:bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))]' +
         (index !== undefined ? ' sat-row-enter' : '')
@@ -557,7 +557,7 @@ export function SatListRowShell({
   /** The row's one primary destination, stretched over the whole row. */
   primary?: ReactNode;
   children: ReactNode;
-  /** Optional position for a capped stagger (first 6 rows). Omit for no entrance. */
+  /** Supplying a position opts into a simultaneous, opacity-only entrance. */
   index?: number;
   /** Record id, so a page can return focus to the record it opened. */
   rowId?: string;
@@ -570,7 +570,6 @@ export function SatListRowShell({
       tabIndex={-1}
       aria-current={current ? 'true' : undefined}
       data-sat-row-id={rowId}
-      style={index !== undefined ? ({ '--sat-row-index': index } as CSSProperties) : undefined}
       className={
         'sat-list-row group relative flex min-h-14 w-full items-center bg-[var(--sat-staff-surface,#fff)] px-4 focus-visible:outline-none aria-[current=true]:bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))]' +
         (index !== undefined ? ' sat-row-enter' : '')

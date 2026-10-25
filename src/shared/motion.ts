@@ -25,7 +25,10 @@ export const spineMotion = {
   hover:{duration:0.12,ease:AUTHORING_EASE_STANDARD},
   focus:{duration:0.15,ease:AUTHORING_EASE_STANDARD},
   menu:{duration:0.17,ease:AUTHORING_EASE_STANDARD},
-  panel:{duration:0.22,ease:AUTHORING_EASE_STANDARD},
+  panel:{duration:0.18,ease:AUTHORING_EASE_STANDARD},
+  selection:{duration:0.16,ease:AUTHORING_EASE},
+  state:{duration:0.13,ease:AUTHORING_EASE},
+  exit:{duration:0.1,ease:AUTHORING_EASE_STANDARD},
   question:{duration:0.12,ease:AUTHORING_EASE_STANDARD},
 } as const;
 

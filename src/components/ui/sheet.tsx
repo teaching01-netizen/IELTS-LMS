@@ -5,6 +5,8 @@ import { XIcon } from "lucide-react"
 import { Dialog as SheetPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useSurfaceScope } from "@/src/shared/ui/SurfaceScope"
+import { captureOverlayReturnTarget } from "@/src/shared/ui/overlayFocus"
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />
@@ -32,11 +34,13 @@ function SheetOverlay({
   className,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Overlay>) {
+  const surfaceScope = useSurfaceScope()
   return (
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
         "fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+        surfaceScope,
         className
       )}
       {...props}
@@ -49,11 +53,15 @@ function SheetContent({
   children,
   side = "right",
   showCloseButton = true,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left"
   showCloseButton?: boolean
 }) {
+  const surfaceScope = useSurfaceScope()
+  const returnFocusRef = React.useRef<HTMLElement | null>(null)
   return (
     <SheetPortal>
       <SheetOverlay />
@@ -69,8 +77,22 @@ function SheetContent({
             "inset-x-0 top-0 h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
           side === "bottom" &&
             "inset-x-0 bottom-0 h-auto border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
+          surfaceScope,
           className
         )}
+        onOpenAutoFocus={(event) => {
+          returnFocusRef.current = captureOverlayReturnTarget()
+          onOpenAutoFocus?.(event)
+        }}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event)
+          const target = returnFocusRef.current
+          returnFocusRef.current = null
+          if (!event.defaultPrevented && target?.isConnected) {
+            event.preventDefault()
+            target.focus({ preventScroll: true })
+          }
+        }}
         {...props}
       >
         {children}

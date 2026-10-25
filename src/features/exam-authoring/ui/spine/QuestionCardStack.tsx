@@ -112,17 +112,16 @@ export function QuestionCardStack({
     });
   }, [module.id]);
 
-  // Choosing a card brings it into view (smoothly, unless the reader prefers
-  // reduced motion). The first render never scrolls.
+  // Keep the chosen card visible without animating the entire editing plane.
+  // The first render never scrolls.
   const lastSelected = useRef(selectedQuestionId);
   useEffect(() => {
     if (lastSelected.current === selectedQuestionId) return;
     lastSelected.current = selectedQuestionId;
     if (!selectedQuestionId) return;
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     rootRef.current
       ?.querySelector<HTMLElement>('[data-question-card="active"]')
-      ?.scrollIntoView?.({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
+      ?.scrollIntoView?.({ block: "nearest", behavior: "auto" });
   }, [selectedQuestionId]);
 
   // Arrow Up / Down walks the summary cards without tabbing through every control.

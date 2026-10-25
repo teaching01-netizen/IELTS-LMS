@@ -3399,9 +3399,7 @@ button:not(:disabled):active > .sat-annotation-press {
   --sat-staff-shadow-dialog: var(--sat-dialog-elevation);
   --sat-staff-shadow-drag: var(--au-elevation-drag);
   --sat-staff-shadow-thumb: 0 1px 3px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
-  /* Motion: single ease, capped stagger, named durations.
-   * Dialog 220ms is grandfathered (matches shipped sat-dialog-enter);
-   * 2026 cap for new motion is 200ms — do not extend dialog timing here. */
+  /* Motion stays local: brief feedback, no overshoot or list cascades. */
   --sat-staff-ease: cubic-bezier(0.2, 0, 0, 1);
   --sat-staff-ease-press: cubic-bezier(0.4, 0, 0.2, 1);
   --sat-staff-motion-hover: 120ms;
@@ -3409,15 +3407,12 @@ button:not(:disabled):active > .sat-annotation-press {
   --sat-staff-motion-banner: 140ms;
   --sat-staff-motion-row: 160ms;
   --sat-staff-motion-press: 100ms;
-  --sat-staff-motion-dialog: 220ms;
+  --sat-staff-motion-dialog: 180ms;
+  --sat-staff-motion-exit: 100ms;
   --sat-staff-motion-dialog-max: 200ms;
-  --sat-staff-stagger-step: 60ms;
-  --sat-staff-stagger-cap: 5;
-  /* Press geometry: one scale per surface size. Controls (<=44px) take the
-   * base scale; large surfaces (>=72px) take the row scale. Geometry never
-   * inverts between appearances. */
+  /* Small controls compress slightly; large surfaces keep their geometry. */
   --sat-staff-press-scale: 0.97;
-  --sat-staff-press-scale-row: 0.99;
+  --sat-staff-press-scale-row: 1;
   --sat-staff-shimmer-duration: 1.35s;
   --sat-staff-shimmer-sweep: rgba(120, 120, 128, 0.14);
   --sat-staff-skeleton-pulse-duration: 1.6s;
@@ -3446,6 +3441,13 @@ button:not(:disabled):active > .sat-annotation-press {
   border: 1px solid var(--color-au-separator);
   background: var(--color-au-surface);
   padding: 5px;
+}
+.sat-menu[data-sat-menu-animate] {
+  animation: sat-route-enter var(--sat-staff-motion-hover) var(--sat-staff-ease) both;
+}
+.sat-menu[data-sat-menu-animate][data-state="closed"] {
+  animation: sat-fade-out var(--sat-staff-motion-exit) ease-in both;
+  pointer-events: none;
 }
 .sat-menu-item {
   display: flex;
@@ -3526,21 +3528,24 @@ button:not(:disabled):active > .sat-annotation-press {
 }
 .sat-product .sat-dialog-overlay,
 .sat-dialog-overlay.sat-product {
-  animation: sat-backdrop-enter 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: sat-backdrop-enter var(--sat-staff-motion-banner) var(--sat-staff-ease) both;
 }
 .sat-product .sat-dialog-center,
 .sat-dialog-center.sat-product {
-  animation: sat-dialog-enter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: sat-dialog-enter var(--sat-staff-motion-dialog) var(--sat-staff-ease) both;
 }
 @keyframes sat-dialog-enter {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -48%) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.sat-dialog-overlay.sat-product[data-state="closed"],
+.sat-dialog-center.sat-product[data-state="closed"] {
+  animation: sat-fade-out var(--sat-staff-motion-exit) ease-in both;
+  pointer-events: none;
+}
+@keyframes sat-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 @media (max-width: 640px) {
   .sat-product .sat-dialog-center,
@@ -3624,17 +3629,13 @@ button:not(:disabled):active > .sat-annotation-press {
   outline-offset: 1px;
 }
 
-/* SAT staff list motion: one capped stagger + one fade vocabulary.
- * Rows cascade via --sat-row-index (cap 5 at call sites); route chrome
- * fades without translating; banners fade so content never jumps.
- * Motion tokens: 160ms state / 140ms banner, ease [0.22,1,0.36,1]. */
+/* Rows arrive together and remain readable throughout the brief fade. */
 .sat-product .sat-row-enter {
-  animation: sat-row-enter var(--sat-staff-motion-row) cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(min(var(--sat-row-index, 0), var(--sat-staff-stagger-cap, 5)) * var(--sat-staff-stagger-step, 60ms));
+  animation: sat-row-enter var(--sat-staff-motion-row) var(--sat-staff-ease) both;
 }
 @keyframes sat-row-enter {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0.85; }
+  to { opacity: 1; }
 }
 .sat-product .sat-route-enter {
   animation: sat-route-enter var(--sat-staff-motion-row) cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -3646,24 +3647,21 @@ button:not(:disabled):active > .sat-annotation-press {
 .sat-product .sat-banner-enter {
   animation: sat-route-enter var(--sat-staff-motion-banner) cubic-bezier(0.22, 1, 0.36, 1) both;
 }
-/* Success pop: a confirmation glyph (published, copied, saved) lands with a
- * short overshoot so the result is noticed without a toast. Pure decoration:
- * the text beside it carries the meaning, and reduced motion removes it. */
+/* Success glyphs settle without bouncing or scaling the content. */
 .sat-pop {
-  animation: sat-pop 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sat-pop var(--sat-staff-motion-state) var(--sat-staff-ease) both;
 }
 @keyframes sat-pop {
-  0% { opacity: 0; transform: scale(0.6); }
-  60% { opacity: 1; transform: scale(1.12); }
-  100% { opacity: 1; transform: scale(1); }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 /* The question card that opens settles in; summaries press in slightly. */
 .sat-card--active {
   animation: sat-card-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes sat-card-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0.85; }
+  to { opacity: 1; }
 }
 .sat-card--summary:active {
   transform: scale(0.996);
@@ -3677,10 +3675,7 @@ button:not(:disabled):active > .sat-annotation-press {
     transform: none;
   }
 }
-/* F-A12 route fade gate (shell-lane hook): .sat-route-fade opts route chrome
- * out of the enter animation entirely (animation: none); reduced-motion
- * forces full opacity with no transition/animation so content is never
- * stuck mid-fade. SatRoot.tsx itself is NOT touched by this lane. */
+/* The shell stays visible across navigation; local surfaces own entrances. */
 .sat-route-fade {
   animation: none;
 }
@@ -3699,14 +3694,9 @@ button:not(:disabled):active > .sat-annotation-press {
 @keyframes sat-spin {
   to { transform: rotate(360deg); }
 }
-/* Live presence dot: gentle opacity pulse; the text label stays the
- * state carrier, never the pulse alone. */
+/* Live state is persistent information, so its dot stays steady. */
 .sat-product .sat-live-dot {
-  animation: sat-live-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-@keyframes sat-live-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  animation: none;
 }
 /* List-row skeleton shimmer: gradient sweep matching authoring rhythm.
  * animate-pulse stays forbidden in SAT (pinned by SatPage.test). */
@@ -3725,10 +3715,9 @@ button:not(:disabled):active > .sat-annotation-press {
   from { transform: translateX(-100%); }
   to { transform: translateX(100%); }
 }
-/* List rows: tactile hover + press, never lift (no translate — transform is
- * press-scale only). Chevron nudges on row hover. */
+/* Wide rows acknowledge presses through fill, keeping text and targets still. */
 .sat-product .sat-list-row {
-  transition: background-color var(--sat-staff-motion-row) var(--sat-staff-ease), transform var(--sat-staff-motion-press) var(--sat-staff-ease-press);
+  transition: background-color var(--sat-staff-motion-hover) var(--sat-staff-ease);
   touch-action: manipulation;
 }
 .sat-product .sat-list-row:hover {
@@ -3736,7 +3725,7 @@ button:not(:disabled):active > .sat-annotation-press {
 }
 .sat-product .sat-list-row:active:not(:disabled) {
   transition-duration: 0ms;
-  transform: scale(0.99);
+  background-color: var(--sat-staff-fill-active, rgba(0, 0, 0, 0.065));
 }
 /* A selected row keeps its accent tint while hovered: the shared hover fill
  * above would otherwise win over the row's own tint utility and read as a
@@ -3755,7 +3744,7 @@ button:not(:disabled):active > .sat-annotation-press {
   --sat-staff-press-scale: 0.97;
 }
 .sat-product .sat-press-row {
-  --sat-staff-press-scale: var(--sat-staff-press-scale-row, 0.99);
+  --sat-staff-press-scale: var(--sat-staff-press-scale-row, 1);
   touch-action: manipulation;
 }
 .sat-product :is(.sat-press, .sat-press-row) {
@@ -4100,11 +4089,13 @@ textarea.sat-input {
   padding-inline: 12px;
 }
 
-/* Detail tab panel: opacity-only fade so a tab change is legible without
- * translating the panel under the pointer (and without animating height).
- * Reuses the route-fade keyframes; keyed remount is what retriggers it. */
+/* Detail tabs keep their position and stay readable through the fade. */
 .sat-product .sat-panel-enter {
-  animation: sat-route-enter var(--sat-staff-motion-banner) cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sat-row-enter var(--sat-staff-motion-banner) var(--sat-staff-ease) both;
+}
+
+.sat-product .sat-nav-link {
+  transition: background-color var(--sat-staff-motion-hover) var(--sat-staff-ease), color var(--sat-staff-motion-hover) var(--sat-staff-ease);
 }
 
 /* Sliding selection thumbs (segmented/filter pills, detail tabs). The thumb is
@@ -4178,6 +4169,11 @@ textarea.sat-input {
   .sat-product .sat-row-enter,
   .sat-product .sat-route-enter,
   .sat-product .sat-banner-enter,
+  .sat-product .sat-panel-enter,
+  .sat-product .sat-nav-link,
+  .sat-menu[data-sat-menu-animate],
+  .sat-dialog-overlay.sat-product,
+  .sat-dialog-center.sat-product,
   .sat-product .sat-spinner,
   .sat-product .sat-live-dot,
   .sat-product .sat-skeleton-shimmer::after,
@@ -4198,6 +4194,9 @@ textarea.sat-input {
   .sat-product .sat-list-row:active:not(:disabled),
   .sat-product :is(.sat-press, .sat-press-row):active:not(:disabled) {
     transform: none !important;
+  }
+  .sat-product .sat-list-row:hover .sat-row-chevron {
+    transform: none;
   }
 }
 
@@ -5513,6 +5512,72 @@ textarea.sat-input {
 .sat-staff-root .text-\[12px\],
 .sat-staff-root .text-\[13px\] {
   font-size: 14px;
+}
+
+/* Staff surfaces keep the same motion and feedback when portaled to body. */
+.sat-staff-root {
+  --authoring-motion-fast: var(--sat-staff-motion-hover);
+  --authoring-motion-state: var(--sat-staff-motion-state);
+  --authoring-motion-panel: var(--sat-staff-motion-dialog);
+  --authoring-ease: var(--sat-staff-ease);
+}
+
+.sat-staff-root:is([data-slot="sheet-content"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"]) {
+  background: var(--sat-staff-surface);
+  color: var(--sat-staff-text-primary);
+  border-color: var(--sat-staff-border-hairline);
+}
+.sat-staff-root:is(.sat-dialog-overlay, .authoring-dialog-overlay, [data-slot="sheet-overlay"]) {
+  background: var(--sat-staff-scrim);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.sat-staff-root:is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"]) {
+  border-radius: var(--sat-staff-radius-menu, 12px);
+  box-shadow: var(--sat-staff-shadow-menu);
+}
+.sat-staff-root[data-slot="tooltip-content"] {
+  background: var(--sat-staff-text-primary);
+  color: var(--sat-staff-text-inverse);
+}
+
+.sat-staff-root:is(.authoring-dialog-content, .authoring-confirm-dialog, [data-slot="sheet-content"])[data-state="open"] {
+  animation: sat-dialog-enter var(--sat-staff-motion-dialog) var(--sat-staff-ease) both;
+}
+.sat-staff-root:is(.authoring-dialog-overlay, [data-slot="sheet-overlay"])[data-state="open"] {
+  animation: sat-backdrop-enter var(--sat-staff-motion-banner) var(--sat-staff-ease) both;
+}
+.sat-staff-root:is([data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"], [data-slot="tooltip-content"]):not([data-state="closed"]) {
+  animation: sat-route-enter var(--sat-staff-motion-hover) var(--sat-staff-ease) both;
+}
+.sat-staff-root:is(.authoring-dialog-content, .authoring-confirm-dialog, .authoring-dialog-overlay, [data-slot="sheet-content"], [data-slot="sheet-overlay"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"], [data-slot="tooltip-content"])[data-state="closed"] {
+  animation: sat-fade-out var(--sat-staff-motion-exit) ease-in both;
+  pointer-events: none;
+}
+
+/* Hover and focus keep targets still; active feedback never waits on a fade. */
+.sat-staff-root :is(.authoring-button, .authoring-icon-button, .exam-workspace-tab, .sat-segmented-option) {
+  transition-duration: var(--sat-staff-motion-hover);
+}
+.sat-staff-root :is(.authoring-button, .authoring-icon-button):active:not(:disabled):not([aria-disabled="true"]) {
+  transition-duration: 0ms;
+}
+.sat-staff-root .sat-skeleton-shimmer::after {
+  background: var(--sat-staff-fill-hover);
+  animation: sat-staff-loading var(--sat-staff-skeleton-pulse-duration) ease-in-out infinite;
+}
+@keyframes sat-staff-loading {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sat-staff-root:is(.authoring-dialog-content, .authoring-confirm-dialog, .authoring-dialog-overlay, [data-slot="sheet-content"], [data-slot="sheet-overlay"], [data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"], [data-slot="popover-content"], [data-slot="tooltip-content"]),
+  .sat-staff-root :is(.authoring-button, .authoring-icon-button, .exam-workspace-tab, .sat-segmented-option, .answer-choice__letter),
+  .sat-staff-root .sat-skeleton-shimmer::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .sat-product .authoring-workspace {

@@ -298,7 +298,7 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
         <form id={FORM_ID} onSubmit={handleFormSubmit} noValidate>
           <div className="max-h-[min(70vh,680px)] space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
             <p className="sr-only" aria-live="polite">Step {step + 1} of 4: {STEP_NAMES[step]}</p>
-            <div key={step} className="space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-200 motion-reduce:animate-none">
+            <div key={step} className="sat-panel-enter space-y-5">
               <div>
                 <h3 ref={headingRef} tabIndex={-1} className="text-[18px] font-semibold tracking-[-0.02em] text-[var(--sat-staff-text-primary,#1d1d1f)]">
                   {STEP_NAMES[step]}

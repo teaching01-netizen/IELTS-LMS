@@ -87,8 +87,8 @@ export function ConflictResolver({
 
   return (
     <motion.aside
-      initial={reduceMotion ? false : { opacity: 0, x: 16 }}
-      animate={{ opacity: 1, x: 0 }}
+      initial={reduceMotion ? false : { opacity: 0 }}
+      animate={{ opacity: 1 }}
       transition={reduceMotion ? { duration: 0 } : authoringMotion.panel}
       role="complementary"
       aria-label={CONFLICT_COPY.compareTitle}

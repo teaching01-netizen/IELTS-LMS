@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { Check, CircleAlert, Cloud, LoaderCircle } from "lucide-react";
-import { authoringMotion } from "@/src/shared/motion";
+import { spineMotion } from "@/src/shared/motion";
 import type { QuestionSaveStatus } from "../../hooks/useQuestionAutosave";
 import {
   SAVE_CONFLICT_COPY,
@@ -51,6 +51,7 @@ function usePrevious<T>(value: T): T | undefined {
  * surface with a polite live region.
  */
 export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, diverged = false, transientSaved = false, announce = true, displayMode = "legacy" }: SaveClusterProps) {
+  const reduceMotion = useReducedMotion();
   const isCoedit = displayMode === "coedit";
   const [hidden, setHidden] = useState(false);
   useEffect(() => {
@@ -109,9 +110,9 @@ export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, di
     <>
       {justSaved ? (
         <motion.span
-          initial={isCoedit ? { opacity: 0 } : { scale: 0.6, opacity: 0 }}
-          animate={isCoedit ? { opacity: 1 } : { scale: 1, opacity: 1 }}
-          transition={isCoedit ? authoringMotion.state : authoringMotion.snap}
+          initial={reduceMotion ? false : { opacity: 0.6 }}
+          animate={{ opacity: 1 }}
+          transition={reduceMotion ? { duration: 0 } : spineMotion.state}
           className="flex"
           aria-hidden="true"
         >
@@ -132,9 +133,9 @@ export function SaveCluster({ status, lastSavedAt, onRetry, onReviewConflict, di
     ) : (
       <motion.span
         key={status}
-        initial={isFirstMount ? false : { opacity: 0 }}
+        initial={isFirstMount || reduceMotion ? false : { opacity: 0.85 }}
         animate={{ opacity: 1 }}
-        transition={authoringMotion.state}
+        transition={reduceMotion ? { duration: 0 } : spineMotion.state}
         className={`flex min-w-24 items-center gap-1.5 text-xs font-semibold ${tone}`}
       >
         {faceInner}

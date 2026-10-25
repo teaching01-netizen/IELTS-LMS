@@ -186,6 +186,6 @@ describe("QuestionCardStack", () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
     rerender(<QuestionCardStack {...props} selectedQuestionId="b" />);
     expect(scrollIntoView).toHaveBeenCalledOnce();
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", behavior: "smooth" });
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", behavior: "auto" });
   });
 });

@@ -2,13 +2,15 @@ import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { AlertDialog as AlertDialogPrimitive, Dialog as DialogPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
+import { useSurfaceScope } from "@/src/shared/ui/SurfaceScope";
+import { captureOverlayReturnTarget } from "@/src/shared/ui/overlayFocus";
 
 /** Focus an opener after Radix has finished unmounting an overlay. React may
  * briefly disconnect and recreate a surrounding control during that commit. */
 export function restoreAuthoringFocus(element: HTMLElement | null): void {
   if (!element) return;
   const focus = () => {
-    if (element.isConnected) element.focus();
+    if (element.isConnected) element.focus({ preventScroll: true });
   };
   focus();
   if (document.activeElement !== element && typeof window !== "undefined") {
@@ -58,6 +60,7 @@ export function AuthoringDialog({
   closeDisabled = false,
   dismissOnBackdrop = true,
 }: AuthoringDialogProps) {
+  const surfaceScope = useSurfaceScope();
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const accessibleLabelId = useId();
   const accessibleNameProps = ariaLabel ? { "aria-labelledby": accessibleLabelId } : {};
@@ -69,17 +72,18 @@ export function AuthoringDialog({
       }}
     >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="authoring-dialog-overlay" />
+        <DialogPrimitive.Overlay className={cn("authoring-dialog-overlay", surfaceScope)} />
         <DialogPrimitive.Content
           className={cn(
             "sat-product authoring-dialog-content w-[calc(100vw-2rem)] max-w-[32rem]",
+            surfaceScope,
             contentClassName
           )}
           aria-label={ariaLabel}
           {...accessibleNameProps}
           onOpenAutoFocus={(event) => {
-            if (!restoreFocusRef.current && document.activeElement instanceof HTMLElement) {
-              restoreFocusRef.current = document.activeElement;
+            if (!restoreFocusRef.current) {
+              restoreFocusRef.current = captureOverlayReturnTarget();
             }
             const content = event.currentTarget;
             if (!(content instanceof HTMLElement)) return;
@@ -166,6 +170,7 @@ export function AuthoringConfirmDialog({
   destructive = false,
   busy = false,
 }: AuthoringConfirmDialogProps) {
+  const surfaceScope = useSurfaceScope();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   return (
@@ -176,12 +181,12 @@ export function AuthoringConfirmDialog({
       }}
     >
       <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay className="authoring-dialog-overlay" />
+        <AlertDialogPrimitive.Overlay className={cn("authoring-dialog-overlay", surfaceScope)} />
         <AlertDialogPrimitive.Content
-          className="sat-product authoring-confirm-dialog"
+          className={cn("sat-product authoring-confirm-dialog", surfaceScope)}
           onOpenAutoFocus={(event) => {
-            if (!restoreFocusRef.current && document.activeElement instanceof HTMLElement) {
-              restoreFocusRef.current = document.activeElement;
+            if (!restoreFocusRef.current) {
+              restoreFocusRef.current = captureOverlayReturnTarget();
             }
             event.preventDefault();
             cancelRef.current?.focus();
@@ -217,6 +222,7 @@ export function AuthoringConfirmDialog({
               <button
                 type="button"
                 disabled={busy}
+                aria-busy={busy || undefined}
                 onClick={(event) => {
                   // AlertDialog.Action is a Dialog.Close. Keep the alert open
                   // while an async destructive operation is pending; callers

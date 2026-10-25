@@ -350,7 +350,7 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
     const focus=()=>{
       const target=document.querySelector<HTMLElement>(`[data-authoring-field="${focusField}"]`);
       if(!target&&attempts++<3){frame=window.requestAnimationFrame(focus);return;}
-      if(target){target.scrollIntoView({behavior:reduceMotion?'auto':'smooth',block:'nearest'});flashAuthoringField(focusField);
+      if(target){target.scrollIntoView({behavior:'auto',block:'nearest'});flashAuthoringField(focusField);
         const control=target.matches('input,textarea,select,[contenteditable=true]')?target:target.querySelector<HTMLElement>('input,textarea,select,[contenteditable=true]')??target.querySelector<HTMLElement>('button')??target;
         control.focus({preventScroll:true});setFocusField(null);}
     };

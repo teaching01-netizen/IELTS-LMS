@@ -46,7 +46,7 @@ const REDUCED_MOTION = reducedMotionCss();
 describe('SAT press vocabulary (sat-press)', () => {
   it('AT-02: scales come from tokens — one for controls, one for large surfaces', () => {
     expect(CSS).toMatch(/--sat-staff-press-scale:\s*0\.97/);
-    expect(CSS).toMatch(/--sat-staff-press-scale-row:\s*0\.99/);
+    expect(CSS).toMatch(/--sat-staff-press-scale-row:\s*1\s*;/);
 
     const control = rule('.sat-product .sat-press');
     expect(control).toContain('--sat-staff-press-scale');
@@ -122,17 +122,32 @@ describe('SAT press vocabulary (sat-press)', () => {
     expect(thumb).toContain('border-radius: inherit');
   });
 
-  it('AT-02/26: the staff motion section carries no literal durations for rows/banners', () => {
+  it('AT-02/26: entrances use shared durations without cascading delays', () => {
     const rowEnter = rule('.sat-product .sat-row-enter');
     expect(rowEnter).toContain('var(--sat-staff-motion-row)');
-    expect(rowEnter).toContain('var(--sat-staff-stagger-step');
+    expect(rowEnter).not.toContain('animation-delay');
     expect(rule('.sat-product .sat-banner-enter')).toContain('var(--sat-staff-motion-banner)');
     expect(rule('.sat-product .sat-route-enter')).toContain('var(--sat-staff-motion-row)');
   });
 
-  it('regression: SAT rows still never lift or translate on press', () => {
+  it('keeps large rows still while acknowledging a press through fill', () => {
     const pressed = rule('.sat-product .sat-list-row:active:not(:disabled)');
-    expect(pressed).toMatch(/transform:\s*scale\(0\.99\)/);
+    expect(pressed).not.toContain('transform:');
+    expect(pressed).toContain('--sat-staff-fill-active');
     expect(CSS).not.toMatch(/\.sat-(?:list-row|press[^{]*):active[^{]*\{[^}]*translate/);
+  });
+
+  it('removes spatial motion from list, editor card, success and dialog entrances', () => {
+    for (const name of ['sat-row-enter', 'sat-card-in', 'sat-pop', 'sat-dialog-enter']) {
+      const frames = CSS.match(new RegExp(`@keyframes ${name}\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1];
+      expect(frames, name).toBeDefined();
+      expect(frames, name).not.toMatch(/transform|translate|scale/);
+    }
+  });
+
+  it('reduces motion on detached dialogs, menus, and tab panels as well as rows', () => {
+    for (const selector of ['.sat-dialog-center.sat-product', '.sat-dialog-overlay.sat-product', '.sat-menu[data-sat-menu-animate]', '.sat-product .sat-panel-enter']) {
+      expect(REDUCED_MOTION).toContain(selector);
+    }
   });
 });

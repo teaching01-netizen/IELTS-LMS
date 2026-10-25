@@ -54,6 +54,14 @@ describe('SatSegmentedControl', () => {
     expect(onChange).toHaveBeenCalledWith('finished');
   });
 
+  it.each([['Home', 'upcoming', 'Upcoming'], ['End', 'finished', 'Finished']] as const)('moves selection and focus with %s', (key, value, label) => {
+    const onChange = vi.fn();
+    render(<SatSegmentedControl<Bucket> label="Room status" value="live" options={options} onChange={onChange} />);
+    fireEvent.keyDown(screen.getByRole('radio', { name: 'Live' }), { key });
+    expect(onChange).toHaveBeenCalledWith(value);
+    expect(screen.getByRole('radio', { name: label })).toHaveFocus();
+  });
+
   it('passes className through to the radiogroup (e.g. max-w-360px)', () => {
     const { container } = render(
       <SatSegmentedControl<Bucket> label="Room status" value="upcoming" options={options} onChange={vi.fn()} className="max-w-360px" />,

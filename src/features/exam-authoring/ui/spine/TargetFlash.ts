@@ -7,11 +7,12 @@
  * Never fires on initial render: `focusField` is null until a user action
  * (or deep-link navigation, which is itself a look-here intent) sets it.
  *
- * Reduced-motion safe: the `.sat-spine` reduced-motion block collapses the
- * keyframe to 0.01ms, and `animationend` still fires so cleanup runs.
+ * Under reduced motion, the existing keyboard focus treatment supplies the
+ * cue without starting an animation or waiting for animationend.
  */
 export function flashAuthoringField(field: string | null | undefined): void {
   if (!field || typeof document === "undefined") return;
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
   let target: HTMLElement | null = null;
   try {
     target = document.querySelector<HTMLElement>(

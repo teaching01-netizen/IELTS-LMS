@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import postcss from "postcss";
 
 /**
  * CSS is the interaction model's physical half: where surfaces anchor, how
@@ -117,14 +118,23 @@ describe("rich editor surface contract", () => {
     expect(unstyledClasses).toEqual([]);
   });
   it("collapses the new motion under reduced-motion", () => {
-    const reduced = css.slice(css.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
     for (const selector of [
-      ".sat-rich-editor__bubble-row,",
-      ".sat-rich-editor__bubble-hint,",
-      ".sat-rich-editor__feedback,",
-      ".sat-tooltip {",
+      ".sat-rich-editor__bubble-row",
+      ".sat-rich-editor__bubble-hint",
+      ".sat-rich-editor__feedback",
+      ".sat-tooltip",
     ]) {
-      expect(reduced).toContain(selector);
+      let disabled = false;
+      postcss.parse(css).walkAtRules('media', (media) => {
+        if (media.params !== '(prefers-reduced-motion: reduce)') return;
+        media.walkRules((rule) => {
+          if (!rule.selectors.includes(selector)) return;
+          rule.walkDecls('animation', (declaration) => {
+            if (declaration.value === 'none' && declaration.important) disabled = true;
+          });
+        });
+      });
+      expect(disabled, selector).toBe(true);
     }
   });
 });

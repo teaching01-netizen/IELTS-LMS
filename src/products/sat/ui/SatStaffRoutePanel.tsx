@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { proctorGateway } from '../../../features/proctor/infrastructure/proctorGateway';
+import { SatButton } from './SatPage';
 
 interface Waiting { attemptId: string; studentName: string; sectionKey: string; rawCorrect: number | null; total: number | null }
 interface Queue { enabled: boolean; items: Waiting[] }
@@ -72,7 +73,7 @@ export function SatStaffRoutePanel({ scheduleId, blocked, onPendingAssignmentsCh
   const assign = async (item: Waiting, route: 'lower' | 'higher') => {
     const key = `${item.attemptId}:${item.sectionKey}`;
     if (busyKey || blocked) return;
-    setBusyKey(key);
+    setBusyKey(`${key}:${route}`);
     setError(null);
     setStatus(null);
     try {
@@ -88,7 +89,6 @@ export function SatStaffRoutePanel({ scheduleId, blocked, onPendingAssignmentsCh
   if (disabled) return null;
   const items = queue?.items ?? [];
   if (!loading && !loadError && items.length === 0 && !error && !status) return null;
-  const button = 'sat-btn sat-btn--secondary sat-press px-3';
   return <section aria-label="Module 2 assignments" className="mt-3 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-3">
     <h3 className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Module 2 assignments</h3>
     {loading && !queue ? <p role="status" className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">Loading students waiting for a Module 2 choice…</p> : null}
@@ -103,8 +103,8 @@ export function SatStaffRoutePanel({ scheduleId, blocked, onPendingAssignmentsCh
           <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">{item.studentName}</p>
           <p className="text-[var(--sat-staff-text-secondary,#515154)]">{item.sectionKey === 'math' ? 'Math' : 'Reading and Writing'}{item.rawCorrect != null && item.total != null ? ` · Module 1: ${item.rawCorrect}/${item.total}` : ''}</p>
           <div className="mt-2 grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
-            <button type="button" className={button} disabled={busyKey !== null || blocked || Boolean(loadError)} onClick={() => void assign(item, 'lower')}>Easier Module 2</button>
-            <button type="button" className={button} disabled={busyKey !== null || blocked || Boolean(loadError)} onClick={() => void assign(item, 'higher')}>Harder Module 2</button>
+            <SatButton pending={busyKey === `${key}:lower`} disabled={(busyKey !== null && busyKey !== `${key}:lower`) || blocked || Boolean(loadError)} onClick={() => void assign(item, 'lower')}>Easier Module 2</SatButton>
+            <SatButton pending={busyKey === `${key}:higher`} disabled={(busyKey !== null && busyKey !== `${key}:higher`) || blocked || Boolean(loadError)} onClick={() => void assign(item, 'higher')}>Harder Module 2</SatButton>
           </div>
         </li>;
       })}

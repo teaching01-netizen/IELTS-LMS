@@ -245,7 +245,7 @@ export function SatFormResponsesRoute() {
           ) : null}
           {query.hasNextPage ? (
             <div className="mt-4 flex justify-center">
-              <SatButton variant="secondary" onClick={() => void query.fetchNextPage()} disabled={query.isFetchingNextPage}>
+              <SatButton variant="secondary" onClick={() => void query.fetchNextPage()} pending={query.isFetchingNextPage}>
                 {query.isFetchingNextPage ? "Loading…" : "Load more"}
               </SatButton>
             </div>

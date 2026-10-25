@@ -1,5 +1,6 @@
 import { useId, useRef } from 'react';
-import { motion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
+import { spineMotion } from '../../../shared/motion';
 
 /**
  * Platform segmented control for the Digital SAT staff workspace. Announces as
@@ -24,6 +25,7 @@ type SatSegmentedControlProps<T extends string> = {
 export function SatSegmentedControl<T extends string>({ label, value, options, onChange, className }: SatSegmentedControlProps<T>) {
   const optionsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const thumbId = useId();
+  const reduceMotion = useReducedMotion();
 
   const move = (from: number, delta: number) => {
     const next = (from + delta + options.length) % options.length;
@@ -47,6 +49,14 @@ export function SatSegmentedControl<T extends string>({ label, value, options, o
         } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
           event.preventDefault();
           move(index, -1);
+        } else if (event.key === 'Home' || event.key === 'End') {
+          event.preventDefault();
+          const next = event.key === 'Home' ? 0 : options.length - 1;
+          const option = options[next];
+          if (option) {
+            onChange(option.value);
+            optionsRef.current[next]?.focus();
+          }
         }
       }}
     >
@@ -66,12 +76,13 @@ export function SatSegmentedControl<T extends string>({ label, value, options, o
             className="sat-segmented-option"
             onClick={() => onChange(option.value)}
           >
-            {selected ? (
+            {selected && reduceMotion ? <span aria-hidden="true" className="sat-segmented-thumb" /> : selected ? (
               <motion.span
+                initial={false}
                 layoutId={thumbId}
                 aria-hidden="true"
                 className="sat-segmented-thumb"
-                transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                transition={spineMotion.selection}
               />
             ) : null}
             <span className="sat-segmented-label">{option.label}</span>

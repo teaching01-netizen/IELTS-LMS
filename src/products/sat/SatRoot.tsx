@@ -1,11 +1,12 @@
-import { lazy, Suspense, useMemo, type ReactNode } from 'react';
-import { MotionConfig, motion, useReducedMotion } from 'motion/react';
+import { lazy, Suspense, useMemo } from 'react';
+import { MotionConfig } from 'motion/react';
 import { BarChart3, BookOpen, ClipboardList, LogOut, Radio, Sigma, UserRound } from 'lucide-react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthSession } from '../../features/auth/authSession';
 import { SatMenu, type SatMenuItem } from './ui/Menu';
 import { SatWorkspaceMark, SatWorkspaceNavContext } from './ui/SatWorkspaceNav';
 import { useSatScrollMemory } from './ui/useSatListReturn';
+import { SurfaceScopeContext } from '../../shared/ui/SurfaceScope';
 
 const SatAuthoringCollaborationBoundary = lazy(() =>
   import('../../features/exam-authoring/realtime/coedit').then((module) => ({
@@ -47,15 +48,6 @@ function ieltsLanding(role: string | undefined): string {
   return '/admin/exams';
 }
 
-function SatRouteFade({ routeKey, children }: { routeKey: string; children: ReactNode }) {
-  const reduce = useReducedMotion();
-  return (
-    <motion.div className="sat-route-fade" key={routeKey} initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}>
-      {children}
-    </motion.div>
-  );
-}
-
 export function SatRoot() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -94,6 +86,7 @@ export function SatRoot() {
   const isDetailPage = /^\/sat\/exams\/[^/]+($|\/(release|preview|access|settings|responses)\/?$)/.test(location.pathname);
 
   return (
+    <SurfaceScopeContext.Provider value="sat-product sat-staff-root">
     <MotionConfig reducedMotion="user" transition={{ duration: 0.18 }}>
     <div className="sat-product sat-staff-root min-h-screen bg-[var(--sat-staff-canvas,var(--sat-canvas))] text-[var(--sat-staff-text-primary,var(--sat-label))] md:flex">
       <a href="#sat-main" className="skip-link">Skip to main content</a>
@@ -128,26 +121,10 @@ export function SatRoot() {
                 <NavLink
                   key={item.path}
                   to={item.path}
-                  className={({ isActive }) => `relative flex min-h-11 items-center gap-3 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'font-semibold text-[var(--sat-staff-text-primary,var(--sat-label))]' : 'font-medium text-[var(--sat-staff-text-secondary,var(--sat-secondary-label))] hover:text-[var(--sat-staff-text-primary,var(--sat-label))]'}`}
+                  className={({ isActive }) => `sat-nav-link relative flex min-h-11 items-center gap-3 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'bg-[var(--sat-staff-fill-hover,var(--sat-fill-hover))] font-semibold text-[var(--sat-staff-text-primary,var(--sat-label))]' : 'font-medium text-[var(--sat-staff-text-secondary,var(--sat-secondary-label))] hover:bg-[var(--sat-staff-fill-faint,rgba(120,120,128,0.06))] hover:text-[var(--sat-staff-text-primary,var(--sat-label))]'}`}
                 >
-                  {({ isActive }) => (
-                    <>
-                      {isActive ? (
-                        <motion.span
-                          layoutId="sat-desktop-nav-pill"
-                          aria-hidden="true"
-                          className="absolute inset-0 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-fill-hover,var(--sat-fill-hover))]"
-                          transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-                        />
-                      ) : (
-                        <span aria-hidden="true" className="absolute inset-0 rounded-[var(--sat-staff-radius-control,10px)] transition-colors hover:bg-[var(--sat-staff-fill-faint,rgba(120,120,128,0.06))]" />
-                      )}
-                      <span className="relative flex items-center gap-3">
-                        <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
-                        {item.label}
-                      </span>
-                    </>
-                  )}
+                  <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
+                  {item.label}
                 </NavLink>
               );
             })}
@@ -212,15 +189,15 @@ export function SatRoot() {
               }
             >
               <SatAuthoringCollaborationBoundary examId={collaborationExamId}>
-                <SatRouteFade routeKey={location.pathname}>
+                <div className="sat-route-fade">
                   <Outlet />
-                </SatRouteFade>
+                </div>
               </SatAuthoringCollaborationBoundary>
             </Suspense>
           ) : (
-            <SatRouteFade routeKey={location.pathname}>
+            <div className="sat-route-fade">
               <Outlet />
-            </SatRouteFade>
+            </div>
           )}
         </main>
         </SatWorkspaceNavContext.Provider>
@@ -248,5 +225,6 @@ export function SatRoot() {
       </div>
     </div>
     </MotionConfig>
+    </SurfaceScopeContext.Provider>
   );
 }

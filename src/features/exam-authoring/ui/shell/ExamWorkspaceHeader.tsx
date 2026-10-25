@@ -1,5 +1,6 @@
-import type { ReactNode, Ref } from "react";
-import { motion } from "motion/react";
+import { useId, type ReactNode, type Ref } from "react";
+import { motion, useReducedMotion } from "motion/react";
+import { spineMotion } from "@/src/shared/motion";
 import { AlertTriangle, ArrowLeft, CalendarPlus, Eye, FileUp, MoreHorizontal, Settings2 } from "lucide-react";
 import { SatWorkspaceSwitcher } from "@/src/products/sat/ui/SatWorkspaceNav";
 import { SatMenu, type SatMenuItem } from "@/src/products/sat/ui/Menu";
@@ -77,6 +78,8 @@ const TAB_LABEL: Record<ExamWorkspaceTab, string> = {
  * between those pages — only the content below the tab row does.
  */
 export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
+  const indicatorId = useId();
+  const reduceMotion = useReducedMotion();
   const {
     examTitle, lifecycle, activeTab, showResponses, onSelectTab, onBack, saveSlot, collaborationSlot,
     onPreview, previewDisabled, onCreateSession, onCreateSessionRef, onQuickSettings,
@@ -189,8 +192,10 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
                   className={`exam-workspace-tab relative inline-flex min-h-11 items-center rounded-t-[var(--sat-staff-radius-control-sm,8px)] px-3 text-[14px] font-semibold leading-5 transition-colors focus-visible:outline-none sm:px-4 ${current ? "text-[var(--sat-staff-text-primary,#1d1d1f)]" : "text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)] hover:text-[var(--sat-staff-text-primary,#1d1d1f)]"}`}
                 >
                   {TAB_LABEL[tab]}
-                  {current ? (
-                    <motion.span layoutId="exam-tab-indicator" transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }} aria-hidden="true" className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[var(--sat-staff-accent,#0071e3)]" />
+                  {current && reduceMotion ? (
+                    <span aria-hidden="true" className="sat-tab-indicator" />
+                  ) : current ? (
+                    <motion.span initial={false} layoutId={indicatorId} transition={spineMotion.selection} aria-hidden="true" className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[var(--sat-staff-accent,#0071e3)]" />
                   ) : null}
                 </button>
               </li>

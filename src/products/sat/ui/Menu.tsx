@@ -227,6 +227,7 @@ function StaticMenu({ label, items, triggerContent, icon: Icon, compact, align =
 
 export function SatMenu(props: SatMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   if (!supportsNativeMenu()) return <StaticMenu {...props} />;
   const { label, items, triggerContent, icon: Icon, compact, align = 'start', width, triggerClassName, portalContainer } = props;
   return (
@@ -244,10 +245,19 @@ export function SatMenu(props: SatMenuProps) {
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal container={portalContainer ?? null}>
         <DropdownMenu.Content
+          ref={contentRef}
           align={align}
           sideOffset={6}
           aria-label={label}
           data-sat-menu-animate=""
+          onCloseAutoFocus={(event) => {
+            const active = document.activeElement;
+            // A selected action may already have focused a dialog. The menu
+            // must not take focus back while its exit animation finishes.
+            if (active instanceof HTMLElement && active !== document.body && active !== triggerRef.current && !contentRef.current?.contains(active)) {
+              event.preventDefault();
+            }
+          }}
           style={{ minWidth: width ?? 176, boxShadow: MENU_ELEVATION, ['--sat-menu-origin' as string]: align === 'end' ? 'top right' : 'top left' }}
           className="sat-menu sat-product sat-staff-root z-[110]"
         >

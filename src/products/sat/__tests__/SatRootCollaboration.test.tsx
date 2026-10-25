@@ -1,7 +1,7 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 import { fireEvent } from '@testing-library/react';
-import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
+import { Link, MemoryRouter, Outlet, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatRoot } from '../SatRoot';
 
@@ -130,5 +130,38 @@ describe('SatRoot collaboration boundary', () => {
     expect(screen.getByText('Room content')).toBeInTheDocument();
     expect(screen.queryByTestId('coedit-boundary')).not.toBeInTheDocument();
     expect(boundary.mounts).toBe(0);
+  });
+
+  it('preserves the exam layout and unsaved input across nested tab navigation', async () => {
+    function ExamLayout() {
+      const [title, setTitle] = useState('');
+      return (
+        <>
+          <input aria-label="Exam title" value={title} onChange={(event) => setTitle(event.target.value)} />
+          <Link to="/sat/exams/ex-1/settings">Exam settings</Link>
+          <Outlet />
+        </>
+      );
+    }
+    authMock.mockReturnValue({ session: { user: { role: 'admin' } }, logout: vi.fn() });
+    render(
+      <MemoryRouter initialEntries={['/sat/exams/ex-1']}>
+        <Routes>
+          <Route path="/sat" element={<SatRoot />}>
+            <Route path="exams/:examId" element={<ExamLayout />}>
+              <Route index element={<p>Questions panel</p>} />
+              <Route path="settings" element={<p>Settings panel</p>} />
+            </Route>
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+    const title = await screen.findByRole('textbox', { name: 'Exam title' });
+    fireEvent.change(title, { target: { value: 'Unsaved practice exam' } });
+    fireEvent.click(screen.getByRole('link', { name: 'Exam settings' }));
+    expect(await screen.findByText('Settings panel')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Exam title' })).toBe(title);
+    expect(title).toHaveValue('Unsaved practice exam');
+    expect(boundary.mounts).toBe(1);
   });
 });

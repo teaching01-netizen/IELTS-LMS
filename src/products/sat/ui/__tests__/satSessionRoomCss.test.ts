@@ -49,6 +49,12 @@ describe('session room layout contracts', () => {
     expect(declarations(keyframe('sat-inspector-enter', 'to')).some((item) => item.prop === 'opacity')).toBe(false);
   });
 
+  it('keeps student details in place when the selected student changes', () => {
+    for (const frame of ['from', 'to']) {
+      expect(declarations(keyframe('sat-student-detail-enter', frame)).some((item) => item.prop === 'transform')).toBe(false);
+    }
+  });
+
   it('respects reduced motion and distinguishes state in forced colors', () => {
     const reducedMotion = atRule('(prefers-reduced-motion: reduce)');
     expect(declaration(reducedMotion, '.sat-room__inspector-panel', 'animation')).toMatchObject({ value: 'none', important: true });

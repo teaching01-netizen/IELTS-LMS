@@ -1,6 +1,5 @@
-import { motion } from "motion/react";
+import { useId, useRef } from "react";
 import { Check } from "lucide-react";
-import { authoringMotion } from "@/src/shared/motion";
 import { FastQuestionComposer } from "../../editor/FastQuestionComposer";
 import { SAT_CHOICE_COMPOSER_CAPABILITIES } from "../../editor/RichQuestionComposer";
 import { plainTextFromContent } from "../../editor/richContent";
@@ -35,6 +34,8 @@ export interface AnswerKeyFieldProps {
  * until the row is focused, so content leads and editing mechanics follow.
  */
 export function AnswerKeyField({ question, onChange, onLocalChange, collaborationFor, readOnly = false }: AnswerKeyFieldProps) {
+  const headingId = useId();
+  const optionRefs = useRef(new Map<string, HTMLButtonElement>());
   const answer = question.answer;
   if (answer.kind !== "single_choice") return null;
 
@@ -45,7 +46,10 @@ export function AnswerKeyField({ question, onChange, onLocalChange, collaboratio
   const moveKey = (fromOptionId: string, direction: 1 | -1) => {
     const index = answer.options.findIndex((option) => option.id === fromOptionId);
     const next = answer.options[(index + direction + answer.options.length) % answer.options.length];
-    if (next) setKey(next.id);
+    if (next) {
+      setKey(next.id);
+      optionRefs.current.get(next.id)?.focus({ preventScroll: true });
+    }
   };
 
   // Identity-safe reorder: swaps positions by stable option id. The key is a
@@ -64,9 +68,9 @@ export function AnswerKeyField({ question, onChange, onLocalChange, collaboratio
   };
 
   return (
-    <section data-answer-options="true" aria-labelledby="spine-answer-key-heading">
+    <section data-answer-options="true" aria-labelledby={headingId}>
       <div className="mb-1 flex items-baseline justify-between gap-3">
-        <h3 id="spine-answer-key-heading" className="sr-only">
+        <h3 id={headingId} className="sr-only">
           Answer key
         </h3>
         <span className="sr-only">Required</span>
@@ -88,12 +92,16 @@ export function AnswerKeyField({ question, onChange, onLocalChange, collaboratio
               data-correct={checked ? "true" : "false"}
               className="answer-choice"
             >
-              <motion.button
+              <button
+                ref={(node) => {
+                  if (node) optionRefs.current.set(option.id, node);
+                  else optionRefs.current.delete(option.id);
+                }}
                 type="button"
                 role="radio"
-                whileTap={authoringMotion.press}
                 disabled={readOnly}
                 aria-checked={checked}
+                tabIndex={checked || (!answer.correctOptionId && index === 0) ? 0 : -1}
                 aria-label={`Choice ${letter}${text ? `: ${text}` : ""}${checked ? ", correct answer, key" : ""}`}
                 onClick={() => setKey(option.id)}
                 onKeyDown={(event) => {
@@ -105,10 +113,10 @@ export function AnswerKeyField({ question, onChange, onLocalChange, collaboratio
                     moveKey(option.id, -1);
                   }
                 }}
-                className="answer-choice__letter flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]"
+                className="sat-press answer-choice__letter flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {letter}
-              </motion.button>
+              </button>
               <div className="answer-choice__content">
                 <FastQuestionComposer
                   label={`Answer choice ${letter}`}
@@ -176,14 +184,12 @@ export function AnswerKeyField({ question, onChange, onLocalChange, collaboratio
                   </button>
                 </div>
                 {checked ? (
-                  <motion.span
-                    layoutId="spine-key-tag"
-                    transition={authoringMotion.snap}
-                    className="answer-choice__key"
+                  <span
+                    className="answer-choice__key sat-banner-enter"
                   >
                     <Check size={12} aria-hidden="true" strokeWidth={3} />
                     Key
-                  </motion.span>
+                  </span>
                 ) : (
                   <span aria-hidden="true" className="answer-choice__key answer-choice__key--idle">
                     Set key

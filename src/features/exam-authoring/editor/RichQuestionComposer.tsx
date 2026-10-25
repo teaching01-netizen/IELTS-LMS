@@ -816,19 +816,13 @@ function MathDialog({
 
         <div>
           <span className="mb-2 block text-[12px] font-semibold text-slate-700">Preview</span>
-          <motion.div
-            layout={!reduceMotion}
-            transition={reduceMotion ? { duration: 0.01 } : authoringMotion.state}
+          <div
             className={`flex min-h-28 overflow-x-auto rounded-[15px] border border-au-separator bg-au-fill p-5 ${
               display ? "items-center justify-center text-center" : "items-center justify-start"
             }`}
           >
             {equation.html ? (
-              <motion.div
-                key={`${display}-${latex}`}
-                initial={reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0.45, y: 2 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={reduceMotion ? { duration: 0.01 } : authoringMotion.state}
+              <div
                 className="max-w-full text-slate-950"
                 dangerouslySetInnerHTML={{ __html: equation.html }}
               />
@@ -842,7 +836,7 @@ function MathDialog({
                 </span>
               </div>
             )}
-          </motion.div>
+          </div>
         </div>
 
         <div className="flex items-center justify-between border-t border-au-separator pt-4">
@@ -1140,10 +1134,10 @@ function ImageDialog({
       <AnimatePresence initial={false}>
         {previewUrl ? (
           <motion.div
-            initial={reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: 5 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduceMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: -4 }}
-            transition={reduceMotion ? { duration: 0.01 } : authoringMotion.surface}
+            initial={reduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: reduceMotion ? 1 : 0 }}
+            transition={reduceMotion ? { duration: 0 } : authoringMotion.state}
             className="relative mb-4 overflow-hidden rounded-xl border border-au-separator bg-au-fill"
           >
             <img
@@ -1174,9 +1168,9 @@ function ImageDialog({
             </AnimatePresence>
             {!uploading && assetId && !uploadError ? (
               <motion.span
-                initial={reduceMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.82 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={reduceMotion ? { duration: 0.01 } : authoringMotion.spring}
+                initial={reduceMotion ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={reduceMotion ? { duration: 0 } : authoringMotion.state}
                 className="absolute right-2 top-2 rounded-full bg-au-surface px-2 py-1 text-xs font-semibold text-au-success-text shadow-sm"
               >
                 Secured ✓

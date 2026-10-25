@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SatConfirmDialog, SatFormDialog, isSatCreationDirty } from '../ConfirmDialog';
+import { SatMenu } from '../Menu';
 
 describe('SatConfirmDialog', () => {
   it('renders the alert with its name, description, and both answers', () => {
@@ -273,5 +274,63 @@ describe('SatConfirmDialog portal scope', () => {
     const overlay = document.querySelector('.sat-dialog-overlay');
     expect(overlay).not.toBeNull();
     expect(overlay).toHaveClass('sat-product');
+  });
+});
+
+describe('native SAT dialog focus', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each(['form', 'confirm'] as const)('restores the opener after Escape closes a %s dialog', async (kind) => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addListener: vi.fn(), removeListener: vi.fn() })));
+    function Host() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open dialog</button>
+          {kind === 'form' ? (
+            <SatFormDialog open={open} eyebrow="Digital SAT" title="Room details" onClose={() => setOpen(false)}>
+              <p>Review this room.</p>
+            </SatFormDialog>
+          ) : (
+            <SatConfirmDialog open={open} title="End exam?" description="Review this action." confirmLabel="End exam" onCancel={() => setOpen(false)} onConfirm={() => setOpen(false)} />
+          )}
+        </>
+      );
+    }
+    render(<Host />);
+    const trigger = screen.getByRole('button', { name: 'Open dialog' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const role = kind === 'form' ? 'dialog' : 'alertdialog';
+    const dialog = await screen.findByRole(role);
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole(role)).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it('returns to the menu trigger after a menu item opens a form', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addListener: vi.fn(), removeListener: vi.fn() })));
+    function Host() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <SatMenu label="Room actions" items={[{ id: 'details', label: 'Room details', onSelect: () => setOpen(true) }]} />
+          <SatFormDialog open={open} eyebrow="Digital SAT" title="Room details" onClose={() => setOpen(false)}><p>Review this room.</p></SatFormDialog>
+        </>
+      );
+    }
+    render(<Host />);
+    const trigger = screen.getByRole('button', { name: 'Room actions' });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const item = await screen.findByRole('menuitem', { name: 'Room details' });
+    item.focus();
+    fireEvent.click(item);
+    const dialog = await screen.findByRole('dialog', { name: 'Room details' });
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 });

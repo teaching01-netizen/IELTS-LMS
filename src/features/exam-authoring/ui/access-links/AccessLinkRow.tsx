@@ -19,7 +19,7 @@ export interface AccessLinkRowProps {
   highlighted?: boolean;
   onOpen: () => void;
   menuItems: SatMenuItem[];
-  /** Optional position for a capped entrance stagger (first 6 rows). */
+  /** The first six results get a brief, simultaneous entrance. */
   resultIndex?: number;
   /**
    * A write against THIS link is in flight. The row keeps its geometry, shows
@@ -90,7 +90,7 @@ export const AccessLinkRow = memo(function AccessLinkRow({
   // Check-in is only worth a word when it is not the normal "open".
   const entryNote = link.status === "live" ? null : formatAccessLinkStatus(link.status);
   const metaText = pendingLabel ?? [describeAccessLinkAudience(link), whenShort(link), entryNote].filter(Boolean).join(" · ");
-  const staggered = resultIndex !== undefined && resultIndex < 6;
+  const entering = resultIndex !== undefined && resultIndex < 6;
   return (
     <div className="relative mb-2">
       <button
@@ -99,10 +99,9 @@ export const AccessLinkRow = memo(function AccessLinkRow({
         onClick={onOpen}
         aria-busy={busy || undefined}
         aria-label={`Open ${link.name}${highlighted ? " (last opened)" : ""}`}
-        style={staggered ? ({ "--sat-row-index": resultIndex } as React.CSSProperties) : undefined}
         className={
           "sat-list-row sat-press-row flex min-h-[80px] w-full items-center rounded-2xl border px-4 py-3 pr-24 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40 " +
-          (staggered ? "sat-row-enter " : "") +
+          (entering ? "sat-row-enter " : "") +
           (highlighted ? "border-au-accent/30 bg-au-accent-tint" : "border-black/[0.06] bg-white")
         }
       >

@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useId, useLayoutEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 import { AlertDialog, Dialog } from 'radix-ui';
+import { captureOverlayReturnTarget } from '../../../shared/ui/overlayFocus';
 
 /**
  * Platform alert contract for the Digital SAT staff workspace: a centered
@@ -111,8 +112,8 @@ export function SatConfirmDialog({
   onConfirm,
 }: SatConfirmDialogProps) {
   const restoreFocusRef = useRef<HTMLElement | null>(null);
-  if (!open) return null;
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    if (!open) return null;
     return (
       <StaticConfirmDialog
         title={title}
@@ -132,8 +133,7 @@ export function SatConfirmDialog({
         <AlertDialog.Content
           className={CONFIRM_CLASS}
           onOpenAutoFocus={() => {
-            const active = document.activeElement;
-            restoreFocusRef.current = restoreFocusTarget ?? (active instanceof HTMLElement && active !== document.body ? active : null);
+            restoreFocusRef.current = restoreFocusTarget ?? captureOverlayReturnTarget();
           }}
           onCloseAutoFocus={(event) => {
             const target = restoreFocusRef.current;
@@ -218,15 +218,30 @@ function StaticFormDialog({ eyebrow, title, onClose, children, size, footer }: O
 }
 
 export function SatFormDialog({ open, eyebrow, title, onClose, children, size, footer }: SatFormDialogProps) {
-  if (!open) return null;
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    if (!open) return null;
     return <StaticFormDialog eyebrow={eyebrow} title={title} onClose={onClose} {...(size ? { size } : {})} footer={footer}>{children}</StaticFormDialog>;
   }
   return (
     <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className={OVERLAY_CLASS} />
-        <Dialog.Content className={formClass(size)}>
+        <Dialog.Content
+          className={formClass(size)}
+          aria-describedby={undefined}
+          onOpenAutoFocus={() => {
+            restoreFocusRef.current = captureOverlayReturnTarget();
+          }}
+          onCloseAutoFocus={(event) => {
+            const target = restoreFocusRef.current;
+            restoreFocusRef.current = null;
+            if (target?.isConnected) {
+              event.preventDefault();
+              target.focus({ preventScroll: true });
+            }
+          }}
+        >
           <div className="flex items-center justify-between px-5 pb-2 pt-4">
             <div>
               <p className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{eyebrow}</p>

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  SatButton,
   SatEmptyState,
   SatInlineError,
   SatListRow,
@@ -86,13 +87,13 @@ describe('SatListRow', () => {
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
-  it('staggers only when an index is given, otherwise no entrance', () => {
+  it('opts into a brief entrance when an index is given, without delaying individual rows', () => {
     const { container, rerender } = render(<SatListRow onOpen={vi.fn()}><span>Plain</span></SatListRow>);
     expect(container.querySelector('button.sat-list-row')).not.toHaveClass('sat-row-enter');
-    rerender(<SatListRow onOpen={vi.fn()} index={2}><span>Staggered</span></SatListRow>);
+    rerender(<SatListRow onOpen={vi.fn()} index={2}><span>Entering</span></SatListRow>);
     const row = container.querySelector('button.sat-list-row');
     expect(row).toHaveClass('sat-row-enter');
-    expect(row?.getAttribute('style')).toContain('--sat-row-index');
+    expect(row).not.toHaveAttribute('style');
   });
 
   it('never lifts on hover — hover is border and shadow only', () => {
@@ -117,6 +118,25 @@ describe('SatPrimaryButton', () => {
   it('stays enabled by default', () => {
     render(<SatPrimaryButton onClick={vi.fn()}>New SAT</SatPrimaryButton>);
     expect(screen.getByRole('button', { name: 'New SAT' })).toBeEnabled();
+  });
+});
+
+describe('SAT action availability', () => {
+  it.each([true, 'true'] as const)('blocks an explicitly aria-disabled action (%s) without losing focus', (disabled) => {
+    const onClick = vi.fn();
+    render(<SatButton aria-disabled={disabled} onClick={onClick}>Publish</SatButton>);
+    const button = screen.getByRole('button', { name: 'Publish' });
+    button.focus();
+    fireEvent.click(button);
+    expect(onClick).not.toHaveBeenCalled();
+    expect(button).toHaveFocus();
+  });
+
+  it('accepts aria-disabled="false" as an enabled action', () => {
+    const onClick = vi.fn();
+    render(<SatButton aria-disabled="false" onClick={onClick}>Publish</SatButton>);
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+    expect(onClick).toHaveBeenCalledOnce();
   });
 });
 
@@ -259,10 +279,10 @@ describe('Phase 03 token hygiene + contracts (additive)', () => {
     expect(clear.getAttribute('aria-label')).toMatch(/^Clear/);
   });
 
-  it('documents the stagger cap: index 9 still renders sat-row-enter (CSS caps at min-5)', () => {
+  it('does not delay rows further down the list', () => {
     const { container } = render(<SatListRow onOpen={vi.fn()} index={9}><span>Capped</span></SatListRow>);
     const row = container.querySelector('button.sat-list-row');
     expect(row).toHaveClass('sat-row-enter');
-    expect(row?.getAttribute('style')).toContain('--sat-row-index');
+    expect(row).not.toHaveAttribute('style');
   });
 });

@@ -87,5 +87,18 @@ describe("AnswerKeyField", () => {
     const next = onChange.mock.calls[0]?.[0] as QuestionRevision;
     if (next.answer.kind !== "single_choice") throw new Error("expected single_choice");
     expect(next.answer.correctOptionId).toBe("C");
+    expect(screen.getByRole("radio", { name: /choice C/i })).toHaveFocus();
+  });
+
+  it('puts only the selected choice in the keyboard tab sequence', () => {
+    render(<AnswerKeyField question={mcq('B')} onChange={vi.fn()} />);
+    for (const letter of ['A', 'B', 'C', 'D']) {
+      expect(screen.getByRole('radio', { name: new RegExp(`choice ${letter}`, 'i') })).toHaveAttribute('tabindex', letter === 'B' ? '0' : '-1');
+    }
+  });
+
+  it('keeps the first choice keyboard reachable before a key is selected', () => {
+    render(<AnswerKeyField question={mcq(null)} onChange={vi.fn()} />);
+    expect(screen.getByRole('radio', { name: /choice A/i })).toHaveAttribute('tabindex', '0');
   });
 });
