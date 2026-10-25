@@ -92,9 +92,18 @@ export async function queryDb<T extends object>(
  * cannot surface (e.g. E2E-04's deadline manipulation).
  */
 export async function executeUpdate(sql: string, params: SqlParam[] = []): Promise<number> {
-  const [result] = await getPool().execute(sql, params);
-  const affected = (result as mysql.ResultSetHeader).affectedRows;
-  return Number(affected);
+  // A test's direct write can lose an InnoDB deadlock to the live API/worker.
+  // The victim is rolled back atomically, so restarting it is safe.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const [result] = await getPool().execute(sql, params);
+      const affected = (result as mysql.ResultSetHeader).affectedRows;
+      return Number(affected);
+    } catch (error) {
+      if ((error as { errno?: number }).errno !== 1213 || attempt >= 5) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50 * attempt));
+    }
+  }
 }
 
 /** Run a DB-backed E2E state transition under an explicit lock order. */

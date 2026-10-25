@@ -4,7 +4,7 @@ import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
 import { SAT_COPY } from "../../domain/satCopy";
 import { SatQuestionStatusGrid } from "./SatQuestionStatusGrid";
 import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
-import { formatSatTime } from "../../domain/satTiming";
+import { SAT_TIME_EXPIRED_LABEL, satTimerLabel } from "../../domain/satTiming";
 import { useSatTemporalSnapshot } from "../../timing/SatTemporalRuntime";
 
 export interface SatReviewPageProps {
@@ -40,14 +40,15 @@ function SatReviewTimer({
 }: Pick<SatReviewPageProps, "remainingLabel" | "remainingSeconds" | "onToggleTimer"> & { timerVisible: boolean }) {
   const temporal = useSatTemporalSnapshot();
   const seconds = temporal?.displaySeconds ?? remainingSeconds;
-  const label = temporal ? formatSatTime(temporal.displaySeconds) : remainingLabel;
+  const label = satTimerLabel(seconds, temporal ? undefined : remainingLabel);
+  const expired = label === SAT_TIME_EXPIRED_LABEL;
   const timerAnnouncement = useStudentTimerAnnouncement(seconds);
   return (
     <div className="flex items-center gap-2">
       <span
         className="sat-tabular text-[18px] font-semibold"
         role="timer"
-        aria-label={timerVisible ? "Time remaining " + label : "Timer hidden"}
+        aria-label={timerVisible ? (expired ? label : "Time remaining " + label) : "Timer hidden"}
       >
         {timerVisible ? label : SAT_COPY.timer.hidden}
       </span>

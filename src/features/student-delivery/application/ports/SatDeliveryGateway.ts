@@ -3,6 +3,7 @@ import type {
   AssessmentDeliveryBootstrap,
   AssessmentDeliveryState,
   AssessmentBreakEntryRequest,
+  AssessmentBreakStartRequest,
   AssessmentLateEvidenceRequest,
   AssessmentModuleCloseAck,
   AssessmentModuleCloseRequest,
@@ -84,8 +85,8 @@ export interface SatDeliveryGateway {
     scheduleId: string,
     attemptId: string,
     breakId: string,
-    /** Optional control-epoch fence (see AssessmentBreakEntryRequest). */
-    request?: AssessmentBreakEntryRequest,
+    /** Optional control-epoch fence and replacement-offer lead. */
+    request?: AssessmentBreakStartRequest,
   ): Promise<AssessmentDeliveryBootstrap>;
   enterBreak?(
     scheduleId: string,

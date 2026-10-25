@@ -1381,10 +1381,33 @@ test.describe("SAT student transitions", () => {
       const scheduledBreak = studentPage.getByTestId("sat-scheduled-break");
       await expect(scheduledBreak).toBeVisible({ timeout: 30_000 });
       await assertSingleSatStage(studentPage);
-      await expect(scheduledBreak).toHaveAttribute("data-sat-break-phase", "active");
+      // The break screen arms and confirms a server-issued future start, so
+      // the transition never consumes the authored break; Math stays withheld
+      // until the break completes.
+      await expect(scheduledBreak).toHaveAttribute("data-sat-break-phase", "active", { timeout: 20_000 });
+      const [confirmedBreak] = await queryDb<{ length_seconds: number; duration_seconds: number }>(
+        `SELECT TIMESTAMPDIFF(SECOND, b.starts_at, b.deadline_at) AS length_seconds, b.duration_seconds
+           FROM assessment_attempt_breaks b
+           JOIN student_attempts a ON a.id = b.attempt_id
+          WHERE a.schedule_id = ? AND a.candidate_id = ? AND b.state = 'active'`,
+        [scheduleId, candidateId]
+      );
+      expect(confirmedBreak?.length_seconds).toBe(confirmedBreak?.duration_seconds);
+      const [withheldMath] = await queryDb<{ available_at: Date | null }>(
+        `SELECT ma.available_at
+           FROM assessment_module_attempts ma
+           JOIN student_attempts a ON a.id = ma.attempt_id
+           JOIN assessment_modules m ON m.id = ma.module_id
+           JOIN assessment_sections s ON s.id = m.section_id
+          WHERE a.schedule_id = ? AND a.candidate_id = ?
+            AND s.section_key = 'math' AND m.adaptive_role = 'base'`,
+        [scheduleId, candidateId]
+      );
+      expect(withheldMath?.available_at ?? null).toBeNull();
       await expect(scheduledBreak.getByRole("heading", { level: 1 })).toHaveCount(1);
       await expect(scheduledBreak.getByRole("heading", { level: 1 })).toBeFocused();
       await expect(scheduledBreak.getByRole("timer")).toBeVisible();
+      await expect(scheduledBreak.getByText("0:00", { exact: true })).toHaveCount(0);
       await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
       await studentPage.reload({ waitUntil: "domcontentloaded" });
       await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveAttribute(
@@ -1409,22 +1432,15 @@ test.describe("SAT student transitions", () => {
         [scheduleId, candidateId]
       );
       expect(expiredBreak).toBe(1);
-      // Math Module 1 was scheduled at the original break deadline. Advance
-      // that availability too when the test moves the personal clock forward.
-      const availableMath = await executeUpdate(
-        `UPDATE assessment_module_attempts ma
-         JOIN student_attempts a ON a.id = ma.attempt_id
-         JOIN assessment_modules m ON m.id = ma.module_id
-         JOIN assessment_sections s ON s.id = m.section_id
-            SET ma.available_at = NOW(6) - INTERVAL 1 MINUTE
-          WHERE a.schedule_id = ?
-            AND a.candidate_id = ?
-            AND s.section_key = 'math'
-            AND m.adaptive_role = 'base'
-            AND ma.state = 'not_started'`,
-        [scheduleId, candidateId]
-      );
-      expect(availableMath).toBe(1);
+      // The countdown is replaced by preparation copy, never by 0:00. The
+      // published forms gate Math behind its section-entry form, so the
+      // completed break hands over to that form with no question access.
+      await expect(scheduledBreak.getByText("0:00", { exact: true })).toHaveCount(0);
+      const expectedClass = studentPage.getByLabel(/Expected Class/);
+      await expect(expectedClass).toBeVisible({ timeout: 45_000 });
+      await expect(studentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+      await expectedClass.selectOption("rank_4");
+      await studentPage.getByRole("button", { name: "Submit and continue" }).click();
       await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
       await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveCount(0);
       await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
@@ -1473,6 +1489,20 @@ test.describe("SAT student transitions", () => {
       delivery.detach();
       await studentContext.close();
     }
+  });
+  for (const delaySeconds of [2, 5] as const) {
+    test(`preserves the full SAT break after a ${delaySeconds}-second start-offer delay`, async ({
+      browser,
+      page,
+    }) => {
+      await assertDelayedPersonalBreakStart(browser, page, delaySeconds);
+    });
+  }
+  test("recovers the confirmed SAT break after duplicate entry requests and a lost response", async ({
+    browser,
+    page,
+  }) => {
+    await assertLostPersonalBreakEntryResponse(browser, page);
   });
   for (const scenario of [
     "delayed final batch",
@@ -1925,4 +1955,490 @@ async function readSectionModules(
     },
     { scheduleId, candidateId, sectionKey }
   );
+}
+
+async function assertDelayedPersonalBreakStart(
+  browser: import("@playwright/test").Browser,
+  adminPage: import("@playwright/test").Page,
+  delaySeconds: 2 | 5
+): Promise<void> {
+  const { studentContext, studentPage, scheduleId, candidateId } = await reachSecondVerbalModule(
+    browser,
+    adminPage,
+    `break-start-delay-${delaySeconds}`
+  );
+  const releaseOfferResponse = deferredSignal();
+  let heldFirstOffer = false;
+  let firstOfferResponseReady = false;
+
+  try {
+    await studentPage.route(
+      `**/assessment-delivery/schedules/${scheduleId}/breaks/*/start`,
+      async (route) => {
+        if (heldFirstOffer) {
+          await route.continue();
+          return;
+        }
+        heldFirstOffer = true;
+        const response = await route.fetch();
+        firstOfferResponseReady = true;
+        await releaseOfferResponse.promise;
+        await route.fulfill({ response });
+      }
+    );
+
+    await reviewAndExpireCurrentModule(studentPage, scheduleId);
+    const breakSurface = studentPage.getByTestId("sat-scheduled-break");
+    await expect(breakSurface).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => firstOfferResponseReady, { timeout: 30_000 }).toBe(true);
+    await expect(breakSurface).toHaveAttribute("data-sat-break-phase", "preparing");
+    await expect(breakSurface.getByRole("timer")).toHaveCount(0);
+    await expect(breakSurface.getByText("0:00", { exact: true })).toHaveCount(0);
+
+    const [armedBreak] = await queryDb<{
+      state: string;
+      starts_at: string | null;
+      deadline_at: string | null;
+    }>(
+      `SELECT b.state, b.starts_at, b.deadline_at
+         FROM assessment_attempt_breaks b
+         JOIN student_attempts a ON a.id = b.attempt_id
+        WHERE a.schedule_id = ? AND a.candidate_id = ?`,
+      [scheduleId, candidateId]
+    );
+    expect(armedBreak).toMatchObject({ state: "armed", starts_at: null, deadline_at: null });
+    const [withheldMath] = await queryDb<{ available_at: string | null }>(
+      `SELECT ma.available_at
+         FROM assessment_module_attempts ma
+         JOIN student_attempts a ON a.id = ma.attempt_id
+         JOIN assessment_modules m ON m.id = ma.module_id
+         JOIN assessment_sections s ON s.id = m.section_id
+        WHERE a.schedule_id = ? AND a.candidate_id = ?
+          AND s.section_key = 'math' AND m.adaptive_role = 'base'`,
+      [scheduleId, candidateId]
+    );
+    expect(withheldMath?.available_at ?? null).toBeNull();
+    await expect(studentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+
+    await studentPage.waitForTimeout(delaySeconds * 1_000);
+    releaseOfferResponse.resolve();
+    await expect(breakSurface).toHaveAttribute("data-sat-break-phase", "active", {
+      timeout: 20_000,
+    });
+    const timer = breakSurface.getByRole("timer");
+    await expect(timer).toBeVisible();
+    await expect(breakSurface.getByText("0:00", { exact: true })).toHaveCount(0);
+
+    const [confirmedBreak] = await queryDb<{
+      entry_generation: number;
+      length_seconds: number;
+      duration_seconds: number;
+    }>(
+      `SELECT b.entry_generation,
+              TIMESTAMPDIFF(SECOND, b.starts_at, b.deadline_at) AS length_seconds,
+              b.duration_seconds
+         FROM assessment_attempt_breaks b
+         JOIN student_attempts a ON a.id = b.attempt_id
+        WHERE a.schedule_id = ? AND a.candidate_id = ? AND b.state = 'active'`,
+      [scheduleId, candidateId]
+    );
+    expect(confirmedBreak?.entry_generation).toBeGreaterThanOrEqual(2);
+    expect(confirmedBreak?.length_seconds).toBe(confirmedBreak?.duration_seconds);
+
+    const firstVisibleSeconds = parseSatTimerSeconds(await timer.innerText());
+    expect(firstVisibleSeconds).toBeGreaterThanOrEqual(confirmedBreak!.duration_seconds - 2);
+    expect(firstVisibleSeconds).toBeLessThanOrEqual(confirmedBreak!.duration_seconds);
+    await expect
+      .poll(async () => parseSatTimerSeconds(await timer.innerText()), {
+        timeout: 4_000,
+        intervals: [200, 500],
+      })
+      .toBeLessThan(firstVisibleSeconds);
+    await expect(studentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+    await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+  } finally {
+    releaseOfferResponse.resolve();
+    await studentContext.close();
+  }
+}
+
+async function assertLostPersonalBreakEntryResponse(
+  browser: import("@playwright/test").Browser,
+  adminPage: import("@playwright/test").Page
+): Promise<void> {
+  const { studentContext, studentPage, scheduleId, candidateId } = await reachSecondVerbalModule(
+    browser,
+    adminPage,
+    "break-enter-lost-response"
+  );
+  let enterResponseDropped = false;
+  let enterAttempts = 0;
+
+  try {
+    await studentPage.route(
+      `**/assessment-delivery/schedules/${scheduleId}/breaks/enter`,
+      async (route) => {
+        enterAttempts += 1;
+        if (enterResponseDropped) {
+          await route.continue();
+          return;
+        }
+        const duplicateResponses = await Promise.all([route.fetch(), route.fetch()]);
+        expect(duplicateResponses.every((response) => response.ok())).toBe(true);
+        await Promise.all(duplicateResponses.map((response) => response.dispose()));
+        enterResponseDropped = true;
+        await route.abort("failed");
+      }
+    );
+
+    await reviewAndExpireCurrentModule(studentPage, scheduleId);
+    const breakSurface = studentPage.getByTestId("sat-scheduled-break");
+    await expect(breakSurface).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => enterResponseDropped, { timeout: 30_000 }).toBe(true);
+    await expect(breakSurface).toHaveAttribute("data-sat-break-phase", "active", {
+      timeout: 20_000,
+    });
+    const timer = breakSurface.getByRole("timer");
+    await expect(timer).toBeVisible();
+    await expect(breakSurface.getByText("0:00", { exact: true })).toHaveCount(0);
+
+    const readConfirmedBreak = async () => {
+      const [confirmedBreak] = await queryDb<{
+        entry_generation: number;
+        deadline_at: string;
+        length_seconds: number;
+        duration_seconds: number;
+      }>(
+        `SELECT b.entry_generation,
+                DATE_FORMAT(b.deadline_at, '%Y-%m-%d %H:%i:%s.%f') AS deadline_at,
+                TIMESTAMPDIFF(SECOND, b.starts_at, b.deadline_at) AS length_seconds,
+                b.duration_seconds
+           FROM assessment_attempt_breaks b
+           JOIN student_attempts a ON a.id = b.attempt_id
+          WHERE a.schedule_id = ? AND a.candidate_id = ? AND b.state = 'active'`,
+        [scheduleId, candidateId]
+      );
+      return confirmedBreak;
+    };
+    const beforeReload = await readConfirmedBreak();
+    expect(beforeReload?.entry_generation).toBe(1);
+    expect(beforeReload?.length_seconds).toBe(beforeReload?.duration_seconds);
+    const firstVisibleSeconds = parseSatTimerSeconds(await timer.innerText());
+    expect(firstVisibleSeconds).toBeGreaterThanOrEqual(beforeReload!.duration_seconds - 2);
+    expect(firstVisibleSeconds).toBeLessThanOrEqual(beforeReload!.duration_seconds);
+
+    await studentPage.reload({ waitUntil: "domcontentloaded" });
+    await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveAttribute(
+      "data-sat-break-phase",
+      "active",
+      { timeout: 45_000 }
+    );
+    const afterReload = await readConfirmedBreak();
+    expect(afterReload?.entry_generation).toBe(1);
+    expect(afterReload?.deadline_at).toBe(beforeReload?.deadline_at);
+    expect(enterAttempts).toBe(1);
+    await expect(studentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+    await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+  } finally {
+    await studentContext.close();
+  }
+}
+
+test("freezes an active SAT break while the proctor pauses and resumes the room", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const { studentContext, studentPage, scheduleId, candidateId } = await reachSecondVerbalModule(
+    browser,
+    page,
+    "break-pause-resume"
+  );
+  let breakId = "";
+  let stateRevision = 0;
+  let stateBreakPausedAt: string | null | undefined;
+  const observeStateBreak = async (response: import("@playwright/test").Response) => {
+    if (!response.url().includes(`/assessment-delivery/schedules/${scheduleId}/state`)) return;
+    const payload = await response.json().catch(() => null) as {
+      attempt?: { personalBreaks?: Array<{ id: string; pausedAt: string | null }> };
+    } | null;
+    const current = payload?.attempt?.personalBreaks?.find((item) => item.id === breakId);
+    if (current) {
+      stateBreakPausedAt = current.pausedAt;
+      stateRevision += 1;
+    }
+  };
+  studentPage.on("response", observeStateBreak);
+  try {
+    await studentPage.bringToFront();
+    await reviewAndExpireCurrentModule(studentPage, scheduleId);
+    const breakSurface = studentPage.getByTestId("sat-scheduled-break");
+    await expect(breakSurface).toHaveAttribute("data-sat-break-phase", "active", {
+      timeout: 30_000,
+    });
+    const timer = breakSurface.getByRole("timer");
+    await expect(timer).toBeVisible();
+
+    const [beforePause] = await queryDb<{ id: string; deadline_at: string }>(
+      `SELECT b.id, DATE_FORMAT(b.deadline_at, '%Y-%m-%d %H:%i:%s.%f') AS deadline_at
+         FROM assessment_attempt_breaks b
+         JOIN student_attempts a ON a.id = b.attempt_id
+        WHERE a.schedule_id = ? AND a.candidate_id = ? AND b.state = 'active'`,
+      [scheduleId, candidateId]
+    );
+    breakId = beforePause!.id;
+    expect(beforePause?.deadline_at).toBeTruthy();
+
+    const beforePauseStateRevision = stateRevision;
+    await page.getByRole("button", { name: "Pause exam" }).click();
+    await expect.poll(() => stateRevision, { timeout: 15_000 }).toBeGreaterThan(beforePauseStateRevision);
+    await expect.poll(() => stateBreakPausedAt !== null && stateBreakPausedAt !== undefined, {
+      timeout: 15_000,
+    }).toBe(true);
+    await expect
+      .poll(
+        async () => {
+          const [row] = await queryDb<{ paused_at: string | null; runtime_status: string }>(
+            `SELECT b.paused_at, r.status AS runtime_status
+               FROM assessment_attempt_breaks b
+               JOIN student_attempts a ON a.id = b.attempt_id
+               JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
+              WHERE a.schedule_id = ? AND a.candidate_id = ? AND b.state = 'active'`,
+            [scheduleId, candidateId]
+          );
+          return row?.paused_at && row.runtime_status === "paused";
+        },
+        { timeout: 15_000 }
+      )
+      .toBe(true);
+    const pausedSeconds = await waitForStableSatTimer(studentPage, timer);
+    await studentPage.waitForTimeout(1_500);
+    expect(parseSatTimerSeconds(await timer.innerText())).toBe(pausedSeconds);
+    await expect(breakSurface.getByText("0:00", { exact: true })).toHaveCount(0);
+
+    const beforeResumeStateRevision = stateRevision;
+    await page.getByRole("button", { name: "Resume exam" }).click();
+    await expect.poll(() => stateRevision, { timeout: 15_000 }).toBeGreaterThan(beforeResumeStateRevision);
+    await expect.poll(() => stateBreakPausedAt === null, { timeout: 15_000 }).toBe(true);
+    await expect
+      .poll(
+        async () => {
+          const [row] = await queryDb<{
+            paused_at: string | null;
+            runtime_status: string;
+            shifted_microseconds: number;
+          }>(
+            `SELECT b.paused_at, r.status AS runtime_status,
+                    TIMESTAMPDIFF(MICROSECOND, ?, b.deadline_at) AS shifted_microseconds
+               FROM assessment_attempt_breaks b
+               JOIN student_attempts a ON a.id = b.attempt_id
+               JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
+              WHERE a.schedule_id = ? AND a.candidate_id = ? AND b.state = 'active'`,
+            [beforePause!.deadline_at, scheduleId, candidateId]
+          );
+          return row?.paused_at === null && row.runtime_status === "live" &&
+            Number(row.shifted_microseconds) >= 1_000_000;
+        },
+        { timeout: 15_000 }
+      )
+      .toBe(true);
+    await expect
+      .poll(async () => parseSatTimerSeconds(await timer.innerText()), {
+        timeout: 5_000,
+        intervals: [250, 500],
+      })
+      .toBeLessThan(pausedSeconds);
+    const [withheldMath] = await queryDb<{ available_at: string | null }>(
+      `SELECT ma.available_at
+         FROM assessment_module_attempts ma
+         JOIN student_attempts a ON a.id = ma.attempt_id
+         JOIN assessment_modules m ON m.id = ma.module_id
+         JOIN assessment_sections s ON s.id = m.section_id
+        WHERE a.schedule_id = ? AND a.candidate_id = ?
+          AND s.section_key = 'math' AND m.adaptive_role = 'base'`,
+      [scheduleId, candidateId]
+    );
+    expect(withheldMath?.available_at ?? null).toBeNull();
+    await expect(studentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+  } finally {
+    studentPage.off("response", observeStateBreak);
+    await studentContext.close();
+  }
+});
+
+test("skips a zero-duration SAT break while keeping Math behind its section form", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const { studentContext, studentPage, scheduleId, candidateId } = await reachSecondVerbalModule(
+    browser,
+    page,
+    "break-zero-duration"
+  );
+  try {
+    const changedSections = await executeUpdate(
+      `UPDATE assessment_sections s
+         JOIN exam_schedules sch ON sch.published_version_id = s.exam_version_id
+          SET s.break_after_seconds = 0
+        WHERE sch.id = ? AND s.section_key = 'reading-writing'`,
+      [scheduleId]
+    );
+    expect(changedSections).toBe(1);
+
+    await reviewAndExpireCurrentModule(studentPage, scheduleId);
+    const mathForm = studentPage.getByLabel(/Expected Class/);
+    await expect(mathForm).toBeVisible({ timeout: 45_000 });
+    await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveCount(0);
+    await expect(studentPage.getByText("0:00", { exact: true })).toHaveCount(0);
+    await expect(studentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+    const [breakRows] = await queryDb<{ count: number }>(
+      `SELECT COUNT(*) AS count
+         FROM assessment_attempt_breaks b
+         JOIN student_attempts a ON a.id = b.attempt_id
+        WHERE a.schedule_id = ? AND a.candidate_id = ?`,
+      [scheduleId, candidateId]
+    );
+    expect(breakRows?.count).toBe(0);
+
+    await mathForm.selectOption("rank_4");
+    await studentPage.getByRole("button", { name: "Submit and continue" }).click();
+    await expect(studentPage.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 45_000 });
+    await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveCount(0);
+    await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+  } finally {
+    await studentContext.close();
+  }
+});
+
+test("keeps Math locked while its section form read is delayed at break expiry", async ({
+  browser,
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const { studentContext, studentPage, scheduleId, candidateId } = await reachSecondVerbalModule(
+    browser,
+    page,
+    "break-delayed-math-state"
+  );
+  const releaseFormRead = deferredSignal();
+  let formReadHeld = false;
+  try {
+    await studentPage.bringToFront();
+    await reviewAndExpireCurrentModule(studentPage, scheduleId);
+    await expect(studentPage.getByTestId("sat-scheduled-break")).toHaveAttribute(
+      "data-sat-break-phase",
+      "active",
+      { timeout: 30_000 }
+    );
+
+    const expired = await executeUpdate(
+      `UPDATE assessment_attempt_breaks b
+         JOIN student_attempts a ON a.id = b.attempt_id
+            SET b.starts_at = NOW(6) - INTERVAL 11 MINUTE,
+                b.deadline_at = NOW(6) - INTERVAL 1 MINUTE,
+                b.updated_at = NOW(6)
+          WHERE a.schedule_id = ? AND a.candidate_id = ? AND b.state = 'active'`,
+      [scheduleId, candidateId]
+    );
+    expect(expired).toBe(1);
+    await expect
+      .poll(
+        async () => {
+          const [row] = await queryDb<{ state: string }>(
+            `SELECT b.state FROM assessment_attempt_breaks b
+               JOIN student_attempts a ON a.id = b.attempt_id
+              WHERE a.schedule_id = ? AND a.candidate_id = ?`,
+            [scheduleId, candidateId]
+          );
+          return row?.state;
+        },
+        { timeout: 15_000 }
+      )
+      .toBe("completed");
+
+    await studentPage.route(
+      `**/assessment-forms/schedules/${scheduleId}/attempts/*/section-entry/math`,
+      async (route) => {
+        if (formReadHeld) {
+          await route.continue();
+          return;
+        }
+        formReadHeld = true;
+        const response = await route.fetch();
+        await releaseFormRead.promise;
+        await route.fulfill({ response });
+      }
+    );
+    await studentPage.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(() => formReadHeld, { timeout: 30_000 }).toBe(true);
+    await expect(studentPage.getByRole("heading", { name: "Before Math" })).toBeVisible();
+    await expect(studentPage.getByText("Loading section details…")).toBeVisible();
+    await expect(studentPage.getByText("0:00", { exact: true })).toHaveCount(0);
+    await expect(studentPage.getByRole("status").getByText("0:00", { exact: true })).toHaveCount(0);
+    await expect(studentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+    await expect(studentPage.getByRole("button", { name: /Begin module/i })).toHaveCount(0);
+
+    releaseFormRead.resolve();
+    await expect(studentPage.getByLabel(/Expected Class/)).toBeVisible({ timeout: 30_000 });
+    await expect(studentPage.getByTestId("sat-exam-shell")).toHaveCount(0);
+  } finally {
+    releaseFormRead.resolve();
+    await studentContext.close();
+  }
+});
+
+async function reachSecondVerbalModule(
+  browser: import("@playwright/test").Browser,
+  adminPage: import("@playwright/test").Page,
+  label: string
+) {
+  const session = await createRunningSatSession(browser, adminPage, { label });
+  try {
+    await expect(session.studentPage.getByTestId("sat-exam-shell")).toBeVisible({
+      timeout: 45_000,
+    });
+    await reviewAndExpireCurrentModule(session.studentPage, session.scheduleId);
+    await expect
+      .poll(
+        async () => {
+          const modules = await readSectionModules(
+            session.studentPage,
+            session.scheduleId,
+            session.candidateId,
+            "reading-writing"
+          );
+          return modules.find((module) => module.adaptiveRole !== "base" && module.state === "active")
+            ?.state ?? null;
+        },
+        { timeout: 45_000, intervals: [250, 500, 1_000, 2_000] }
+      )
+      .toBe("active");
+    return session;
+  } catch (error) {
+    await session.studentContext.close();
+    throw error;
+  }
+}
+
+function parseSatTimerSeconds(value: string): number {
+  const parts = value.trim().split(":");
+  if (parts.length < 2 || parts.some((part) => !/^\d+$/.test(part))) {
+    throw new Error(`Unexpected SAT timer value: ${value}`);
+  }
+  return parts.map(Number).reduce((total, part) => total * 60 + part, 0);
+}
+
+async function waitForStableSatTimer(
+  page: import("@playwright/test").Page,
+  timer: import("@playwright/test").Locator
+): Promise<number> {
+  let previous = parseSatTimerSeconds(await timer.innerText());
+  for (let sample = 0; sample < 5; sample += 1) {
+    await page.waitForTimeout(2_000);
+    const current = parseSatTimerSeconds(await timer.innerText());
+    if (current === previous) return current;
+    previous = current;
+  }
+  throw new Error(`SAT break countdown kept moving after the pause (${previous} seconds left).`);
 }

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, ArrowLeft, CheckCircle2, ExternalLink, LoaderCircle } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, ClipboardList, ExternalLink, LoaderCircle } from "lucide-react";
 import { ApiError } from "@/src/shared/api-client/errors";
 import {
   AnswerList,
@@ -29,7 +29,6 @@ const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sat-surface)]";
 const PRIMARY = `sat-touch-target sat-pressable inline-flex items-center justify-center gap-2 rounded-full bg-[var(--sat-accent)] px-6 text-[14px] font-semibold text-[var(--sat-accent-text)] hover:bg-[var(--sat-accent-strong)] disabled:cursor-not-allowed disabled:bg-[var(--sat-disabled-background)] disabled:text-[var(--sat-disabled-text)] ${FOCUS_RING}`;
 const SECONDARY = `sat-touch-target sat-pressable inline-flex items-center justify-center gap-2 rounded-full border border-[var(--sat-divider-strong)] bg-[var(--sat-surface)] px-5 text-[14px] font-semibold text-[var(--sat-text)] hover:bg-[var(--sat-surface-hover)] disabled:cursor-not-allowed ${FOCUS_RING}`;
-const LINK = `sat-touch-target inline-flex items-center gap-1.5 rounded-md px-1 text-[14px] font-semibold text-[var(--sat-accent-strong)] underline underline-offset-2 ${FOCUS_RING}`;
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 function formatTime(value: string | null | undefined): string {
@@ -143,8 +142,11 @@ export function SatEvaCompletionGate({ scheduleId, attemptId, recoveryException,
   if (state.eligibility !== "eligible") return <>{renderComplete(null)}</>;
 
   if (view === "eva" || forcedNative) {
+    if (state.mode === "embed" && embedIsOpen(state) && !eva.isError) {
+      return <EmbedEvaFullscreen state={state} recoveryException={recoveryException} onBack={backToComplete} />;
+    }
     return (
-      <EvaShell recoveryException={recoveryException} wide={state.mode === "embed"}>
+      <EvaShell recoveryException={recoveryException}>
         {state.mode === "native" ? (
           <NativeEvaView
             key={`${state.versionId}:${state.response}`}
@@ -188,10 +190,10 @@ export function SatEvaCompletionGate({ scheduleId, attemptId, recoveryException,
   );
 }
 
-function EvaShell({ recoveryException, wide, children }: { recoveryException: boolean; wide?: boolean; children: ReactNode }) {
+function EvaShell({ recoveryException, children }: { recoveryException: boolean; children: ReactNode }) {
   return (
     <div className="sat-ui min-h-[100dvh] bg-[var(--sat-background)] pl-[calc(1rem+var(--student-safe-left))] pr-[calc(1rem+var(--student-safe-right))] pt-[calc(2rem+var(--student-safe-top))] pb-[calc(3rem+var(--student-safe-bottom))] text-[var(--sat-text)] sm:pl-[calc(1.5rem+var(--student-safe-left))] sm:pr-[calc(1.5rem+var(--student-safe-right))]">
-      <main className={`mx-auto w-full ${wide ? "max-w-[1120px]" : "max-w-[640px]"}`}>
+      <main className="mx-auto w-full max-w-[640px]">
         <p className="text-[14px] font-semibold text-[var(--sat-text-secondary)]">Digital SAT</p>
         <p role="status" className="mt-2 flex items-start gap-2 rounded-xl border border-[var(--sat-divider)] bg-[var(--sat-surface)] p-4 text-[15px] font-semibold">
           <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-[var(--sat-success,var(--sat-accent-strong))]" aria-hidden="true" />
@@ -230,11 +232,19 @@ export function SatEvaStatusGroup({ state, onOpen }: { state: Exclude<EvaState, 
     status = "Eva SIM access closed · submission not tracked";
   }
   return (
-    <section aria-label="Eva SIM" className="mt-6 rounded-xl border border-[var(--sat-divider)] bg-[var(--sat-surface)] p-4 text-left">
-      <p className="text-[15px] font-semibold text-[var(--sat-text)]">{status}</p>
-      {detail ? <p className="sat-tabular mt-1 text-[13px] text-[var(--sat-text-secondary)]">{detail}</p> : null}
+    <section
+      aria-label="Eva SIM"
+      className="mt-6 flex flex-col gap-3 rounded-xl border border-[var(--sat-divider)] bg-[var(--sat-surface-subtle)] p-4 text-left sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <ClipboardList size={20} className="mt-0.5 shrink-0 text-[var(--sat-text-secondary)]" aria-hidden="true" />
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold text-[var(--sat-text)]">{status}</p>
+          {detail ? <p className="sat-tabular mt-0.5 text-[13px] text-[var(--sat-text-secondary)]">{detail}</p> : null}
+        </div>
+      </div>
       {action ? (
-        <button type="button" data-eva-action="true" className={`${SECONDARY} mt-3`} onClick={onOpen}>
+        <button type="button" data-eva-action="true" className={`${SECONDARY} shrink-0`} onClick={onOpen}>
           {action}
         </button>
       ) : null}
@@ -519,6 +529,10 @@ function focusFirstInvalid(form: HTMLFormElement): void {
 
 // --------------------------------------------------------------------- embed
 
+function embedIsOpen(state: EmbedEvaState): boolean {
+  return state.collection === "open" && state.canOpen && Boolean(state.embedUrl);
+}
+
 function EmbedEvaView({
   state,
   revalidationFailed,
@@ -532,24 +546,7 @@ function EmbedEvaView({
   onRetry: () => void;
   onBack: () => void;
 }) {
-  const [slow, setSlow] = useState(false);
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSlow(true), 8_000);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  const open = state.collection === "open" && state.canOpen && Boolean(state.embedUrl);
-  if (!open) {
-    return (
-      <section aria-label="Eva SIM">
-        <ClosedHeading>Eva SIM access is closed here. External submission is not tracked.</ClosedHeading>
-        <div className="mt-6">
-          <BackButton onClick={onBack} />
-        </div>
-      </section>
-    );
-  }
-  if (revalidationFailed) {
+  if (revalidationFailed && embedIsOpen(state)) {
     return (
       <section aria-label="Eva SIM">
         <h2 tabIndex={-1} className="text-[20px] font-semibold" role="alert">
@@ -565,32 +562,64 @@ function EmbedEvaView({
     );
   }
   return (
-    <section aria-labelledby="eva-embed-title">
-      <h2 id="eva-embed-title" className="text-[24px] font-semibold tracking-tight">
-        Eva SIM
-      </h2>
-      <p className="mt-2 text-[15px] leading-6 text-[var(--sat-text-secondary)] [overflow-wrap:anywhere]">
-        Complete the form below. Responses are collected by <span className="font-semibold text-[var(--sat-text)]">{state.embedHost}</span>.
-        This SAT system does not track submission of this external form.
-      </p>
-      <div className="mt-4 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <section aria-label="Eva SIM">
+      <ClosedHeading>Eva SIM access is closed here. External submission is not tracked.</ClosedHeading>
+      <div className="mt-6">
         <BackButton onClick={onBack} />
-        {state.externalOpenUrl ? (
-          <a href={state.externalOpenUrl} target="_blank" rel="noopener noreferrer" className={LINK}>
-            Open form in new tab
-            <ExternalLink size={14} aria-hidden="true" />
-            <span className="sr-only">(opens in a new tab)</span>
-          </a>
-        ) : null}
       </div>
-      <EvaEmbedFrame
-        src={state.embedUrl ?? ""}
-        host={state.embedHost}
-        className="mt-4 block h-[75dvh] min-h-[480px] w-full rounded-xl border border-[var(--sat-divider)] bg-white"
-      />
-      <p className="mt-3 text-[13px] leading-5 text-[var(--sat-text-secondary)]" aria-live="polite">
-        {slow ? "If the form is blank or unavailable, open it in a new tab." : ""}
-      </p>
     </section>
+  );
+}
+
+/** The open external form: a slim toolbar above a frame that fills the rest of the viewport. */
+function EmbedEvaFullscreen({
+  state,
+  recoveryException,
+  onBack,
+}: {
+  state: EmbedEvaState;
+  recoveryException: boolean;
+  onBack: () => void;
+}) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), 8_000);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return (
+    <div className="sat-ui flex h-[100dvh] flex-col bg-[var(--sat-background)] pl-[calc(0.75rem+var(--student-safe-left))] pr-[calc(0.75rem+var(--student-safe-right))] pt-[calc(0.75rem+var(--student-safe-top))] pb-[calc(0.75rem+var(--student-safe-bottom))] text-[var(--sat-text)]">
+      <main aria-labelledby="eva-embed-title" className="flex min-h-0 flex-1 flex-col">
+        <div className="flex items-center gap-3">
+          <BackButton onClick={onBack} />
+          <h2 id="eva-embed-title" className="min-w-0 truncate text-[17px] font-semibold tracking-tight">
+            Eva SIM
+          </h2>
+        </div>
+        <p className="mt-2 text-[13px] leading-5 text-[var(--sat-text-secondary)] [overflow-wrap:anywhere]">
+          <span role="status" className="inline-flex items-center gap-1 font-semibold text-[var(--sat-text)]">
+            <CheckCircle2 size={14} className="shrink-0 text-[var(--sat-accent-strong)]" aria-hidden="true" />
+            {recoveryException ? "SAT submission confirmed with a recovery exception" : "SAT submission confirmed"}
+          </span>
+          {" · "}Responses are collected by <span className="font-semibold text-[var(--sat-text)]">{state.embedHost}</span>.
+          This SAT system does not track submission of this external form.{" "}
+          {state.externalOpenUrl ? (
+            <a href={state.externalOpenUrl} target="_blank" rel="noopener noreferrer" className={`inline-flex items-center gap-1 rounded-sm font-semibold text-[var(--sat-accent-strong)] underline underline-offset-2 ${FOCUS_RING}`}>
+              Open form in new tab
+              <ExternalLink size={13} aria-hidden="true" />
+              <span className="sr-only">(opens in a new tab)</span>
+            </a>
+          ) : null}
+        </p>
+        <EvaEmbedFrame
+          src={state.embedUrl ?? ""}
+          host={state.embedHost}
+          className="mt-3 block min-h-[320px] w-full flex-1 rounded-xl border border-[var(--sat-divider)] bg-white"
+        />
+        <p className={`text-[13px] leading-5 text-[var(--sat-text-secondary)] ${slow ? "mt-2" : "sr-only"}`} aria-live="polite">
+          {slow ? "If the form is blank or unavailable, open it in a new tab." : ""}
+        </p>
+      </main>
+    </div>
   );
 }

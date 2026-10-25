@@ -1,4 +1,5 @@
 import type { SatRunnerState, SatSectionKey } from "./satRunnerReducer";
+import type { SatBreakWindow } from "./satTimingPolicy";
 
 export const SAT_ENTRY_RECOVERY_SURFACE_MS = 5_000;
 
@@ -46,8 +47,11 @@ export interface SatExamStage extends SatStudentStageBase {
   readonly pendingModuleTitle: string | null;
 }
 
-/** The scheduled break is one surface: waiting for it, or on it. */
-export type SatBreakPhase = "waiting" | "active";
+/**
+ * The scheduled break is one surface: waiting for it, preparing its
+ * server-issued start, counting down, or ending while the next section opens.
+ */
+export type SatBreakPhase = "waiting" | "preparing" | "active" | "ending";
 
 export interface SatScheduledBreakStage extends SatStudentStageBase {
   readonly kind: "scheduled-break";
@@ -147,6 +151,11 @@ export interface DeriveSatStudentStageInput {
   /** The module's active question resolves (module phase only; Review needs none). */
   moduleQuestionResolved: boolean;
   pendingBreakSeconds: number;
+  /**
+   * The derived break window (satBreakWindow). Absent means a shared break
+   * described by pendingBreakSeconds alone.
+   */
+  breakWindow?: SatBreakWindow;
   pendingSectionWaitSeconds: number;
   /** Identity of the attempt; every presence key is scoped by it. */
   attemptKey: string;
@@ -190,6 +199,9 @@ export function deriveSatStudentStage({
   moduleResolved,
   moduleQuestionResolved,
   pendingBreakSeconds,
+  breakWindow = pendingBreakSeconds > 0
+    ? { phase: "active", seconds: pendingBreakSeconds, blocksEntry: true }
+    : { phase: "none", seconds: null, blocksEntry: false },
   pendingSectionWaitSeconds,
   attemptKey,
 }: DeriveSatStudentStageInput): SatStudentStage {
@@ -236,7 +248,7 @@ export function deriveSatStudentStage({
 
   // A skipped/disabled form still leads to the normal recovery-policy entry
   // action when the real break ends, rather than holding the break forever.
-  if (explicitModuleEntryRequired && pendingModule && !pendingModule.started && pendingBreakSeconds <= 0 && pendingSectionWaitSeconds <= 0) {
+  if (explicitModuleEntryRequired && pendingModule && !pendingModule.started && !breakWindow.blocksEntry && pendingSectionWaitSeconds <= 0) {
     return {
       kind: "pre-start",
       key: `pre-start:${attemptKey}:module-entry:${pendingModule.id}`,
@@ -254,13 +266,19 @@ export function deriveSatStudentStage({
     Boolean(pendingModule?.startsNewSection) && !pendingModule?.started;
   if ((runnerPhase === "break" && !pendingModule?.started) || hasUnstartedSectionBoundary) {
     const sectionKey = pendingModule?.sectionKey ?? "math";
-    const waiting = pendingSectionWaitSeconds > 0 && pendingBreakSeconds <= 0;
-    const phase: SatBreakPhase = waiting ? "waiting" : "active";
+    const waiting = pendingSectionWaitSeconds > 0 && breakWindow.phase === "none";
+    // After the countdown (or once the server completed the break) the same
+    // surface reads "Preparing <section>…" until the next module replaces it.
+    const phase: SatBreakPhase = waiting
+      ? "waiting"
+      : breakWindow.phase === "preparing" || breakWindow.phase === "active"
+        ? breakWindow.phase
+        : "ending";
     return {
       kind: "scheduled-break",
       key: `break:${attemptKey}:${sectionKey}`,
       phase,
-      remainingSeconds: waiting ? pendingSectionWaitSeconds : pendingBreakSeconds > 0 ? pendingBreakSeconds : null,
+      remainingSeconds: waiting ? pendingSectionWaitSeconds : breakWindow.seconds,
       nextSectionKey: sectionKey,
     };
   }

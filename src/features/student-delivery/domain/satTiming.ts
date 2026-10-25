@@ -174,6 +174,15 @@ export function shouldAutoRevealTimer(args: {
   return previousSeconds > SAT_TIMER_AUTO_REVEAL_SECONDS;
 }
 
+/** Module/review timer text: an expired clock reads "Time expired", never 0:00. */
+export const SAT_TIME_EXPIRED_LABEL = 'Time expired';
+
+export function satTimerLabel(seconds: number | null | undefined, fallbackLabel?: string): string {
+  if (seconds == null) return fallbackLabel ?? '';
+  if (seconds <= 0) return SAT_TIME_EXPIRED_LABEL;
+  return fallbackLabel ?? formatSatTime(seconds);
+}
+
 export function formatSatTime(seconds: number): string {
   const safe = Math.max(0, Math.floor(seconds));
   return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, '0')}`;

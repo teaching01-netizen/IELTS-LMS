@@ -12,7 +12,7 @@ import type {AuthoringField} from './readinessFamilies';
  * the field rather than a banner beside it. The section title stays the
  * strongest thing in the header; everything else is metadata.
  */
-export function SectionRule({title,field,hint='Optional',actions,issues=[],children}:{title:string;field?:AuthoringField;hint?:string;actions?:ReactNode;issues?:AssessmentValidationIssue[];children:ReactNode}) {
+export function SectionRule({title,field,hint,actions,issues=[],children}:{title:string;field?:AuthoringField;hint?:string;actions?:ReactNode;issues?:AssessmentValidationIssue[];children:ReactNode}) {
  const id=useId();
  const blocking=issues.filter(issue=>issue.blocking);
  const warnings=issues.filter(issue=>!issue.blocking);

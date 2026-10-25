@@ -24,11 +24,11 @@ func expectExamResponse(mock sqlmock.Sqlmock, exam Exam) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "slug", "title", "provider_key", "provider_exam_type", "exam_type", "status", "visibility",
 			"organization_id", "owner_id", "current_draft_version_id", "current_published_version_id", "schema_version",
-			"revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled", "sat_section_scope",
+			"revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled", "sat_section_scope", "sat_custom_modules",
 		}).AddRow(
 			exam.ID, exam.Slug, exam.Title, exam.ProviderKey, exam.ProviderExamType, exam.ExamType, exam.Status, exam.Visibility,
 			exam.OrganizationID, exam.OwnerID, exam.CurrentDraftVersionID, exam.CurrentPublishedVersion, exam.SchemaVersion,
-			exam.Revision, exam.CreatedAt, exam.UpdatedAt, exam.CurrentPublishedScope, exam.CurrentPublishedVersionNumber, exam.SatScoreReportEnabled, exam.SatSectionScope,
+			exam.Revision, exam.CreatedAt, exam.UpdatedAt, exam.CurrentPublishedScope, exam.CurrentPublishedVersionNumber, exam.SatScoreReportEnabled, exam.SatSectionScope, exam.SatCustomModules,
 		))
 }
 

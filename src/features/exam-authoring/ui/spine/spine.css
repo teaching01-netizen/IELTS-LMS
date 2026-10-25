@@ -1276,11 +1276,21 @@
 /* One fixed-width trailing slot so the key marker never reflows the row. It is
  * exactly the strip's height so the marker centres on the band. */
 .answer-choice__aside {
+  /* Lifted onto the strip like the letter chip, or the band hides the key. */
+  position: relative;
+  z-index: 1;
   display: flex;
   height: 44px;
   align-items: center;
   gap: 6px;
   padding-top: 0;
+}
+
+/* Side by side, never stacked: stacked arrows overflow the 44px slot into the
+ * next choice, and the slot's 124px (56 + 6 + 62) is what the strip's 144px
+ * bleed above is derived from. */
+.answer-choice__reorder {
+  display: flex;
 }
 
 .answer-choice__key {

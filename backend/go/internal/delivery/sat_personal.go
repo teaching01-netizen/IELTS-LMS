@@ -45,9 +45,8 @@ func recordPersonalFrameLead(stage string, startsAt, enteredAt time.Time) {
 // and break→next-M1 are server-driven (finalize + break-expiry activate the
 // next module atomically); the client renders authoritative state only.
 
-// personalOfferLeadSeconds is deprecated: the normal module/break path no
-// longer arms future-start offers. It remains only for the deprecated
-// StartBreak/EnterBreak and armPersonalModuleOfferTx offer paths, which are
-// retained backward-compatibly until the follow-up cleanup migration removes
-// the entry_* columns.
+// personalOfferLeadSeconds is the default future-start lead of an offer. The
+// scheduled break uses it on its normal path (StartBreak/EnterBreak arm and
+// confirm the break once its screen is ready); the module path no longer arms
+// offers and keeps it only for the deprecated armPersonalModuleOfferTx.
 const personalOfferLeadSeconds = 3

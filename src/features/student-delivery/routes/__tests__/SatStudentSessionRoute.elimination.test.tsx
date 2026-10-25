@@ -3,20 +3,18 @@ import { createElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
 import {
-  satEliminatorArmsKey,
-  saveSatEliminatorArms,
-} from "../../infrastructure/satEliminatorArmStore";
+  satEliminatorModeKey,
+  saveSatEliminatorMode,
+} from "../../infrastructure/satEliminatorModeStore";
 import { SatStudentSessionRoute } from "../SatStudentSessionRoute";
 
 /**
- * The eliminator is QUESTION-SCOPED.
+ * The eliminator is ONE SWITCH FOR THE ATTEMPT.
  *
- * Arming it used to be one route-wide boolean that every navigation reset, so a
- * student who armed the cut control, moved on, and came back found it closed
- * again — even though the choices they crossed out had survived (those are
- * data, in `eliminatedOptionIds`). These tests pin the split: the crossing-out
- * survives navigation because it is persisted, and the open/closed arm survives
- * navigation because it is keyed per question. Nothing about it is server state.
+ * Turned on, it stays on for every question the student visits until they turn
+ * it off; turned off, it stays off. The choices they crossed out are separate
+ * data (`eliminatedOptionIds`) and survive navigation because they are
+ * persisted. Nothing about the switch is server state.
  */
 
 const controllerMock = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
@@ -235,7 +233,7 @@ function seed(state: Record<string, unknown>) {
     autoEntryRecoverable: false,
     entryAutoStartPending: false,
     pendingModule: module,
-    pendingBreakSeconds: 0,
+    pendingBreakSeconds: 0, breakWindow: { phase: "none", seconds: null, blocksEntry: false }, breakEntry: { retrying: false, blocked: null },
     pendingSectionWaitSeconds: 0,
     pendingStageReady: true,
     effectiveTiming: data.timing,
@@ -282,7 +280,7 @@ const eliminatorToggle = () =>
 const commands = () =>
   (controllerMock.current as { commands: Record<string, ReturnType<typeof vi.fn>> }).commands;
 
-describe("SatStudentSessionRoute question-scoped eliminator", () => {
+describe("SatStudentSessionRoute attempt-wide eliminator", () => {
   beforeEach(() => {
     cleanup();
     window.sessionStorage.clear();
@@ -293,7 +291,7 @@ describe("SatStudentSessionRoute question-scoped eliminator", () => {
     matchMediaMock();
   });
 
-  it("keeps the eliminator open per question across navigation", () => {
+  it("keeps the eliminator on for every question until the student turns it off", () => {
     const view = renderAt(0);
 
     expect(eliminatorToggle()).toHaveAttribute("aria-pressed", "false");
@@ -303,43 +301,32 @@ describe("SatStudentSessionRoute question-scoped eliminator", () => {
       "true"
     );
 
-    // Q2 starts closed — the arm is not global.
+    // Q2 opens already on — the switch is not per question.
     goToQuestion(view, 1);
+    expect(screen.getByRole("button", { name: "Turn off cross-out mode" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(screen.getByRole("button", { name: "Eliminate option A" })).toBeInTheDocument();
+
+    // Turning it off on Q2 turns it off everywhere.
+    fireEvent.click(eliminatorToggle());
     expect(screen.getByRole("button", { name: "Turn on cross-out mode" })).toHaveAttribute(
       "aria-pressed",
       "false"
     );
-    fireEvent.click(screen.getByRole("button", { name: "Turn on cross-out mode" }));
-    expect(screen.getByRole("button", { name: "Turn off cross-out mode" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
-
-    // Back to Q1: still armed, and the two states stayed independent.
     goToQuestion(view, 0);
-    expect(screen.getByRole("button", { name: "Turn off cross-out mode" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Turn on cross-out mode" })).toHaveAttribute(
       "aria-pressed",
-      "true"
-    );
-    goToQuestion(view, 1);
-    expect(screen.getByRole("button", { name: "Turn off cross-out mode" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
+      "false"
     );
   });
 
-  it("closes only the question the student disarms", () => {
+  it("keeps the eliminator on across a module change in the same attempt", () => {
     const view = renderAt(0);
     fireEvent.click(eliminatorToggle());
-    goToQuestion(view, 1);
-    fireEvent.click(eliminatorToggle());
 
-    // Disarm Q2, then confirm Q1 kept its own arm.
-    fireEvent.click(screen.getByRole("button", { name: "Turn off cross-out mode" }));
-    expect(screen.getByRole("button", { name: "Turn on cross-out mode" })).toHaveAttribute(
-      "aria-pressed",
-      "false"
-    );
+    moduleAttemptId = "ma-2";
     goToQuestion(view, 0);
     expect(screen.getByRole("button", { name: "Turn off cross-out mode" })).toHaveAttribute(
       "aria-pressed",
@@ -412,19 +399,19 @@ describe("SatStudentSessionRoute question-scoped eliminator", () => {
     expect(screen.getByRole("button", { name: "Eliminate option B" })).toBeInTheDocument();
   });
 
-  it("remembers the armed question through a reload of the same attempt", () => {
+  it("remembers the switch through a reload of the same attempt", () => {
     const first = renderAt(0);
     // This attempt already crossed option B out on q1: the reload must bring
     // back the strike and its Undo, not just the armed mode.
     fireEvent.click(eliminatorToggle());
-    // Armed means armed for the attempt, on this device.
+    // On means on for the attempt, on this device.
     expect(
-      window.localStorage.getItem(satEliminatorArmsKey("schedule-1", "attempt-1"))
-    ).toContain("ma-1:q1");
+      window.localStorage.getItem(satEliminatorModeKey("schedule-1", "attempt-1"))
+    ).not.toBeNull();
     first.unmount();
 
     // A reload is a fresh mount of the same attempt: the exam comes back with
-    // the question the student left armed still armed, and with the crossing
+    // the eliminator still on, and with the crossing
     // out they already made — the strike and its Undo are server state, not a
     // side effect of the armed mode.
     seed(moduleState({
@@ -444,21 +431,21 @@ describe("SatStudentSessionRoute question-scoped eliminator", () => {
         .querySelector('[data-sat-elimination-line="true"]')
     ).not.toBeNull();
 
-    // Disarming is remembered too — no stale record to reopen on the next load.
+    // Off is remembered too — no stale record to reopen on the next load.
     fireEvent.click(eliminatorToggle());
     expect(
-      window.localStorage.getItem(satEliminatorArmsKey("schedule-1", "attempt-1"))
+      window.localStorage.getItem(satEliminatorModeKey("schedule-1", "attempt-1"))
     ).toBeNull();
   });
 
-  it("shows each attempt its own remembered arms", () => {
+  it("shows each attempt its own remembered switch", () => {
     const view = renderAt(0);
     fireEvent.click(eliminatorToggle());
     expect(eliminatorToggle()).toHaveAttribute("aria-pressed", "true");
 
-    // The next attempt was armed on a different module attempt: it opens with
-    // ITS record, not the one the previous attempt left on this device.
-    saveSatEliminatorArms("schedule-1", "attempt-2", new Set(["ma-2:q1"]));
+    // The next attempt opens with ITS record, not the one the previous attempt
+    // left on this device.
+    saveSatEliminatorMode("schedule-1", "attempt-2", true);
     moduleAttemptId = "ma-2";
     seed(moduleState({ questionIndex: 0 }));
     view.rerender(createElement(SatStudentSessionRoute, routeProps("attempt-2")));
@@ -470,20 +457,6 @@ describe("SatStudentSessionRoute question-scoped eliminator", () => {
     // And an attempt with nothing remembered opens closed.
     seed(moduleState({ questionIndex: 0 }));
     view.rerender(createElement(SatStudentSessionRoute, routeProps("attempt-3")));
-    expect(screen.getByRole("button", { name: "Turn on cross-out mode" })).toHaveAttribute(
-      "aria-pressed",
-      "false"
-    );
-  });
-
-  it("does not leak an arm from a previous attempt or module attempt", () => {
-    const view = renderAt(0);
-    fireEvent.click(eliminatorToggle());
-    expect(eliminatorToggle()).toHaveAttribute("aria-pressed", "true");
-
-    // Same question id, different module attempt: the arm is not inherited.
-    moduleAttemptId = "ma-2";
-    goToQuestion(view, 0);
     expect(screen.getByRole("button", { name: "Turn on cross-out mode" })).toHaveAttribute(
       "aria-pressed",
       "false"

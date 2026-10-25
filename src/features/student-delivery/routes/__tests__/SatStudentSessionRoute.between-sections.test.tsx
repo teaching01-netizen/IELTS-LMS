@@ -346,6 +346,10 @@ function seed(
     retryModuleEntry: vi.fn(),
     pendingModule: module,
     pendingBreakSeconds: pending.breakSeconds,
+    breakWindow: pending.breakSeconds > 0
+      ? { phase: "active", seconds: pending.breakSeconds, blocksEntry: true }
+      : { phase: "none", seconds: null, blocksEntry: false },
+    breakEntry: { retrying: false, blocked: null },
     pendingSectionWaitSeconds: pending.waitSeconds,
     pendingStageReady: true,
     effectiveTiming: data?.timing ?? null,
@@ -420,7 +424,7 @@ describe("SatStudentSessionRoute between-sections window", () => {
   // At 0:00 the same break surface stays mounted for the tiny propagation
   // window and is replaced directly by Math Module 1 when state arrives —
   // never "Opening Math…".
-  it("holds the same break surface at 0:00 with no opening copy", () => {
+  it("holds the same break surface after 0:00 as preparation, with no timer", () => {
     renderRoute(
       mathData(),
       { breakSeconds: 0, waitSeconds: 0 },
@@ -429,7 +433,8 @@ describe("SatStudentSessionRoute between-sections window", () => {
 
     expect(screen.getByTestId("sat-scheduled-break")).toBeInTheDocument();
     expect(screen.queryByRole("timer")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Take a short break." })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Preparing Math…" })).toBeInTheDocument();
+    expect(screen.queryByText("0:00")).toBeNull();
     expect(screen.queryByText(/Opening Math/)).toBeNull();
     expect(screen.queryByText(/Still opening/)).toBeNull();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();

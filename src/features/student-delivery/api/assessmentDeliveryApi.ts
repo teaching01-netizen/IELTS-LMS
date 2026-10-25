@@ -24,6 +24,7 @@ import type {
   AssessmentDeliveryBootstrap,
   AssessmentDeliveryState,
   AssessmentBreakEntryRequest,
+  AssessmentBreakStartRequest,
   AssessmentLateEvidenceRequest,
   AssessmentModuleCloseAck,
   AssessmentModuleCloseIntentAck,
@@ -532,13 +533,17 @@ export const assessmentDeliveryApi = {
     scheduleId: string,
     attemptId: string,
     breakId: string,
-    request?: AssessmentBreakEntryRequest
+    request?: AssessmentBreakStartRequest
   ): Promise<AssessmentDeliveryBootstrap> {
-    // Only the control-epoch fence is meaningful here (the server ignores the
-    // rest of the entry shape); an undefined epoch is omitted so legacy
-    // clients keep the pre-existing un-fenced behavior.
+    // Undefined fields are omitted so an unfenced first offer keeps the
+    // server's default lead.
     const body =
-      request?.controlEpoch === undefined ? undefined : { controlEpoch: request.controlEpoch };
+      request?.controlEpoch === undefined && request?.leadSeconds === undefined
+        ? undefined
+        : {
+            ...(request.controlEpoch === undefined ? {} : { controlEpoch: request.controlEpoch }),
+            ...(request.leadSeconds === undefined ? {} : { leadSeconds: request.leadSeconds }),
+          };
     return attemptRequest(scheduleId, attemptId, (config) =>
       backendPost<AssessmentDeliveryBootstrap>(
         `/v1/assessment-delivery/schedules/${scheduleId}/breaks/${breakId}/start`,

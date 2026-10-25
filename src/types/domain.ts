@@ -97,6 +97,8 @@ export interface ExamEntity {
   /** SAT only: show the score report on completion; off shows "SAT complete" only. */
   satSectionScope?: SatPublishScope | undefined;
   satScoreReportEnabled?: boolean | undefined;
+  /** SAT only: has a classroom plan (custom modules), so it runs in Classroom rooms only. */
+  satCustomModules?: boolean | undefined;
 
   // Permissions summary (simplified for now, can be expanded)
   canEdit: boolean;

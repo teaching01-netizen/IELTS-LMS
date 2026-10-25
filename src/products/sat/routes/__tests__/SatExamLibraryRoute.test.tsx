@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,14 +37,16 @@ const defaultsMock = vi.hoisted(() => ({
 vi.mock('../../../../features/exam-authoring/api/satExamConfigApi', () => ({
   useSatExamConfigDefaults: () => ({ data: defaultsMock.data, error: null }),
 }));
+const sessionUser = vi.hoisted(() => ({ id: undefined as string | undefined }));
 vi.mock('../../../../features/auth/authSession', () => ({
-  useAuthSession: () => ({ session: { user: { displayName: 'Admin', email: 'admin@example.com' } } }),
+  useAuthSession: () => ({ session: { user: { id: sessionUser.id, displayName: 'Admin', email: 'admin@example.com' } } }),
 }));
 
 const satExam = {
   id: 'sat-1', slug: 'sat-1', title: 'SAT Practice 06', providerKey: 'sat', type: 'Academic', status: 'draft',
   visibility: 'organization', owner: 'Admin', createdAt: '2026-08-29T00:00:00Z', updatedAt: '2026-08-30T00:00:00Z',
   currentDraftVersionId: 'draft-1', currentPublishedVersionId: null, canEdit: true, canPublish: true, canDelete: true, schemaVersion: 4,
+  satCustomModules: true,
 };
 const ieltsExam = { ...satExam, id: 'ielts-1', slug: 'ielts-1', title: 'IELTS Academic 01', providerKey: 'ielts' };
 
@@ -123,7 +125,11 @@ describe('SatExamLibraryRoute', () => {
     defaultsMock.data.classroomCreationEnabled = true;
   });
 
-  afterEach(() => { consumeAuthoringDraftOnEntry('sat-1'); });
+  afterEach(() => {
+    consumeAuthoringDraftOnEntry('sat-1');
+    window.localStorage.clear();
+    sessionUser.id = undefined;
+  });
 
   it('bulk-deletes any selected exam, warning that rooms and results go with it', async () => {
     const second = { ...satExam, id: 'sat-2', slug: 'sat-2', title: 'SAT Practice 07' };
@@ -493,5 +499,39 @@ describe('SatExamLibraryRoute', () => {
       expect(row.className).not.toMatch(/translate/);
     });
     expect(container.innerHTML).not.toMatch(/bg-gradient|backdrop-blur/);
+  });
+
+  it('opens on Classroom, filters by exam type, and remembers the last type per user in this browser', () => {
+    const practice = { ...satExam, id: 'sat-full', slug: 'sat-full', title: 'SAT Full 01', satCustomModules: false };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, practice], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    sessionUser.id = 'user-a';
+    const first = renderRoute();
+    const typeTabs = screen.getByRole('radiogroup', { name: 'Exam type' });
+    expect(within(typeTabs).getByRole('radio', { name: 'Classroom 1' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
+    expect(screen.queryByText('SAT Full 01')).not.toBeInTheDocument();
+
+    fireEvent.click(within(typeTabs).getByRole('radio', { name: 'Practice 1' }));
+    expect(screen.getByText('SAT Full 01')).toBeInTheDocument();
+    expect(screen.queryByText('SAT Practice 06')).not.toBeInTheDocument();
+    first.unmount();
+
+    expect(window.localStorage.getItem('sat-exam-library-type:user-a')).toBe('practice');
+    renderRoute();
+    expect(screen.getByRole('radio', { name: 'Practice 1' })).toHaveAttribute('aria-checked', 'true');
+    cleanup();
+
+    sessionUser.id = 'user-b';
+    renderRoute();
+    expect(screen.getByRole('radio', { name: 'Classroom 1' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('points to the other type when the selected type has no exams', () => {
+    const practice = { ...satExam, satCustomModules: false };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [practice], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute();
+    expect(screen.getByText('No Classroom exams')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show Practice exams' }));
+    expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
   });
 });

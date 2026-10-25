@@ -114,13 +114,21 @@ const TextAlignShortcuts = Extension.create<{ enabled: () => boolean }>({
   },
 });
 
+// Documents are immutable, so a cursor move (same doc) never recounts.
+const wordCounts = new WeakMap<ProseMirrorNode, number>();
+
 /** Live word count under a document editor, like a word processor's status bar. */
 function EditorWordCount({ editor }: { editor: Editor }) {
   const words = useEditorState({
     editor,
     selector: ({ editor: e }) => {
       const { doc } = e.state;
-      return doc.textBetween(0, doc.content.size, " ", " ").split(/\s+/).filter(Boolean).length;
+      let count = wordCounts.get(doc);
+      if (count === undefined) {
+        count = doc.textBetween(0, doc.content.size, " ", " ").split(/\s+/).filter(Boolean).length;
+        wordCounts.set(doc, count);
+      }
+      return count;
     },
   });
   return <div className="sat-rich-editor__footer">{words === 1 ? "1 word" : `${words} words`}</div>;

@@ -41,12 +41,12 @@ func TestReopenDraftHealsOrphanDraftExam(t *testing.T) {
 			"id", "slug", "title", "provider_key", "provider_exam_type",
 			"exam_type", "status", "visibility", "organization_id", "owner_id",
 			"current_draft_version_id", "current_published_version_id",
-			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled", "sat_section_scope",
+			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled", "sat_section_scope", "sat_custom_modules",
 		}).AddRow(
 			"exam-orphan", "orphan", "Orphan Exam", "ielts", nil,
 			"Academic", "draft", "organization", nil, "owner-1",
 			nil, nil,
-			1, 0, time.Now(), time.Now(), nil, nil, false, "full",
+			1, 0, time.Now(), time.Now(), nil, nil, false, "full", false,
 		))
 	// No surviving versions: the ordering key resolves to no row, so the
 	// snapshot read is skipped and the draft seeds from an empty skeleton.
@@ -113,12 +113,12 @@ func TestReopenDraftClonesPublishedSnapshot(t *testing.T) {
 			"id", "slug", "title", "provider_key", "provider_exam_type",
 			"exam_type", "status", "visibility", "organization_id", "owner_id",
 			"current_draft_version_id", "current_published_version_id",
-			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled", "sat_section_scope",
+			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled", "sat_section_scope", "sat_custom_modules",
 		}).AddRow(
 			"exam-sealed", "sealed", "Sealed Exam", "ielts", nil,
 			"Academic", "published", "organization", nil, "owner-1",
 			nil, "ver-pub",
-			1, 7, time.Now(), time.Now(), "reading-writing", 3, false, "full",
+			1, 7, time.Now(), time.Now(), "reading-writing", 3, false, "full", false,
 		))
 	// Latest surviving version is the published seal; reuse its snapshots.
 	// The ordering key and the payload are read separately so the server never
@@ -185,12 +185,12 @@ func TestReopenDraftReturnsExistingDraft(t *testing.T) {
 			"id", "slug", "title", "provider_key", "provider_exam_type",
 			"exam_type", "status", "visibility", "organization_id", "owner_id",
 			"current_draft_version_id", "current_published_version_id",
-			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled", "sat_section_scope",
+			"schema_version", "revision", "created_at", "updated_at", "current_published_scope", "current_published_version_number", "sat_score_report_enabled", "sat_section_scope", "sat_custom_modules",
 		}).AddRow(
 			"exam-live", "live", "Live Exam", "ielts", nil,
 			"Academic", "draft", "organization", nil, "owner-1",
 			"ver-live", nil,
-			1, 1, time.Now(), time.Now(), nil, nil, false, "full",
+			1, 1, time.Now(), time.Now(), nil, nil, false, "full", false,
 		))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_versions WHERE id = ?")).
 		WithArgs("ver-live").

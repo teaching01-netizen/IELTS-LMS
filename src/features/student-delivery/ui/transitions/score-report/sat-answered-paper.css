@@ -161,7 +161,7 @@
   }
   .sat-paper-question .sat-answer-choice,
   .sat-paper-question [data-review-spr] { break-inside: avoid; }
-  /* Keep the authored rail as vector rectangles. The multi-stop CSS gradient
+  /* Keep the authored rail as vector rectangles. The multi-stop CSS colour ramp
      becomes a nested PDF shading pattern that is slow to redraw on iPad. */
   .sat-answered-paper .sat-paper-question .sat-color-rail {
     background-image: var(--sat-rail-print-pattern);

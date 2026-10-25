@@ -90,30 +90,40 @@ export function ComposerToolbar({ editor, capabilities: c, onOpenDialog, onTable
   const [copyingTable, setCopyingTable] = useState(false);
   const state = useEditorState({
     editor,
-    selector: ({ editor: e }) => ({
-      context: resolveComposerContext(e.state),
-      selection: selectionKindOf(e.state),
-      bold: e.isActive('bold'),
-      italic: e.isActive('italic'),
-      underline: e.isActive('underline'),
-      strike: e.isActive('strike'),
-      superscript: e.isActive('superscript'),
-      subscript: e.isActive('subscript'),
-      bullet: e.isActive('bulletList'),
-      ordered: e.isActive('orderedList'),
-      code: e.isActive('codeBlock'),
-      align: storedTextAlignment(e.getAttributes(e.isActive('heading') ? 'heading' : 'paragraph')['textAlign']) ?? 'left',
-      canIndent: e.can().sinkListItem('listItem'),
-      canOutdent: e.can().liftListItem('listItem'),
-      style: e.isActive('heading', { level: 2 }) ? 'heading2' : e.isActive('heading', { level: 3 }) ? 'heading3' : 'paragraph',
-      undo: typeof e.can().undo === 'function' ? e.can().undo() : false,
-      redo: typeof e.can().redo === 'function' ? e.can().redo() : false,
-      history: typeof e.can().undo === 'function',
-      mergeCells: e.can().mergeCells(),
-      splitCell: e.can().splitCell(),
-      inTable: e.isActive('table'),
-      centeredTable: e.getAttributes('table')['cellAlignment'] === 'center',
-    }),
+    selector: ({ editor: e }) => {
+      // Runs on every transaction (each keystroke). `can()` rebuilds a wrapper
+      // for every registered command per call, so build it once, and ask list
+      // and table questions only where the answer can be yes.
+      const can = e.can();
+      const bullet = e.isActive('bulletList');
+      const ordered = e.isActive('orderedList');
+      const inList = bullet || ordered;
+      const inTable = e.isActive('table');
+      return {
+        context: resolveComposerContext(e.state),
+        selection: selectionKindOf(e.state),
+        bold: e.isActive('bold'),
+        italic: e.isActive('italic'),
+        underline: e.isActive('underline'),
+        strike: e.isActive('strike'),
+        superscript: e.isActive('superscript'),
+        subscript: e.isActive('subscript'),
+        bullet,
+        ordered,
+        code: e.isActive('codeBlock'),
+        align: storedTextAlignment(e.getAttributes(e.isActive('heading') ? 'heading' : 'paragraph')['textAlign']) ?? 'left',
+        canIndent: inList && can.sinkListItem('listItem'),
+        canOutdent: inList && can.liftListItem('listItem'),
+        style: e.isActive('heading', { level: 2 }) ? 'heading2' : e.isActive('heading', { level: 3 }) ? 'heading3' : 'paragraph',
+        undo: typeof can.undo === 'function' ? can.undo() : false,
+        redo: typeof can.redo === 'function' ? can.redo() : false,
+        history: typeof can.undo === 'function',
+        mergeCells: inTable && can.mergeCells(),
+        splitCell: inTable && can.splitCell(),
+        inTable,
+        centeredTable: inTable && e.getAttributes('table')['cellAlignment'] === 'center',
+      };
+    },
   });
   const context = state.context;
   // A node selection (image, equation) cannot carry text marks, so those

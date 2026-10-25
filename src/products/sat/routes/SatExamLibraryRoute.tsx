@@ -29,6 +29,29 @@ import {
 } from '../ui/SatPage';
 
 type LibrarySort = 'updated' | 'title';
+type ExamType = 'classroom' | 'practice';
+
+const EXAM_TYPE_LABEL: Record<ExamType, string> = { classroom: 'Classroom', practice: 'Practice' };
+// Custom-module exams run in Classroom rooms only; the full adaptive test is the Practice exam.
+const examTypeOf = (exam: ExamEntity): ExamType => (exam.satCustomModules ? 'classroom' : 'practice');
+
+// The last type tab is a per-browser preference, keyed by viewer so people
+// sharing a browser keep their own. Blocked storage falls back to Classroom.
+const examTypeKey = (userId: string | undefined) => `sat-exam-library-type:${userId ?? 'anonymous'}`;
+function readExamType(key: string): ExamType {
+  try {
+    return window.localStorage.getItem(key) === 'practice' ? 'practice' : 'classroom';
+  } catch {
+    return 'classroom';
+  }
+}
+function writeExamType(key: string, type: ExamType): void {
+  try {
+    window.localStorage.setItem(key, type);
+  } catch {
+    // Storage unavailable: the choice lasts for this visit only.
+  }
+}
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
@@ -95,7 +118,21 @@ export function SatExamLibraryRoute() {
   const tab: SatLibraryTab = params.tab ?? 'active';
   const sort: LibrarySort = params.sort === 'title' ? 'title' : 'updated';
   const [createOpen, setCreateOpen] = useState(false);
-  const satExams = useMemo(() => (query.data?.entities ?? []).filter((exam) => exam.providerKey === 'sat'), [query.data?.entities]);
+  const { session } = useAuthSession();
+  const typeKey = examTypeKey(session?.user.id);
+  const [typeChoice, setTypeChoice] = useState<{ key: string; type: ExamType } | null>(null);
+  const examType = typeChoice?.key === typeKey ? typeChoice.type : readExamType(typeKey);
+  const setExamType = (next: ExamType) => {
+    writeExamType(typeKey, next);
+    setTypeChoice({ key: typeKey, type: next });
+  };
+  const allSatExams = useMemo(() => (query.data?.entities ?? []).filter((exam) => exam.providerKey === 'sat'), [query.data?.entities]);
+  const typeCounts = useMemo(() => {
+    const classroom = allSatExams.filter((exam) => examTypeOf(exam) === 'classroom').length;
+    return { classroom, practice: allSatExams.length - classroom };
+  }, [allSatExams]);
+  const satExams = useMemo(() => allSatExams.filter((exam) => examTypeOf(exam) === examType), [allSatExams, examType]);
+  const otherType: ExamType = examType === 'classroom' ? 'practice' : 'classroom';
   const counts = useMemo(() => {
     const active = satExams.filter((exam) => exam.status !== 'archived');
     const published = active.filter((exam) => exam.status === 'published').length;
@@ -118,7 +155,6 @@ export function SatExamLibraryRoute() {
   const { lastOpenedId, openRecord } = useSatListReturn(!query.isLoading);
   const setSearch = (value: string) => setParams({ q: value });
 
-  const { session } = useAuthSession();
   const bulkDelete = useBulkDeleteExamsMutation();
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -185,6 +221,18 @@ export function SatExamLibraryRoute() {
         description="Author Digital SAT practice exams and prepare rooms. Changes are saved automatically."
         actions={<SatButton variant="primary" onClick={openCreate} icon={<Plus size={16} aria-hidden="true" />}>Create exam</SatButton>}
       />
+
+      <div className="mt-6">
+        <SatSegmentedControl<ExamType>
+          label="Exam type"
+          value={examType}
+          options={[
+            { value: 'classroom', label: EXAM_TYPE_LABEL.classroom, count: typeCounts.classroom },
+            { value: 'practice', label: EXAM_TYPE_LABEL.practice, count: typeCounts.practice },
+          ]}
+          onChange={setExamType}
+        />
+      </div>
 
       <SatListToolbar
         label="Exam list controls"
@@ -372,7 +420,7 @@ export function SatExamLibraryRoute() {
         <SatEmptyState
           icon={<SearchX size={20} aria-hidden="true" />}
           title="No matching exams"
-          hint={`No ${TAB_NOUN[tab]} exams match “${search.trim()}”.`}
+          hint={`No ${TAB_NOUN[tab]} ${EXAM_TYPE_LABEL[examType]} exams match “${search.trim()}”.`}
           action={<SatButton variant="secondary" onClick={() => setSearch('')}>Clear search</SatButton>}
         />
       ) : tab === 'archived' ? (
@@ -395,6 +443,15 @@ export function SatExamLibraryRoute() {
           title="No active exams"
           hint={`${counts.archived} archived ${counts.archived === 1 ? 'exam is' : 'exams are'} in the Archived tab. Create a new exam or open an archived one.`}
           action={<SatButton variant="secondary" onClick={() => setParams({ tab: 'archived' })}>Show archived</SatButton>}
+        />
+      ) : typeCounts[otherType] > 0 ? (
+        <SatEmptyState
+          icon={<BookOpen size={20} aria-hidden="true" />}
+          title={`No ${EXAM_TYPE_LABEL[examType]} exams`}
+          hint={examType === 'classroom'
+            ? 'Exams with custom modules appear here. Full SAT exams are under Practice.'
+            : 'Full SAT exams appear here. Exams with custom modules are under Classroom.'}
+          action={<SatButton variant="secondary" onClick={() => setExamType(otherType)}>Show {EXAM_TYPE_LABEL[otherType]} exams</SatButton>}
         />
       ) : (
         <SatEmptyState

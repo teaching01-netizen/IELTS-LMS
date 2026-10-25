@@ -193,6 +193,9 @@ type Exam struct {
 	// download on completion; off, the student only sees "SAT complete".
 	SatScoreReportEnabled bool            `json:"satScoreReportEnabled"`
 	SatSectionScope       SATPublishScope `json:"satSectionScope"`
+	// SatCustomModules: the exam has a classroom plan, so it runs in Classroom
+	// rooms only; otherwise it is the full adaptive (Practice-capable) test.
+	SatCustomModules bool `json:"satCustomModules"`
 }
 
 // Version is the exam_versions row projection used by ListVersions.
@@ -325,7 +328,9 @@ func claimExamOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, fing
 	return storedResult, false, nil
 }
 
-const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), (SELECT v.version_number FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), sat_score_report_enabled, sat_section_scope"
+const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), (SELECT v.version_number FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), sat_score_report_enabled, sat_section_scope, " +
+	// Same version GetClassroomPlan reads: the draft, else the published release.
+	"COALESCE((SELECT JSON_TYPE(v.sat_classroom_plan) = 'OBJECT' AND JSON_LENGTH(v.sat_classroom_plan) > 0 FROM exam_versions v WHERE v.id = COALESCE(NULLIF(exam_entities.current_draft_version_id, ''), exam_entities.current_published_version_id)), FALSE)"
 
 // versionColumns is the full exam_versions projection, snapshot payloads
 // included: only ever selected by id or for a single ordered row.
@@ -342,7 +347,7 @@ func scanExam(row interface {
 	var e Exam
 	var providerExamType, orgID, draftID, pubID, publishedScope sql.NullString
 	var publishedVersionNumber sql.NullInt64
-	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope, &publishedVersionNumber, &e.SatScoreReportEnabled, &e.SatSectionScope); err != nil {
+	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope, &publishedVersionNumber, &e.SatScoreReportEnabled, &e.SatSectionScope, &e.SatCustomModules); err != nil {
 		return Exam{}, err
 	}
 	if providerExamType.Valid {

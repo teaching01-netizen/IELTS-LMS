@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react';
 import { useRoomClockMs } from '@shared/hooks/useAuthoritativeDeadlineClock';
 import { deriveSatTemporalSnapshot, type SatTemporalModel } from './satTemporalModel';
+import { satOpenPersonalBreak } from '../application/satTimingPolicy';
 
 const SatTemporalContext = createContext<SatTemporalModel | null>(null);
 
@@ -48,14 +49,16 @@ export function SatTemporalRuntime({
         onBoundary?.('break-end', key);
       }
     }
-    const personalBreak = data?.attempt.personalBreaks?.find((candidate) => candidate.state !== 'completed');
+    // Only an actually expired break ends: a preparing break (including one
+    // confirmed for a future start) never does.
+    const personalBreak = satOpenPersonalBreak(timing?.timingModel, data?.attempt.personalBreaks);
     if (
       data?.scheduleRuntimeStatus === 'live' &&
-      personalBreak?.state === 'active' &&
+      personalBreak &&
       !personalBreak.pausedAt &&
-      snapshot.pendingBreakSeconds <= 0
+      snapshot.breakWindow.phase === 'ending'
     ) {
-      const key = `personal-break-end:${data.attempt.id}:${personalBreak.id}:${personalBreak.entryGeneration}`;
+      const key = `personal-break-end:${data.attempt.id}:${personalBreak.id}:${personalBreak.entryGeneration}:${personalBreak.deadlineAt}`;
       if (!firedRef.current.has(key)) {
         firedRef.current.add(key);
         onBoundary?.('break-end', key);

@@ -3,12 +3,13 @@ import type {
   AssessmentModuleAttemptSnapshot,
   AssessmentTimingSnapshot,
 } from '../contracts/assessmentDelivery';
-import { isSatPersonalTimingModel } from '../../../types/domain';
 import { breakRemainingSeconds, personalModuleRemainingSeconds } from '../domain/satTiming';
 import {
   satBreakCountdownSeconds,
+  satBreakWindow,
   satClockOffsetMs,
   satCountdown,
+  satOpenPersonalBreak,
   satPersonalClockRunning,
   satSectionWaitSeconds,
   satSharedClockRunning,
@@ -71,26 +72,20 @@ export function deriveSatTemporalSnapshot(model: SatTemporalModel, now: number) 
     running: Boolean(nextSectionStartAt) && data?.scheduleRuntimeStatus === 'live',
     nowMs: now,
   });
-  const personalBreak = data && isSatPersonalTimingModel(effectiveTiming?.timingModel)
-    ? data.attempt.personalBreaks?.find((candidate) => candidate.state !== 'completed') ?? null
-    : null;
-  const pendingBreakSeconds = data
-    ? isSatPersonalTimingModel(effectiveTiming?.timingModel)
-      ? (() => {
-          if (!personalBreak || personalBreak.state !== 'active' || !personalBreak.deadlineAt) return 0;
-          if (personalBreak.pausedAt) return Math.max(0, personalBreak.remainingSeconds);
-          const deadline = Date.parse(personalBreak.deadlineAt);
-          const startsAt = personalBreak.startsAt ? Date.parse(personalBreak.startsAt) : Number.NaN;
-          if (Number.isFinite(startsAt) && startsAt > now + offset) return 0;
-          return Number.isFinite(deadline) ? Math.max(0, Math.ceil((deadline - (now + offset)) / 1_000)) : 0;
-        })()
-      : satBreakCountdownSeconds({
+  const breakWindow = satBreakWindow({
+    timingModel: effectiveTiming?.timingModel,
+    personalBreak: satOpenPersonalBreak(effectiveTiming?.timingModel, data?.attempt.personalBreaks),
+    serverNowMs: now + offset,
+    sharedSeconds: data
+      ? satBreakCountdownSeconds({
           timingModel: effectiveTiming?.timingModel,
           nextSectionStartAt,
           nextSectionStartSeconds,
           legacyBreakSeconds: breakRemainingSeconds(data, model.pendingAttempt, snapshotReceivedAt, now),
         })
-    : 0;
+      : 0,
+  });
+  const pendingBreakSeconds = breakWindow.seconds ?? 0;
   const pendingSectionWaitSeconds = data && effectiveTiming
     ? satSectionWaitSeconds({
         timingModel: effectiveTiming.timingModel,
@@ -111,6 +106,7 @@ export function deriveSatTemporalSnapshot(model: SatTemporalModel, now: number) 
     ...countdown,
     authoritativeSeconds,
     nextSectionStartSeconds,
+    breakWindow,
     pendingBreakSeconds,
     pendingSectionWaitSeconds,
     handoffSeconds,

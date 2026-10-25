@@ -9,7 +9,6 @@ import {
   type StudentFontSize,
   type StudentPassageReadabilityLevel,
 } from './accessibilityScale';
-import { STUDENT_PLAYBACK_RATES } from './accessibilityPreferences';
 import {
   STUDENT_ZOOM_MAX,
   STUDENT_ZOOM_MIN,
@@ -42,12 +41,10 @@ export function IeltsAccessibilitySettings({
   systemHighContrast = false,
   zoom,
   passageReadabilityLevel,
-  playbackRate,
   onFontSizeChange,
   onHighContrastToggle,
   onZoomChange,
   onPassageReadabilityChange,
-  onPlaybackRateChange,
   onResetDefaults,
 }: AccessibilitySettingsProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -265,37 +262,6 @@ export function IeltsAccessibilitySettings({
                   </button>
                 ) : null}
               </div>
-            </div>
-          </div>
-        </section>
-
-        <section aria-labelledby="accessibility-listening">
-          <h3 id="accessibility-listening" className={sectionLabelClassName}>
-            Listening
-          </h3>
-          <div className={`${cardClassName} space-y-3`}>
-            <div>
-              <div className="font-medium text-gray-900">Playback Speed</div>
-              <div className="text-sm text-gray-600">Applies to listening audio</div>
-            </div>
-            <div
-              role="group"
-              aria-label="Playback speed"
-              className={segmentTrackClassName}
-              style={{ gridTemplateColumns: `repeat(${STUDENT_PLAYBACK_RATES.length}, minmax(0, 1fr))` }}
-            >
-              {STUDENT_PLAYBACK_RATES.map((rate) => (
-                <button
-                  key={rate}
-                  type="button"
-                  onClick={() => onPlaybackRateChange(rate)}
-                  aria-pressed={playbackRate === rate}
-                  data-testid={`playback-rate-${rate}`}
-                  className={segmentClassName}
-                >
-                  {rate}×
-                </button>
-              ))}
             </div>
           </div>
         </section>

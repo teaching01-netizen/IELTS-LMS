@@ -221,7 +221,7 @@ function seed() {
     autoEntryRecoverable: false,
     entryAutoStartPending: false,
     pendingModule: module,
-    pendingBreakSeconds: 0,
+    pendingBreakSeconds: 0, breakWindow: { phase: "none", seconds: null, blocksEntry: false }, breakEntry: { retrying: false, blocked: null },
     pendingSectionWaitSeconds: 0,
     pendingStageReady: true,
     effectiveTiming: data.timing,

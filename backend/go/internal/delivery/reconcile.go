@@ -167,18 +167,11 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			// Personal breaks own their deadline. They are completed at that
 			// exact instant (no cohort section clock and no module save grace);
 			// a delayed worker cannot consume the next module's authored time.
-			res, err := t.ExecContext(ctx, `
-				UPDATE assessment_attempt_breaks
-				SET state = 'completed', revision = revision + 1
-				WHERE attempt_id = ? AND state = 'active' AND paused_at IS NULL
-				  AND NOT EXISTS (SELECT 1 FROM student_attempts sa WHERE sa.id = assessment_attempt_breaks.attempt_id AND sa.proctor_status = 'paused')
-				  AND deadline_at IS NOT NULL AND deadline_at <= UTC_TIMESTAMP(6)`, attemptID)
+			completed, err := completeDuePersonalBreaksTx(ctx, t, attemptID, recoveryPolicy)
 			if err != nil {
 				return err
 			}
-			if n, err := res.RowsAffected(); err != nil {
-				return err
-			} else if n > 0 {
+			if completed {
 				changed = true
 			}
 			// Server-driven break→next-section (product contract 2026-09-24):

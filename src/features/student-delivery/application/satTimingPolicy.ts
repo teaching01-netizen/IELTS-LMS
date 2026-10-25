@@ -10,7 +10,10 @@
  * controller owns payload facts and boundary effects, and this module owns the rules.
  */
 
-import type { AssessmentModuleAttemptSnapshot } from "../contracts/assessmentDelivery";
+import type {
+  AssessmentModuleAttemptSnapshot,
+  AssessmentPersonalBreakSnapshot,
+} from "../contracts/assessmentDelivery";
 import { drainSinceSnapshot } from "../domain/satTiming";
 import {
   isCohortTimingModel,
@@ -274,4 +277,75 @@ export function satBreakCountdownSeconds(input: {
 }): number {
   if (!isCohortTimingModel(input.timingModel)) return input.legacyBreakSeconds;
   return input.nextSectionStartAt ? input.nextSectionStartSeconds : 0;
+}
+
+/**
+ * The scheduled break as one derived window, shared by the controller, stage
+ * selection, boundary wakeups and the break screen so none of them carries its
+ * own break arithmetic:
+ *  - `preparing` the break exists but its server-issued start has not arrived
+ *    (pending, armed, confirmed for a future start, or paused before it);
+ *  - `active`    the countdown runs; `seconds` is always positive;
+ *  - `ending`    the countdown reached zero and the server has not yet
+ *    completed the break;
+ *  - `none`      no break holds the next module.
+ * Every personal phase except `none` blocks module entry. A shared (cohort or
+ * legacy) break is `active` while its countdown is positive.
+ */
+export type SatBreakWindowPhase = "none" | "preparing" | "active" | "ending";
+
+export interface SatBreakWindow {
+  readonly phase: SatBreakWindowPhase;
+  /** Whole seconds left while `active`; null in every other phase. */
+  readonly seconds: number | null;
+  readonly blocksEntry: boolean;
+}
+
+const NO_BREAK: SatBreakWindow = { phase: "none", seconds: null, blocksEntry: false };
+
+type SatBreakWindowBreak = Pick<
+  AssessmentPersonalBreakSnapshot,
+  "state" | "startsAt" | "deadlineAt" | "pausedAt" | "remainingSeconds"
+>;
+
+/** The attempt's open personal break: the first one not yet completed. */
+export function satOpenPersonalBreak<T extends { state: string }>(
+  timingModel: MaybeString,
+  breaks: readonly T[] | null | undefined,
+): T | null {
+  if (!isSatPersonalTimingModel(timingModel)) return null;
+  return breaks?.find((candidate) => candidate.state !== "completed") ?? null;
+}
+
+export function satBreakWindow(input: {
+  timingModel: MaybeString;
+  /** The open personal break (satOpenPersonalBreak), personal model only. */
+  personalBreak: SatBreakWindowBreak | null;
+  /** Device time corrected by the accepted server-time/receipt-time offset. */
+  serverNowMs: number;
+  /** Shared (cohort/legacy) break countdown; ignored by the personal model. */
+  sharedSeconds: number;
+}): SatBreakWindow {
+  if (!isSatPersonalTimingModel(input.timingModel)) {
+    return input.sharedSeconds > 0
+      ? { phase: "active", seconds: input.sharedSeconds, blocksEntry: true }
+      : NO_BREAK;
+  }
+  const brk = input.personalBreak;
+  if (!brk || brk.state === "completed") return NO_BREAK;
+  const preparing: SatBreakWindow = { phase: "preparing", seconds: null, blocksEntry: true };
+  const ending: SatBreakWindow = { phase: "ending", seconds: null, blocksEntry: true };
+  const startsAt = brk.startsAt ? Date.parse(brk.startsAt) : Number.NaN;
+  const deadline = brk.deadlineAt ? Date.parse(brk.deadlineAt) : Number.NaN;
+  if (brk.state !== "active" || !Number.isFinite(startsAt) || !Number.isFinite(deadline)) return preparing;
+  if (brk.pausedAt) {
+    const pausedAt = Date.parse(brk.pausedAt);
+    if (Number.isFinite(pausedAt) && startsAt > pausedAt) return preparing;
+    return brk.remainingSeconds > 0
+      ? { phase: "active", seconds: brk.remainingSeconds, blocksEntry: true }
+      : ending;
+  }
+  if (startsAt > input.serverNowMs) return preparing;
+  const seconds = Math.ceil((deadline - input.serverNowMs) / 1_000);
+  return seconds > 0 ? { phase: "active", seconds, blocksEntry: true } : ending;
 }

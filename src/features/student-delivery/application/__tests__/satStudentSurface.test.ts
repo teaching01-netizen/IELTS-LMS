@@ -151,7 +151,8 @@ describe("deriveSatStudentStage — the scheduled break is only a section bounda
   it("never renders an opening-next-section surface", () => {
     const boundary = pending("Module 1", "math", true);
     const stage = derive({ pendingModule: boundary, pendingBreakSeconds: 0 });
-    expect(stage).toMatchObject({ kind: "scheduled-break", phase: "active" });
+    // A spent break holds the same surface as "ending" with no countdown.
+    expect(stage).toMatchObject({ kind: "scheduled-break", phase: "ending", remainingSeconds: null });
     if (stage.kind === "scheduled-break") {
       expect(stage.phase).not.toBe("opening-next-section");
     }

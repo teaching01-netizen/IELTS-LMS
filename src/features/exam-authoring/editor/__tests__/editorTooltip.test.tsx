@@ -74,4 +74,39 @@ describe("hover labels on icon-only controls", () => {
     fireEvent.focus(control);
     expect(control).toHaveAccessibleDescription("Bold ⌘B");
   });
+
+  it("stays quiet when a click moves focus, and Escape dismisses a shown label", () => {
+    render(<Control />);
+    const control = screen.getByRole("button", { name: "Bold (⌘B)" });
+    fireEvent.pointerDown(control);
+    fireEvent.focus(control);
+    fireEvent.pointerUp(control);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.blur(control);
+    fireEvent.focus(control);
+    expect(screen.getByRole("tooltip")).toBeVisible();
+    fireEvent.keyDown(control, { key: "Escape" });
+    expect(control).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("drops the label with its control, so switching questions never strands one", () => {
+    const { rerender } = render(
+      <>
+        <Control />
+        <EditorTooltip label="Italic">
+          <button type="button" aria-label="Italic">I</button>
+        </EditorTooltip>
+      </>,
+    );
+    fireEvent.focus(screen.getByRole("button", { name: "Bold (⌘B)" }));
+    expect(screen.getByRole("tooltip")).toBeVisible();
+    rerender(
+      <EditorTooltip label="Italic">
+        <button type="button" aria-label="Italic">I</button>
+      </EditorTooltip>,
+    );
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
 });

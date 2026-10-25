@@ -335,6 +335,16 @@ export interface AssessmentStageVisibleAck {
   serverNow: string;
 }
 
+/**
+ * Optional StartBreak body. leadSeconds (3–12) asks a replacement offer for a
+ * longer future start after a slow round trip; omitted keeps the server's
+ * three-second default.
+ */
+export interface AssessmentBreakStartRequest {
+  controlEpoch?: number;
+  leadSeconds?: number;
+}
+
 export interface AssessmentBreakEntryRequest {
   breakId: string;
   generation: number;

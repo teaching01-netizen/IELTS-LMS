@@ -17,7 +17,7 @@ import type { StudentAttempt } from "../../../types/studentAttempt";
 import type { SatBootstrapSeed } from "../bootstrap/satBootstrapSeed";
 import { useSatExamController } from "../hooks/useSatExamController";
 import { useSatReadingPreferences } from "../hooks/useSatReadingPreferences";
-import { useSatEliminatorArms } from "../hooks/useSatEliminatorArms";
+import { useSatEliminatorMode } from "../hooks/useSatEliminatorMode";
 import {
   deriveSatStudentStage,
   type SatExamStage,
@@ -124,18 +124,16 @@ export function SatStudentSessionRoute({
   });
   const reading = useSatReadingPreferences(scheduleId, attemptId);
   /**
-   * Questions whose eliminator is OPEN, keyed by module attempt + question.
+   * Whether the eliminator is ON — one switch for the whole attempt: turned on,
+   * it stays on for every question until the student turns it off.
    *
    * The choices a student actually crossed out are data and live in the
    * response draft (`eliminatedOptionIds`), persisted like every other answer
-   * edit. This is only the presentation state of "the cut control is showing on
-   * this question", and keying it per question is the whole point: the arm used
-   * to be one route-wide boolean that EVERY navigation reset, so returning to a
-   * question the student had armed found it closed again while the
-   * crossing-out itself had survived. It is attempt-scoped client state that
-   * outlives a page reload (the hook owns that), never server state.
+   * edit. This is only the presentation state of "the cut control is showing".
+   * It is attempt-scoped client state that outlives a page reload (the hook
+   * owns that), never server state.
    */
-  const eliminator = useSatEliminatorArms(scheduleId, attemptId);
+  const eliminator = useSatEliminatorMode(scheduleId, attemptId);
   /**
    * Which module attempt the exam's own chrome belongs to, resolved here rather
    * than in the answering branch because the Notes record below is read through
@@ -336,9 +334,8 @@ export function SatStudentSessionRoute({
     state.phase === "module" || state.phase === "review" ? state.questionIndex : -1;
   useEffect(() => {
     // Ephemeral UI resets on navigation: Help/Shortcuts/Break never linger.
-    // The eliminator deliberately does NOT reset here — it is question-scoped
-    // and persisted per attempt (see `eliminator`), so navigating away and back
-    // restores exactly what the student left open on that question.
+    // The eliminator deliberately does NOT reset here — it is one switch for
+    // the attempt (see `eliminator`) and stays on until the student turns it off.
     setHelpOpen(false);
     setShortcutsOpen(false);
     setBreakConfirmOpen(false);
@@ -438,6 +435,7 @@ export function SatStudentSessionRoute({
     moduleResolved: Boolean(exam.stateModule && exam.stateModuleAttempt && exam.stateSection),
     moduleQuestionResolved: state.phase !== "module" || (liveQuestion !== null && liveQuestionId !== null),
     pendingBreakSeconds: exam.pendingBreakSeconds,
+    breakWindow: exam.breakWindow,
     pendingSectionWaitSeconds: exam.pendingSectionWaitSeconds,
     attemptKey: identityKey,
   });
@@ -639,7 +637,7 @@ export function SatStudentSessionRoute({
   }
 
   const sectionFormBoundary = stage.kind === "pre-start" || (
-    stage.kind === "scheduled-break" && exam.pendingBreakSeconds <= 0 &&
+    stage.kind === "scheduled-break" && !exam.breakWindow.blocksEntry &&
     exam.pendingSectionWaitSeconds <= 0 && exam.sectionEntry?.state?.state !== "waiting"
   );
   if (sectionFormBoundary && exam.sectionEntry && !exam.sectionEntry.ready) {
@@ -672,6 +670,15 @@ export function SatStudentSessionRoute({
         remainingSeconds={stage.remainingSeconds}
         nextHasForm={exam.sectionEntry?.state?.state === "waiting"}
         requiresEntryConfirmation={Boolean(data.satDeliveryPolicy)}
+        onSurfaceMounted={exam.setBreakSurfaceMounted}
+        notice={
+          exam.breakEntry.blocked ??
+          (exam.breakEntry.retrying
+            ? "Still preparing your break. Please wait."
+            : exam.breakEndStalled
+              ? "Still opening the next section. Please wait."
+              : null)
+        }
       />,
     );
   }
@@ -874,16 +881,8 @@ export function SatStudentSessionRoute({
     return stageHost(examStage, refreshFallback);
   }
 
-  /**
-   * This question's eliminator key, and the one place a question's display
-   * state is read from: armed or not, per module attempt + exam question. The
-   * module attempt scopes it, so a module re-entry cannot inherit an arm from a
-   * question that merely shares its exam question id — and the module attempt id
-   * survives a reload, which is what lets the restored page find its arm again.
-   */
-  const questionKey = `${moduleAttemptKey}:${questionId}`;
-  const eliminationMode = eliminator.armedKeys.has(questionKey);
-  const toggleEliminationMode = () => eliminator.toggle(questionKey);
+  const eliminationMode = eliminator.on;
+  const toggleEliminationMode = eliminator.toggle;
   const response = responseForQuestion(state.responses, questionId);
   const interactionBlocked =
     exam.blocked || exam.isSubmitting || exam.answerInteractionBlocked || persistenceInteractionBlocked;

@@ -1252,10 +1252,8 @@ func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, 
 			return err
 		}
 		if gated {
-			if breakAfterSeconds > 0 {
-				if err := createActivePersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, now); err != nil {
-					return err
-				}
+			if err := createPersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds); err != nil {
+				return err
 			}
 			return insertModuleAttemptTx(ctx, t, attemptID, next, nil)
 		}
@@ -1290,13 +1288,16 @@ func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, 
 			// Recovery-policy handoff never starts a working clock in routing or
 			// in the timeout worker. The selected module stays withheld and
 			// not_started until its owner explicitly enters it.
+			moduleAvailableAt := &availableAt
 			if currentSectionID != next.sectionID && breakAfterSeconds > 0 {
-				if err := createActivePersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, now); err != nil {
+				if err := createPersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds); err != nil {
 					return err
 				}
-				availableAt = now.Add(time.Duration(breakAfterSeconds) * time.Second)
+				// Eligibility (and so the entry allowance) begins at the break's
+				// confirmed deadline, set when the break completes.
+				moduleAvailableAt = nil
 			}
-			if err := insertModuleAttemptTx(ctx, t, attemptID, next, &availableAt); err != nil {
+			if err := insertModuleAttemptTx(ctx, t, attemptID, next, moduleAvailableAt); err != nil {
 				return err
 			}
 			telemetry.IncCounter(telemetry.MSATAdaptiveModuleOpenTotal, "role", next.adaptiveRole)
@@ -1305,11 +1306,13 @@ func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, 
 		// Server-driven progression (product contract 2026-09-24):
 		// - Same-section adaptive (M1→M2): route selection + selected M2
 		//   creation happen atomically here.
-		// - Cross-section (RW M2 → break → Math M1): the server starts the
-		//   scheduled break immediately (active with DB-time deadline) and the
-		//   next M1 waits as not_started until break expiry activates it
-		//   (see ReconcileAttemptTimeout). The client renders authoritative
-		//   state only.
+		// - Cross-section (RW M2 → break → Math M1): the scheduled break is
+		//   created pending. The break screen arms and confirms a future
+		//   server-issued start (StartBreak/EnterBreak), so the candidate
+		//   receives the whole authored break however long the transition
+		//   takes. The next M1 waits not_started with available_at unset until
+		//   break completion sets it to the break's actual deadline (see
+		//   ReconcileAttemptTimeout).
 		//
 		// Without a break, the follow-up module's clock is the student's own
 		// time. Under server_start it runs from this commit, so routing,
@@ -1317,12 +1320,10 @@ func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, 
 		// client_start it waits not_started: the browser starts it when it has
 		// the module in hand (StartModule), and auto_start_at is the backstop.
 		if currentSectionID != next.sectionID && breakAfterSeconds > 0 {
-			if err := createActivePersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, now); err != nil {
+			if err := createPersonalBreakTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds); err != nil {
 				return err
 			}
-			breakDeadline := now.Add(time.Duration(breakAfterSeconds) * time.Second)
-			availableAt = breakDeadline
-			if err := insertModuleAttemptTx(ctx, t, attemptID, next, &availableAt); err != nil {
+			if err := insertModuleAttemptTx(ctx, t, attemptID, next, nil); err != nil {
 				return err
 			}
 		} else if currentSectionID == next.sectionID && handoffMode == attempts.HandoffModeClientStart {
@@ -1341,9 +1342,11 @@ func (s *Service) openFollowUpModuleTx(ctx context.Context, t tx.Tx, attemptID, 
 	return nil
 }
 
-// createPersonalBreakTx is deprecated: the normal path now uses
-// createActivePersonalBreakTx (server starts the break immediately at section
-// finalization). Kept for backward-compatible tests and old clients.
+// createPersonalBreakTx records the attempt-owned scheduled break as pending.
+// Its clock starts only when the break screen confirms a server-issued future
+// start (StartBreak/EnterBreak), so finalization, routing and delivery latency
+// never consume the authored break. Idempotent via the unique
+// (attempt_id, after_section_id) key; a zero-duration break is not recorded.
 func createPersonalBreakTx(ctx context.Context, t tx.Tx, attemptID, afterSectionID string, durationSeconds int) error {
 	if durationSeconds <= 0 {
 		return nil
@@ -1354,25 +1357,6 @@ func createPersonalBreakTx(ctx context.Context, t tx.Tx, attemptID, afterSection
 		VALUES (?, ?, ?, ?, 'pending', 0)
 		ON DUPLICATE KEY UPDATE id = id`,
 		uuid.NewString(), attemptID, afterSectionID, durationSeconds)
-	return err
-}
-
-// createActivePersonalBreakTx records the attempt-owned scheduled break as
-// ACTIVE at section finalization (server-driven break lifecycle). The break
-// clock starts at DB time; reconciliation and handoff time do not consume the
-// candidate's authored break duration. Idempotent via the unique
-// (attempt_id, after_section_id) key.
-func createActivePersonalBreakTx(ctx context.Context, t tx.Tx, attemptID, afterSectionID string, durationSeconds int, now time.Time) error {
-	if durationSeconds <= 0 {
-		return nil
-	}
-	deadline := now.Add(time.Duration(durationSeconds) * time.Second)
-	_, err := t.ExecContext(ctx, `
-		INSERT INTO assessment_attempt_breaks
-		(id, attempt_id, after_section_id, duration_seconds, state, starts_at, deadline_at, revision)
-		VALUES (?, ?, ?, ?, 'active', ?, ?, 0)
-		ON DUPLICATE KEY UPDATE id = id`,
-		uuid.NewString(), attemptID, afterSectionID, durationSeconds, now, deadline)
 	return err
 }
 

@@ -7,7 +7,7 @@ import type { SatDisplayPresentation } from "../../domain/satReadingLayout";
 import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
 import { SatDirectionsPopover } from "./SatDirectionsPopover";
 import { SatReadingPopover } from "./SatReadingPopover";
-import { formatSatTime, shouldAutoRevealTimer } from "../../domain/satTiming";
+import { SAT_TIME_EXPIRED_LABEL, satTimerLabel, shouldAutoRevealTimer } from "../../domain/satTiming";
 import { useSatTemporalSnapshot } from "../../timing/SatTemporalRuntime";
 import { useSatReferenceViewportWidth } from "../tools/useSatReferenceViewportWidth";
 
@@ -81,7 +81,8 @@ function SatTimer({ remainingLabel: fallbackLabel, remainingSeconds: fallbackSec
   // mirroring the IELTS headers. Per-tick label keeps no live region.
   const temporal = useSatTemporalSnapshot();
   const remainingSeconds = temporal?.displaySeconds ?? fallbackSeconds;
-  const remainingLabel = temporal ? formatSatTime(temporal.displaySeconds) : fallbackLabel;
+  const remainingLabel = satTimerLabel(remainingSeconds, temporal ? undefined : fallbackLabel);
+  const expired = remainingLabel === SAT_TIME_EXPIRED_LABEL;
   const timerAnnouncement = useStudentTimerAnnouncement(remainingSeconds);
   const previousRemainingRef = useRef<number | null>(null);
   const revealFiredRef = useRef(false);
@@ -104,7 +105,7 @@ function SatTimer({ remainingLabel: fallbackLabel, remainingSeconds: fallbackSec
       <span
         className="sat-tabular sat-type-timer font-semibold text-[var(--sat-text)]"
         role="timer"
-        aria-label={timerVisible ? `Time remaining ${remainingLabel}` : "Timer hidden. Reappears at 5:00."}
+        aria-label={timerVisible ? (expired ? remainingLabel : `Time remaining ${remainingLabel}`) : "Timer hidden. Reappears at 5:00."}
       >
         {timerVisible ? remainingLabel : "Hidden"}
       </span>

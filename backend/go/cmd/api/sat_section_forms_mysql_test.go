@@ -9,6 +9,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/assessmentforms"
 	"example.com/ielts-proctoring/internal/assessmentforms/definition"
+	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"github.com/google/uuid"
@@ -259,7 +260,22 @@ func TestSectionFormMathHandoffMySQL(t *testing.T) {
 				if err != nil || st.State != "waiting" {
 					t.Fatalf("Math exposed during break: %+v %v", st, err)
 				}
-				exec("UPDATE assessment_attempt_breaks SET deadline_at=TIMESTAMPADD(SECOND,-1,UTC_TIMESTAMP(6)) WHERE attempt_id=?", c.attemptID)
+				// The break starts only through its screen: arm, then confirm
+				// the server-issued future start.
+				var breakID, breakState string
+				if err := f.db.QueryRow("SELECT id,state FROM assessment_attempt_breaks WHERE attempt_id=?", c.attemptID).Scan(&breakID, &breakState); err != nil {
+					t.Fatal(err)
+				}
+				if breakState != "pending" {
+					t.Fatalf("break started before its screen confirmed it: %s", breakState)
+				}
+				if _, err := f.app.Delivery.StartBreak(ctx, f.scheduleID, c.attemptID, f.scheduleID, breakID, nil, candidate.session, candidate.token); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.app.Delivery.EnterBreak(ctx, f.scheduleID, c.attemptID, f.scheduleID, delivery.BreakEntryRequest{BreakID: breakID, Generation: 1}, candidate.session, candidate.token); err != nil {
+					t.Fatal(err)
+				}
+				exec("UPDATE assessment_attempt_breaks SET starts_at=TIMESTAMPADD(SECOND,-61,UTC_TIMESTAMP(6)),deadline_at=TIMESTAMPADD(SECOND,-1,UTC_TIMESTAMP(6)) WHERE attempt_id=?", c.attemptID)
 				if _, err := f.app.Delivery.ReconcileAttemptTimeout(ctx, f.scheduleID, c.attemptID, time.Now().UTC()); err != nil {
 					t.Fatal(err)
 				}

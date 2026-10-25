@@ -42,7 +42,7 @@ import {
   clearCalculatorWorkspacesForAttempt,
 } from "../infrastructure/satCalculatorWorkspace";
 import { clearSatReadingPreferences } from "../infrastructure/satReadingPreferencesStore";
-import { clearSatEliminatorArms } from "../infrastructure/satEliminatorArmStore";
+import { clearSatEliminatorMode } from "../infrastructure/satEliminatorModeStore";
 import { clearSatNotesColumn } from "../infrastructure/satNotesColumnStore";
 import { createSatRunnerState, satRunnerReducer } from "../application/satRunnerReducer";
 // SAT-005/007: commit-to-phase routing and conflict policy live in application/
@@ -64,6 +64,8 @@ import {
 // readiness, break/wait countdowns, and the recovery-poll cadence.
 import {
   satBreakCountdownSeconds,
+  satBreakWindow,
+  satOpenPersonalBreak,
   satClockOffsetMs,
   satCountdown,
   satExpectedStageKey,
@@ -108,6 +110,7 @@ import {
 } from "../application/satBootstrapEquality";
 import { useSatIntegrityControl } from "./useSatIntegrityControl";
 import { useSatModuleEntry } from "./useSatModuleEntry";
+import { useSatBreakEntry } from "./useSatBreakEntry";
 import { useSatResponsePersistence } from "./useSatResponsePersistence";
 import { deriveSatTemporalSnapshot, type SatTemporalModel } from "../timing/satTemporalModel";
 
@@ -120,6 +123,13 @@ import { deriveSatTemporalSnapshot, type SatTemporalModel } from "../timing/satT
  * replaced directly by the next active module when state arrives.
  */
 const SAT_BREAK_END_PULL_WINDOW_MS = 2_000;
+/**
+ * Personal break end: refresh at once, then sequentially at the pull window's
+ * cadence for at most this many reads or this long. Afterward ordinary
+ * recovery polling continues and the break screen reports the retry state.
+ */
+const SAT_BREAK_END_MAX_READS = 8;
+const SAT_BREAK_END_MAX_MS = 20_000;
 
 /**
  * Module close at expiry (docs/sat-m1-m2-handoff-plan.md, Phase 3): how long
@@ -1075,7 +1085,7 @@ export function useSatExamController({
    * Everything this attempt kept on THIS device, released when the attempt
    * ends: reading preferences (which carry its automatic zoom decision and the
    * display choices that go with them), cached calculator workspaces, the
-   * questions whose eliminator was left open, and the Notes column's open pane.
+   * eliminator switch, and the Notes column's open pane.
    *
    * One helper, because the end of an attempt arrives down more than one path
    * (termination, a committed result, a successful finalization retry) and a
@@ -1085,7 +1095,7 @@ export function useSatExamController({
   const clearAttemptClientState = useCallback(() => {
     clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
     clearSatReadingPreferences(scheduleId, attemptId);
-    clearSatEliminatorArms(scheduleId, attemptId);
+    clearSatEliminatorMode(scheduleId, attemptId);
     clearSatNotesColumn(scheduleId, attemptId);
   }, [attemptId, scheduleId]);
 
@@ -1199,42 +1209,21 @@ export function useSatExamController({
     running: Boolean(nextSectionStartAt) && data?.scheduleRuntimeStatus === "live",
     nowMs: now,
   });
-  const pendingBreakSeconds = data
-    ? isSatPersonalTimingModel(effectiveTiming?.timingModel)
-      ? (() => {
-          const activeBreak = data.attempt.personalBreaks?.find((candidate) =>
-            candidate.state !== "completed",
-          );
-          if (!activeBreak || activeBreak.state !== "active" || !activeBreak.deadlineAt) return 0;
-          if (activeBreak.pausedAt) return Math.max(0, activeBreak.remainingSeconds);
-          const deadline = Date.parse(activeBreak.deadlineAt);
-          const breakOffset = serverClockOffsetMs;
-          const startsAt = activeBreak.startsAt ? Date.parse(activeBreak.startsAt) : Number.NaN;
-          if (Number.isFinite(startsAt) && startsAt > now + breakOffset) return 0;
-          return Number.isFinite(deadline)
-            ? Math.max(0, Math.ceil((deadline - (now + breakOffset)) / 1_000))
-            : 0;
-        })()
-      : satBreakCountdownSeconds({
-        timingModel: effectiveTiming?.timingModel,
-        nextSectionStartAt,
-        nextSectionStartSeconds,
-        legacyBreakSeconds: breakRemainingSeconds(
-          data,
-          pendingAttempt,
-          snapshotReceivedAt,
-          now,
-        ),
-      })
-    : 0;
-  const personalBreak = data && isSatPersonalTimingModel(effectiveTiming?.timingModel)
-    ? data.attempt.personalBreaks?.find((candidate) => candidate.state !== "completed") ?? null
-    : null;
-  const breakGateSeconds = personalBreak
-    ? personalBreak.state === "completed"
-      ? 0
-      : Math.max(1, personalBreak.state === "active" ? pendingBreakSeconds : personalBreak.durationSeconds)
-    : pendingBreakSeconds;
+  const personalBreak = satOpenPersonalBreak(effectiveTiming?.timingModel, data?.attempt.personalBreaks);
+  const breakWindow = satBreakWindow({
+    timingModel: effectiveTiming?.timingModel,
+    personalBreak,
+    serverNowMs: now + serverClockOffsetMs,
+    sharedSeconds: data
+      ? satBreakCountdownSeconds({
+          timingModel: effectiveTiming?.timingModel,
+          nextSectionStartAt,
+          nextSectionStartSeconds,
+          legacyBreakSeconds: breakRemainingSeconds(data, pendingAttempt, snapshotReceivedAt, now),
+        })
+      : 0,
+  });
+  const pendingBreakSeconds = breakWindow.seconds ?? 0;
   const pendingSection = data && pendingModule ? sectionForModule(data, pendingModule.id) : null;
   const sectionEntry = useSatSectionEntry(scheduleId, attemptId, pendingModule?.id ?? null,
     pendingSection?.sectionKey === "math" || pendingSection?.sectionKey === "reading-writing" ? pendingSection.sectionKey : null,
@@ -1524,9 +1513,38 @@ export function useSatExamController({
     }
   }, [acceptPayloadAndRoute, attemptId, data, isStarting, sectionEntry.ready, refresh, resolveEntryPayload, scheduleId, withEntryControlEpoch]);
 
-  // Server-driven break lifecycle: the server starts the scheduled break at
-  // section finalization and activates the next-section Module 1 at break
-  // expiry. The client renders authoritative state only (zero mutations).
+  // Break lifecycle: the server creates the scheduled break pending at section
+  // finalization; once the break surface is mounted and visible this browser
+  // arms and confirms a server-issued future start (useSatBreakEntry), so the
+  // student receives the full authored break. Break expiry then activates the
+  // next-section Module 1 server-side.
+  const [breakSurfaceMounted, setBreakSurfaceMounted] = useState(false);
+  const [breakEndStalledKey, setBreakEndStalledKey] = useState<string | null>(null);
+  const commitBreakPayload = useCallback(
+    (payload: AssessmentDeliveryBootstrap) => {
+      acceptPayloadAndRoute(payload, { kind: "poll" });
+    },
+    [acceptPayloadAndRoute],
+  );
+  const refreshBreakState = useCallback(() => refresh(false), [refresh]);
+  const breakEntry = useSatBreakEntry({
+    identity: identityKey,
+    // A paused attempt or room never prepares: the server would refuse, and
+    // resume brings a fresh projection.
+    enabled:
+      breakSurfaceMounted &&
+      data?.scheduleRuntimeStatus === "live" &&
+      data.proctorStatus !== "paused" &&
+      !personalBreak?.pausedAt,
+    personalBreak,
+    serverClockOffsetMs,
+    scheduleId,
+    attemptId,
+    gateway: satDeliveryGateway,
+    withControlEpoch: withEntryControlEpoch,
+    commit: commitBreakPayload,
+    refresh: refreshBreakState,
+  });
 
   // Phase 3 (client-forced break end): once the authoritative break has run
   // out, pull the advanced projection ourselves instead of waiting out the
@@ -1542,7 +1560,7 @@ export function useSatExamController({
     data,
     module: pendingModule,
     stageReady: pendingStageReady,
-    breakSeconds: breakGateSeconds,
+    breakSeconds: breakWindow.blocksEntry ? Math.max(1, pendingBreakSeconds) : 0,
     sectionWaitSeconds: pendingSectionWaitSeconds,
     phase: state.phase,
     explicitEntryRequired: data?.satDeliveryPolicy?.version === "sat_recovery_v1" &&
@@ -1561,7 +1579,7 @@ export function useSatExamController({
     identity: identityKey,
     enabled: sectionEntry.ready && (entryDecision.shouldStart || (
       sectionEntry.state?.state === "submitted" && sectionEntry.state.canStart && !isSatStartCodePending(data) &&
-      sectionEntry.state.moduleId === pendingModule?.id && breakGateSeconds <= 0 && pendingSectionWaitSeconds <= 0
+      sectionEntry.state.moduleId === pendingModule?.id && !breakWindow.blocksEntry && pendingSectionWaitSeconds <= 0
     )),
     entryKey: pendingModule ? `${attemptId}:${pendingModule.id}` : null,
     startModule: startPendingModule,
@@ -1942,9 +1960,10 @@ export function useSatExamController({
       }
     }
     if (personalBreak && !personalBreak.pausedAt) {
-      const breakOffset = satClockOffsetMs(effectiveTiming?.serverNow ?? data?.timing.serverNow ?? null, snapshotReceivedAt);
-      addDeadline(personalBreak.startsAt, breakOffset);
-      addDeadline(personalBreak.deadlineAt, breakOffset);
+      // The same server-time/receipt pair as the break countdown, so the wake
+      // lands on the boundary the window derivation sees.
+      addDeadline(personalBreak.startsAt, serverClockOffsetMs);
+      addDeadline(personalBreak.deadlineAt, serverClockOffsetMs);
     }
     if (pendingAttempt?.availableAt && data) {
       addDeadline(pendingAttempt.availableAt, satClockOffsetMs(data.serverNow, snapshotReceivedAt));
@@ -1968,10 +1987,32 @@ export function useSatExamController({
     if (boundary === "break-end") {
       const firedAt = Date.now();
       const personal = key.startsWith("personal-break-end:");
-      const last = personal ? personalBreakEndPullRef.current : breakEndPullRef.current;
+      if (personal) {
+        // Keyed by attempt, break, generation and deadline: one sequential
+        // read loop per expired break, never a request storm.
+        if (personalBreakEndPullRef.current?.key === key || data?.scheduleRuntimeStatus !== "live") return;
+        personalBreakEndPullRef.current = { key, firedAt };
+        const breakId = personalBreak?.id;
+        const generation = identityGenerationRef.current;
+        const breakStillOpen = () =>
+          dataRef.current?.attempt.personalBreaks?.some(
+            (candidate) => candidate.id === breakId && candidate.state !== "completed",
+          ) ?? false;
+        void (async () => {
+          for (let read = 1; ; read += 1) {
+            await refresh(false);
+            if (identityGenerationRef.current !== generation || !breakStillOpen()) return;
+            if (read >= SAT_BREAK_END_MAX_READS || Date.now() + SAT_BREAK_END_PULL_WINDOW_MS - firedAt > SAT_BREAK_END_MAX_MS) break;
+            await new Promise((resolve) => window.setTimeout(resolve, SAT_BREAK_END_PULL_WINDOW_MS));
+            if (identityGenerationRef.current !== generation) return;
+          }
+          setBreakEndStalledKey(key);
+        })();
+        return;
+      }
+      const last = breakEndPullRef.current;
       if (last?.key === key || (last && firedAt - last.firedAt < SAT_BREAK_END_PULL_WINDOW_MS)) return;
-      if (personal) personalBreakEndPullRef.current = { key, firedAt };
-      else breakEndPullRef.current = { key, firedAt };
+      breakEndPullRef.current = { key, firedAt };
       if (data?.scheduleRuntimeStatus === "live") void refresh(false);
       return;
     }
@@ -2006,7 +2047,7 @@ export function useSatExamController({
       if (identityGenerationRef.current !== generation) return;
       void refresh(true);
     });
-  }, [closeTimedOutModule, data, refresh, state.phase, stateModule, stateModuleAttempt]);
+  }, [closeTimedOutModule, data, personalBreak?.id, refresh, state.phase, stateModule, stateModuleAttempt]);
 
   // The controller also owns the local expiry safety net. The route's
   // SatTemporalRuntime reports the same boundary for UI clocks, but hooks and
@@ -2172,6 +2213,13 @@ export function useSatExamController({
     pendingModule,
     pendingModuleWindow,
     pendingBreakSeconds,
+    breakWindow,
+    breakEntry,
+    /** The expired break's completion did not arrive within the read loop. */
+    breakEndStalled:
+      breakEndStalledKey !== null && breakWindow.phase === "ending" &&
+      personalBreakEndPullRef.current?.key === breakEndStalledKey,
+    setBreakSurfaceMounted,
     pendingSectionWaitSeconds,
     pendingStageReady,
     entryReason: entryDecision.reason,

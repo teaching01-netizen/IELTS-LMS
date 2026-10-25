@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect } from "react";
 import type { SatBreakPhase } from "../../application/satStudentSurface";
 import { formatSatTime } from "../../domain/satTiming";
 import { SatPresenceSurface } from "../motion/SatPresenceSurface";
@@ -12,56 +12,84 @@ export function SatScheduledBreakScreen({
   remainingSeconds,
   nextHasForm = false,
   requiresEntryConfirmation = false,
+  onSurfaceMounted,
+  notice = null,
 }: {
   phase: SatScheduledBreakPhase;
   nextSectionKey: "reading-writing" | "math";
   remainingSeconds: number | null;
   nextHasForm?: boolean;
   requiresEntryConfirmation?: boolean;
+  /** Reports the mounted surface so break preparation starts only once it can be seen. */
+  onSurfaceMounted?: (mounted: boolean) => void;
+  /** Preparation retry or refusal text; announced with the phase status. */
+  notice?: string | null;
 }) {
+  useEffect(() => {
+    onSurfaceMounted?.(true);
+    return () => onSurfaceMounted?.(false);
+  }, [onSurfaceMounted]);
+
+  // The per-second snapshot re-derives the same break window the controller
+  // uses, so preparing → active → ending flips on the boundary itself rather
+  // than on the next controller render.
   const temporal = useSatTemporalSnapshot();
-  const liveRemainingSeconds = temporal
-    ? phase === "waiting"
-      ? temporal.pendingSectionWaitSeconds
-      : temporal.pendingBreakSeconds
-    : remainingSeconds;
+  let livePhase = phase;
+  let liveSeconds = remainingSeconds;
+  if (temporal && phase === "waiting") {
+    liveSeconds = temporal.pendingSectionWaitSeconds;
+  } else if (temporal) {
+    const window = temporal.breakWindow;
+    livePhase = window.phase === "preparing" ? "preparing" : window.phase === "active" ? "active" : "ending";
+    liveSeconds = window.seconds;
+  }
   const nextSection = nextSectionKey === "math" ? "Math" : "Reading and Writing";
-  // The countdown slot NEVER unmounts while the break is on screen: the same
-  // break surface stays mounted until the next active module replaces it.
-  const lastSecondsRef = useRef<number | null>(null);
-  if (liveRemainingSeconds !== null) lastSecondsRef.current = liveRemainingSeconds;
-  const heldSeconds = liveRemainingSeconds ?? lastSecondsRef.current;
-  const displayedTime = heldSeconds === null ? null : formatSatTime(Math.max(0, heldSeconds));
-  const timerReserved = liveRemainingSeconds === null && displayedTime !== null;
-  const contextLabel = phase === "waiting" ? "Section complete" : "Scheduled break";
-  const headline = phase === "waiting" ? "Your break begins in" : "Take a short break.";
+  // The countdown slot NEVER unmounts while the break is on screen, and only a
+  // positive countdown is shown: preparing and ending keep the slot's space
+  // but render no time, so 0:00 is never shown or read as remaining time.
+  const displayedTime = liveSeconds !== null && liveSeconds > 0 ? formatSatTime(liveSeconds) : null;
+  const contextLabel = livePhase === "waiting" ? "Section complete" : "Scheduled break";
+  const headline =
+    livePhase === "waiting"
+      ? "Your break begins in"
+      : livePhase === "preparing"
+        ? "Preparing your break…"
+        : livePhase === "ending"
+          ? `Preparing ${nextSection}…`
+          : "Take a short break.";
   const supportingCopy =
-    phase === "waiting"
+    livePhase === "waiting"
       ? `${nextSection} is next after your scheduled break.`
       : nextHasForm ? "After your break, complete your section details before starting. Your exam timer starts after entry." : requiresEntryConfirmation ? "After your break, choose Begin module when you are ready." : "Your next section starts automatically.";
+  const status =
+    livePhase === "waiting"
+      ? "Section complete. Your scheduled break begins when the section clock ends."
+      : livePhase === "preparing"
+        ? "Preparing your break."
+        : livePhase === "ending"
+          ? `Break over. Preparing ${nextSection}.`
+          : "Break started.";
 
   return (
     <SatPresenceSurface
       data-testid="sat-scheduled-break"
-      data-sat-break-phase={phase}
+      data-sat-break-phase={livePhase}
       className="sat-ui grid min-h-[100dvh] place-items-center bg-[var(--sat-background)] pl-[calc(1.25rem+var(--student-safe-left))] pr-[calc(1.25rem+var(--student-safe-right))] pt-[var(--student-safe-top)] pb-[var(--student-safe-bottom)] text-center text-[var(--sat-text)]"
     >
       <main className="w-full max-w-lg py-10">
         <p className="sat-type-control-secondary font-semibold text-[var(--sat-text-secondary)]">
           {contextLabel}
         </p>
-        {displayedTime !== null ? (
-          <p
-            className="sat-tabular mt-4 text-5xl font-semibold"
-            role="timer"
-            aria-label={`Time remaining ${displayedTime}`}
-            data-sat-break-timer={timerReserved ? "reserved" : "live"}
-            aria-hidden={timerReserved ? true : undefined}
-            style={timerReserved ? { visibility: "hidden" } : undefined}
-          >
-            {displayedTime}
-          </p>
-        ) : null}
+        <p
+          className="sat-tabular mt-4 text-5xl font-semibold"
+          role={displayedTime ? "timer" : undefined}
+          aria-label={displayedTime ? `Time remaining ${displayedTime}` : undefined}
+          data-sat-break-timer={displayedTime ? "live" : "reserved"}
+          aria-hidden={displayedTime ? undefined : true}
+          style={displayedTime ? undefined : { visibility: "hidden" }}
+        >
+          {displayedTime ?? " "}
+        </p>
         <h1
           data-sat-stage-heading="true"
           tabIndex={-1}
@@ -69,7 +97,7 @@ export function SatScheduledBreakScreen({
         >
           {headline}
         </h1>
-        {phase !== "waiting" ? (
+        {livePhase !== "waiting" && livePhase !== "ending" ? (
           <p className="mt-2 sat-type-control-primary font-medium text-[var(--sat-text)]">
             {nextSection} is next
           </p>
@@ -77,10 +105,11 @@ export function SatScheduledBreakScreen({
         <p className="mt-3 sat-type-control-secondary leading-6 text-[var(--sat-text-secondary)]">
           {supportingCopy}
         </p>
+        {notice ? (
+          <p className="mt-3 sat-type-control-secondary font-medium text-[var(--sat-text)]">{notice}</p>
+        ) : null}
         <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-          {phase === "waiting"
-            ? "Section complete. Your scheduled break begins when the section clock ends."
-            : "Break started."}
+          {notice ? `${status} ${notice}` : status}
         </p>
       </main>
     </SatPresenceSurface>

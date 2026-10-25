@@ -294,12 +294,12 @@ func deliveryStartBreakHandler(app *App) http.HandlerFunc {
 		// The optional body carries the control epoch the client believed it
 		// held, so a break armed across a pause/resume boundary is refused
 		// instead of entering under a frozen clock (mirrors EnterBreak).
-		var req delivery.BreakEntryRequest
+		var req delivery.BreakStartRequest
 		if err := httpx.DecodeLimitedOptional(r, httpx.MaxStudentBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		out, err := app.Delivery.StartBreak(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "breakID"), req.ControlEpoch, claims.ClientSessionID, claims.TokenID)
+		out, err := app.Delivery.StartBreak(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "breakID"), &req, claims.ClientSessionID, claims.TokenID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return

@@ -908,7 +908,15 @@ func SyncSATPauseInTx(ctx context.Context, q tx.Tx, scheduleID, attemptID string
 	if _, err := q.ExecContext(ctx, modules, args...); err != nil {
 		return err
 	}
+	// A pause that began before a confirmed future start (the break screen was
+	// still preparing) moves that start, its offer instant and the deadline
+	// together on resume, so the candidate still receives the whole break after
+	// the same lead. A pause during the countdown moves only the deadline.
+	const pausedBeforeStart = "b.starts_at IS NOT NULL AND b.starts_at > b.paused_at"
+	const pauseShift = "INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND"
 	breaks := "UPDATE assessment_attempt_breaks b JOIN student_attempts sa ON sa.id = b.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET " +
+		"b.entry_starts_at = CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL AND " + pausedBeforeStart + " AND b.entry_starts_at IS NOT NULL THEN DATE_ADD(b.entry_starts_at, " + pauseShift + ") ELSE b.entry_starts_at END, " +
+		"b.starts_at = CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL AND " + pausedBeforeStart + " THEN DATE_ADD(b.starts_at, " + pauseShift + ") ELSE b.starts_at END, " +
 		"b.accumulated_paused_seconds = b.accumulated_paused_seconds + CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) ELSE 0 END, " +
 		"b.deadline_at = CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL THEN DATE_ADD(b.deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) ELSE b.deadline_at END, " +
 		"b.paused_at = CASE WHEN " + effective + " THEN COALESCE(b.paused_at, UTC_TIMESTAMP(6)) ELSE NULL END, b.revision = b.revision + 1 WHERE " + scope +
