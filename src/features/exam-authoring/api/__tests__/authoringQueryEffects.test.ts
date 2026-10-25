@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import type {
   AssessmentAuthoringShellResult,
   AssessmentQuestionDetail,
@@ -8,6 +8,7 @@ import type {
 } from "../../contracts/assessment";
 import { makeQuestionDetail, makeShell } from "../../realtime/__tests__/fixtures";
 import { accessLinkKeys } from "../accessLinkKeys";
+import { examKeys } from "../examQueries";
 import { assessmentKeys, authoringEffects, readyShellResult } from "../authoringQueryEffects";
 
 /**
@@ -123,6 +124,37 @@ function makeClient() {
 }
 
 describe("authoring effect vocabulary", () => {
+  it("prepares route freshness without waiting for network reads or accepting a late pre-commit response", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const key = examKeys.detail("exam-1");
+    queryClient.setQueryData(key, { revision: 1 });
+    let finishOldRead!: (value: { revision: number }) => void;
+    const oldRead = vi.fn(() => new Promise<{ revision: number }>((resolve) => { finishOldRead = resolve; }));
+    const source = new QueryObserver(queryClient, { queryKey: key, queryFn: oldRead, staleTime: 0 });
+    const unsubscribeSource = source.subscribe(() => {});
+    expect(queryClient.getQueryState(key)?.fetchStatus).toBe("fetching");
+
+    await authoringEffects.refreshBeforeRouteChange(queryClient, "exam-1");
+
+    expect(oldRead).toHaveBeenCalledOnce();
+    expect(queryClient.getQueryState(key)).toMatchObject({ fetchStatus: "idle", isInvalidated: true });
+    finishOldRead({ revision: 0 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(queryClient.getQueryData(key)).toEqual({ revision: 1 });
+
+    const destination = new QueryObserver(queryClient, {
+      queryKey: key, queryFn: async () => ({ revision: 2 }), staleTime: 300_000,
+    });
+    const unsubscribeDestination = destination.subscribe(() => {});
+    await destination.refetch();
+    expect(queryClient.getQueryData(key)).toEqual({ revision: 2 });
+    expect(queryClient.getQueryState(key)?.isInvalidated).toBe(false);
+    unsubscribeDestination();
+    unsubscribeSource();
+    queryClient.clear();
+  });
+
   it("shellChanged marks the tree AND the two reports derived from it", async () => {
     const { queryClient, invalidateSpy } = makeClient();
 

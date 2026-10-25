@@ -5986,10 +5986,21 @@ textarea.sat-input {
 ::view-transition-group(sat-exam-header) {
   animation: none;
 }
-/* Never layer readable old and new questions over each other. */
-::view-transition-old(sat-workspace) { display: none; }
+/* A short dissolve softens the content swap; the header stays fully visible. */
+@keyframes sat-workspace-leave {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes sat-workspace-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+::view-transition-old(sat-workspace) {
+  animation: sat-workspace-leave 90ms ease-out both;
+  mix-blend-mode: normal;
+}
 ::view-transition-new(sat-workspace) {
-  animation: sat-workspace-in 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: sat-workspace-reveal 140ms ease-out both;
   mix-blend-mode: normal;
 }
 ::view-transition-old(sat-exam-header) { display: none; }

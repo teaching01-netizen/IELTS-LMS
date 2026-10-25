@@ -22,7 +22,7 @@ describe('SAT staff motion across detached surfaces', () => {
   });
 
   it('uses opacity-only keyframes for all staff surface entrances and exits', () => {
-    for (const name of ['sat-dialog-enter', 'sat-backdrop-enter', 'sat-route-enter', 'sat-fade-out', 'sat-staff-loading', 'sat-workspace-in']) {
+    for (const name of ['sat-dialog-enter', 'sat-backdrop-enter', 'sat-route-enter', 'sat-fade-out', 'sat-staff-loading', 'sat-workspace-in', 'sat-workspace-leave', 'sat-workspace-reveal']) {
       const frames = root.nodes.find((node): node is AtRule => node.type === 'atrule' && node.name === 'keyframes' && node.params === name);
       expect(frames, name).toBeDefined();
       frames?.walkDecls((declaration) => expect(declaration.prop, name).toBe('opacity'));
@@ -41,7 +41,7 @@ describe('SAT staff motion across detached surfaces', () => {
   });
 
   it('removes native and fallback navigation animation under reduced motion', () => {
-    for (const selector of ['.sat-workspace-enter', '::view-transition-new(sat-workspace)']) {
+    for (const selector of ['.sat-workspace-enter', '::view-transition-old(sat-workspace)', '::view-transition-new(sat-workspace)']) {
       let instant = false;
       root.walkAtRules('media', (media) => {
         if (!media.params.includes('prefers-reduced-motion: reduce')) return;

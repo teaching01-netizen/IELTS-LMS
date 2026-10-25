@@ -1,5 +1,5 @@
-import { lazy, Suspense } from "react";
-import { Navigate, createBrowserRouter, useNavigate, useNavigation, useSearchParams } from "react-router-dom";
+import { lazy, Suspense, useEffect } from "react";
+import { Navigate, createBrowserRouter, useNavigate, useNavigation, useSearchParams, useLocation } from "react-router-dom";
 import { AppShell } from "../../components/AppShell";
 import { AppLoadingSkeleton } from "../../components/ui/AppLoadingSkeleton";
 import { SatListSkeleton } from "../../products/sat/ui/SatPage";
@@ -231,9 +231,15 @@ function withAuth(
   return <RequireAuth allowedRoles={allowedRoles}>{element}</RequireAuth>;
 }
 
+const loadExamSettingsRoute = () => import("../../features/exam-authoring/routes/ExamSettingsRoute");
+
 /** Data-route chunks load before the workspace changes, preserving context. */
 function SatWorkspaceRoot() {
   const navigation = useNavigation();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (/^\/sat\/exams\/[^/]+\/?$/.test(pathname)) void loadExamSettingsRoute().catch(() => {});
+  }, [pathname]);
   const createdRoom = navigation.location?.state?.satCreatedRoom;
   const openingCreatedRoom = typeof createdRoom === "string"
     && navigation.location?.pathname === `/sat/sessions/${encodeURIComponent(createdRoom)}`;
@@ -473,7 +479,7 @@ const baseRoutes = [
             path: "exams/:examId/settings",
             errorElement: <RouteErrorBoundary />,
             lazy: async () => {
-              const { ExamSettingsRoute } = await import("../../features/exam-authoring/routes/ExamSettingsRoute");
+              const { ExamSettingsRoute } = await loadExamSettingsRoute();
               return { element: withAuth(<ExamSettingsRoute />, ["admin", "builder"]) };
             },
           },

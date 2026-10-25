@@ -81,7 +81,7 @@ Browser review uses the real shared components in a development-only fixture. Au
 **PROPOSED SAT adaptation of the explicitly requested `instacart-rappi-commerce-interaction-engineering` skill.** The task is repeated staff navigation (Questions ↔ Settings ↔ Rooms ↔ Responses), followed by managing a newly created room. React web, the installed React Router 7/Motion 12 stack, and existing save, authorization, and room-operation contracts remain the platform assumptions. These choices do not describe proprietary Instacart/Rappi behavior.
 
 ```text
-Questions --flush acknowledged edits--> Settings / Rooms / Responses / Preview
+Questions --immediate tab feedback + required save acknowledgement--> Settings / Rooms / Responses / Preview
 Settings --save or existing discard decision--> another exam section
 section click --> router loads destination module (source stays usable)
               --> guarded route commits --> content reveals; header stays steady
@@ -100,7 +100,7 @@ confirmed receipt --> open /sat/sessions/:scheduleId
 | `useSatNavigate` / forward, replace, history | Uses the router's `viewTransition` option after the caller's existing save/unsaved-settings gate. Preserves state, replace, and history semantics. OS reduced motion skips native snapshots. Explicit opt-out remains available. |
 | SAT data routes / module pending | The router awaits the exam/room route module before replacing the source. A quiet status appears after 200ms for longer waits; confirmed creation has its own pending copy. No arbitrary navigation timeout or invented percentage. |
 | `ExamWorkspaceHeader` / selected section | Separate named snapshot prevents header travel or geometry interpolation. Selected-page semantics remain on real section actions. |
-| Content / native, fallback, reduced | New content fades from 0.88 to 1 over 180ms. Old readable content is not layered with new text. No directional slide, zoom, blur, spring, stagger, or exit wait. Native snapshot and live entrance do not stack. Unsupported browsers use a mount-only content entrance. Reduced motion is immediate. |
+| Content / native, fallback, reduced | Native route content dissolves over 140ms, with the previous content fading out over 90ms on an opaque canvas. The fixed header does not fade. Unsupported-browser content entrances retain the 180ms fade from 0.88 to 1. No directional slide, zoom, blur, spring, stagger, or exit wait. Native snapshot and live entrance do not stack. Unsupported browsers use a mount-only content entrance. Reduced motion is immediate. |
 | Window scroll / section arrival | Existing scroll-memory owner also restores forward section visits. Waits for the selected destination marker if content is lazy. New sections start at zero. Query-only edits do not trigger section focus. Existing inner editor state remains under its own controller. |
 | Focus / tab or created room | Section changes focus the current section button; confirmed room arrival focuses the room heading without scrolling. A newly active field/sheet keeps its focus. Route-changing room sheets do not restore focus into the source page. |
 | Created room / pending, ready, failed read | Confirmation travels with the returned schedule ID, never a speculative ID. A partial loading snapshot remains loading. Read errors retry the existing room; they do not restart creation. Existing offline, validation, unknown-result and idempotency recovery remain unchanged. |
@@ -117,3 +117,11 @@ Observable acceptance coverage:
 - Keep the existing create failure, duplicate-submit, unknown-result recovery, dirty-settings and authoring save-gate tests passing.
 
 Instrumentation uses existing router navigation state, Radix focus state, the selected-section `data-sat-exam-section` marker, the room-title marker and live-region copy. No analytics service or new collection of student data is introduced. The ignored `e2e/.generated/sat-navigation-review.html` fixture exercises actual shared header/sheet/room primitives and router navigation with clearly labeled local sample content. Its native handoff count verifies the browser integration, not production performance. Authenticated staff journeys, OS-level preference toggling and physical-device profiling remain unverified.
+
+### Immediate Questions → Settings response (feedback correction)
+
+The source of avoidable latency was the route barrier awaiting three active projection refetches after a confirmed save. The barrier now cancels pre-commit reads and marks those caches stale locally. Destination observers perform the fresh reads; Preview keeps its existing stale-data loading guard. No save acknowledgement is skipped. The Settings route module warms while Questions is open.
+
+The requested tab highlights on the click frame and exposes `aria-busy` plus an Opening status while a necessary save or route load completes. Current-page semantics stay on the actual route. Refused saves restore the existing tab; a newer tab request supersedes an older pending save continuation, and unmount cancels those continuations. The native dissolve starts alongside route commit, with no decorative wait.
+
+Focused tests cover immediate pending feedback, refusal recovery, out-of-order save waits, cancellation of pre-commit query responses, fresh destination reads, and the existing co-editing durability/offline barriers. Native timing values remain proposed budgets, not measured click-to-content latency. Authenticated browser latency is still unmeasured.

@@ -26,6 +26,8 @@ export interface ExamWorkspaceHeaderProps {
   lifecycle: ExamLifecycleCopy;
   /** Tab marked current. `null` on pages that are not a tab (Student access, Publish). */
   activeTab: ExamWorkspaceTab | null;
+  /** Immediate click feedback while the host confirms a save or loads a route. */
+  pendingTab?: ExamWorkspaceTab | null;
   /** Hidden for roles that cannot read results (see canViewExamResponses). */
   showResponses: boolean;
   /**
@@ -81,7 +83,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
   const indicatorId = useId();
   const reduceMotion = useReducedMotion();
   const {
-    examTitle, lifecycle, activeTab, showResponses, onSelectTab, onBack, saveSlot, collaborationSlot,
+    examTitle, lifecycle, activeTab, pendingTab = null, showResponses, onSelectTab, onBack, saveSlot, collaborationSlot,
     onPreview, previewDisabled, onCreateSession, onCreateSessionRef, onQuickSettings,
     issueCount = 0, onOpenIssues,
     importItems, menuItems, contextLine,
@@ -183,6 +185,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
         <ul className="flex items-end gap-1 overflow-x-auto">
           {tabs.map((tab) => {
             const current = activeTab === tab;
+            const highlighted = (pendingTab ?? activeTab) === tab;
             return (
               <li key={tab}>
                 <button
@@ -190,12 +193,13 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
                   onClick={() => onSelectTab(tab)}
                   data-sat-exam-section={tab}
                   aria-current={current ? "page" : undefined}
-                  className={`exam-workspace-tab relative inline-flex min-h-11 items-center rounded-t-[var(--sat-staff-radius-control-sm,8px)] px-3 text-[14px] font-semibold leading-5 transition-colors focus-visible:outline-none sm:px-4 ${current ? "text-[var(--sat-staff-text-primary,#1d1d1f)]" : "text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)] hover:text-[var(--sat-staff-text-primary,#1d1d1f)]"}`}
+                  aria-busy={pendingTab === tab || undefined}
+                  className={`exam-workspace-tab relative inline-flex min-h-11 items-center rounded-t-[var(--sat-staff-radius-control-sm,8px)] px-3 text-[14px] font-semibold leading-5 transition-colors focus-visible:outline-none sm:px-4 ${highlighted ? "text-[var(--sat-staff-text-primary,#1d1d1f)]" : "text-[var(--sat-staff-text-secondary,#515154)] hover:bg-[var(--sat-staff-fill-faint)] hover:text-[var(--sat-staff-text-primary,#1d1d1f)]"}`}
                 >
                   {TAB_LABEL[tab]}
-                  {current && reduceMotion ? (
+                  {highlighted && reduceMotion ? (
                     <span aria-hidden="true" className="sat-tab-indicator" />
-                  ) : current ? (
+                  ) : highlighted ? (
                     <motion.span initial={false} layoutId={indicatorId} transition={spineMotion.selection} aria-hidden="true" className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-[var(--sat-staff-accent,#0071e3)]" />
                   ) : null}
                 </button>
@@ -204,6 +208,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
           })}
         </ul>
       </nav>
+      <span role="status" className="sr-only">{pendingTab ? `Opening ${TAB_LABEL[pendingTab]}…` : ""}</span>
     </header>
   );
 }

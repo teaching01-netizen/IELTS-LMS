@@ -24,6 +24,19 @@ describe("ExamWorkspaceHeader", () => {
     expect(tabs.getByRole("button", { name: "Questions" })).not.toHaveAttribute("aria-current");
   });
 
+  it("shows the requested section immediately while keeping current-page semantics truthful", () => {
+    const { rerender } = render(<ExamWorkspaceHeader {...props({ pendingTab: "settings" })} />);
+    const settings = screen.getByRole("button", { name: "Settings" });
+    expect(settings).toHaveAttribute("aria-busy", "true");
+    expect(settings).not.toHaveAttribute("aria-current");
+    expect(settings.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Questions" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("status")).toHaveTextContent("Opening Settings…");
+    rerender(<ExamWorkspaceHeader {...props()} />);
+    expect(settings).not.toHaveAttribute("aria-busy");
+    expect(settings.querySelector('[aria-hidden="true"]')).toBeNull();
+  });
+
   it("reports the chosen tab and leaves navigation to the host", () => {
     const onSelectTab = vi.fn();
     render(<ExamWorkspaceHeader {...props({ onSelectTab })} />);

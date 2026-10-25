@@ -223,6 +223,9 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
   const [outlineOpen, setOutlineOpenPreference] = useOutlinePreference();
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState<false | "quick">(false);
+  const [pendingRoute, setPendingRoute] = useState<string | null>(null);
+  const routeIntentRef = useRef(0);
+  useEffect(() => () => { routeIntentRef.current += 1; }, []);
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [focusField, setFocusField] = useState<string | null>(null);
@@ -1002,10 +1005,18 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
   });
 
   const goAfterFlush = (path: string) => {
+    const intent = ++routeIntentRef.current;
+    setPendingRoute(path);
     void (async () => {
-      if (await flushBeforeRouteChange()) navigate(path);
+      try {
+        if (await flushBeforeRouteChange() && intent === routeIntentRef.current) await navigate(path);
+      } finally {
+        if (intent === routeIntentRef.current) setPendingRoute(null);
+      }
     })();
   };
+  const pendingTab = (["questions", "delivery", "responses", "settings"] as ExamWorkspaceTab[])
+    .find((tab) => examWorkspacePath(examId, tab) === pendingRoute) ?? null;
   const openCreateRoom = () => {
     // Unacknowledged edits are flushed first; the create-room hook re-checks the
     // same barrier at submit, so this only avoids opening over a failed save.
@@ -1274,11 +1285,12 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
               examTitle={examTitle}
               lifecycle={chrome.lifecycle}
               activeTab="questions"
+              pendingTab={pendingTab}
               showResponses={chrome.showResponses}
               onSelectTab={(tab) => {
                 // Tabs are pages (Back, refresh and links behave); Quick settings
                 // is the in-place sheet that keeps the author's question and text.
-                if (tab !== "questions") goAfterFlush(examWorkspacePath(examId, tab));
+                if (tab !== "questions" || pendingRoute) goAfterFlush(examWorkspacePath(examId, tab));
               }}
               onQuickSettings={() => setSettingsOpen("quick")}
               onBack={() => goAfterFlush(satListReturnTarget("/sat/exams").to)}
@@ -1584,8 +1596,8 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
               {id:'delete',label:'Delete question',group:'Question',onSelect:()=>setDeleteTarget(selectedExamQuestionId),disabledReason:!draft?'Select a question first':rowMutationBusy?'Another operation is running':undefined},
               ...([-1,1] as const).map(direction=>({id:direction===-1?'up':'down',label:direction===-1?'Move question up':'Move question down',group:'Question' as const,disabledReason:!draft?'Select a question first':rowMutationBusy?'Another operation is running':!selectedModule.questions[selectedModuleIndex+direction]?'Already at module boundary':undefined,onSelect:()=>{const expected=selectedModule.questions.map(q=>q.examQuestionId),next=[...expected],i=selectedModuleIndex,j=i+direction;const from=next[i],to=next[j];if(!from||!to)return;next[i]=to;next[j]=from;void handleReorder(next,expected).catch(()=>undefined);}})),
               {id:'question-preview',label:'Preview question',group:'Question',onSelect:()=>setPreviewOpen(true),disabledReason:!draft?'Select a question first':undefined},
-              {id:'preview',label:'Preview exam',group:'Exam',onSelect:()=>{void flushBeforeRouteChange().then(ok=>{if(ok)navigate(`/sat/exams/${examId}/preview`);});}},
-              {id:'settings',label:'Exam settings',group:'Exam',onSelect:()=>{void flushBeforeRouteChange().then(ok=>{if(ok)navigate(examWorkspacePath(examId,'settings'));});}},
+              {id:'preview',label:'Preview exam',group:'Exam',onSelect:()=>goAfterFlush(`/sat/exams/${examId}/preview`)},
+              {id:'settings',label:'Exam settings',group:'Exam',onSelect:()=>goAfterFlush(examWorkspacePath(examId,'settings'))},
               {id:'overview',label:'Exam overview',group:'Exam',onSelect:()=>setWorkspaceMode('overview')},
               {id:'issues',label:'Review issues',group:'Exam',onSelect:()=>void openIssues()},
               {id:'navigator',label:'Open question navigator',group:'View',onSelect:()=>{setWorkspaceMode('build');if(compactViewport)setQuestionListOpen(true);else searchInputRef.current?.focus();}},

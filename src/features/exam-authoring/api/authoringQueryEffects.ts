@@ -492,17 +492,16 @@ export const authoringEffects = {
   },
 
   /**
-   * Make the projections the NEXT route reads fresh BEFORE we unmount.
+   * Prepare freshness for the NEXT route before we unmount.
    *
-   * Awaited deliberately by the caller: the preview must not mount on a cached
-   * exam detail that is still inside its five-minute staleTime.
+   * Cancel reads started before the commit, then mark the destination's data
+   * stale locally. Its own observers refetch on arrival; network reads must
+   * not hold the author's click on the source page.
    */
   async refreshBeforeRouteChange(queryClient: QueryClient, examId: string): Promise<void> {
-    await Promise.allSettled([
-      queryClient.invalidateQueries({ queryKey: examKeys.detail(examId) }),
-      queryClient.invalidateQueries({ queryKey: assessmentKeys.shell(examId) }),
-      queryClient.invalidateQueries({ queryKey: assessmentKeys.release(examId) }),
-    ]);
+    const keys = [examKeys.detail(examId), assessmentKeys.shell(examId), assessmentKeys.release(examId)];
+    await Promise.allSettled(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
+    await Promise.allSettled(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey, refetchType: "none" })));
   },
 
   /**

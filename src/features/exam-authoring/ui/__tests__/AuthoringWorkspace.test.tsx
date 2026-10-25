@@ -244,6 +244,21 @@ function renderWorkspace() {
   return render(workspaceTree(queryClient));
 }
 
+function renderRoutedWorkspace() {
+  return render(
+    <QueryClientProvider client={renderWorkspaceClient()}>
+      <MemoryRouter initialEntries={["/sat/exams/exam-1"]}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/sat/exams/:examId" element={<AuthoringWorkspace examId="exam-1" examTitle="SAT Practice 1" />} />
+          <Route path="/sat/exams/:examId/settings" element={<p>Settings destination</p>} />
+          <Route path="/sat/exams/:examId/access" element={<p>Rooms destination</p>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
 function openOutline() {
   window.localStorage.setItem("sat-authoring-outline", "open");
 }
@@ -410,6 +425,53 @@ describe("AuthoringWorkspace (spine-only)", () => {
     // There is no publish action anywhere in the SAT header.
     expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Authoring view" })).not.toBeInTheDocument();
+  });
+
+  it("acknowledges Settings on the click frame while a required save is still pending", async () => {
+    harness.autosave.status = "unsaved";
+    let finishSave!: (value: { ok: boolean; isLatest: boolean }) => void;
+    harness.autosave.flushNow.mockImplementation(() => new Promise((resolve) => { finishSave = resolve; }));
+    renderRoutedWorkspace();
+    await screen.findByRole("region", { name: "Question 1, editing" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("button", { name: "Settings" })).toHaveAttribute("aria-busy", "true");
+    expect(within(screen.getByTestId("exam-workspace-header")).getByRole("status")).toHaveTextContent("Opening Settings…");
+    expect(screen.getByTestId("location")).toHaveTextContent("/sat/exams/exam-1");
+    expect(screen.queryByText("Settings destination")).not.toBeInTheDocument();
+    await act(async () => { finishSave({ ok: true, isLatest: true }); });
+    expect(await screen.findByText("Settings destination")).toBeInTheDocument();
+  });
+
+  it("restores the current tab when saving refuses the requested move", async () => {
+    harness.autosave.status = "error";
+    harness.autosave.flushNow.mockResolvedValue({ ok: false, isLatest: true });
+    renderRoutedWorkspace();
+    await screen.findByRole("region", { name: "Question 1, editing" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Settings" })).not.toHaveAttribute("aria-busy"));
+    expect(screen.getByRole("button", { name: "Questions" })).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByText("Settings destination")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("does not commit an older tab request while the latest request is still confirming", async () => {
+    harness.autosave.status = "unsaved";
+    let first!: (value: { ok: boolean; isLatest: boolean }) => void;
+    let second!: (value: { ok: boolean; isLatest: boolean }) => void;
+    harness.autosave.flushNow
+      .mockImplementationOnce(() => new Promise((resolve) => { first = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { second = resolve; }));
+    renderRoutedWorkspace();
+    await screen.findByRole("region", { name: "Question 1, editing" });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rooms" }));
+    expect(screen.getByRole("button", { name: "Rooms" })).toHaveAttribute("aria-busy", "true");
+    await act(async () => { first({ ok: true, isLatest: true }); });
+    expect(screen.queryByText("Settings destination")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rooms" })).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByTestId("location").textContent).toBe("/sat/exams/exam-1");
+    await act(async () => { second({ ok: true, isLatest: true }); });
+    expect(await screen.findByText("Rooms destination")).toBeInTheDocument();
   });
 
   it("edits settings in place from Quick settings, while the Settings tab is a real page", async () => {

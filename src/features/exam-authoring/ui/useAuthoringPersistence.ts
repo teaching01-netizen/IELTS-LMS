@@ -307,9 +307,9 @@ export function useAuthoringPersistence(
    * The next screen (exam preview, release, exam library) reads the committed
    * MySQL projection rather than the room, so nothing less than a durable
    * acknowledgement of THIS tab's state proves it will show the author's work.
-   * A refusal is not navigated past. Query invalidation is awaited before the
-   * route changes so the preview cannot mount on a cached exam detail still
-   * inside its five-minute staleTime.
+   * A refusal is not navigated past. Local cache invalidation finishes before
+   * the route changes; the destination owns the subsequent fresh read, so
+   * unrelated projection requests do not delay navigation.
    */
   const flushBeforeRouteChange = useCallback(async (): Promise<boolean> => {
     if (!workspaceCollaboration) return flushBeforeNavigation("mutation");
@@ -322,8 +322,8 @@ export function useAuthoringPersistence(
       setNavigationError(block);
       return false;
     }
-    // A refetch failure must not strand the author here: the room is durable,
-    // which is the promise; freshness is best-effort on top of it.
+    // Durability is confirmed. Mark projections stale without waiting for
+    // network refetches on the source screen.
     await authoringEffects.refreshBeforeRouteChange(queryClient, examId);
     return true;
   }, [examId, flushBeforeNavigation, queryClient, workspaceCollaboration]);
