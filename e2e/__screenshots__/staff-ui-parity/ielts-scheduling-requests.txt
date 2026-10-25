@@ -1,0 +1,10 @@
+reads:
+GET /api/v1/auth/session
+GET /api/v1/exams
+GET /api/v1/schedules
+GET /api/v1/settings/exam-defaults
+GET /api/v1/versions/ielts-version-1
+GET /api/v1/versions/ielts-version-2
+GET /api/v1/versions/ielts-version-3
+writes:
+

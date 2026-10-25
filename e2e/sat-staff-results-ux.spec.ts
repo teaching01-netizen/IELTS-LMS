@@ -182,6 +182,8 @@ test.describe("SAT staff response review", () => {
     await expect(inspector).toContainText("Ananda S.");
     await expect(inspector).toContainText("1 answer");
     await expect(inspector).toContainText("B");
+    // Measure final tokens, not colors blended mid entry animation.
+    await page.waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== "running"));
     await expectNoSeriousAxeViolations(page, "SAT response inspector");
     const shareUrl = page.url();
     const shared = new URL(shareUrl);

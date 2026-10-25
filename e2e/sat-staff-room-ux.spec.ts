@@ -378,30 +378,37 @@ async function installGuidedRoomSetupTransport(page: Page) {
     }),
   }));
 
-  await page.route("**/api/v1/assessment-access/exams/sat-room-setup-exam/links", async (route) => {
-    if (route.request().method() !== "POST") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
-      return;
-    }
-    const request = route.request().postDataJSON() as Record<string, unknown>;
+  await page.route("**/api/v1/assessment-access/exams/sat-room-setup-exam/links", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }));
+
+  // Room creation first re-reads the committed authoring shell; this exam has
+  // no working draft, so the server holds only the published release.
+  await page.route("**/api/v1/assessment-authoring/exams/sat-room-setup-exam/shell", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ state: "NO_DRAFT", shell: null }) }));
+
+  // One-action create: the server captures (or reuses) the release and
+  // creates the room in one transaction. The client never names the version.
+  await page.route("**/api/v1/sat/exams/sat-room-setup-exam/rooms", async (route) => {
+    const request = route.request().postDataJSON() as { room: Record<string, unknown> } & Record<string, unknown>;
     createdRequests.push(request);
+    const room = request.room;
     createdLink = {
       id: "link-room-created",
       examId: SETUP_EXAM.id,
       examTitle: SETUP_EXAM.title,
       providerKey: "sat",
-      publishedVersionId: request.publishedVersionId,
+      publishedVersionId: SETUP_PUBLISHED_VERSION.id,
       versionNumber: 3,
       publishScope: "full",
       scheduleId: "sat-room-created",
-      name: request.name,
-      enabledSections: request.enabledSections,
-      audienceType: request.audienceType,
-      audienceLabel: request.audienceLabel,
-      accessMode: request.accessMode,
-      availabilityType: request.availabilityType,
-      opensAt: request.opensAt,
-      closesAt: request.closesAt,
+      name: room.name,
+      enabledSections: room.enabledSections,
+      audienceType: room.audienceType,
+      audienceLabel: room.audienceLabel,
+      accessMode: room.accessMode,
+      availabilityType: room.availabilityType,
+      opensAt: room.opensAt,
+      closesAt: room.closesAt,
       lifecycleState: "active",
       status: "live",
       selectedStudentCount: 0,
@@ -418,7 +425,7 @@ async function installGuidedRoomSetupTransport(page: Page) {
       examId: SETUP_EXAM.id,
       examTitle: SETUP_EXAM.title,
       publishedVersionId: SETUP_PUBLISHED_VERSION.id,
-      cohortName: String(request.name),
+      cohortName: String(room.name),
       startTime: "2026-11-01T04:00:00.000Z",
       endTime: "2026-11-01T07:00:00.000Z",
       status: "upcoming",
@@ -429,7 +436,11 @@ async function installGuidedRoomSetupTransport(page: Page) {
       status: 201,
       contentType: "application/json",
       headers: { "x-csrf-token": "csrf-room-setup" },
-      body: JSON.stringify(createdLink),
+      body: JSON.stringify({
+        room: createdLink,
+        version: { id: SETUP_PUBLISHED_VERSION.id, number: 3, scope: "full", createdNow: false },
+        exam: { revision: SETUP_EXAM.revision },
+      }),
     });
   });
 
@@ -652,7 +663,9 @@ test.describe("SAT staff live-room UX", () => {
 });
 
 test.describe("SAT guided room setup", () => {
-  test("reviews, edits, and creates a room pinned to the published version", async ({ page }) => {
+  // Rooms capture the latest saved exam (SatCreateRoomFlow): the client sends
+  // the exam/draft revisions it saw and the server chooses the release.
+  test("reviews, edits, and creates a room from the latest saved exam", async ({ page }) => {
     const recording = await installGuidedRoomSetupTransport(page);
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto("/sat/sessions");
@@ -660,8 +673,9 @@ test.describe("SAT guided room setup", () => {
     await page.getByRole("button", { name: "Create room" }).click();
     const roomSetup = page.getByRole("dialog", { name: "Create room" });
     await expect(roomSetup).toBeVisible();
-    await expect(roomSetup.getByLabel("Exam")).toHaveValue("sat-room-setup-exam");
-    await expect(roomSetup.getByText("SAT Practice 03 · Version 3", { exact: true })).toBeVisible();
+    const examPicker = roomSetup.getByRole("combobox", { name: "Exam", exact: true });
+    await expect(examPicker).toHaveValue("sat-room-setup-exam");
+    await expect(roomSetup.getByRole("region", { name: "Exam content for this room" })).toContainText("This room uses the latest saved exam");
     await expect(roomSetup.getByRole("group", { name: "Who can join" })).toBeVisible();
     await expect(roomSetup.getByRole("group", { name: "Check-in" })).toBeVisible();
 
@@ -669,7 +683,7 @@ test.describe("SAT guided room setup", () => {
     await roomSetup.getByRole("button", { name: "Create room", exact: true }).click();
     await expect(roomSetup.getByText("Give this room a name people will recognize.")).toBeVisible();
     await expect(roomName).toBeFocused();
-    await expect(roomSetup.getByLabel("Exam")).toHaveValue("sat-room-setup-exam");
+    await expect(examPicker).toHaveValue("sat-room-setup-exam");
     await roomName.fill("October morning mock");
     await expectNoSeriousAxeViolations(page, "SAT guided room setup review");
     await expect(roomName).toHaveValue("October morning mock");
@@ -679,19 +693,23 @@ test.describe("SAT guided room setup", () => {
     await expect(page.getByRole("heading", { level: 1, name: "October morning mock" })).toBeVisible();
     expect(recording.createdRequests).toHaveLength(1);
     expect(recording.createdRequests[0]).toMatchObject({
-      name: "October morning mock",
-      publishedVersionId: "published-v3",
-      audienceType: "anyone",
-      accessMode: "student_code",
-      availabilityType: "anytime",
-      opensAt: null,
-      closesAt: null,
+      expectedExamRevision: SETUP_EXAM.revision,
+      expectedDraftVersionId: "",
+      room: {
+        name: "October morning mock",
+        audienceType: "anyone",
+        accessMode: "student_code",
+        availabilityType: "anytime",
+        opensAt: null,
+        closesAt: null,
+      },
     });
+    expect(recording.createdRequests[0]).not.toHaveProperty("room.publishedVersionId");
     expect(recording.consoleErrors).toEqual([]);
     expect(recording.pageErrors).toEqual([]);
   });
 
-  test("exam Rooms starts the same guided setup with its version already pinned", async ({ page }) => {
+  test("exam Rooms starts the same guided setup for the latest saved exam", async ({ page }) => {
     const recording = await installGuidedRoomSetupTransport(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/sat/exams/sat-room-setup-exam/access");
@@ -701,7 +719,7 @@ test.describe("SAT guided room setup", () => {
     await header.getByRole("button", { name: "Create room" }).click();
     const roomSetup = page.getByRole("dialog", { name: "Create room" });
     await expect(roomSetup).toBeVisible();
-    await expect(roomSetup.getByText("SAT Practice 03 · Version 3", { exact: true })).toBeVisible();
+    await expect(roomSetup.getByRole("region", { name: "Exam content for this room" })).toContainText("This room uses the latest saved exam");
     await roomSetup.getByRole("textbox", { name: "Room name" }).fill("Exam Rooms tab setup");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await expectNoSeriousAxeViolations(page, "SAT exam Rooms guided setup review");
@@ -710,10 +728,9 @@ test.describe("SAT guided room setup", () => {
     await expect(page).toHaveURL(/\/sat\/sessions\/sat-room-created$/);
     expect(recording.createdRequests).toHaveLength(1);
     expect(recording.createdRequests[0]).toMatchObject({
-      name: "Exam Rooms tab setup",
-      publishedVersionId: "published-v3",
-      audienceType: "anyone",
-      availabilityType: "anytime",
+      expectedExamRevision: SETUP_EXAM.revision,
+      expectedDraftVersionId: "",
+      room: { name: "Exam Rooms tab setup", audienceType: "anyone", availabilityType: "anytime" },
     });
     expect(recording.consoleErrors).toEqual([]);
     expect(recording.pageErrors).toEqual([]);

@@ -1,0 +1,493 @@
+{
+ "title": "IELTS Academic Mock 04",
+ "type": "Academic",
+ "activeModule": "listening",
+ "activePassageId": "p1",
+ "activeListeningPartId": "l1",
+ "activeScienceStimulusId": "",
+ "config": {
+  "general": {
+   "preset": "Academic",
+   "type": "Academic",
+   "ieltsMode": false,
+   "title": "IELTS Academic Mock 04",
+   "summary": "Standard IELTS Academic Exam",
+   "instructions": "Please follow the instructions for each section carefully."
+  },
+  "sections": {
+   "listening": {
+    "enabled": true,
+    "label": "Listening",
+    "duration": 30,
+    "order": 0,
+    "gapAfterMinutes": 0,
+    "partCount": 4,
+    "audioPlaybackEnabled": true,
+    "staffInstructions": "",
+    "bandScoreTable": {
+     "2": 2.5,
+     "4": 3,
+     "6": 3.5,
+     "10": 4,
+     "13": 4.5,
+     "16": 5,
+     "18": 5.5,
+     "23": 6,
+     "26": 6.5,
+     "30": 7,
+     "32": 7.5,
+     "35": 8,
+     "37": 8.5,
+     "39": 9
+    },
+    "allowedQuestionTypes": [
+     "TFNG",
+     "CLOZE",
+     "MATCHING",
+     "MAP",
+     "MULTI_MCQ"
+    ]
+   },
+   "reading": {
+    "enabled": true,
+    "label": "Reading",
+    "duration": 60,
+    "order": 1,
+    "gapAfterMinutes": 0,
+    "passageCount": 3,
+    "bandScoreTable": {
+     "4": 2.5,
+     "6": 3,
+     "8": 3.5,
+     "10": 4,
+     "13": 4.5,
+     "15": 5,
+     "19": 5.5,
+     "23": 6,
+     "27": 6.5,
+     "30": 7,
+     "33": 7.5,
+     "35": 8,
+     "37": 8.5,
+     "39": 9
+    },
+    "allowedQuestionTypes": [
+     "TFNG",
+     "CLOZE",
+     "MATCHING",
+     "MAP",
+     "MULTI_MCQ"
+    ]
+   },
+   "writing": {
+    "enabled": true,
+    "label": "Writing",
+    "duration": 60,
+    "order": 2,
+    "gapAfterMinutes": 0,
+    "tasks": [
+     {
+      "id": "task1",
+      "label": "Task 1",
+      "taskType": "task1-academic",
+      "minWords": 150,
+      "recommendedTime": 20
+     },
+     {
+      "id": "task2",
+      "label": "Task 2",
+      "taskType": "task2-essay",
+      "minWords": 250,
+      "recommendedTime": 40
+     }
+    ],
+    "rubricWeights": {
+     "taskResponse": 25,
+     "coherence": 25,
+     "lexical": 25,
+     "grammar": 25
+    },
+    "allowedQuestionTypes": []
+   },
+   "speaking": {
+    "enabled": true,
+    "label": "Speaking",
+    "duration": 15,
+    "order": 3,
+    "gapAfterMinutes": 0,
+    "parts": [
+     {
+      "id": "part1",
+      "label": "Part 1: Introduction & Interview",
+      "prepTime": 0,
+      "speakingTime": 300
+     },
+     {
+      "id": "part2",
+      "label": "Part 2: Individual Long Turn",
+      "prepTime": 60,
+      "speakingTime": 120
+     },
+     {
+      "id": "part3",
+      "label": "Part 3: Two-way Discussion",
+      "prepTime": 0,
+      "speakingTime": 300
+     }
+    ],
+    "rubricWeights": {
+     "fluency": 25,
+     "lexical": 25,
+     "grammar": 25,
+     "pronunciation": 25
+    },
+    "allowedQuestionTypes": []
+   },
+   "science": {
+    "enabled": false,
+    "label": "Science",
+    "duration": 40,
+    "order": 0,
+    "gapAfterMinutes": 0,
+    "questionCount": 40,
+    "allowedQuestionTypes": [
+     "SINGLE_MCQ"
+    ]
+   }
+  },
+  "standards": {
+   "passageWordCount": {
+    "optimalMin": 700,
+    "optimalMax": 1000,
+    "warningMin": 500,
+    "warningMax": 1200
+   },
+   "writingTasks": {
+    "task1": {
+     "minWords": 150,
+     "recommendedTime": 20
+    },
+    "task2": {
+     "minWords": 250,
+     "recommendedTime": 40
+    }
+   },
+   "rubricDeviationThreshold": 10,
+   "rubricWeights": {
+    "writing": {
+     "taskResponse": 25,
+     "coherence": 25,
+     "lexical": 25,
+     "grammar": 25
+    },
+    "speaking": {
+     "fluency": 25,
+     "lexical": 25,
+     "grammar": 25,
+     "pronunciation": 25
+    }
+   },
+   "bandScoreTables": {
+    "listening": {
+     "2": 2.5,
+     "4": 3,
+     "6": 3.5,
+     "10": 4,
+     "13": 4.5,
+     "16": 5,
+     "18": 5.5,
+     "23": 6,
+     "26": 6.5,
+     "30": 7,
+     "32": 7.5,
+     "35": 8,
+     "37": 8.5,
+     "39": 9
+    },
+    "readingAcademic": {
+     "4": 2.5,
+     "6": 3,
+     "8": 3.5,
+     "10": 4,
+     "13": 4.5,
+     "15": 5,
+     "19": 5.5,
+     "23": 6,
+     "27": 6.5,
+     "30": 7,
+     "33": 7.5,
+     "35": 8,
+     "37": 8.5,
+     "39": 9
+    },
+    "readingGeneralTraining": {
+     "6": 2.5,
+     "9": 3,
+     "12": 3.5,
+     "15": 4,
+     "19": 4.5,
+     "23": 5,
+     "27": 5.5,
+     "30": 6,
+     "32": 6.5,
+     "34": 7,
+     "36": 7.5,
+     "37": 8,
+     "39": 8.5,
+     "40": 9
+    }
+   }
+  },
+  "progression": {
+   "autoSubmit": true,
+   "lockAfterSubmit": true,
+   "allowPause": false,
+   "showWarnings": true,
+   "warningThreshold": 3,
+   "unansweredSubmissionPolicy": "confirm"
+  },
+  "delivery": {
+   "launchMode": "proctor_start",
+   "transitionMode": "auto_with_proctor_override",
+   "allowedExtensionMinutes": [
+    5,
+    10
+   ]
+  },
+  "scoring": {
+   "overallRounding": "nearest-0.5"
+  },
+  "security": {
+   "tabSwitchRule": "warn",
+   "detectSecondaryScreen": true,
+   "blockClipboard": true,
+   "antiScreenshotGuardEnabled": true,
+   "preventAutofill": true,
+   "preventAutocorrect": true,
+   "preventTranslation": true,
+   "heartbeatIntervalSeconds": 15,
+   "heartbeatMissThreshold": 3,
+   "heartbeatWarningThreshold": 2,
+   "heartbeatHardBlockThreshold": 4,
+   "pauseOnOffline": true,
+   "bufferAnswersOffline": true,
+   "requireDeviceContinuityOnReconnect": true,
+   "allowSafariWithAcknowledgement": true,
+   "proctoringFlags": {
+    "webcam": true,
+    "audio": true,
+    "screen": true
+   },
+   "severityThresholds": {
+    "lowLimit": 5,
+    "mediumLimit": 3,
+    "highLimit": 2,
+    "criticalAction": "terminate"
+   }
+  }
+ },
+ "reading": {
+  "passages": [
+   {
+    "id": "p1",
+    "title": "Passage 1",
+    "content": "The Industrial Revolution, which began in Britain in the late 18th century, was driven by several key factors.",
+    "blocks": [],
+    "images": [],
+    "wordCount": 17
+   },
+   {
+    "id": "p2",
+    "title": "Passage 2",
+    "content": "",
+    "blocks": [],
+    "images": [],
+    "wordCount": 0
+   },
+   {
+    "id": "p3",
+    "title": "Passage 3",
+    "content": "",
+    "blocks": [],
+    "images": [],
+    "wordCount": 0
+   }
+  ]
+ },
+ "listening": {
+  "parts": [
+   {
+    "id": "l1",
+    "title": "Part 1",
+    "pins": [
+     {
+      "id": "pin1",
+      "time": "00:45",
+      "label": "Q1-5 Location"
+     }
+    ],
+    "blocks": []
+   },
+   {
+    "id": "l2",
+    "title": "Part 2",
+    "pins": [],
+    "blocks": []
+   },
+   {
+    "id": "l3",
+    "title": "Part 3",
+    "pins": [],
+    "blocks": []
+   },
+   {
+    "id": "l4",
+    "title": "Part 4",
+    "pins": [],
+    "blocks": []
+   }
+  ]
+ },
+ "writing": {
+  "task1Prompt": "The chart below shows the number of visitors to three museums in London between 2000 and 2020.",
+  "task2Prompt": "Some people believe that universities should focus on providing skills for the workplace.",
+  "task1Chart": {
+   "id": "chart-1",
+   "title": "Museum visitors (millions)",
+   "type": "bar",
+   "labels": [
+    "Museum A",
+    "Museum B",
+    "Museum C"
+   ],
+   "values": [
+    2.1,
+    3.4,
+    2.8
+   ]
+  },
+  "customPromptTemplates": [],
+  "rubric": {
+   "id": "ielts-writing-official",
+   "title": "IELTS Writing",
+   "module": "writing",
+   "criteria": [
+    {
+     "id": "task-response",
+     "label": "Task Achievement / Response",
+     "description": "Addresses the task, selects key features, and develops a clear position.",
+     "weight": 25,
+     "officialWeight": 25
+    },
+    {
+     "id": "coherence",
+     "label": "Coherence & Cohesion",
+     "description": "Organizes ideas logically and links information clearly.",
+     "weight": 25,
+     "officialWeight": 25
+    },
+    {
+     "id": "lexical",
+     "label": "Lexical Resource",
+     "description": "Uses a flexible range of vocabulary with precision and control.",
+     "weight": 25,
+     "officialWeight": 25
+    },
+    {
+     "id": "grammar",
+     "label": "Grammatical Range & Accuracy",
+     "description": "Controls grammar and punctuation across simple and complex structures.",
+     "weight": 25,
+     "officialWeight": 25
+    }
+   ]
+  },
+  "gradeHistory": [],
+  "tasks": [
+   {
+    "taskId": "task1",
+    "prompt": "The chart below shows the number of visitors to three museums in London between 2000 and 2020.",
+    "chart": {
+     "id": "chart-1",
+     "title": "Museum visitors (millions)",
+     "type": "bar",
+     "labels": [
+      "Museum A",
+      "Museum B",
+      "Museum C"
+     ],
+     "values": [
+      2.1,
+      3.4,
+      2.8
+     ]
+    }
+   },
+   {
+    "taskId": "task2",
+    "prompt": "Some people believe that universities should focus on providing skills for the workplace."
+   }
+  ]
+ },
+ "speaking": {
+  "part1Topics": [
+   "Work/Studies",
+   "Home Town/Accommodation"
+  ],
+  "cueCard": "Describe something you own which is very important to you.",
+  "cueCardDetails": {
+   "topic": "Describe something you own which is very important to you.",
+   "bullets": [
+    "what it is",
+    "when you got it",
+    "why it matters to you",
+    "how often you use it"
+   ],
+   "timeAllocation": "1 minute preparation + up to 2 minutes speaking",
+   "evaluatorNotes": ""
+  },
+  "part3Discussion": [
+   "Why do some people value material possessions more than experiences?"
+  ],
+  "evaluatorNotes": "",
+  "rubric": {
+   "id": "ielts-speaking-official",
+   "title": "IELTS Speaking",
+   "module": "speaking",
+   "criteria": [
+    {
+     "id": "fluency",
+     "label": "Fluency & Coherence",
+     "description": "Speaks at length, links ideas, and maintains clear progression.",
+     "weight": 25,
+     "officialWeight": 25
+    },
+    {
+     "id": "lexical",
+     "label": "Lexical Resource",
+     "description": "Uses precise vocabulary, paraphrase, and topic control.",
+     "weight": 25,
+     "officialWeight": 25
+    },
+    {
+     "id": "grammar",
+     "label": "Grammatical Range & Accuracy",
+     "description": "Uses varied sentence forms with consistent accuracy.",
+     "weight": 25,
+     "officialWeight": 25
+    },
+    {
+     "id": "pronunciation",
+     "label": "Pronunciation",
+     "description": "Maintains intelligibility through stress, rhythm, and sound control.",
+     "weight": 25,
+     "officialWeight": 25
+    }
+   ]
+  },
+  "gradeHistory": []
+ },
+ "science": {
+  "stimuli": []
+ }
+}
