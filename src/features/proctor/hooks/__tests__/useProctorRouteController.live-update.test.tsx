@@ -243,4 +243,81 @@ describe('useProctorRouteController live updates', () => {
       global.fetch = originalFetch;
     }
   });
+
+  it('a selected SAT room event refreshes the SAT summary family, not only the all-provider list (F5)', async () => {
+    const fetchUrls: string[] = [];
+    const originalFetch = global.fetch;
+    const summary = [{ schedule: { ...buildSchedule(), providerKey: 'sat' }, runtime: buildRuntime(), studentCount: 1, activeCount: 1, degradedLiveMode: false }];
+    global.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      fetchUrls.push(url);
+      if (url === '/api/v1/proctor/sessions?providerKey=sat' || url === '/api/v1/proctor/sessions') {
+        return new Response(JSON.stringify({ success: true, data: summary }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url === '/api/v1/proctor/sessions/sched-1?mode=dashboard&auditLimit=200&alertLimit=100') {
+        return new Response(JSON.stringify({ success: true, data: buildDetail() }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ success: false, error: { message: `Unhandled ${url}` } }), { status: 500, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    try {
+      // Real QueryClient shared by a SAT room observer and an all-provider observer.
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+      const sat = renderHook(() => useProctorRouteController({ providerKey: 'sat', initialScheduleId: 'sched-1' }), { wrapper });
+      const satHandler = await waitFor(() => {
+        expect(liveUpdateHandler).not.toBeNull();
+        return liveUpdateHandler!;
+      });
+      renderHook(() => useProctorRouteController(), { wrapper });
+
+      await waitFor(() => {
+        expect(sat.result.current.isLoading).toBe(false);
+        expect(fetchUrls.filter((url) => url === '/api/v1/proctor/sessions')).toHaveLength(1);
+      });
+      const satListBefore = fetchUrls.filter((url) => url === '/api/v1/proctor/sessions?providerKey=sat').length;
+      const detailBefore = fetchUrls.filter((url) => url.startsWith('/api/v1/proctor/sessions/sched-1')).length;
+
+      await act(async () => {
+        satHandler({ kind: 'schedule_alert', id: 'sched-1', revision: 0, event: 'alert_changed' });
+      });
+
+      await waitFor(() => {
+        expect(fetchUrls.filter((url) => url === '/api/v1/proctor/sessions?providerKey=sat').length).toBe(satListBefore + 1);
+        expect(fetchUrls.filter((url) => url.startsWith('/api/v1/proctor/sessions/sched-1')).length).toBe(detailBefore + 1);
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  it('surfaces a failed live refresh instead of swallowing it', async () => {
+    const originalFetch = global.fetch;
+    let failReads = false;
+    global.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (failReads) {
+        // Non-retryable, so the test observes the propagated failure promptly.
+        return new Response(JSON.stringify({ success: false, error: { code: 'FORBIDDEN', message: 'monitoring access revoked' } }), { status: 403, headers: { 'content-type': 'application/json' } });
+      }
+      if (url === '/api/v1/proctor/sessions') {
+        return new Response(JSON.stringify({ success: true, data: [{ schedule: buildSchedule(), runtime: buildRuntime(), studentCount: 1, activeCount: 1, degradedLiveMode: false }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ success: true, data: buildDetail() }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    try {
+      const { result } = renderHook(() => useProctorRouteController(), { wrapper: createWrapper() });
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      failReads = true;
+      await act(async () => {
+        liveUpdateHandler?.({ kind: 'schedule_alert', id: 'sched-1', revision: 0, event: 'alert_changed' });
+      });
+      await waitFor(() => expect(result.current.error).toBeTruthy());
+      // The last good snapshot stays on screen; the error is reported beside it.
+      expect(result.current.schedules).toHaveLength(1);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

@@ -648,32 +648,53 @@ export function useProctorRouteController(
     summariesQuery.error,
   ]);
 
+  // refetchQueries swallows query errors unless asked: required reconciliation
+  // must reject so callers can tell a stale view from a fresh one.
   const refresh = useCallback(async () => {
-    await queryClient.refetchQueries({ queryKey: proctorKeys.sessions(options.providerKey) });
+    await queryClient.refetchQueries({ queryKey: proctorKeys.sessions(options.providerKey) }, { throwOnError: true });
     await Promise.all(
       detailScheduleIds.map((scheduleId) =>
-        queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) })
+        queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) }, { throwOnError: true })
       )
     );
   }, [detailScheduleIds, options.providerKey, queryClient]);
 
   const refreshSchedule = useCallback(
     async (scheduleId: string) => {
+      // Refresh the summary family this controller subscribes to (SAT rooms
+      // and the all-provider overview are different cache entries).
       await Promise.all([
-        queryClient.refetchQueries({ queryKey: proctorKeys.sessions() }),
-        queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) }),
+        queryClient.refetchQueries({ queryKey: proctorKeys.sessions(options.providerKey) }, { throwOnError: true }),
+        queryClient.refetchQueries({ queryKey: proctorKeys.detail(scheduleId) }, { throwOnError: true }),
       ]);
     },
-    [queryClient]
+    [options.providerKey, queryClient]
   );
 
-  const loadMonitoringState = refresh;
+  /**
+   * Reconcile after a confirmed command. The command already happened, so a
+   * failed read must not turn it into a failure (or invite a repeat); it is
+   * reported separately as a stale view on the existing connection banner.
+   */
+  const loadMonitoringState = useCallback(async () => {
+    try {
+      await refresh();
+    } catch (refreshError) {
+      setError(
+        refreshError instanceof Error
+          ? `Action confirmed, but live data could not be refreshed: ${refreshError.message}`
+          : "Action confirmed, but live data could not be refreshed."
+      );
+    }
+  }, [refresh]);
 
   const handleLiveUpdate = useCallback(
     (event: LiveUpdateEvent) => {
       const scheduleId = getLiveUpdateScheduleId(event);
       if (!scheduleId) {
-        void refresh();
+        void refresh().catch((loadError) => {
+          setError(loadError instanceof Error ? loadError.message : "Failed to refresh live data");
+        });
         return;
       }
 
@@ -776,10 +797,10 @@ export function useProctorRouteController(
         runtime?.revision ?? undefined
       );
       if (!result.success) {
-        setError(result.error ?? "Failed to end section");
-      } else {
-        setError(null);
+        // A business rejection (even over HTTP 200) is a failure, never a success.
+        throw new Error(result.error ?? "Failed to end section");
       }
+      setError(null);
       await loadMonitoringState();
     },
     [loadMonitoringState, runtimeSnapshots]
@@ -798,10 +819,9 @@ export function useProctorRouteController(
         runtime?.revision ?? undefined
       );
       if (!result.success) {
-        setError(result.error ?? "Failed to extend section");
-      } else {
-        setError(null);
+        throw new Error(result.error ?? "Failed to extend section");
       }
+      setError(null);
       await loadMonitoringState();
     },
     [loadMonitoringState, runtimeSnapshots]
@@ -809,7 +829,10 @@ export function useProctorRouteController(
 
   const handleCompleteExam = useCallback(
     async (scheduleId: string) => {
-      await proctorFacade.delivery.completeRuntime(scheduleId, "Proctor");
+      const result = await proctorFacade.delivery.completeRuntime(scheduleId, "Proctor");
+      if (!result.success) {
+        throw new Error(result.error ?? "Failed to complete exam");
+      }
       await loadMonitoringState();
     },
     [loadMonitoringState]
