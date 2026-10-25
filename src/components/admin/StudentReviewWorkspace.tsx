@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useReducer, useRef } from 'react';
 import { 
   ArrowLeft, Save, CheckCircle, Clock, FileText,
   MessageSquare, ChevronLeft, ChevronRight, Eye, Calendar,
@@ -27,6 +27,10 @@ import { SectionLoadingSkeleton } from '@components/ui';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { subscribeObjectiveGradingUpdates } from '../../utils/objectiveGradingSync';
+import {
+  createReviewDraftState,
+  reviewDraftReducer,
+} from '../../features/grading/domain/reviewDraftState';
 
 export interface StudentReviewWorkspaceProps {
   submissionId: string;
@@ -104,7 +108,14 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const [submission, setSubmission] = useState<StudentSubmission | null>(null);
   const [sectionSubmissions, setSectionSubmissions] = useState<SectionSubmission[]>([]);
   const [writingSubmissions, setWritingSubmissions] = useState<WritingTaskSubmission[]>([]);
-  const [reviewDraft, setReviewDraft] = useState<ReviewDraft | null>(null);
+  const [draftState, dispatchDraft] = useReducer(reviewDraftReducer, submissionId, createReviewDraftState);
+  const reviewDraft = draftState.submissionId === submissionId ? draftState.local : null;
+  const saving = draftState.submissionId === submissionId && draftState.pendingSave !== null;
+  const saveOperationSeq = useRef(0);
+  const editDraft = useCallback(
+    (update: (draft: ReviewDraft) => ReviewDraft) => dispatchDraft({ type: 'edited', submissionId, update }),
+    [submissionId],
+  );
   const [examState, setExamState] = useState<ExamState | null>(null);
   const [examLoading, setExamLoading] = useState(false);
   const [examError, setExamError] = useState<string | null>(null);
@@ -122,7 +133,6 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     () => new Set(),
   );
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
   const examLoadSeq = useRef(0);
   const [releaseAction, setReleaseAction] = useState<
     | 'mark_grading_complete'
@@ -215,37 +225,42 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       setSubmission(subData);
       setLoading(false);
 
-      // Load or create review draft
-      const existingDraft = await gradingRepository.getReviewDraftBySubmission(submissionId);
-      if (seq !== submissionLoadSeq.current) return;
-
-      if (existingDraft) {
-        setReviewDraft(existingDraft);
-      } else if (
-        subData &&
-        ['submitted', 'in_progress', 'reopened'].includes(subData.gradingStatus)
-      ) {
-        const result = await gradingService.startReview(submissionId, currentTeacherId, currentTeacherName);
+      // Load or create the review draft once per submission. Later reads in
+      // this load (sections, writing) never reinstall it over local edits.
+      try {
+        const existingDraft = await gradingRepository.getReviewDraftBySubmission(submissionId);
         if (seq !== submissionLoadSeq.current) return;
-        if (result.success && result.data) {
-          // Initialize with default checklist
-          const initializedDraft = {
-            ...result.data,
-            releaseStatus: 'draft' as ReleaseStatus,
-            drawings: [],
-            checklist: {
-              listeningReviewed: false,
-              readingReviewed: false,
-              writingTask1Reviewed: false,
-              writingTask2Reviewed: false,
-              speakingReviewed: false,
-              overallFeedbackWritten: false,
-              rubricComplete: false,
-              annotationsComplete: false
-            }
-          };
-          setReviewDraft(initializedDraft);
+
+        if (existingDraft) {
+          dispatchDraft({ type: 'loaded', submissionId, draft: existingDraft });
+        } else if (
+          ['submitted', 'in_progress', 'reopened'].includes(subData.gradingStatus)
+        ) {
+          const result = await gradingService.startReview(submissionId, currentTeacherId, currentTeacherName);
+          if (seq !== submissionLoadSeq.current) return;
+          if (result.success && result.data) {
+            // Initialize with default checklist
+            const initializedDraft = {
+              ...result.data,
+              releaseStatus: 'draft' as ReleaseStatus,
+              drawings: [],
+              checklist: {
+                listeningReviewed: false,
+                readingReviewed: false,
+                writingTask1Reviewed: false,
+                writingTask2Reviewed: false,
+                speakingReviewed: false,
+                overallFeedbackWritten: false,
+                rubricComplete: false,
+                annotationsComplete: false
+              }
+            };
+            dispatchDraft({ type: 'loaded', submissionId, draft: initializedDraft });
+          }
         }
+      } catch (error) {
+        if (seq !== submissionLoadSeq.current) return;
+        setDraftError(error instanceof Error ? error.message : 'Failed to load review draft.');
       }
 
       setSectionsLoading(true);
@@ -276,41 +291,6 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         }
       }
 
-      try {
-        const existingDraft = await gradingRepository.getReviewDraftBySubmission(submissionId);
-        if (seq !== submissionLoadSeq.current) return;
-
-        if (existingDraft) {
-          setReviewDraft(existingDraft);
-        } else if (
-          ['submitted', 'in_progress', 'reopened'].includes(subData.gradingStatus)
-        ) {
-          const result = await gradingService.startReview(submissionId, currentTeacherId, currentTeacherName);
-          if (seq !== submissionLoadSeq.current) return;
-          if (result.success && result.data) {
-            // Initialize with default checklist
-            const initializedDraft = {
-              ...result.data,
-              releaseStatus: 'draft' as ReleaseStatus,
-              drawings: [],
-              checklist: {
-                listeningReviewed: false,
-                readingReviewed: false,
-                writingTask1Reviewed: false,
-                writingTask2Reviewed: false,
-                speakingReviewed: false,
-                overallFeedbackWritten: false,
-                rubricComplete: false,
-                annotationsComplete: false
-              }
-            };
-            setReviewDraft(initializedDraft);
-          }
-        }
-      } catch (error) {
-        if (seq !== submissionLoadSeq.current) return;
-        setDraftError(error instanceof Error ? error.message : 'Failed to load review draft.');
-      }
     } catch (error) {
       if (seq !== submissionLoadSeq.current) return;
       logger.error('Failed to load submission:', error);
@@ -347,12 +327,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     setSubmission(null);
     setSectionSubmissions([]);
     setWritingSubmissions([]);
-    setReviewDraft(null);
+    dispatchDraft({ type: 'reset', submissionId });
     setExamState(null);
     setExamError(null);
     setActiveSection('reading');
     setActiveTask('task1');
-    setSaving(false);
     setReleaseAction(null);
     setReleaseError(null);
     setShowReportPreview(false);
@@ -370,13 +349,23 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   }, [reloadObjectiveSections, submission?.examId]);
 
   const handleSaveDraft = async () => {
-    if (!reviewDraft) return;
-    setSaving(true);
-    const result = await gradingService.saveReviewDraft(reviewDraft, currentTeacherId, currentTeacherName);
-    if (result.success && result.data) {
-      setReviewDraft(result.data);
+    if (!reviewDraft || saving) return;
+    // The save is bound to this submission and the edit sequence it carries;
+    // its acknowledgement cannot erase newer edits or reach another student.
+    const operationId = (saveOperationSeq.current += 1);
+    const savedFor = submissionId;
+    dispatchDraft({ type: 'saveStarted', submissionId: savedFor, operationId });
+    try {
+      const result = await gradingService.saveReviewDraft(reviewDraft, currentTeacherId, currentTeacherName);
+      if (result.success && result.data) {
+        dispatchDraft({ type: 'saveAcknowledged', submissionId: savedFor, operationId, draft: result.data });
+      } else {
+        dispatchDraft({ type: 'saveFailed', submissionId: savedFor, operationId });
+      }
+    } catch (error) {
+      logger.error('Failed to save review draft:', error);
+      dispatchDraft({ type: 'saveFailed', submissionId: savedFor, operationId });
     }
-    setSaving(false);
   };
 
   const handleObjectiveOverride = async (
@@ -432,7 +421,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         currentTeacherName,
       );
       if (result.success && result.data) {
-        setReviewDraft(result.data);
+        dispatchDraft({ type: 'transitioned', submissionId, draft: result.data });
       } else {
         throw new Error(gradingErrorMessage(result.error, 'Failed to mark grading complete'));
       }
@@ -455,7 +444,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         currentTeacherName,
       );
       if (result.success && result.data) {
-        setReviewDraft(result.data);
+        dispatchDraft({ type: 'transitioned', submissionId, draft: result.data });
       } else {
         throw new Error(gradingErrorMessage(result.error, 'Failed to mark ready to release'));
       }
@@ -568,7 +557,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         currentTeacherName,
       );
       if (result.success && result.data) {
-        setReviewDraft(result.data);
+        dispatchDraft({ type: 'transitioned', submissionId, draft: result.data });
       } else {
         throw new Error(gradingErrorMessage(result.error, 'Failed to schedule release'));
       }
@@ -592,7 +581,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         'Manual reopen',
       );
       if (result.success && result.data) {
-        setReviewDraft(result.data);
+        dispatchDraft({ type: 'transitioned', submissionId, draft: result.data });
       } else {
         throw new Error(gradingErrorMessage(result.error, 'Failed to reopen review'));
       }
@@ -606,102 +595,78 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
 
   const updateRubricAssessment = (section: 'listening' | 'reading' | 'writing' | 'speaking', assessment: Partial<RubricAssessment>, taskId?: string) => {
     if (!reviewDraft) return;
-    
-    const updatedDraft = { ...reviewDraft };
-    if (section === 'writing' && taskId) {
-      if (!updatedDraft.sectionDrafts.writing) {
-        updatedDraft.sectionDrafts.writing = {};
+    editDraft((previous) => {
+      if (section === 'writing' && taskId) {
+        const writing = previous.sectionDrafts.writing ?? {};
+        const task = taskId as 'task1' | 'task2';
+        return {
+          ...previous,
+          sectionDrafts: {
+            ...previous.sectionDrafts,
+            writing: { ...writing, [task]: { ...writing[task], ...assessment } as RubricAssessment },
+          },
+        };
       }
-      updatedDraft.sectionDrafts.writing[taskId as 'task1' | 'task2'] = {
-        ...updatedDraft.sectionDrafts.writing[taskId as 'task1' | 'task2'],
-        ...assessment
-      } as RubricAssessment;
-    } else {
-      updatedDraft.sectionDrafts[section] = {
-        ...updatedDraft.sectionDrafts[section],
-        ...assessment
-      } as RubricAssessment;
-    }
-    
-    updatedDraft.hasUnsavedChanges = true;
-    setReviewDraft(updatedDraft);
+      return {
+        ...previous,
+        sectionDrafts: {
+          ...previous.sectionDrafts,
+          [section]: { ...previous.sectionDrafts[section], ...assessment } as RubricAssessment,
+        },
+      };
+    });
   };
 
   const updateChecklist = (updates: Partial<GradingChecklist>) => {
     if (!reviewDraft) return;
-    const updatedDraft = {
-      ...reviewDraft,
-      checklist: { ...reviewDraft.checklist, ...updates },
-      hasUnsavedChanges: true
-    };
-    setReviewDraft(updatedDraft);
+    editDraft((previous) => ({ ...previous, checklist: { ...previous.checklist, ...updates } }));
   };
 
   const handleAnnotationAdd = (annotation: WritingAnnotation) => {
     if (!reviewDraft || !annotation.taskId) return;
-    setReviewDraft((previous) => {
-      if (!previous) return previous;
-      if (previous.annotations.some((candidate) => candidate.id === annotation.id)) {
-        return previous;
-      }
-      return {
-        ...previous,
-        annotations: [...previous.annotations, annotation],
-        hasUnsavedChanges: true
-      };
-    });
+    if (reviewDraft.annotations.some((candidate) => candidate.id === annotation.id)) return;
+    editDraft((previous) =>
+      previous.annotations.some((candidate) => candidate.id === annotation.id)
+        ? previous
+        : { ...previous, annotations: [...previous.annotations, annotation] },
+    );
   };
 
   // Canvas update path: replace the annotation in place (undo/redo restore).
   const handleAnnotationUpdate = (annotation: WritingAnnotation) => {
     if (!reviewDraft || !annotation.taskId) return;
-    setReviewDraft((previous) => {
-      if (!previous) return previous;
-      return {
-        ...previous,
-        annotations: previous.annotations.map((candidate) =>
-          candidate.id === annotation.id ? annotation : candidate,
-        ),
-        hasUnsavedChanges: true
-      };
-    });
+    editDraft((previous) => ({
+      ...previous,
+      annotations: previous.annotations.map((candidate) =>
+        candidate.id === annotation.id ? annotation : candidate,
+      ),
+    }));
   };
 
   const handleAnnotationDelete = (annotationId: string) => {
     if (!reviewDraft) return;
-    const updatedDraft = {
-      ...reviewDraft,
-      annotations: reviewDraft.annotations.filter(a => a.id !== annotationId),
-      hasUnsavedChanges: true
-    };
-    setReviewDraft(updatedDraft);
+    editDraft((previous) => ({
+      ...previous,
+      annotations: previous.annotations.filter((candidate) => candidate.id !== annotationId),
+    }));
   };
 
   const handleDrawingAdd = (drawing: DrawingAnnotation) => {
     if (!reviewDraft || !drawing.taskId) return;
-    setReviewDraft((previous) => {
-      if (!previous) return previous;
-      if (previous.drawings.some((candidate) => candidate.id === drawing.id)) {
-        return previous;
-      }
-      return {
-        ...previous,
-        drawings: [...previous.drawings, drawing],
-        hasUnsavedChanges: true
-      };
-    });
+    if (reviewDraft.drawings.some((candidate) => candidate.id === drawing.id)) return;
+    editDraft((previous) =>
+      previous.drawings.some((candidate) => candidate.id === drawing.id)
+        ? previous
+        : { ...previous, drawings: [...previous.drawings, drawing] },
+    );
   };
 
   const handleDrawingDelete = (drawingId: string) => {
     if (!reviewDraft || !drawingId) return;
-    setReviewDraft((previous) => {
-      if (!previous) return previous;
-      return {
-        ...previous,
-        drawings: previous.drawings.filter((candidate) => candidate.id !== drawingId),
-        hasUnsavedChanges: true
-      };
-    });
+    editDraft((previous) => ({
+      ...previous,
+      drawings: previous.drawings.filter((candidate) => candidate.id !== drawingId),
+    }));
   };
 
   const getSectionSubmission = (section: 'listening' | 'reading' | 'writing' | 'speaking' | 'science') => {
@@ -1694,7 +1659,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 value={reviewDraft?.overallFeedback || ''}
                 onChange={(e) => {
                   if (reviewDraft) {
-                    setReviewDraft({ ...reviewDraft, overallFeedback: e.target.value, hasUnsavedChanges: true });
+                    const overallFeedback = e.target.value;
+                    editDraft((previous) => ({ ...previous, overallFeedback }));
                   }
                 }}
               />
@@ -1709,7 +1675,8 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 value={reviewDraft?.internalNotes || ''}
                 onChange={(e) => {
                   if (reviewDraft) {
-                    setReviewDraft({ ...reviewDraft, internalNotes: e.target.value, hasUnsavedChanges: true });
+                    const internalNotes = e.target.value;
+                    editDraft((previous) => ({ ...previous, internalNotes }));
                   }
                 }}
               />
@@ -1728,16 +1695,16 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     value={reviewDraft?.teacherSummary?.strengths?.join('\n') || ''}
                     onChange={(e) => {
                       if (reviewDraft) {
-                        setReviewDraft({
-                          ...reviewDraft,
+                        const strengths = e.target.value.split('\n').filter(s => s.trim());
+                        editDraft((previous) => ({
+                          ...previous,
                           teacherSummary: {
-                            ...reviewDraft.teacherSummary,
-                            strengths: e.target.value.split('\n').filter(s => s.trim()),
-                            improvementPriorities: reviewDraft.teacherSummary?.improvementPriorities || [],
-                            recommendedPractice: reviewDraft.teacherSummary?.recommendedPractice || []
+                            ...previous.teacherSummary,
+                            improvementPriorities: previous.teacherSummary?.improvementPriorities || [],
+                            recommendedPractice: previous.teacherSummary?.recommendedPractice || [],
+                            strengths,
                           },
-                          hasUnsavedChanges: true
-                        });
+                        }));
                       }
                     }}
                   />
@@ -1751,16 +1718,16 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     value={reviewDraft?.teacherSummary?.improvementPriorities?.join('\n') || ''}
                     onChange={(e) => {
                       if (reviewDraft) {
-                        setReviewDraft({
-                          ...reviewDraft,
+                        const improvementPriorities = e.target.value.split('\n').filter(s => s.trim());
+                        editDraft((previous) => ({
+                          ...previous,
                           teacherSummary: {
-                            ...reviewDraft.teacherSummary,
-                            strengths: reviewDraft.teacherSummary?.strengths || [],
-                            improvementPriorities: e.target.value.split('\n').filter(s => s.trim()),
-                            recommendedPractice: reviewDraft.teacherSummary?.recommendedPractice || []
+                            ...previous.teacherSummary,
+                            strengths: previous.teacherSummary?.strengths || [],
+                            recommendedPractice: previous.teacherSummary?.recommendedPractice || [],
+                            improvementPriorities,
                           },
-                          hasUnsavedChanges: true
-                        });
+                        }));
                       }
                     }}
                   />
@@ -1774,16 +1741,16 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                     value={reviewDraft?.teacherSummary?.recommendedPractice?.join('\n') || ''}
                     onChange={(e) => {
                       if (reviewDraft) {
-                        setReviewDraft({
-                          ...reviewDraft,
+                        const recommendedPractice = e.target.value.split('\n').filter(s => s.trim());
+                        editDraft((previous) => ({
+                          ...previous,
                           teacherSummary: {
-                            ...reviewDraft.teacherSummary,
-                            strengths: reviewDraft.teacherSummary?.strengths || [],
-                            improvementPriorities: reviewDraft.teacherSummary?.improvementPriorities || [],
-                            recommendedPractice: e.target.value.split('\n').filter(s => s.trim())
+                            ...previous.teacherSummary,
+                            strengths: previous.teacherSummary?.strengths || [],
+                            improvementPriorities: previous.teacherSummary?.improvementPriorities || [],
+                            recommendedPractice,
                           },
-                          hasUnsavedChanges: true
-                        });
+                        }));
                       }
                     }}
                   />

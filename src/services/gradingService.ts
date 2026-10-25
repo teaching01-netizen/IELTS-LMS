@@ -538,7 +538,9 @@ export class GradingService {
           },
           checklist: draft.checklist,
           hasUnsavedChanges: draft.hasUnsavedChanges,
-          revision: getReviewDraftRevision(draft.id),
+          // The draft's own base wins over the read cache, which any later
+          // read advances; that would turn a conflict into a blind overwrite.
+          revision: draft.revision ?? getReviewDraftRevision(draft.id),
         },
       );
       await gradingRepository.saveReviewDraft(savedDraft);

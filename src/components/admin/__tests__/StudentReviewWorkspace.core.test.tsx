@@ -646,3 +646,107 @@ describe('StudentReviewWorkspace save and release flows', () => {
     ).toBeDisabled();
   });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const feedbackBox = () => screen.getByPlaceholderText('Summary feedback visible to student...');
+
+describe('StudentReviewWorkspace draft acknowledgement (F1/F2)', () => {
+  test('a slow section read cannot re-install the server draft over a local edit', async () => {
+    seedWorkspace({ draft: makeDraft({ overallFeedback: 'server copy' }) });
+    const sections = deferred<any[]>();
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockReturnValue(sections.promise);
+    renderWorkspace();
+
+    await waitFor(() => expect(feedbackBox()).toHaveValue('server copy'));
+    fireEvent.change(feedbackBox(), { target: { value: 'local edit' } });
+    sections.resolve([]);
+
+    await waitFor(() => expect(gradingRepository.getWritingSubmissionsBySubmissionId).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(feedbackBox()).toHaveValue('local edit');
+    expect(saveButton()).toBeEnabled();
+    expect(gradingRepository.getReviewDraftBySubmission).toHaveBeenCalledTimes(1);
+  });
+
+  test('acknowledging save N keeps edit N+1 visible and unsaved', async () => {
+    seedWorkspace({ draft: makeDraft({ overallFeedback: '' }) });
+    const save = deferred<any>();
+    vi.mocked(gradingService.saveReviewDraft).mockReturnValueOnce(save.promise);
+    renderWorkspace();
+
+    await waitFor(() => expect(feedbackBox()).toHaveValue(''));
+    fireEvent.change(feedbackBox(), { target: { value: 'edit four' } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(gradingService.saveReviewDraft).toHaveBeenCalledTimes(1));
+    const submitted = vi.mocked(gradingService.saveReviewDraft).mock.calls[0]![0] as any;
+    expect(submitted.overallFeedback).toBe('edit four');
+
+    fireEvent.change(feedbackBox(), { target: { value: 'edit five' } });
+    save.resolve({ success: true, data: { ...submitted, overallFeedback: 'edit four', hasUnsavedChanges: false, revision: 9 } });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /save draft/i })).toHaveTextContent('Save Draft'));
+    expect(feedbackBox()).toHaveValue('edit five');
+    expect(saveButton()).toBeEnabled();
+
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(gradingService.saveReviewDraft).toHaveBeenCalledTimes(2));
+    const next = vi.mocked(gradingService.saveReviewDraft).mock.calls[1]![0] as any;
+    expect(next.overallFeedback).toBe('edit five');
+    // The next save builds on the acknowledged server revision.
+    expect(next.revision).toBe(9);
+  });
+
+  test('a rejected save keeps local edits dirty', async () => {
+    seedWorkspace({ draft: makeDraft({ overallFeedback: '' }) });
+    vi.mocked(gradingService.saveReviewDraft).mockResolvedValueOnce({ success: false, error: { code: 'CONFLICT', message: 'Draft changed' } } as any);
+    renderWorkspace();
+
+    await waitFor(() => expect(feedbackBox()).toHaveValue(''));
+    fireEvent.change(feedbackBox(), { target: { value: 'keep me' } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(gradingService.saveReviewDraft).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(saveButton()).toHaveTextContent('Save Draft'));
+    expect(feedbackBox()).toHaveValue('keep me');
+    expect(saveButton()).toBeEnabled();
+  });
+
+  test('an acknowledgement for submission A never populates submission B', async () => {
+    seedWorkspace({ draft: makeDraft({ overallFeedback: '' }) });
+    const saveA = deferred<any>();
+    vi.mocked(gradingService.saveReviewDraft).mockReturnValueOnce(saveA.promise);
+    const view = renderWorkspace();
+
+    await waitFor(() => expect(feedbackBox()).toHaveValue(''));
+    fireEvent.change(feedbackBox(), { target: { value: 'for alice' } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(gradingService.saveReviewDraft).toHaveBeenCalledTimes(1));
+    const submittedA = vi.mocked(gradingService.saveReviewDraft).mock.calls[0]![0] as any;
+
+    vi.mocked(gradingRepository.getSubmissionById).mockResolvedValue(
+      makeSubmission({ id: 'sub-2', submissionId: 'sub-2', studentName: 'Bob' }) as any,
+    );
+    vi.mocked(gradingRepository.getReviewDraftBySubmission).mockResolvedValue(
+      makeDraft({ id: 'draft-2', submissionId: 'sub-2', overallFeedback: 'bob server copy' }) as any,
+    );
+    view.rerender(
+      <StudentReviewWorkspace submissionId="sub-2" onBack={() => {}} currentTeacherId="t-1" currentTeacherName="Teacher" />,
+    );
+    expect(await screen.findByRole('heading', { name: 'Bob' })).toBeInTheDocument();
+    await waitFor(() => expect(feedbackBox()).toHaveValue('bob server copy'));
+
+    saveA.resolve({ success: true, data: { ...submittedA, hasUnsavedChanges: false } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(feedbackBox()).toHaveValue('bob server copy');
+    expect(saveButton()).toBeDisabled();
+    expect(saveButton()).toHaveTextContent('Save Draft');
+  });
+});

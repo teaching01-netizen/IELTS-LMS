@@ -615,6 +615,8 @@ export interface ReviewDraft {
   // State
   hasUnsavedChanges: boolean;
   lastAutoSaveAt?: string | undefined;
+  /** Server revision this draft is based on; a save sends it as its expected base. */
+  revision?: number | undefined;
   
   // Metadata
   createdAt: string;

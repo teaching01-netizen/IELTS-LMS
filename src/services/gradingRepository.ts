@@ -173,6 +173,7 @@ type BackendReviewDraft = Omit<
   | 'internalNotes'
   | 'teacherSummary'
   | 'lastAutoSaveAt'
+  | 'revision'
 > & {
   revision?: number | null | undefined;
   overallFeedback?: string | null | undefined;
@@ -450,6 +451,7 @@ class BackendGradingRepository implements IGradingRepository {
       checklist: payload.checklist ?? {},
       hasUnsavedChanges: payload.hasUnsavedChanges,
       lastAutoSaveAt: payload.lastAutoSaveAt ?? undefined,
+      revision: typeof payload.revision === 'number' ? payload.revision : undefined,
       createdAt: payload.createdAt,
       updatedAt: payload.updatedAt,
     };

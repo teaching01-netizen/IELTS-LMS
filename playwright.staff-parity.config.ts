@@ -21,7 +21,7 @@ export default defineConfig({
     trace: "retain-on-failure",
     timezoneId: "Asia/Bangkok",
     locale: "en-US",
-    reducedMotion: "reduce",
+    contextOptions: { reducedMotion: "reduce" },
     colorScheme: "light",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], deviceScaleFactor: 1 } }],
