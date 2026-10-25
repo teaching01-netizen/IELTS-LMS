@@ -16,7 +16,8 @@ test.describe('Application smoke tests', () => {
   test('login page loads the sign-in form', async ({ page }) => {
     await page.goto('/login');
 
-    await expect(page.getByRole('heading', { name: 'IELTS Proctoring System' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Warwick Exam' })).toBeVisible();
+    await expect(page.getByRole('img', { name: 'Warwick Institute' })).toBeVisible();
     await expect(page.getByLabel('Email Address')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible();
   });

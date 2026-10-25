@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { LoadingSurface } from '@components/ui';
+import warwickLogo from '../../assets/warwick-institute-logo.png';
 import { resolvePostLoginPath, useAuthSession } from './authSession';
 import { loginFormSchema } from './validation/authForms';
 
@@ -131,7 +132,14 @@ export function LoginPage() {
       <div className="max-w-md w-full">
         <div className="bg-white border border-border rounded-lg shadow-lg p-8">
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-gray-900 mb-2 tracking-tight">IELTS Proctoring System</h1>
+            <img
+              src={warwickLogo}
+              alt="Warwick Institute"
+              width={700}
+              height={268}
+              className="mx-auto mb-6 h-auto w-56 max-w-full"
+            />
+            <h1 className="text-2xl font-bold text-gray-900 mb-2 tracking-tight">Warwick Exam</h1>
             <p className="text-sm text-gray-500">Sign in to access your dashboard</p>
           </div>
 
