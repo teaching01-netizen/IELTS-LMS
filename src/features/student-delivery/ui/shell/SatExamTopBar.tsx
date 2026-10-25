@@ -10,7 +10,7 @@ import { SatReadingPopover } from "./SatReadingPopover";
 import { SAT_TIME_EXPIRED_LABEL, satTimerLabel, shouldAutoRevealTimer } from "../../domain/satTiming";
 import { useSatTemporalSnapshot } from "../../timing/SatTemporalRuntime";
 import { useSatReferenceViewportWidth } from "../tools/useSatReferenceViewportWidth";
-import warwickLogo from "../../../../assets/warwick-institute-logo.png";
+import { WarwickInstituteLogo } from "../../../../components/ui/WarwickInstituteLogo";
 
 export interface SatExamTopBarProps {
   sectionLabel: string;
@@ -139,9 +139,11 @@ export function SatExamTopBar(props: SatExamTopBarProps) {
       {/* Bluebook 3-anchor header: context | independently-centered timer | tools. Mobile keeps 2-row stacking. */}
       <div className="mx-auto grid min-h-0 min-w-0 max-w-[1440px] grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center gap-x-2 py-1 lg:h-[96px] lg:min-h-0 lg:grid-cols-[minmax(280px,1fr)_180px_minmax(280px,1fr)] lg:grid-rows-1 lg:gap-3 lg:py-0">
         <div className="sat-popover-anchor relative col-start-1 row-start-1 flex min-w-0 items-center gap-2 self-stretch lg:col-auto lg:row-auto lg:block lg:py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <img src={warwickLogo} alt="Warwick Institute" width={700} height={268} className="h-6 w-auto shrink-0 rounded-sm bg-white" />
-            <p className="sat-type-body min-w-0 truncate font-semibold leading-6 text-[var(--sat-text)]">
+          <div className="flex min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-3">
+            <div className="shrink-0 border-[var(--sat-divider-soft)] sm:border-r sm:pr-3">
+              <WarwickInstituteLogo className="h-auto w-24 rounded-sm bg-white min-[480px]:w-32" />
+            </div>
+            <p className="sat-type-body min-w-0 font-semibold leading-6 text-[var(--sat-text)] sm:truncate">
               {props.sectionLabel}
             </p>
           </div>

@@ -18,7 +18,7 @@ import type { ExamType } from "../../../types";
 import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnouncement";
 import { StudentToolsSheet } from "./StudentToolsSheet";
 import { isIeltsExamType } from "./studentExamTypeContext";
-import warwickLogo from "../../../assets/warwick-institute-logo.png";
+import { WarwickInstituteLogo } from "../../ui/WarwickInstituteLogo";
 import {
   getStudentSaveStatusPresentation,
   type StudentAutoSaveStatus,
@@ -96,8 +96,12 @@ export function CompactStudentHeader({
       role="banner"
       data-testid="student-compact-header"
     >
+      {isIeltsExamType(examType) ? (
+        <div className="shrink-0 border-r border-gray-200 pr-2">
+          <WarwickInstituteLogo className="h-auto w-[72px] min-[480px]:w-24" />
+        </div>
+      ) : null}
       <div className="min-w-0 flex-1">
-        {isIeltsExamType(examType) ? <img src={warwickLogo} alt="Warwick Institute" width={700} height={268} className="h-auto w-16" /> : null}
         <div className="flex items-center gap-2">
           <span className="flex-shrink-0 border border-gray-900 px-1.5 py-0.5 text-lg font-bold tracking-tight text-gray-900">
             {examType === "ACT" ? "ACT" : "IELTS"}

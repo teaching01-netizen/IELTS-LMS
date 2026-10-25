@@ -25,7 +25,7 @@ import { getStudentHighlightPaletteEntry, studentHighlightPalette, type StudentH
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
 import type { ExamType } from '../../types';
 import { isIeltsExamType } from './layout/studentExamTypeContext';
-import warwickLogo from '../../assets/warwick-institute-logo.png';
+import { WarwickInstituteLogo } from '../ui/WarwickInstituteLogo';
 
 const pressClassName =
   'transition-[background-color,border-color,box-shadow,opacity] duration-100 ease-out';
@@ -304,8 +304,12 @@ export function StudentHeader({
       role="banner"
     >
       <div className="flex items-center gap-3 md:gap-4 lg:gap-6 min-w-0 justify-self-start">
-        <div className="flex flex-shrink-0 flex-col items-center gap-0.5">
-          {isIelts ? <img src={warwickLogo} alt="Warwick Institute" width={700} height={268} className="h-5 w-auto" /> : null}
+        <div className="flex flex-shrink-0 items-center gap-3">
+          {isIelts ? (
+            <div className="border-r border-gray-200 pr-3">
+              <WarwickInstituteLogo className="h-auto w-28 lg:w-32" />
+            </div>
+          ) : null}
           <div className="bg-white border border-gray-900 px-1.5 md:px-2 lg:px-3 py-0.5 rounded-sm flex-shrink-0">
             <div className="text-gray-900 font-bold text-lg md:text-xl lg:text-2xl tracking-tight">{examLabel}</div>
           </div>
