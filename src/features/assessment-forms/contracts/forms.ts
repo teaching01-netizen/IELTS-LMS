@@ -104,7 +104,8 @@ export interface ExamFormsDocument {
 export interface SaveExamFormsRequest {
   expectedVersionId: string;
   expectedRevision: number;
-  forms: ExamForms;
+  /** null turns custom forms off (system details only). */
+  forms: ExamForms | null;
 }
 
 /** Candidate-safe registration projection on public entry metadata. */

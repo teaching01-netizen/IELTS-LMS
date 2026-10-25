@@ -158,9 +158,6 @@ test.describe("SAT automatic resume", () => {
       await secondStudentPage.goto(joinHref, { waitUntil: "domcontentloaded" });
       await secondStudentPage.getByLabel("Full name").fill("Second SAT candidate");
       await secondStudentPage.getByLabel("Email").fill(`second-${Date.now()}@example.com`);
-      await secondStudentPage.getByLabel(/Admission year/).fill("2027");
-      await secondStudentPage.getByLabel(/Seat number/).fill("A-008");
-      await secondStudentPage.getByLabel(/Expected Class/).selectOption("rank_4");
       await secondStudentPage.getByRole("button", { name: /Continue/i }).click();
       await expect(secondStudentPage).toHaveURL(new RegExp(`/student/${scheduleId}/[^/]+$`), {
         timeout: 30_000,

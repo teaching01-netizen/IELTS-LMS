@@ -120,7 +120,12 @@ func formValidationError(issues []definition.Issue) *apperrors.Error {
 // SaveForms merges only the owned forms property into the locked current
 // draft under an exact version/revision fence and advances the draft revision
 // (which invalidates readiness). Unrelated config keys are never replaced.
+// A null forms value turns custom forms off: new rooms collect only system
+// details (no registration questions, section entry forms or Eva SIM).
 func (s *Service) SaveForms(ctx context.Context, examID string, req SaveFormsRequest) (ExamForms, error) {
+	if trimmed := strings.TrimSpace(string(req.Forms)); trimmed == "null" {
+		return s.writeForms(ctx, examID, req, json.RawMessage("null"))
+	}
 	forms, issues := definition.Parse(req.Forms)
 	if len(issues) > 0 {
 		return ExamForms{}, formValidationError(issues)
@@ -138,8 +143,12 @@ func (s *Service) SaveForms(ctx context.Context, examID string, req SaveFormsReq
 	if err != nil {
 		return ExamForms{}, err
 	}
+	return s.writeForms(ctx, examID, req, encoded)
+}
+
+func (s *Service) writeForms(ctx context.Context, examID string, req SaveFormsRequest, encoded json.RawMessage) (ExamForms, error) {
 	var out ExamForms
-	err = s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	err := s.runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
 		var draftID, config string
 		var revision int
 		err := q.QueryRowContext(ctx, "SELECT v.id, v.revision, CAST(v.config_snapshot AS CHAR) FROM exam_versions v JOIN exam_entities e ON e.id = v.exam_id WHERE v.exam_id = ? AND v.is_draft = TRUE AND e.current_draft_version_id = v.id FOR UPDATE", examID).Scan(&draftID, &revision, &config)
@@ -158,7 +167,11 @@ func (s *Service) SaveForms(ctx context.Context, examID string, req SaveFormsReq
 				return validationError("Draft configuration must be a JSON object.")
 			}
 		}
-		top[definition.SnapshotKey] = encoded
+		if string(encoded) == "null" {
+			delete(top, definition.SnapshotKey)
+		} else {
+			top[definition.SnapshotKey] = encoded
+		}
 		merged, err := json.Marshal(top)
 		if err != nil {
 			return err

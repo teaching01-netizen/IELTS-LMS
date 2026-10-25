@@ -120,12 +120,6 @@ export async function createRunningSatSession(
   }
   await studentPage.getByLabel("Full name").fill(studentName);
   await studentPage.getByLabel("Email").fill(studentEmail);
-  // New SAT drafts include required registration fields. Keep this shared
-  // real-server fixture on the same valid check-in path students use now.
-  await studentPage.getByLabel(/Admission year/).fill("2027");
-  await studentPage.getByLabel(/Seat number/).fill("A-007");
-  const expectedClass = studentPage.getByLabel(/Expected Class/);
-  if (await expectedClass.count()) await expectedClass.selectOption("rank_4");
   await studentPage.getByRole("button", { name: /Continue/i }).click();
   await expect(studentPage).toHaveURL(/\/student\/[0-9a-f-]+\/[^/]+$/i, { timeout: 30_000 });
 

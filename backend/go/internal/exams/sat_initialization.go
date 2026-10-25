@@ -3,7 +3,6 @@ package exams
 import (
 	"context"
 	"encoding/json"
-	"example.com/ielts-proctoring/internal/assessmentforms/definition"
 	"fmt"
 	"strings"
 
@@ -78,7 +77,8 @@ func satInitialConfig() (string, error) {
 			"bufferAnswersOffline":               true,
 			"requireDeviceContinuityOnReconnect": true,
 		},
-		definition.SnapshotKey: definition.DefaultSectionSATForms(),
+		// New exams start without custom forms (system details only); staff
+		// turn them on in Settings.
 	}
 	encoded, err := json.Marshal(value)
 	if err != nil {

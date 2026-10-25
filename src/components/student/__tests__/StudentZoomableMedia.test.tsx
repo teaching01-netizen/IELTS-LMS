@@ -1,10 +1,14 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { StudentZoomableMedia } from '../StudentZoomableMedia';
 import { StudentExamTypeContext } from '../layout/studentExamTypeContext';
 
 describe('StudentZoomableMedia', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('falls back to alternate sources and opens a zoom-only viewer', () => {
     render(
       <StudentZoomableMedia
@@ -96,5 +100,66 @@ describe('StudentZoomableMedia', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Close image zoom' }));
     expect(screen.queryByRole('dialog', { name: 'Ant trap zoomed view' })).not.toBeInTheDocument();
+  });
+
+  it('re-requests a failed image on a backoff, then offers Try again', () => {
+    vi.useFakeTimers();
+    render(<StudentZoomableMedia sources={['/api/v1/media/a1/content']} alt="Bar chart" label="Bar chart" />);
+
+    const first = screen.getByAltText('Bar chart');
+    fireEvent.error(first);
+    expect(screen.getByRole('status')).toHaveTextContent('Loading image…');
+    expect(screen.queryByAltText('Bar chart')).not.toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    const second = screen.getByAltText('Bar chart');
+    // A new element: the browser requests the source again.
+    expect(second).not.toBe(first);
+    expect(second).toHaveAttribute('src', '/api/v1/media/a1/content');
+
+    fireEvent.error(second);
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+    });
+    fireEvent.error(screen.getByAltText('Bar chart'));
+    expect(screen.getByRole('status')).toHaveTextContent('Image could not be loaded');
+    expect(screen.getByRole('group', { name: 'Bar chart' })).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(screen.queryByAltText('Bar chart')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(screen.getByAltText('Bar chart')).toHaveAttribute('src', '/api/v1/media/a1/content');
+    expect(screen.getByRole('button', { name: 'Bar chart' })).toHaveFocus();
+  });
+
+  it('takes one step per failed source when the viewer shows it too', () => {
+    vi.useFakeTimers();
+    render(<StudentZoomableMedia sources={['/a.png', '/b.png']} alt="Map" label="Map" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Map' }));
+    // The thumbnail and the open viewer share one request, so both report its
+    // failure before React renders again.
+    const failBoth = () =>
+      act(() => {
+        for (const image of screen.getAllByAltText('Map')) {
+          image.dispatchEvent(new Event('error'));
+        }
+      });
+
+    failBoth();
+    for (const image of screen.getAllByAltText('Map')) {
+      expect(image).toHaveAttribute('src', '/b.png');
+    }
+    failBoth();
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    // One retry was spent, not two: the next pass still waits and retries.
+    failBoth();
+    failBoth();
+    expect(screen.getAllByRole('status')[0]).toHaveTextContent('Loading image…');
   });
 });

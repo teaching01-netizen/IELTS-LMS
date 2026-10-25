@@ -320,11 +320,14 @@ func TestVerifyRenderableAssetsDeduplicatesAndChecksFinalizedBytes(t *testing.T)
 	if err != nil {
 		t.Fatalf("VerifyRenderableAssets() error = %v", err)
 	}
+	svc.renditions.wg.Wait()
 	if len(issues) != 1 || issues[0].AssetID != "pending-1" || issues[0].Reason != "not_finalized" {
 		t.Fatalf("issues = %+v, want only the pending asset", issues)
 	}
-	if len(store.statCalls) != 1 || store.statCalls[0] != "media/ready-1.png" {
-		t.Fatalf("Stat calls = %v, want one check for the unique finalized object", store.statCalls)
+	// One check for the unique finalized object, then its delivery rendition
+	// is started (and found already present in this fake store).
+	if len(store.statCalls) != 2 || store.statCalls[0] != "media/ready-1.png" || store.statCalls[1] != "media/ready-1.png"+deliveryRenditionSuffix {
+		t.Fatalf("Stat calls = %v, want the object check then the rendition probe", store.statCalls)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

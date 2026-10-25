@@ -176,6 +176,7 @@ function FormsEditor({
   >({});
   const [conflict, setConflict] = useState<SectionKey | null>(null);
   const [confirmReload, setConfirmReload] = useState(false);
+  const [confirmOff, setConfirmOff] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [issues, setIssues] = useState<FormIssue[]>(doc.issues);
   const revisionRef = useRef({ versionId: doc.versionId, revision: doc.versionRevision });
@@ -329,33 +330,32 @@ function FormsEditor({
     void submit(section, confirmed);
   };
 
-  const addStandard = (upgrade = false) => {
+  /** Adopt server-confirmed forms (null: custom forms off) as every section's draft. */
+  const adopt = (forms: ExamForms | null) => {
+    setConfirmed(forms);
+    setRegistration(forms?.registration.fields ?? []);
+    setEva(forms?.evaSim ?? doc.standard.evaSim);
+    setVerbal(forms?.schemaVersion === 2 ? forms.sectionEntry["reading-writing"].fields : []);
+    setMath(forms?.schemaVersion === 2 ? forms.sectionEntry.math.fields : []);
+    setSectionEnabled(enabledSections(forms));
+  };
+
+  const replaceForms = (next: ExamForms | null, message: string) => {
     if (saving) return;
-    const standard = upgrade && confirmed ? upgradeToSectionForms(confirmed) : doc.standard;
     setSaving("registration");
+    setErrors({});
     void save
       .mutateAsync({
         expectedVersionId: revisionRef.current.versionId,
         expectedRevision: revisionRef.current.revision,
-        forms: standard,
+        forms: next,
       })
       .then((ack) => {
         revisionRef.current = { versionId: ack.versionId, revision: ack.versionRevision };
         setIssues(ack.issues);
-        if (ack.forms) {
-          setConfirmed(ack.forms);
-          setRegistration(ack.forms.registration.fields);
-          setEva(ack.forms.evaSim);
-          setVerbal(
-            ack.forms.schemaVersion === 2 ? ack.forms.sectionEntry["reading-writing"].fields : []
-          );
-          setMath(ack.forms.schemaVersion === 2 ? ack.forms.sectionEntry.math.fields : []);
-          setSectionEnabled(enabledSections(ack.forms));
-          setReviewUpgrade(false);
-        }
-        setAnnouncement(
-          upgrade ? "Separate section forms enabled for new rooms." : "Standard SAT fields added."
-        );
+        adopt(ack.forms);
+        setReviewUpgrade(false);
+        setAnnouncement(message);
       })
       .catch((error: unknown) =>
         setErrors((prev) => ({ ...prev, registration: issueMessage(error) }))
@@ -363,19 +363,17 @@ function FormsEditor({
       .finally(() => setSaving(null));
   };
 
+  const addStandard = (upgrade = false) =>
+    upgrade && confirmed
+      ? replaceForms(upgradeToSectionForms(confirmed), "Separate section forms enabled for new rooms.")
+      : replaceForms(doc.standard, "Custom forms turned on with the standard SAT fields.");
+
   const loadLatest = async () => {
     setConfirmReload(false);
     const latest = await reload().catch(() => undefined);
     if (!latest) return;
     revisionRef.current = { versionId: latest.versionId, revision: latest.versionRevision };
-    setConfirmed(latest.forms);
-    setRegistration(latest.forms?.registration.fields ?? []);
-    setEva(latest.forms?.evaSim ?? latest.standard.evaSim);
-    setVerbal(
-      latest.forms?.schemaVersion === 2 ? latest.forms.sectionEntry["reading-writing"].fields : []
-    );
-    setMath(latest.forms?.schemaVersion === 2 ? latest.forms.sectionEntry.math.fields : []);
-    setSectionEnabled(enabledSections(latest.forms));
+    adopt(latest.forms);
     setIssues(latest.issues);
     setConflict(null);
     setErrors({});
@@ -435,28 +433,40 @@ function FormsEditor({
           Changes apply to newly created rooms. Existing rooms keep their version.
         </p>
         <div className={`${CARD} mt-6`}>
-          <dl className="grid gap-1 sm:grid-cols-[180px_minmax(0,1fr)]">
+          <div className="flex min-h-11 items-center justify-between gap-4">
+            <div className="min-w-0">
+              <label htmlFor="exam-forms-enabled" className="text-[15px] font-semibold">
+                Custom exam forms
+              </label>
+              <p id="exam-forms-enabled-help" className={MUTED}>
+                {legacy
+                  ? "Off — students enter only the system details below."
+                  : "On — registration questions, Verbal and Math entry forms, and Eva SIM."}
+              </p>
+            </div>
+            <input
+              id="exam-forms-enabled"
+              type="checkbox"
+              role="switch"
+              aria-label="Custom exam forms"
+              aria-describedby="exam-forms-enabled-help"
+              checked={!legacy}
+              disabled={!canEdit || saving !== null}
+              onChange={(event) => {
+                if (event.currentTarget.checked) addStandard();
+                else setConfirmOff(true);
+              }}
+              className="h-5 w-5 shrink-0 accent-[var(--sat-staff-accent,#0071e3)]"
+            />
+          </div>
+          <dl className="mt-4 grid gap-1 border-t border-[var(--sat-staff-border-hairline)] pt-4 sm:grid-cols-[180px_minmax(0,1fr)]">
             <dt className="text-[14px] font-semibold">System details</dt>
             <dd className={MUTED}>
               Student ID/WCODE, full name and email · collected according to access mode
             </dd>
           </dl>
           {legacy ? (
-            <div className="mt-5 border-t border-[var(--sat-staff-border-hairline)] pt-4">
-              <p className={MUTED}>This version has no registration questions.</p>
-              {canEdit ? (
-                <button
-                  type="button"
-                  className="sat-btn sat-btn--primary sat-press mt-3"
-                  onClick={() => addStandard()}
-                  disabled={saving !== null}
-                >
-                  <Plus size={16} aria-hidden="true" />
-                  Add standard SAT fields
-                </button>
-              ) : null}
-              <SectionErrors error={errors.registration} />
-            </div>
+            <SectionErrors error={errors.registration} />
           ) : (
             <>
               <FieldListEditor
@@ -665,6 +675,18 @@ function FormsEditor({
         </section>
       ) : null}
 
+      <AuthoringConfirmDialog
+        open={confirmOff}
+        title="Turn off custom exam forms?"
+        description="New rooms will collect only system details: no registration questions, Verbal or Math entry forms, or Eva SIM. The questions in this draft are removed; turning forms on again starts from the standard SAT fields. Existing rooms keep their forms."
+        confirmLabel="Turn off forms"
+        destructive
+        onCancel={() => setConfirmOff(false)}
+        onConfirm={() => {
+          setConfirmOff(false);
+          replaceForms(null, "Custom exam forms turned off for new rooms.");
+        }}
+      />
       <AuthoringConfirmDialog
         open={confirmReload}
         title="Load the latest forms?"

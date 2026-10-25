@@ -41,6 +41,7 @@ type objectStoreReadiness interface {
 
 // VerifyRenderableAssets requires each referenced image to be finalized and
 // its object to exist as a readable file before an SAT version is published.
+// Each image that passes has its delivery rendition started in the background.
 func (s *Service) VerifyRenderableAssets(ctx context.Context, assetIDs []string) ([]AssetIssue, error) {
 	ids := uniqueAssetIDs(assetIDs)
 	if len(ids) == 0 {
@@ -97,7 +98,11 @@ func (s *Service) VerifyRenderableAssets(ctx context.Context, assetIDs []string)
 			cancel()
 			if err != nil {
 				issues = append(issues, AssetIssue{AssetID: id, Reason: "object_unreadable", StorageErrorClass: classifyStorageError(err)})
+				continue
 			}
+			// Publish is the last step before students: their copy renders now,
+			// not on the first student request.
+			s.renditions.kick(s.store, Asset{ID: id, ObjectKey: record.objectKey, ContentType: record.contentType})
 		}
 	}
 	sort.Slice(issues, func(i, j int) bool { return issues[i].AssetID < issues[j].AssetID })

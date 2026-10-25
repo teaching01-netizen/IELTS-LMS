@@ -18,7 +18,7 @@ import { isInstructionReferencePlacement } from "../../utils/referenceImagePlace
 import { StudentMaterialWithQuestionPane } from "./StudentMaterialWithQuestionPane";
 import { StudentModuleEmptyState } from "./StudentModuleEmptyState";
 import type { StudentLayoutMode } from "./layout/studentLayoutMode";
-import { getImageUrlCandidates } from "../../utils/imageUrl";
+import { advanceImageSourceCandidate, getImageUrlCandidates, retryImageSourceLater } from "../../utils/imageUrl";
 
 interface StudentReadingProps {
   state: ExamState;
@@ -162,6 +162,13 @@ const ReadingPassagePane = React.memo(function ReadingPassagePane({
           ref={inlineImageHostRef}
           onClick={openInlineImage}
           onKeyDown={handleInlineImageKeyDown}
+          // A failed passage image moves to its next Drive source, then is
+          // re-requested on a short backoff.
+          onErrorCapture={(event) => {
+            if (event.target instanceof HTMLImageElement && !advanceImageSourceCandidate(event.target)) {
+              retryImageSourceLater(event.target);
+            }
+          }}
         >
           <RichTextHighlighter
             content={renderedPassageContent}

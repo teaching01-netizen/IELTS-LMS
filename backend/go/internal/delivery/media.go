@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	examdomain "example.com/ielts-proctoring/internal/exams"
+	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/satpublish"
 )
 
@@ -25,13 +26,23 @@ func (s *Service) CanAttemptReadMedia(ctx context.Context, scheduleID, attemptID
 		return false, nil
 	}
 
+	// One statement per figure for the attempt, its pinned version's revision
+	// and release scope, and the link scope: a room loads every figure of a
+	// module at once, so each round trip here is multiplied by the room.
 	var storedSchedule string
 	var publishedVersionID sql.NullString
 	var codeRequired bool
 	var codeAcceptedAt sql.NullTime
+	var revision sql.NullInt64
+	var releaseScope, linkScope sql.NullString
 	err := s.db.QueryRowContext(ctx,
-		"SELECT schedule_id, published_version_id, sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ?", attemptID,
-	).Scan(&storedSchedule, &publishedVersionID, &codeRequired, &codeAcceptedAt)
+		`SELECT a.schedule_id, a.published_version_id, a.sat_start_code_required, a.sat_start_code_accepted_at,
+		        v.revision, v.sat_publish_scope, l.enabled_sections
+		   FROM student_attempts a
+		   LEFT JOIN exam_versions v ON v.id = a.published_version_id
+		   LEFT JOIN assessment_access_links l ON l.schedule_id = a.schedule_id
+		  WHERE a.id = ?`, attemptID,
+	).Scan(&storedSchedule, &publishedVersionID, &codeRequired, &codeAcceptedAt, &revision, &releaseScope, &linkScope)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -46,19 +57,16 @@ func (s *Service) CanAttemptReadMedia(ctx context.Context, scheduleID, attemptID
 	if codeRequired && !codeAcceptedAt.Valid {
 		return false, nil
 	}
+	if !revision.Valid {
+		return false, apperrors.New(apperrors.CodeNotFound, "Published exam version not found.")
+	}
 	versionID := publishedVersionID.String
-	revision, err := s.versionRevision(ctx, versionID)
+	sections, err := s.cachedSections(ctx, versionID, revision.Int64)
 	if err != nil {
 		return false, err
 	}
-	sections, err := s.cachedSections(ctx, versionID, revision)
-	if err != nil {
-		return false, err
-	}
-	scope, err := s.effectiveSectionScope(ctx, scheduleID, versionID)
-	if err != nil {
-		return false, err
-	}
+	// The effectiveSectionScope rule, from the same row.
+	scope := examdomain.IntersectSectionScopes(examdomain.ParseSATPublishScope(releaseScope.String), examdomain.ParseStoredSectionScope(linkScope))
 	// An adaptive branch the attempt was never routed into has no module
 	// attempt row. Its questions must not be reachable by asset id either, so
 	// media authorization uses the same assigned-module fence as the delivery
@@ -67,7 +75,7 @@ func (s *Service) CanAttemptReadMedia(ctx context.Context, scheduleID, attemptID
 	if err != nil {
 		return false, err
 	}
-	index := s.mediaIndexFor(versionID, revision, sections)
+	index := s.mediaIndexFor(versionID, revision.Int64, sections)
 	for _, section := range deliverySectionsForOpenedModules(sections, opened) {
 		if scope != nil && !examdomain.AllowsSection(scope, section.SectionKey) {
 			continue

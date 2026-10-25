@@ -39,9 +39,6 @@ async function createCodeSession(browser: Browser, page: Page) {
   await studentPage.goto(joinHref);
   await studentPage.getByLabel('Full name').fill('First code candidate');
   await studentPage.getByLabel('Email').fill(`first-${suffix}@example.com`);
-  await studentPage.getByLabel('Admission year (ค.ศ.)').fill('2027');
-  await studentPage.getByLabel('Seat number').fill('A-007');
-  await studentPage.getByLabel('Expected Class').selectOption('rank_1');
   await studentPage.getByRole('button', { name: /Continue/i }).click();
   await expect(studentPage.getByRole('heading', { name: 'Enter your exam start code' })).toBeVisible({ timeout: 45_000 });
   await page.goto(`/sat/sessions/${link.scheduleId}`);
@@ -59,9 +56,6 @@ test('starts candidates independently without staff Start and preserves the orig
     await secondPage.goto(fixture.joinHref);
     await secondPage.getByLabel('Full name').fill('Second code candidate');
     await secondPage.getByLabel('Email').fill(`second-${Date.now()}@example.com`);
-    await secondPage.getByLabel('Admission year (ค.ศ.)').fill('2027');
-    await secondPage.getByLabel('Seat number').fill('A-008');
-    await secondPage.getByLabel('Expected Class').selectOption('rank_1');
     await secondPage.getByRole('button', { name: /Continue/i }).click();
     await expect(secondPage.getByRole('heading', { name: 'Enter your exam start code' })).toBeVisible();
     await expect(fixture.studentPage.getByRole('heading', { name: 'Enter your exam start code' })).toBeVisible();

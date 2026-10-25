@@ -21,12 +21,12 @@ func expectAttemptMediaRows(mock sqlmock.Sqlmock, linkScope string, opened ...st
 // false, as on a version-cache hit. A cached load also reads the revision it
 // observed alongside the tree.
 func expectAttemptMediaQueries(mock sqlmock.Sqlmock, loadTree, cached bool, linkScope string, opened ...string) {
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT schedule_id, published_version_id, sat_start_code_required, sat_start_code_accepted_at FROM student_attempts WHERE id = ?")).
+	// The attempt, its version's revision and release scope, and the link
+	// scope arrive in one statement.
+	mock.ExpectQuery(`(?s)SELECT a\.schedule_id, a\.published_version_id, a\.sat_start_code_required, a\.sat_start_code_accepted_at,\s+v\.revision, v\.sat_publish_scope, l\.enabled_sections\s+FROM student_attempts a\s+LEFT JOIN exam_versions v ON v\.id = a\.published_version_id\s+LEFT JOIN assessment_access_links l ON l\.schedule_id = a\.schedule_id\s+WHERE a\.id = \?`).
 		WithArgs("attempt-1").
-		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "published_version_id", "sat_start_code_required", "sat_start_code_accepted_at"}).AddRow("schedule-1", "version-1", false, nil))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT revision FROM exam_versions WHERE id = ?")).
-		WithArgs("version-1").
-		WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(1))
+		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "published_version_id", "sat_start_code_required", "sat_start_code_accepted_at", "revision", "sat_publish_scope", "enabled_sections"}).
+			AddRow("schedule-1", "version-1", false, nil, 1, "full", linkScope))
 	if loadTree {
 		expectAttemptMediaTree(mock)
 		if cached {
@@ -35,12 +35,6 @@ func expectAttemptMediaQueries(mock sqlmock.Sqlmock, loadTree, cached bool, link
 				WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(1))
 		}
 	}
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_publish_scope FROM exam_versions WHERE id = ?")).
-		WithArgs("version-1").
-		WillReturnRows(sqlmock.NewRows([]string{"sat_publish_scope"}).AddRow("full"))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT enabled_sections FROM assessment_access_links WHERE schedule_id = ?")).
-		WithArgs("schedule-1").
-		WillReturnRows(sqlmock.NewRows([]string{"enabled_sections"}).AddRow(linkScope))
 	// The assigned-module fence: only modules the attempt owns are readable.
 	rows := sqlmock.NewRows([]string{"module_id"})
 	for _, moduleID := range opened {
@@ -138,6 +132,50 @@ func TestCanAttemptReadMediaUsesPinnedVersionAndSectionScope(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The joined read keeps the separate reads' outcomes: a pinned version with no
+// row is an error, and a schedule with no access link is not narrowed.
+func TestCanAttemptReadMediaJoinedReadEdges(t *testing.T) {
+	joined := regexp.QuoteMeta("FROM student_attempts a")
+	columns := []string{"schedule_id", "published_version_id", "sat_start_code_required", "sat_start_code_accepted_at", "revision", "sat_publish_scope", "enabled_sections"}
+
+	t.Run("missing version row", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		mock.ExpectQuery(joined).WithArgs("attempt-1").
+			WillReturnRows(sqlmock.NewRows(columns).AddRow("schedule-1", "version-1", false, nil, nil, nil, nil))
+		if _, err := NewService(db, nil).CanAttemptReadMedia(context.Background(), "schedule-1", "attempt-1", "asset-pinned"); err == nil {
+			t.Fatal("a pinned version without a row must fail closed with an error")
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("no access link", func(t *testing.T) {
+		db, mock, err := sqlmock.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		mock.ExpectQuery(joined).WithArgs("attempt-1").
+			WillReturnRows(sqlmock.NewRows(columns).AddRow("schedule-1", "version-1", false, nil, 1, "full", nil))
+		expectAttemptMediaTree(mock)
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ?")).
+			WithArgs("attempt-1").
+			WillReturnRows(sqlmock.NewRows([]string{"module_id"}).AddRow("module-1"))
+		allowed, err := NewService(db, nil).CanAttemptReadMedia(context.Background(), "schedule-1", "attempt-1", "asset-pinned")
+		if err != nil || !allowed {
+			t.Fatalf("CanAttemptReadMedia() = %v, %v; want true without an access link", allowed, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestModuleMediaIndexIncludesLegacyManagedImagesOnlyForScience(t *testing.T) {

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Minus, Plus, X } from 'lucide-react';
 import { isIeltsExamType, useStudentExamType } from './layout/studentExamTypeContext';
+import { IMAGE_RETRY_DELAYS_MS } from '../../utils/imageUrl';
 
 type StudentZoomableMediaProps = {
   sources: string[];
@@ -49,6 +50,15 @@ export function StudentZoomableMedia({
     [sourcesKey]
   );
   const [sourceIndex, setSourceIndex] = useState(0);
+  // Load recovery after the last source fails: `attempt` numbers each pass over
+  // the sources and keys the <img>, so a retry is a fresh request; `loadStatus`
+  // is what the frame shows meanwhile.
+  const [attempt, setAttempt] = useState(0);
+  const [loadStatus, setLoadStatus] = useState<'ready' | 'waiting' | 'failed'>('ready');
+  const autoRetriesRef = useRef(0);
+  const retryTimerRef = useRef<number | null>(null);
+  const handledFailureRef = useRef<string | null>(null);
+  const focusAfterRetryRef = useRef(false);
   const [isOpen, setIsOpen] = useState(openOnMount);
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [intrinsicSize, setIntrinsicSize] = useState<IntrinsicSize | null>(null);
@@ -68,7 +78,26 @@ export function StudentZoomableMedia({
 
   useEffect(() => {
     setSourceIndex(0);
+    setLoadStatus('ready');
+    autoRetriesRef.current = 0;
+    handledFailureRef.current = null;
+    return () => {
+      if (retryTimerRef.current !== null) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
   }, [normalizedSources]);
+
+  // A retry the student asked for leaves focus where the image comes back.
+  useEffect(() => {
+    if (!focusAfterRetryRef.current) {
+      return;
+    }
+    focusAfterRetryRef.current = false;
+    (isOpen ? closeButtonRef : triggerButtonRef).current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per retry, not on open/close
+  }, [attempt]);
 
   useEffect(() => {
     return () => {
@@ -197,13 +226,63 @@ export function StudentZoomableMedia({
     onDismiss?.();
   };
 
+  const restartLoad = () => {
+    setSourceIndex(0);
+    setAttempt((value) => value + 1);
+    setLoadStatus('ready');
+  };
+
   const handleImageError = () => {
-    if (!hasMultipleSources) {
+    // The thumbnail and an open viewer load the same source: one failure, one step.
+    const failure = `${attempt}:${safeSourceIndex}`;
+    if (handledFailureRef.current === failure) {
       return;
     }
-
-    setSourceIndex((currentIndex) => Math.min(currentIndex + 1, normalizedSources.length - 1));
+    handledFailureRef.current = failure;
+    if (safeSourceIndex < normalizedSources.length - 1) {
+      setSourceIndex(safeSourceIndex + 1);
+      return;
+    }
+    const delay = IMAGE_RETRY_DELAYS_MS[autoRetriesRef.current];
+    if (delay === undefined) {
+      setLoadStatus('failed');
+      return;
+    }
+    autoRetriesRef.current += 1;
+    setLoadStatus('waiting');
+    retryTimerRef.current = window.setTimeout(() => {
+      retryTimerRef.current = null;
+      restartLoad();
+    }, delay);
   };
+
+  const handleRetry = () => {
+    autoRetriesRef.current = 0;
+    focusAfterRetryRef.current = true;
+    restartLoad();
+  };
+
+  // Shown in place of the image while a retry waits, and once retries are spent.
+  const renderLoadNotice = (tone: 'light' | 'dark') => (
+    <div className="flex min-h-32 w-full flex-col items-center justify-center gap-3 px-4 py-6 text-center">
+      <span role="status" className={`text-sm ${tone === 'dark' ? 'text-white/80' : 'text-gray-600'}`}>
+        {loadStatus === 'failed' ? 'Image could not be loaded' : 'Loading image…'}
+      </span>
+      {loadStatus === 'failed' ? (
+        <button
+          type="button"
+          onClick={handleRetry}
+          className={
+            tone === 'dark'
+              ? 'h-11 rounded-full bg-white/15 px-5 text-[15px] font-semibold text-white transition-colors duration-100 hover:bg-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80'
+              : 'h-11 rounded-full border border-gray-300 bg-white px-5 text-[15px] font-semibold text-gray-800 transition-colors duration-100 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-500'
+          }
+        >
+          Try again
+        </button>
+      ) : null}
+    </div>
+  );
 
   const handleModalImageLoad = (event: React.SyntheticEvent<HTMLImageElement>) => {
     const nextWidth = event.currentTarget.naturalWidth;
@@ -235,7 +314,9 @@ export function StudentZoomableMedia({
 
   const annotationScale = zoom / DEFAULT_ZOOM;
 
-  const zoomedImage = (
+  const zoomedImage = loadStatus !== 'ready' ? (
+    renderLoadNotice(isIelts ? 'dark' : 'light')
+  ) : (
     <div
       className={`relative ${isIelts ? 'overflow-hidden rounded-md bg-white shadow-2xl' : ''}`}
       style={
@@ -248,6 +329,7 @@ export function StudentZoomableMedia({
       }
     >
       <img
+        key={attempt}
         src={currentSource}
         alt={alt}
         className={`block h-auto w-full object-contain ${modalImageClassName ?? ''}`}
@@ -442,7 +524,17 @@ export function StudentZoomableMedia({
 
   return (
     <>
-      {renderTrigger ? (
+      {renderTrigger && loadStatus !== 'ready' ? (
+        // A frame, not the zoom button: there is nothing to zoom, and the
+        // retry control cannot sit inside another button.
+        <div
+          role="group"
+          aria-label={label}
+          className={`relative block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-50 ${className ?? ''}`}
+        >
+          {renderLoadNotice('light')}
+        </div>
+      ) : renderTrigger ? (
         <button
           type="button"
           onClick={handleOpen}
@@ -453,10 +545,12 @@ export function StudentZoomableMedia({
         >
           <div className="relative">
             <img
+              key={attempt}
               src={currentSource}
               alt={alt}
               className={`h-auto w-full object-contain select-none ${imageClassName ?? ''}`}
               loading="lazy"
+              decoding="async"
               draggable={false}
               referrerPolicy="no-referrer"
               onError={handleImageError}

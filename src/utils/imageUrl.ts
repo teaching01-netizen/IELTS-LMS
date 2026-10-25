@@ -63,6 +63,36 @@ export function advanceImageSourceCandidate(image: HTMLImageElement): boolean {
   return true;
 }
 
+/**
+ * Backoff before re-requesting an image whose last source failed: a dropped
+ * request on an exam-room network is usually over within seconds.
+ */
+export const IMAGE_RETRY_DELAYS_MS = [1_000, 3_000] as const;
+
+/**
+ * Re-request a rendered image after its last source failed, once per entry in
+ * IMAGE_RETRY_DELAYS_MS, by swapping in a copy of the element: WebKit does not
+ * fetch again when a failed image's `src` is set to the value it already has.
+ * The copy keeps the attributes, retry count included. Returns false once the
+ * retries are spent.
+ */
+export function retryImageSourceLater(image: HTMLImageElement): boolean {
+  const attempt = Number.parseInt(image.dataset['imageRetry'] ?? '0', 10) || 0;
+  const delay = IMAGE_RETRY_DELAYS_MS[attempt];
+  const source = image.getAttribute('src');
+  if (delay === undefined || !source) return false;
+  image.dataset['imageRetry'] = String(attempt + 1);
+  window.setTimeout(() => {
+    // A re-rendered surface replaces the node, and a newer source supersedes this one.
+    if (!image.isConnected || image.getAttribute('src') !== source) return;
+    const fresh = image.cloneNode() as HTMLImageElement;
+    const focused = document.activeElement === image;
+    image.replaceWith(fresh);
+    if (focused) fresh.focus();
+  }, delay);
+  return true;
+}
+
 export const normalizeImageUrl = (value: string): string => {
   // Drops javascript:/vbscript:/data:text/html to '' so downstream <img src>
   // and sanitizeHtml post-processing never emit an executable source.

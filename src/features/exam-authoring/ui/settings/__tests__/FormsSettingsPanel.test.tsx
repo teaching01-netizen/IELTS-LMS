@@ -60,13 +60,29 @@ describe("FormsSettingsPanel", () => {
     expect(saveExamFormsMock).not.toHaveBeenCalled();
   });
 
-  it("offers standard SAT fields on a legacy draft instead of inserting them on open", async () => {
+  it("turns custom forms on with the standard SAT fields instead of inserting them on open", async () => {
     examFormsMock.mockResolvedValue(doc(null));
     saveExamFormsMock.mockResolvedValue(doc(standard, 4));
     renderPanel();
-    fireEvent.click(await screen.findByRole("button", { name: "Add standard SAT fields" }));
+    const toggle = await screen.findByRole("switch", { name: "Custom exam forms" });
+    expect(toggle).not.toBeChecked();
+    expect(saveExamFormsMock).not.toHaveBeenCalled();
+    fireEvent.click(toggle);
     await waitFor(() => expect(saveExamFormsMock).toHaveBeenCalledWith("exam-1", { expectedVersionId: "ver-draft", expectedRevision: 3, forms: standard }));
     expect(await screen.findByRole("button", { name: "Edit Seat number" })).toBeInTheDocument();
+  });
+
+  it("turns custom forms off after confirmation, hiding section forms and Eva SIM", async () => {
+    examFormsMock.mockResolvedValue(doc(standard));
+    saveExamFormsMock.mockResolvedValue(doc(null, 4));
+    renderPanel();
+    fireEvent.click(await screen.findByRole("switch", { name: "Custom exam forms" }));
+    expect(saveExamFormsMock).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Turn off forms" }));
+    await waitFor(() => expect(saveExamFormsMock).toHaveBeenCalledWith("exam-1", { expectedVersionId: "ver-draft", expectedRevision: 3, forms: null }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Custom exam forms" })).not.toBeChecked());
+    expect(screen.queryByRole("heading", { name: "Eva SIM" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit Seat number" })).not.toBeInTheDocument();
   });
 
   it("saves one section with the other section's confirmed value, never its unsaved input", async () => {

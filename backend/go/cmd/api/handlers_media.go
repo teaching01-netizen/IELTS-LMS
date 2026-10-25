@@ -65,7 +65,14 @@ func mediaDownloadHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		content, err := app.Media.OpenFinalized(r.Context(), assetID)
+		// Students get the delivery rendition, the same screen-sized copy the
+		// attempt-bearer route serves; staff edit from the original.
+		student := sess.Role == auth.RoleStudent
+		open := app.Media.OpenFinalized
+		if student {
+			open = app.Media.OpenDelivery
+		}
+		content, err := open(r.Context(), assetID)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
@@ -75,10 +82,14 @@ func mediaDownloadHandler(app *App) http.HandlerFunc {
 		// safe: browsers/CDNs may reuse bytes for a year. Uploads stay
 		// uncacheable via the finalized-only guard above. Protected SAT
 		// question media is never publicly cacheable, even for staff reads:
-		// a shared cache would hand it to anyone holding the URL.
-		if protected {
+		// a shared cache would hand it to anyone holding the URL. A student's
+		// copy differs from the staff original, so no shared cache keeps it.
+		switch {
+		case protected:
 			w.Header().Set("Cache-Control", "private, no-store")
-		} else {
+		case student:
+			w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+		default:
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		serveMediaContent(w, r, content)

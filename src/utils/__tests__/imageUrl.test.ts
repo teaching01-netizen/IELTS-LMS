@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { getImageUrlCandidates, normalizeImageUrl } from '../imageUrl';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getImageUrlCandidates, normalizeImageUrl, retryImageSourceLater } from '../imageUrl';
 
 describe('imageUrl', () => {
   it('normalizes google drive share links to browser-loadable image urls', () => {
@@ -35,5 +35,59 @@ describe('imageUrl', () => {
 
   it('keeps benign data:image sources', () => {
     expect(normalizeImageUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
+  });
+
+  describe('retryImageSourceLater', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      document.body.innerHTML = '';
+    });
+
+    it('re-requests a failed image twice on a backoff, then gives up', () => {
+      vi.useFakeTimers();
+      const host = document.createElement('div');
+      const image = document.createElement('img');
+      image.setAttribute('src', '/api/v1/media/asset-1/content');
+      image.setAttribute('tabindex', '0');
+      host.append(image);
+      document.body.append(host);
+      image.focus();
+
+      expect(retryImageSourceLater(image)).toBe(true);
+      vi.advanceTimersByTime(999);
+      expect(host.firstElementChild).toBe(image);
+      vi.advanceTimersByTime(1);
+      // A new element in its place (WebKit only re-requests a new one), same
+      // source and attributes, focus carried over.
+      const second = host.firstElementChild as HTMLImageElement;
+      expect(second).not.toBe(image);
+      expect(second).toHaveAttribute('src', '/api/v1/media/asset-1/content');
+      expect(second).toHaveFocus();
+
+      expect(retryImageSourceLater(second)).toBe(true);
+      vi.advanceTimersByTime(3_000);
+      const third = host.firstElementChild as HTMLImageElement;
+      expect(third).not.toBe(second);
+
+      // The retry count travels with the copies.
+      expect(retryImageSourceLater(third)).toBe(false);
+    });
+
+    it('leaves a replaced or re-pointed image alone', () => {
+      vi.useFakeTimers();
+      const detached = document.createElement('img');
+      detached.setAttribute('src', '/a.png');
+      const moved = document.createElement('img');
+      moved.setAttribute('src', '/a.png');
+      document.body.append(moved);
+
+      retryImageSourceLater(detached);
+      retryImageSourceLater(moved);
+      moved.src = '/b.png';
+      vi.advanceTimersByTime(1_000);
+
+      expect(detached.isConnected).toBe(false);
+      expect(document.body.firstElementChild).toBe(moved);
+    });
   });
 });
