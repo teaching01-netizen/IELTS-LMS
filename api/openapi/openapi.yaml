@@ -1156,6 +1156,11 @@ paths:
     post:
       tags: [proctor]
       summary: Proctor pause attempt
+      description: >-
+        An optional body `operationId` (at most 64 bytes) is applied once per attempt;
+        a repeat with the same id and content replays the first result. Automatic
+        rules derive it from the rule and triggering violation, so two operators'
+        browsers enforce one trigger once.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - name: scheduleId
@@ -1271,6 +1276,11 @@ paths:
     post:
       tags: [proctor]
       summary: Proctor warn attempt
+      description: >-
+        An optional body `operationId` (at most 64 bytes) is applied once per attempt;
+        a repeat with the same id and content replays the first result. Automatic
+        rules derive it from the rule and triggering violation, so two operators'
+        browsers enforce one trigger once.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - name: scheduleId

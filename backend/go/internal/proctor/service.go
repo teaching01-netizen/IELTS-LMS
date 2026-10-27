@@ -401,53 +401,60 @@ func (s *Service) Warn(ctx context.Context, actor Actor, scheduleID, attemptID s
 		if err := lockAttemptScope(ctx, q, scheduleID, attemptID); err != nil {
 			return err
 		}
-		const term = "SELECT submitted_at, COALESCE(delivery_status, 'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
-		var submittedAny any
-		var delivery string
-		if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &delivery); err != nil {
-			if err == sql.ErrNoRows {
-				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
-			}
-			return err
+		return withOperationReceipt(ctx, q, scheduleID, attemptID, "warn_attempt", cmd, func() error {
+			return s.warnInTx(ctx, q, actor, scheduleID, attemptID, cmd)
+		})
+	})
+}
+
+func (s *Service) warnInTx(ctx context.Context, q tx.Tx, actor Actor, scheduleID, attemptID string, cmd AttemptCommand) error {
+	const term = "SELECT submitted_at, COALESCE(delivery_status, 'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
+	var submittedAny any
+	var delivery string
+	if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &delivery); err != nil {
+		if err == sql.ErrNoRows {
+			return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
 		}
-		if submittedAny != nil {
-			if t, ok := submittedAny.(time.Time); ok && !t.IsZero() {
-				return terminalConflict("The attempt is already terminal and cannot accept a warning.")
-			}
-			if _, ok := submittedAny.([]byte); ok {
-				return terminalConflict("The attempt is already terminal and cannot accept a warning.")
-			}
-			if str, ok := submittedAny.(string); ok && strings.TrimSpace(str) != "" {
-				return terminalConflict("The attempt is already terminal and cannot accept a warning.")
-			}
-		}
-		switch delivery {
-		case "submitted", "terminated", "locked", "cancelled":
+		return err
+	}
+	if submittedAny != nil {
+		if t, ok := submittedAny.(time.Time); ok && !t.IsZero() {
 			return terminalConflict("The attempt is already terminal and cannot accept a warning.")
 		}
+		if _, ok := submittedAny.([]byte); ok {
+			return terminalConflict("The attempt is already terminal and cannot accept a warning.")
+		}
+		if str, ok := submittedAny.(string); ok && strings.TrimSpace(str) != "" {
+			return terminalConflict("The attempt is already terminal and cannot accept a warning.")
+		}
+	}
+	switch delivery {
+	case "submitted", "terminated", "locked", "cancelled":
+		return terminalConflict("The attempt is already terminal and cannot accept a warning.")
+	}
 
-		description := "Proctor warning issued."
-		if cmd.Message != nil && strings.TrimSpace(*cmd.Message) != "" {
-			description = *cmd.Message
-		} else if cmd.Reason != nil && strings.TrimSpace(*cmd.Reason) != "" {
-			description = *cmd.Reason
-		}
-		warningID := uuid.NewString()
-		warnJSON, _ := json.Marshal(map[string]any{"id": warningID, "type": "PROCTOR_WARNING", "severity": "medium", "description": description})
-		payload, _ := json.Marshal(map[string]any{"message": description})
-		const ins = "INSERT INTO student_violation_events (id, schedule_id, attempt_id, violation_id, violation_type, severity, description, payload, created_at) VALUES (?, ?, ?, ?, 'PROCTOR_WARNING', 'medium', ?, ?, UTC_TIMESTAMP(6))"
-		if _, err := q.ExecContext(ctx, ins, warningID, scheduleID, attemptID, warningID, description, string(payload)); err != nil {
-			return err
-		}
-		const upd = "UPDATE student_attempts SET proctor_status = CASE WHEN proctor_status = 'paused' THEN 'paused' ELSE 'warned' END, proctor_note = ?, proctor_updated_at = CASE WHEN proctor_status = 'paused' THEN proctor_updated_at ELSE UTC_TIMESTAMP(6) END, proctor_updated_by = ?, last_warning_id = ?, violations_snapshot = JSON_MERGE_PRESERVE(COALESCE(violations_snapshot, JSON_ARRAY()), ?), updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ?"
-		if _, err := q.ExecContext(ctx, upd, description, actor.ID, warningID, string(warnJSON), attemptID, scheduleID); err != nil {
-			return err
-		}
-		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "STUDENT_WARN", &attemptID, map[string]any{"message": cmd.Message, "warningId": warningID, "severity": "medium"}); err != nil {
-			return err
-		}
-		return s.emitRoster(ctx, q, scheduleID, "warn_attempt", &attemptID, nil)
-	})
+	description := "Proctor warning issued."
+	if cmd.Message != nil && strings.TrimSpace(*cmd.Message) != "" {
+		description = *cmd.Message
+	} else if cmd.Reason != nil && strings.TrimSpace(*cmd.Reason) != "" {
+		description = *cmd.Reason
+	}
+	warningID := uuid.NewString()
+	warnJSON, _ := json.Marshal(map[string]any{"id": warningID, "type": "PROCTOR_WARNING", "severity": "medium", "description": description})
+	payload, _ := json.Marshal(map[string]any{"message": description})
+	const ins = "INSERT INTO student_violation_events (id, schedule_id, attempt_id, violation_id, violation_type, severity, description, payload, created_at) VALUES (?, ?, ?, ?, 'PROCTOR_WARNING', 'medium', ?, ?, UTC_TIMESTAMP(6))"
+	if _, err := q.ExecContext(ctx, ins, warningID, scheduleID, attemptID, warningID, description, string(payload)); err != nil {
+		return err
+	}
+	const upd = "UPDATE student_attempts SET proctor_status = CASE WHEN proctor_status = 'paused' THEN 'paused' ELSE 'warned' END, proctor_note = ?, proctor_updated_at = CASE WHEN proctor_status = 'paused' THEN proctor_updated_at ELSE UTC_TIMESTAMP(6) END, proctor_updated_by = ?, last_warning_id = ?, violations_snapshot = JSON_MERGE_PRESERVE(COALESCE(violations_snapshot, JSON_ARRAY()), ?), updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ?"
+	if _, err := q.ExecContext(ctx, upd, description, actor.ID, warningID, string(warnJSON), attemptID, scheduleID); err != nil {
+		return err
+	}
+	if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "STUDENT_WARN", &attemptID, map[string]any{"message": cmd.Message, "warningId": warningID, "severity": "medium"}); err != nil {
+		return err
+	}
+	return s.emitRoster(ctx, q, scheduleID, "warn_attempt", &attemptID, nil)
+
 }
 
 // Pause moves a writable attempt to proctor paused (protocol-aware V2 delivery
@@ -1220,67 +1227,73 @@ func (s *Service) updateAttemptStatus(ctx context.Context, actor Actor, schedule
 		if err := lockAttemptScope(ctx, q, scheduleID, attemptID); err != nil {
 			return err
 		}
-		const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
-		var submittedAny any
-		var proctor, delivery string
-		if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &proctor, &delivery); err != nil {
-			if err == sql.ErrNoRows {
-				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
-			}
-			return err
-		}
-		if isNonNullTime(submittedAny) || proctor == "terminated" || delivery == "submitted" || delivery == "terminated" || delivery == "locked" || delivery == "cancelled" {
-			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "The attempt is already terminal and cannot accept this command.", HTTPStatus: 409}
-		}
-		if proctor == proctorStatus {
-			return nil
-		}
-		const upd = "UPDATE student_attempts SET delivery_status = CASE WHEN COALESCE(protocol_version, 1) <> 2 THEN delivery_status WHEN ? = 'paused' THEN CASE WHEN COALESCE(delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN delivery_status ELSE 'paused' END WHEN ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND COALESCE(delivery_status, 'running') = 'paused' THEN 'running' ELSE delivery_status END, closing_grace_until = CASE WHEN COALESCE(protocol_version, 1) = 2 AND ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND deadline_at IS NOT NULL THEN DATE_ADD(DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6)), 0) SECOND), INTERVAL 30 SECOND) ELSE closing_grace_until END, deadline_at = CASE WHEN COALESCE(protocol_version, 1) = 2 AND ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND deadline_at IS NOT NULL THEN DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6)), 0) SECOND) ELSE deadline_at END, proctor_status = ?, phase = COALESCE(?, phase), proctor_note = COALESCE(?, proctor_note), proctor_updated_at = UTC_TIMESTAMP(6), proctor_updated_by = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ?"
-		var reason *string
-		if cmd.Reason != nil {
-			reason = cmd.Reason
-		} else {
-			reason = cmd.Message
-		}
-		if _, err := q.ExecContext(ctx, upd, proctorStatus, proctorStatus, proctorStatus, proctorStatus, proctorStatus, phase, reason, actor.ID, attemptID, scheduleID); err != nil {
-			return err
-		}
-		var timingModel, runtimeStatus string
-		runtimeErr := q.QueryRowContext(ctx, `SELECT COALESCE(timing_model, ''), status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE`, scheduleID).Scan(&timingModel, &runtimeStatus)
-		if runtimeErr != nil && runtimeErr != sql.ErrNoRows {
-			return runtimeErr
-		}
-		if runtimeErr == nil && examruntime.IsIELTSPersonal(timingModel) {
-			if proctorStatus == "paused" {
-				if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
-					SET paused_at = COALESCE(paused_at, UTC_TIMESTAMP(6)), revision = revision + 1
-					WHERE attempt_id = ? AND state IN ('preparing', 'active') AND paused_at IS NULL`, attemptID); err != nil {
-					return err
-				}
-			} else if proctorStatus == "active" && runtimeStatus != examruntime.StatusPaused {
-				if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
-					SET expected_start_at = DATE_ADD(expected_start_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND),
-					    preparation_deadline_at = DATE_ADD(preparation_deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND),
-					    started_at = CASE WHEN started_at IS NULL THEN NULL ELSE DATE_ADD(started_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) END,
-					    deadline_at = CASE WHEN deadline_at IS NULL THEN NULL ELSE DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) END,
-					    accumulated_paused_seconds = accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, paused_at, UTC_TIMESTAMP(6)), 0),
-					    paused_at = NULL, revision = revision + 1
-					WHERE attempt_id = ? AND state IN ('preparing', 'active') AND paused_at IS NOT NULL`, attemptID); err != nil {
-					return err
-				}
-			}
-		}
-		if err := examruntime.SyncSATPauseInTx(ctx, q, scheduleID, attemptID); err != nil {
-			return err
-		}
-		if err := insertAuditLog(ctx, q, scheduleID, actor.ID, actionType, &attemptID, map[string]any{"message": cmd.Message, "reason": cmd.Reason}); err != nil {
-			return err
-		}
-		if err := s.emitRoster(ctx, q, scheduleID, actionType, &attemptID, nil); err != nil {
-			return err
-		}
-		return nil
+		return withOperationReceipt(ctx, q, scheduleID, attemptID, actionType, cmd, func() error {
+			return s.updateAttemptStatusInTx(ctx, q, actor, scheduleID, attemptID, proctorStatus, phase, actionType, cmd)
+		})
 	})
+}
+
+func (s *Service) updateAttemptStatusInTx(ctx context.Context, q tx.Tx, actor Actor, scheduleID, attemptID, proctorStatus string, phase *string, actionType string, cmd AttemptCommand) error {
+	const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
+	var submittedAny any
+	var proctor, delivery string
+	if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &proctor, &delivery); err != nil {
+		if err == sql.ErrNoRows {
+			return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
+		}
+		return err
+	}
+	if isNonNullTime(submittedAny) || proctor == "terminated" || delivery == "submitted" || delivery == "terminated" || delivery == "locked" || delivery == "cancelled" {
+		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "The attempt is already terminal and cannot accept this command.", HTTPStatus: 409}
+	}
+	if proctor == proctorStatus {
+		return nil
+	}
+	const upd = "UPDATE student_attempts SET delivery_status = CASE WHEN COALESCE(protocol_version, 1) <> 2 THEN delivery_status WHEN ? = 'paused' THEN CASE WHEN COALESCE(delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN delivery_status ELSE 'paused' END WHEN ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND COALESCE(delivery_status, 'running') = 'paused' THEN 'running' ELSE delivery_status END, closing_grace_until = CASE WHEN COALESCE(protocol_version, 1) = 2 AND ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND deadline_at IS NOT NULL THEN DATE_ADD(DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6)), 0) SECOND), INTERVAL 30 SECOND) ELSE closing_grace_until END, deadline_at = CASE WHEN COALESCE(protocol_version, 1) = 2 AND ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND deadline_at IS NOT NULL THEN DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6)), 0) SECOND) ELSE deadline_at END, proctor_status = ?, phase = COALESCE(?, phase), proctor_note = COALESCE(?, proctor_note), proctor_updated_at = UTC_TIMESTAMP(6), proctor_updated_by = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ?"
+	var reason *string
+	if cmd.Reason != nil {
+		reason = cmd.Reason
+	} else {
+		reason = cmd.Message
+	}
+	if _, err := q.ExecContext(ctx, upd, proctorStatus, proctorStatus, proctorStatus, proctorStatus, proctorStatus, phase, reason, actor.ID, attemptID, scheduleID); err != nil {
+		return err
+	}
+	var timingModel, runtimeStatus string
+	runtimeErr := q.QueryRowContext(ctx, `SELECT COALESCE(timing_model, ''), status FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE`, scheduleID).Scan(&timingModel, &runtimeStatus)
+	if runtimeErr != nil && runtimeErr != sql.ErrNoRows {
+		return runtimeErr
+	}
+	if runtimeErr == nil && examruntime.IsIELTSPersonal(timingModel) {
+		if proctorStatus == "paused" {
+			if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
+				SET paused_at = COALESCE(paused_at, UTC_TIMESTAMP(6)), revision = revision + 1
+				WHERE attempt_id = ? AND state IN ('preparing', 'active') AND paused_at IS NULL`, attemptID); err != nil {
+				return err
+			}
+		} else if proctorStatus == "active" && runtimeStatus != examruntime.StatusPaused {
+			if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
+				SET expected_start_at = DATE_ADD(expected_start_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND),
+				    preparation_deadline_at = DATE_ADD(preparation_deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND),
+				    started_at = CASE WHEN started_at IS NULL THEN NULL ELSE DATE_ADD(started_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) END,
+				    deadline_at = CASE WHEN deadline_at IS NULL THEN NULL ELSE DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) END,
+				    accumulated_paused_seconds = accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, paused_at, UTC_TIMESTAMP(6)), 0),
+				    paused_at = NULL, revision = revision + 1
+				WHERE attempt_id = ? AND state IN ('preparing', 'active') AND paused_at IS NOT NULL`, attemptID); err != nil {
+				return err
+			}
+		}
+	}
+	if err := examruntime.SyncSATPauseInTx(ctx, q, scheduleID, attemptID); err != nil {
+		return err
+	}
+	if err := insertAuditLog(ctx, q, scheduleID, actor.ID, actionType, &attemptID, map[string]any{"message": cmd.Message, "reason": cmd.Reason}); err != nil {
+		return err
+	}
+	if err := s.emitRoster(ctx, q, scheduleID, actionType, &attemptID, nil); err != nil {
+		return err
+	}
+	return nil
 }
 
 // requireWriterRole pre-checks Admin|Proctor before opening a transaction.
@@ -1351,3 +1364,33 @@ func isNonNullTime(v any) bool {
 func strptr(s string) *string { v := s; return &v }
 
 var _ = fmt.Sprintf
+
+// withOperationReceipt makes an attempt command with an operation id
+// idempotent under the caller's attempt lock. The request hash covers the
+// command content but not the actor, so the same trigger sent by two
+// operators (automatic rules run in every proctor's browser) is applied once
+// and replayed for the other. Commands without an id keep their behaviour.
+func withOperationReceipt(ctx context.Context, q tx.Tx, scheduleID, attemptID, kind string, cmd AttemptCommand, apply func() error) error {
+	if cmd.OperationID == "" {
+		return apply()
+	}
+	hash, err := lifecycle.Hash(kind, struct {
+		Message *string
+		Reason  *string
+	}{cmd.Message, cmd.Reason})
+	if err != nil {
+		return err
+	}
+	scope := lifecycle.Scope{ScheduleID: scheduleID, AttemptID: attemptID}
+	stored, err := lifecycle.Load(ctx, q, scope, cmd.OperationID, kind, hash)
+	if err != nil {
+		return err
+	}
+	if stored != nil {
+		return nil
+	}
+	if err := apply(); err != nil {
+		return err
+	}
+	return lifecycle.Store(ctx, q, scope, cmd.OperationID, kind, hash, map[string]any{"ok": true})
+}

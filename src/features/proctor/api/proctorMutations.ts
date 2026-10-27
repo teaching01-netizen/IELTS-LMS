@@ -54,10 +54,17 @@ export const proctorMutations = {
   completeRuntime: (scheduleId: string, actor: string) =>
     runDelivery(() => delivery.completeRuntime(scheduleId, actor), 'Failed to complete exam'),
 
-  warnStudent: (attemptId: string, message: string, actor: string) =>
-    runDelivery(() => delivery.warnStudent(attemptId, message, actor), 'Failed to execute student action'),
-  pauseStudent: (attemptId: string, actor: string) =>
-    runDelivery(() => delivery.pauseStudentAttempt(attemptId, actor), 'Failed to execute student action'),
+  /** `operationId` makes the server apply the command once per attempt (automatic rules). */
+  warnStudent: (attemptId: string, message: string, actor: string, operationId?: string) =>
+    runDelivery(
+      () => (operationId ? delivery.warnStudent(attemptId, message, actor, operationId) : delivery.warnStudent(attemptId, message, actor)),
+      'Failed to execute student action',
+    ),
+  pauseStudent: (attemptId: string, actor: string, operationId?: string) =>
+    runDelivery(
+      () => (operationId ? delivery.pauseStudentAttempt(attemptId, actor, operationId) : delivery.pauseStudentAttempt(attemptId, actor)),
+      'Failed to execute student action',
+    ),
   resumeStudent: (attemptId: string, actor: string) =>
     runDelivery(() => delivery.resumeStudentAttempt(attemptId, actor), 'Failed to execute student action'),
   terminateStudent: (attemptId: string, actor: string) =>

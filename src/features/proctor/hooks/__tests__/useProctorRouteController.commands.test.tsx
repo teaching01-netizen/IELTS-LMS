@@ -467,6 +467,34 @@ describe('proctor commands', () => {
     expect(callsWhilePending).toBe(1);
   });
 
+  it('gives one trigger the same operation id in every operator\'s browser', async () => {
+    const rule = {
+      id: 'rule-cross-operator', scheduleId: 'sched-1', triggerType: 'violation_count', threshold: 2,
+      action: 'warn', isEnabled: true, createdAt: '2026-01-01T09:00:00.000Z', createdBy: 'admin-1',
+    };
+    const violations = [
+      { id: 'violation-1', type: 'TAB_SWITCH', severity: 'medium', timestamp: '2026-01-01T09:02:00.000Z', description: 'Tab switch.' },
+      { id: 'violation-2', type: 'TAB_SWITCH', severity: 'medium', timestamp: '2026-01-01T09:03:00.000Z', description: 'Tab switch.' },
+    ];
+    installBackend(detail({ sessions: [{ ...session, violations }], violationRules: [rule] }));
+    const warn = vi.spyOn(examDeliveryService, 'warnStudent').mockResolvedValue({ success: true });
+
+    // Two operators: separate browsers, separate query caches.
+    const first = renderController();
+    await waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+    const second = renderController();
+    await waitFor(() => expect(warn).toHaveBeenCalledTimes(2));
+
+    const [firstKey, secondKey] = warn.mock.calls.map((call) => call[3]);
+    // The server applies an operation id once per attempt, so the second
+    // operator's enforcement is a replay, not a second warning.
+    expect(firstKey).toMatch(/^auto-rule:/);
+    expect(firstKey!.length).toBeLessThanOrEqual(64);
+    expect(secondKey).toBe(firstKey);
+    first.unmount();
+    second.unmount();
+  });
+
   it('allows a new threshold crossing after the previous action finishes', async () => {
     const rule = {
       id: 'rule-reset', scheduleId: 'sched-1', triggerType: 'violation_count', threshold: 1,

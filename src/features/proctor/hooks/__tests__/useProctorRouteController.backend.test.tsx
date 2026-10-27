@@ -851,12 +851,15 @@ describe("useProctorRouteController backend mode", () => {
       expect(pauseSpy).toHaveBeenCalledTimes(1);
       expect(terminateSpy).toHaveBeenCalledTimes(1);
     });
+    // Automatic warn/pause carry a trigger-scoped id so the server applies
+    // them once across operators.
     expect(warnSpy).toHaveBeenCalledWith(
       "attempt-1",
       "Auto-warning triggered by violation_count",
-      "system"
+      "system",
+      expect.stringMatching(/^auto-rule:[0-9a-f]{32}$/)
     );
-    expect(pauseSpy).toHaveBeenCalledWith("attempt-1", "system");
+    expect(pauseSpy).toHaveBeenCalledWith("attempt-1", "system", expect.stringMatching(/^auto-rule:[0-9a-f]{32}$/));
     expect(terminateSpy).toHaveBeenCalledWith("attempt-1", "system");
     await waitFor(() => {
       expect(result.current.alerts.some((alert) => alert.type === "RULE_NOTIFY_PROCTOR")).toBe(

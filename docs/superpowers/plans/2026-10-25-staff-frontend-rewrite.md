@@ -187,6 +187,8 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Gate:** Shared hook works for both IELTS and SAT; older snapshots never regress active module/time/status; deletion/acknowledgement behavior is correct; command rejection never shows success; room changes leak no commands or feedback. Automatic-rule cross-operator guarantees remain a release blocker until demonstrated.
 
+**Automatic-rule authority (resolved):** Warn and pause accept an `operationId` that the server applies once per attempt under the attempt lock (`internal/proctor/service.go` `withOperationReceipt`, receipts in `assessment_lifecycle_receipts`); the request hash excludes the actor. Automatic rules derive the id from the rule, attempt, and the violation that crossed the threshold, so every operator's browser sends the same id and the second enforcement is a replay. `TestAutoRuleEnforcementIsIdempotentAcrossOperatorsMySQL` demonstrates two operators warning once and a replayed pause not re-pausing a resumed student. A second terminate is refused as already terminal, so terminate needs no id.
+
 **Existing audit limitation:** The note repository's `saveAuditLog` method is a no-op, and the Go note upsert does not insert an audit event. The removed frontend call never recorded one. If note creation must appear in the audit log, the server must record it with the note write; a client-side follow-up cannot make those writes atomic.
 
 ### Package 5 — Rewrite IELTS config, builder orchestration, and preferences

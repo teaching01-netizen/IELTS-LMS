@@ -35,6 +35,35 @@ function autoRuleStateFor(client: QueryClient): AutoRuleState {
   return state;
 }
 
+/**
+ * The violations a rule counts, in the order the server recorded them.
+ * Shared by evaluation and trigger identity so both agree on the crossing.
+ */
+function matchingViolations(rule: ViolationRule, session: StudentSession) {
+  switch (rule.triggerType) {
+    case 'violation_count':
+      return session.violations;
+    case 'specific_violation_type':
+      return session.violations.filter((violation) => violation.type === rule.specificViolationType);
+    case 'severity_threshold':
+      return session.violations.filter((violation) => violation.severity === rule.specificSeverity);
+    default:
+      return [];
+  }
+}
+
+/**
+ * Server operation id for one automatic enforcement: the rule, the attempt
+ * (the server's receipt scope), and the violation that crossed the threshold.
+ * Hashed to fit the server's 64-byte operation id limit.
+ */
+async function autoRuleOperationId(rule: ViolationRule, session: StudentSession): Promise<string> {
+  const crossing = matchingViolations(rule, session)[rule.threshold - 1]?.id ?? `count-${rule.threshold}`;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([rule.id, session.id, crossing])));
+  const hex = Array.from(new Uint8Array(digest).slice(0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `auto-rule:${hex}`;
+}
+
 function rulesForRoom(rooms: Map<string, Set<string>>, scheduleId: string): Set<string> {
   const existing = rooms.get(scheduleId);
   if (existing) return existing;
@@ -281,9 +310,11 @@ export function useProctorCommands(monitoring: ProctorMonitoring) {
   // the raw violation count would fire the same rule again after its own
   // action was recorded.
   //
-  // offcut: this dedupe is per query client. Other tabs, operators, or a reload
-  // can enforce the same trigger twice; the server must deduplicate by rule,
-  // attempt, and trigger identity before automatic enforcement is release-safe.
+  // This dedupe is per query client. Across tabs, operators, and reloads the
+  // server deduplicates: warn/pause carry an operation id derived from the
+  // rule and the violation that crossed its threshold, which every browser
+  // computes identically, and the server applies one id once per attempt.
+  // Terminate needs no id: a second terminate is refused as already terminal.
   const violationRulesRef = useRef(monitoring.violationRules);
   violationRulesRef.current = monitoring.violationRules;
   const evaluateViolationRules = useCallback(
@@ -307,25 +338,7 @@ export function useProctorCommands(monitoring: ProctorMonitoring) {
         }
 
         for (const rule of activeRules) {
-          let shouldTrigger = false;
-
-          switch (rule.triggerType) {
-            case 'violation_count':
-              shouldTrigger = session.violations.length >= rule.threshold;
-              break;
-            case 'specific_violation_type':
-              shouldTrigger =
-                session.violations.filter(
-                  (violation) => violation.type === rule.specificViolationType
-                ).length >= rule.threshold;
-              break;
-            case 'severity_threshold':
-              shouldTrigger =
-                session.violations.filter(
-                  (violation) => violation.severity === rule.specificSeverity
-                ).length >= rule.threshold;
-              break;
-          }
+          const shouldTrigger = matchingViolations(rule, session).length >= rule.threshold;
 
           const fireKey = JSON.stringify([rule.id, session.id]);
           if (!shouldTrigger) {
@@ -349,9 +362,11 @@ export function useProctorCommands(monitoring: ProctorMonitoring) {
           try {
             let outcome: CommandOutcome | null = null;
             if (rule.action === 'warn') {
-              outcome = await proctorMutations.warnStudent(session.id, `Auto-warning triggered by ${rule.triggerType}`, 'system');
+              const operationId = await autoRuleOperationId(rule, session);
+              outcome = await proctorMutations.warnStudent(session.id, `Auto-warning triggered by ${rule.triggerType}`, 'system', operationId);
             } else if (rule.action === 'pause') {
-              outcome = await proctorMutations.pauseStudent(session.id, 'system');
+              const operationId = await autoRuleOperationId(rule, session);
+              outcome = await proctorMutations.pauseStudent(session.id, 'system', operationId);
             } else if (rule.action === 'notify_proctor') {
               const latestViolationId = session.violations.at(-1)?.id ?? 'none';
               notifyAlerts.push({

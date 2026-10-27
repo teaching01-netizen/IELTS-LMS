@@ -340,6 +340,7 @@ export class ExamDeliveryService {
     attemptId: string,
     message: string,
     actor: string,
+    operationId?: string,
   ): Promise<DeliveryMutationResult> {
     let commandDispatched = false;
     try {
@@ -352,6 +353,7 @@ export class ExamDeliveryService {
       await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/warn`, {
         actorId: actor,
         message,
+        ...(operationId ? { operationId } : {}),
       }, { retries: 0 });
       return { success: true };
     } catch (error) {
@@ -362,6 +364,7 @@ export class ExamDeliveryService {
   async pauseStudentAttempt(
     attemptId: string,
     actor: string,
+    operationId?: string,
   ): Promise<DeliveryMutationResult> {
     let commandDispatched = false;
     try {
@@ -373,6 +376,7 @@ export class ExamDeliveryService {
       commandDispatched = true;
       await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/pause`, {
         actorId: actor,
+        ...(operationId ? { operationId } : {}),
       }, { retries: 0 });
       return { success: true };
     } catch (error) {
