@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3,
@@ -20,10 +20,19 @@ interface AdminNavItem {
   path: string;
 }
 
+/** A defaults save that did not land; the draft stays on screen either way. */
+export type DefaultsSaveIssue =
+  | { kind: 'failed'; message: string }
+  | { kind: 'conflict'; message: string };
+
 interface AdminRootController {
   contextValue: AdminContextValue;
   currentView: AdminNavItem['id'];
   defaultsLoadError: string | null;
+  defaultsSaveIssue: DefaultsSaveIssue | null;
+  /** Retry a failed save, or keep this draft over a conflicting remote edit. */
+  retryDefaultsSave: () => void;
+  overwriteDefaults: () => void;
   isInitialized: boolean;
   navItems: AdminNavItem[];
   notificationCount: number;
@@ -43,6 +52,13 @@ export function useAdminRootController(): AdminRootController {
   );
   const [isInitialized, setIsInitialized] = useState(false);
   const [defaultsLoadError, setDefaultsLoadError] = useState<string | null>(null);
+  const [defaultsSaveIssue, setDefaultsSaveIssue] = useState<DefaultsSaveIssue | null>(null);
+  // Saves are serialized and latest-wins: each one carries the revision the
+  // previous acknowledgement returned, and only the newest queued draft is sent.
+  const latestDraftRef = useRef<ExamConfig>(defaults);
+  const queuedSaveRef = useRef<{ config: ExamConfig; overwrite: boolean } | null>(null);
+  const saveLoopRef = useRef<Promise<void> | null>(null);
+  const conflictRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window === 'undefined' ? true : window.innerWidth >= 768,
   );
@@ -94,6 +110,9 @@ export function useAdminRootController(): AdminRootController {
   const initialize = useCallback(async () => {
     setIsInitialized(false);
     setDefaultsLoadError(null);
+    setDefaultsSaveIssue(null);
+    conflictRef.current = false;
+    queuedSaveRef.current = null;
 
     try {
       const shouldLoadDefaults = role === 'admin' || role === 'builder';
@@ -101,6 +120,7 @@ export function useAdminRootController(): AdminRootController {
         ? await examAuthoringFacade.preferences.loadDefaults()
         : examAuthoringFacade.preferences.getDefaults();
 
+      latestDraftRef.current = loadedDefaults;
       setDefaultsState(loadedDefaults);
     } catch (loadError) {
       setDefaultsLoadError(
@@ -115,10 +135,47 @@ export function useAdminRootController(): AdminRootController {
     void initialize();
   }, [initialize]);
 
-  const setDefaults = useCallback((config: ExamConfig) => {
-    setDefaultsState(config);
-    void examAuthoringFacade.preferences.saveDefaults(config);
+  const persistDefaults = useCallback((config: ExamConfig, overwrite = false) => {
+    queuedSaveRef.current = { config, overwrite };
+    if (saveLoopRef.current) return;
+    saveLoopRef.current = (async () => {
+      try {
+        while (queuedSaveRef.current) {
+          const job = queuedSaveRef.current;
+          queuedSaveRef.current = null;
+          try {
+            await examAuthoringFacade.preferences.saveDefaults(job.config, job.overwrite ? { overwrite: true } : {});
+            conflictRef.current = false;
+            setDefaultsSaveIssue(null);
+          } catch (saveError) {
+            // Stop here: never chain newer saves onto a failed or conflicting
+            // base. The draft stays on screen; the grader retries explicitly.
+            queuedSaveRef.current = null;
+            const conflict = (saveError as { code?: unknown } | null)?.code === 'EXAM_DEFAULTS_CONFLICT';
+            conflictRef.current = conflict;
+            setDefaultsSaveIssue(
+              conflict
+                ? { kind: 'conflict', message: 'Another admin changed the exam defaults since you opened them.' }
+                : { kind: 'failed', message: saveError instanceof Error ? saveError.message : 'Failed to save exam defaults.' },
+            );
+          }
+        }
+      } finally {
+        saveLoopRef.current = null;
+      }
+    })();
   }, []);
+
+  const setDefaults = useCallback((config: ExamConfig) => {
+    latestDraftRef.current = config;
+    setDefaultsState(config);
+    // While a conflict is unresolved, edits stay local instead of re-sending
+    // a document the server would reject (or, worse, accept over theirs).
+    if (!conflictRef.current) persistDefaults(config);
+  }, [persistDefaults]);
+
+  const retryDefaultsSave = useCallback(() => persistDefaults(latestDraftRef.current), [persistDefaults]);
+  const overwriteDefaults = useCallback(() => persistDefaults(latestDraftRef.current, true), [persistDefaults]);
 
   const handleNavigate = useCallback((mode: 'builder' | 'student' | 'admin' | 'proctor') => {
     navigate(`/${mode}`);
@@ -144,6 +201,9 @@ export function useAdminRootController(): AdminRootController {
     contextValue,
     currentView,
     defaultsLoadError,
+    defaultsSaveIssue,
+    retryDefaultsSave,
+    overwriteDefaults,
     isInitialized,
     navItems,
     notificationCount: 0,

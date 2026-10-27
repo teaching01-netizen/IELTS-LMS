@@ -20,6 +20,9 @@ export function AdminRoot() {
     contextValue,
     currentView,
     defaultsLoadError,
+    defaultsSaveIssue,
+    retryDefaultsSave,
+    overwriteDefaults,
     isInitialized,
     navItems,
     notificationCount,
@@ -214,6 +217,43 @@ export function AdminRoot() {
                 >
                   Retry defaults
                 </button>
+              </div>
+            ) : null}
+            {defaultsSaveIssue ? (
+              <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                <p>
+                  {defaultsSaveIssue.kind === 'conflict'
+                    ? `${defaultsSaveIssue.message} Your changes are still on this page and were not saved.`
+                    : `Exam defaults were not saved. Your changes are still on this page. ${defaultsSaveIssue.message}`}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {defaultsSaveIssue.kind === 'conflict' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void reload()}
+                        className="rounded-md border border-amber-400 bg-white px-3 py-1.5 font-semibold hover:bg-amber-100"
+                      >
+                        Load their version
+                      </button>
+                      <button
+                        type="button"
+                        onClick={overwriteDefaults}
+                        className="rounded-md border border-amber-400 bg-white px-3 py-1.5 font-semibold hover:bg-amber-100"
+                      >
+                        Save mine anyway
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={retryDefaultsSave}
+                      className="rounded-md border border-amber-400 bg-white px-3 py-1.5 font-semibold hover:bg-amber-100"
+                    >
+                      Retry save
+                    </button>
+                  )}
+                </div>
               </div>
             ) : null}
             <Outlet />
