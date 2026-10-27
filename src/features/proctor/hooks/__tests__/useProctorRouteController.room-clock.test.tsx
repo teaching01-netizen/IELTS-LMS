@@ -216,12 +216,14 @@ function installBackend() {
   const originalFetch = global.fetch;
   let readAt = FIRST_READ_AT;
   let detailReads = 0;
+  let heldDetail: Promise<void> | null = null;
 
   global.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     const isDetail = url.startsWith(`/api/v1/proctor/sessions/${SCHEDULE_ID}?`);
     if (isDetail) {
       detailReads += 1;
+      if (heldDetail) await heldDetail;
     }
     return new Response(JSON.stringify(isDetail ? buildDetailPayload(readAt) : buildSummaryPayload(readAt)), {
       status: 200,
@@ -236,6 +238,11 @@ function installBackend() {
     },
     detailReads() {
       return detailReads;
+    },
+    holdDetail() {
+      let release = () => {};
+      heldDetail = new Promise<void>((resolve) => { release = resolve; });
+      return release;
     },
     restore() {
       global.fetch = originalFetch;
@@ -283,7 +290,7 @@ async function mountRoom(backend: ReturnType<typeof installBackend>) {
     expect(backend.detailReads()).toBe(1);
   });
   await waitFor(() => {
-    expect(result.current.roomClock.serverNow).toBe(FIRST_READ_AT);
+    expect(result.current.roomClock?.serverNow).toBe(FIRST_READ_AT);
   });
   await waitFor(() => {
     expect(runtimeSnapshotHandler).not.toBeNull();
@@ -319,8 +326,8 @@ describe('useProctorRouteController room clock', () => {
       const result = await mountRoom(backend);
 
       const initial = readRoomClocks(result.current);
-      expect(result.current.roomClock.serverNow).toBe(FIRST_READ_AT);
-      expect(result.current.roomClock.receivedAt).toBeGreaterThan(0);
+      expect(result.current.roomClock?.serverNow).toBe(FIRST_READ_AT);
+      expect(result.current.roomClock?.receivedAt).toBeGreaterThan(0);
       expect(initial.runtimeServerNow).toBe(FIRST_READ_AT);
       expect(Math.abs(initial.correctedNowMs - Date.parse(FIRST_READ_AT))).toBeLessThan(
         CLOCK_TOLERANCE_MS,
@@ -332,8 +339,8 @@ describe('useProctorRouteController room clock', () => {
       await refreshRoom(result, backend);
 
       const refreshed = readRoomClocks(result.current);
-      expect(result.current.roomClock.serverNow).toBe(SECOND_READ_AT);
-      expect(result.current.roomClock.receivedAt).toBeGreaterThan(0);
+      expect(result.current.roomClock?.serverNow).toBe(SECOND_READ_AT);
+      expect(result.current.roomClock?.receivedAt).toBeGreaterThan(0);
       // Pre-fix this stayed at FIRST_READ_AT: the equal revision kept the whole
       // existing projection, so the room's clock lagged its own roster rows.
       expect(refreshed.runtimeServerNow).toBe(SECOND_READ_AT);
@@ -353,7 +360,7 @@ describe('useProctorRouteController room clock', () => {
 
       backend.answerAt(SECOND_READ_AT);
       await refreshRoom(result, backend);
-      expect(result.current.roomClock.serverNow).toBe(SECOND_READ_AT);
+      expect(result.current.roomClock?.serverNow).toBe(SECOND_READ_AT);
 
       // A slow proxy answers with an older read: its stamp and its deadline are
       // both behind the instant the room already holds.
@@ -361,7 +368,7 @@ describe('useProctorRouteController room clock', () => {
       await refreshRoom(result, backend);
 
       const afterStale = readRoomClocks(result.current);
-      expect(result.current.roomClock.serverNow).toBe(SECOND_READ_AT);
+      expect(result.current.roomClock?.serverNow).toBe(SECOND_READ_AT);
       expect(afterStale.runtimeServerNow).toBe(SECOND_READ_AT);
       expect(Math.abs(afterStale.correctedNowMs - Date.parse(SECOND_READ_AT))).toBeLessThan(
         CLOCK_TOLERANCE_MS,
@@ -376,14 +383,14 @@ describe('useProctorRouteController room clock', () => {
     const backend = installBackend();
     try {
       const result = await mountRoom(backend);
-      expect(result.current.roomClock.serverNow).toBe(FIRST_READ_AT);
+      expect(result.current.roomClock?.serverNow).toBe(FIRST_READ_AT);
 
       await act(async () => {
         runtimeSnapshotHandler?.({ scheduleId: SCHEDULE_ID, runtime: buildRuntimePayload(FRAME_READ_AT) });
       });
 
       await waitFor(() => {
-        expect(result.current.roomClock.serverNow).toBe(FRAME_READ_AT);
+        expect(result.current.roomClock?.serverNow).toBe(FRAME_READ_AT);
       });
       const afterFrame = readRoomClocks(result.current);
       // Pre-fix the frame was dropped by the revision-only gate, so the socket
@@ -400,12 +407,78 @@ describe('useProctorRouteController room clock', () => {
       });
 
       const afterReplay = readRoomClocks(result.current);
-      expect(result.current.roomClock.serverNow).toBe(FRAME_READ_AT);
+      expect(result.current.roomClock?.serverNow).toBe(FRAME_READ_AT);
       expect(afterReplay.runtimeServerNow).toBe(FRAME_READ_AT);
       expect(Math.abs(afterReplay.correctedNowMs - Date.parse(FRAME_READ_AT))).toBeLessThan(
         CLOCK_TOLERANCE_MS,
       );
     } finally {
+      backend.restore();
+    }
+  });
+
+  it('shares a socket update and room clock with every observer of the same room', async () => {
+    const backend = installBackend();
+    try {
+      const { result } = renderHook(() => [
+        useProctorRouteController({ initialScheduleId: SCHEDULE_ID }),
+        useProctorRouteController({ initialScheduleId: SCHEDULE_ID }),
+      ] as const, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(backend.detailReads()).toBeGreaterThan(0);
+        expect(result.current.every((controller) => readRoomClocks(controller).runtimeServerNow === FIRST_READ_AT)).toBe(true);
+      });
+
+      // The mocked socket delivers to just one mounted observer.
+      await act(async () => {
+        runtimeSnapshotHandler?.({ scheduleId: SCHEDULE_ID, runtime: buildRuntimePayload(FRAME_READ_AT) });
+      });
+
+      await waitFor(() => {
+        for (const controller of result.current) {
+          expect(readRoomClocks(controller).runtimeServerNow).toBe(FRAME_READ_AT);
+          expect(controller.roomClock?.serverNow).toBe(FRAME_READ_AT);
+        }
+      });
+      expect(result.current[0].roomClock?.receivedAt).toBe(result.current[1].roomClock?.receivedAt);
+
+      backend.answerAt(STALE_READ_AT);
+      await act(async () => { await result.current[0].reload(); });
+      for (const controller of result.current) {
+        expect(readRoomClocks(controller).runtimeServerNow).toBe(FRAME_READ_AT);
+        expect(controller.roomClock?.serverNow).toBe(FRAME_READ_AT);
+      }
+    } finally {
+      backend.restore();
+    }
+  });
+
+  it('keeps a socket frame that arrives before the first room detail', async () => {
+    const backend = installBackend();
+    const releaseDetail = backend.holdDetail();
+    try {
+      const { result } = renderHook(() => useProctorRouteController({ initialScheduleId: SCHEDULE_ID }), {
+        wrapper: createWrapper(),
+      });
+      await waitFor(() => {
+        expect(backend.detailReads()).toBe(1);
+        expect(result.current.schedules).toHaveLength(1);
+        expect(runtimeSnapshotHandler).not.toBeNull();
+      });
+
+      await act(async () => {
+        runtimeSnapshotHandler?.({ scheduleId: SCHEDULE_ID, runtime: buildRuntimePayload(FRAME_READ_AT) });
+      });
+      await waitFor(() => expect(readRoomClocks(result.current).runtimeServerNow).toBe(FRAME_READ_AT));
+      expect(result.current.isLoading).toBe(true);
+
+      await act(async () => { releaseDetail(); });
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(readRoomClocks(result.current).runtimeServerNow).toBe(FRAME_READ_AT);
+      expect(result.current.roomClock?.serverNow).toBe(FRAME_READ_AT);
+    } finally {
+      releaseDetail();
       backend.restore();
     }
   });

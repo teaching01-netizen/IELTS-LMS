@@ -3,7 +3,31 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProctorDashboard } from '../ProctorDashboard';
 import { examDeliveryService } from '../../../services/examDeliveryService';
+import { proctorMutations } from '../../../features/proctor/api/proctorMutations';
+import type { CommandOutcome } from '../../../features/proctor/domain/commandOutcome';
+import type { ProctorViewCommands } from '../../../features/proctor/contracts';
 import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
+
+const CONFIRMED: CommandOutcome = { kind: 'confirmed' };
+
+/** View commands that reach the real delivery seam, so service spies still observe the wire call. */
+function fakeCommands() {
+  return {
+    resolveRecovery: vi.fn<ProctorViewCommands['resolveRecovery']>(async () => CONFIRMED),
+    studentAction: vi.fn<ProctorViewCommands['studentAction']>((session, action, actor, message) =>
+      action === 'warn' ? proctorMutations.warnStudent(session.id, message ?? 'Warning issued by proctor', actor)
+      : action === 'pause' ? proctorMutations.pauseStudent(session.id, actor)
+      : action === 'resume' ? proctorMutations.resumeStudent(session.id, actor)
+      : proctorMutations.terminateStudent(session.id, actor)),
+    extendStudent: vi.fn<ProctorViewCommands['extendStudent']>((session, minutes, actor) =>
+      proctorMutations.extendStudent(session.id, actor, minutes, session.runtimeCurrentModuleId)),
+    acknowledgeAlerts: vi.fn<ProctorViewCommands['acknowledgeAlerts']>(async () => CONFIRMED),
+    saveNote: vi.fn<ProctorViewCommands['saveNote']>((note) => proctorMutations.saveNote(note)),
+    deleteNote: vi.fn<ProctorViewCommands['deleteNote']>((note) => proctorMutations.deleteNote(note.id)),
+    saveRule: vi.fn<ProctorViewCommands['saveRule']>((rule) => proctorMutations.saveRule(rule)),
+    deleteRule: vi.fn<ProctorViewCommands['deleteRule']>((rule) => proctorMutations.deleteRule(rule.id)),
+  } satisfies ProctorViewCommands;
+}
 
 describe('ProctorDashboard runtime controls', () => {
   beforeEach(() => {
@@ -20,14 +44,20 @@ describe('ProctorDashboard runtime controls', () => {
 
   function DashboardHarness({
     scheduleMetrics = {},
+    commands,
     ...props
-  }: Omit<DashboardProps, 'selectedScheduleId' | 'onSelectScheduleId' | 'scheduleMetrics'> & {
+  }: Omit<DashboardProps, 'selectedScheduleId' | 'onSelectScheduleId' | 'scheduleMetrics' | 'commands'> & {
     scheduleMetrics?: DashboardProps['scheduleMetrics'];
+    commands?: ProctorViewCommands;
+    selectedScheduleId?: string | null;
+    onSelectScheduleId?: (id: string | null) => void;
   }) {
     const [selectedScheduleId, onSelectScheduleId] = React.useState<string | null>(null);
+    const [defaultCommands] = React.useState(fakeCommands);
     return (
       <ProctorDashboard
         {...props}
+        commands={commands ?? defaultCommands}
         scheduleMetrics={scheduleMetrics}
         selectedScheduleId={selectedScheduleId}
         onSelectScheduleId={onSelectScheduleId}
@@ -38,6 +68,7 @@ describe('ProctorDashboard runtime controls', () => {
   const baseSchedule: ExamSchedule = {
     id: 'sched-1',
     examId: 'exam-1',
+    providerKey: 'ielts',
     examTitle: 'Mock Exam',
     proctorDisplayName: 'Mock Exam',
     gradingDisplayName: 'Mock Exam',
@@ -59,6 +90,7 @@ describe('ProctorDashboard runtime controls', () => {
     id: 'runtime-1',
     scheduleId: 'sched-1',
     examId: 'exam-1',
+    providerKey: 'ielts',
     examTitle: 'Mock Exam',
     cohortName: 'Cohort A',
     deliveryMode: 'proctor_start',
@@ -100,8 +132,6 @@ describe('ProctorDashboard runtime controls', () => {
         runtimeSnapshots={[]}
         sessions={[]}
         alerts={[]}
-        onUpdateSessions={vi.fn()}
-        onUpdateAlerts={vi.fn()}
         onStartScheduledSession={vi.fn()}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -122,8 +152,6 @@ describe('ProctorDashboard runtime controls', () => {
         runtimeSnapshots={[]}
         sessions={[]}
         alerts={[]}
-        onUpdateSessions={vi.fn()}
-        onUpdateAlerts={vi.fn()}
         onStartScheduledSession={onStartScheduledSession}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -169,8 +197,6 @@ describe('ProctorDashboard runtime controls', () => {
         runtimeSnapshots={[]}
         sessions={[]}
         alerts={[]}
-        onUpdateSessions={vi.fn()}
-        onUpdateAlerts={vi.fn()}
         onStartScheduledSession={vi.fn()}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -215,8 +241,6 @@ describe('ProctorDashboard runtime controls', () => {
         runtimeSnapshots={[]}
         sessions={[]}
         alerts={[]}
-        onUpdateSessions={vi.fn()}
-        onUpdateAlerts={vi.fn()}
         onStartScheduledSession={vi.fn()}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -249,8 +273,6 @@ describe('ProctorDashboard runtime controls', () => {
         runtimeSnapshots={[liveRuntime]}
         sessions={[]}
         alerts={[]}
-        onUpdateSessions={vi.fn()}
-        onUpdateAlerts={vi.fn()}
         onStartScheduledSession={vi.fn()}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -274,8 +296,6 @@ describe('ProctorDashboard runtime controls', () => {
         runtimeSnapshots={[liveRuntime]}
         sessions={[]}
         alerts={[]}
-        onUpdateSessions={vi.fn()}
-        onUpdateAlerts={vi.fn()}
         onStartScheduledSession={vi.fn()}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -319,9 +339,6 @@ describe('ProctorDashboard runtime controls', () => {
         alerts={[]}
         notes={[]}
         auditLogs={[]}
-        onUpdateSessions={vi.fn()}
-        onUpdateAlerts={vi.fn()}
-        onUpdateNotes={vi.fn()}
         onStartScheduledSession={vi.fn()}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -389,9 +406,6 @@ describe('ProctorDashboard runtime controls', () => {
           payload: {},
         },
       ],
-      onUpdateSessions: vi.fn(),
-      onUpdateAlerts: vi.fn(),
-      onUpdateNotes: vi.fn(),
       onStartScheduledSession: vi.fn(),
       onPauseCohort: vi.fn(),
       onResumeCohort: vi.fn(),
@@ -425,7 +439,7 @@ describe('ProctorDashboard runtime controls', () => {
       runtimeTimeRemainingSeconds: 1800,
       runtimeDeadlineAt: '2026-01-01T00:30:00.000Z',
       runtimeServerNow: '2026-01-01T00:00:00.000Z',
-      runtimeSectionStatus: 'live',
+      runtimeSectionStatus: 'live' as const,
       runtimeWaiting: false,
       violations: [],
       warnings: 0,
@@ -444,8 +458,6 @@ describe('ProctorDashboard runtime controls', () => {
         }]}
         sessions={[pausedSession]}
         alerts={[]}
-        onUpdateSessions={vi.fn()}
-        onUpdateAlerts={vi.fn()}
         onStartScheduledSession={vi.fn()}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -480,7 +492,7 @@ describe('ProctorDashboard runtime controls', () => {
       runtimeStatus: 'live' as const,
       runtimeCurrentSection: 'reading' as const,
       runtimeTimeRemainingSeconds: 1800,
-      runtimeSectionStatus: 'live',
+      runtimeSectionStatus: 'live' as const,
       runtimeWaiting: false,
       violations: [],
       warnings: 0,
@@ -497,9 +509,6 @@ describe('ProctorDashboard runtime controls', () => {
         alerts={[]}
         notes={[]}
         auditLogs={[]}
-        onUpdateSessions={vi.fn()}
-        onUpdateAlerts={vi.fn()}
-        onUpdateNotes={vi.fn()}
         onStartScheduledSession={vi.fn()}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -522,7 +531,7 @@ describe('ProctorDashboard runtime controls', () => {
     const extendSpy = vi
       .spyOn(examDeliveryService, 'extendStudentAttempt')
       .mockResolvedValue({ success: true });
-    const onUpdateSessions = vi.fn();
+    const commands = fakeCommands();
     const satSession = {
       id: 'student-1',
       studentId: 'STU-001',
@@ -536,7 +545,7 @@ describe('ProctorDashboard runtime controls', () => {
       runtimeCurrentSection: 'reading' as const,
       runtimeTimeRemainingSeconds: 1800,
       runtimeCurrentModuleId: 'module-1',
-      runtimeSectionStatus: 'live',
+      runtimeSectionStatus: 'live' as const,
       runtimeWaiting: false,
       violations: [],
       warnings: 0,
@@ -553,9 +562,7 @@ describe('ProctorDashboard runtime controls', () => {
         alerts={[]}
         notes={[]}
         auditLogs={[]}
-        onUpdateSessions={onUpdateSessions}
-        onUpdateAlerts={vi.fn()}
-        onUpdateNotes={vi.fn()}
+        commands={commands}
         onStartScheduledSession={vi.fn()}
         onPauseCohort={vi.fn()}
         onResumeCohort={vi.fn()}
@@ -575,10 +582,47 @@ describe('ProctorDashboard runtime controls', () => {
       fireEvent.click(extendButton);
     });
 
+    expect(commands.extendStudent).toHaveBeenCalledWith(expect.objectContaining({ id: 'student-1' }), 5, expect.any(String));
     expect(extendSpy).toHaveBeenCalledWith('student-1', expect.any(String), 5, 'module-1');
-    expect(onUpdateSessions).toHaveBeenCalled();
-    const updated = onUpdateSessions.mock.calls.at(-1)?.[0] as Array<typeof satSession> | undefined;
-    expect(updated?.find((session) => session.id === 'student-1')?.runtimeTimeRemainingSeconds).toBe(2100);
+    expect(screen.getByText(/added 5 minutes to jane roe/i)).toBeInTheDocument();
+  });
+
+  it('binds a pending cohort action and its feedback to the room it was issued for', async () => {
+    let resolvePause: () => void = () => {};
+    const onPauseCohort = vi.fn(() => new Promise<void>((resolve) => { resolvePause = resolve; }));
+    const roomA = { ...baseSchedule, status: 'live' as const, startTime: '2026-01-01T00:00:00.000Z' };
+    const roomB = { ...roomA, id: 'sched-2', cohortName: 'Cohort B' };
+    const props: Omit<DashboardProps, 'selectedScheduleId'> = {
+      schedules: [roomA, roomB],
+      runtimeSnapshots: [liveRuntime, { ...liveRuntime, id: 'runtime-2', scheduleId: 'sched-2', cohortName: 'Cohort B' }],
+      sessions: [],
+      alerts: [],
+      scheduleMetrics: {},
+      commands: fakeCommands(),
+      onSelectScheduleId: vi.fn(),
+      onStartScheduledSession: vi.fn(),
+      onPauseCohort,
+      onResumeCohort: vi.fn(),
+      onEndSectionNow: vi.fn(),
+      onExtendCurrentSection: vi.fn(),
+      onCompleteExam: vi.fn(),
+    };
+    const { rerender } = render(<ProctorDashboard {...props} selectedScheduleId="sched-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /pause cohort/i }));
+    expect(onPauseCohort).toHaveBeenCalledWith('sched-1');
+    expect(screen.getByRole('button', { name: /pausing/i })).toBeDisabled();
+
+    // Room B is not busy with room A's command.
+    rerender(<ProctorDashboard {...props} selectedScheduleId="sched-2" />);
+    expect(screen.getByRole('button', { name: /^pause cohort$/i })).not.toBeDisabled();
+
+    // Room A's completion is reported as room A's, not as the visible room's.
+    await act(async () => {
+      resolvePause();
+    });
+    expect(screen.queryByText('Cohort paused.')).not.toBeInTheDocument();
+    expect(screen.getByText('Cohort A: Cohort paused.')).toBeInTheDocument();
   });
 
   describe('appended coverage: states, filters, actions, empty/error', () => {
@@ -599,7 +643,7 @@ describe('ProctorDashboard runtime controls', () => {
       runtimeCurrentSection: 'reading' as const,
       runtimeTimeRemainingSeconds: 1800,
       runtimeCurrentModuleId: 'module-1',
-      runtimeSectionStatus: 'live',
+      runtimeSectionStatus: 'live' as const,
       runtimeWaiting: false,
       violations: [] as Array<{ id: string; type: string; severity: 'medium'; timestamp: string; description: string }>,
       warnings: 0,
@@ -614,11 +658,8 @@ describe('ProctorDashboard runtime controls', () => {
       runtimeSnapshots: [liveRuntime],
       sessions: [makeSession()],
       alerts: [] as DashboardProps['alerts'],
-      notes: [] as DashboardProps['notes'],
-      auditLogs: [] as DashboardProps['auditLogs'],
-      onUpdateSessions: vi.fn(),
-      onUpdateAlerts: vi.fn(),
-      onUpdateNotes: vi.fn(),
+      notes: [] as NonNullable<DashboardProps['notes']>,
+      auditLogs: [] as NonNullable<DashboardProps['auditLogs']>,
       onStartScheduledSession: vi.fn(),
       onPauseCohort: vi.fn(),
       onResumeCohort: vi.fn(),
@@ -658,8 +699,6 @@ describe('ProctorDashboard runtime controls', () => {
           runtimeSnapshots={[]}
           sessions={[]}
           alerts={[]}
-          onUpdateSessions={vi.fn()}
-          onUpdateAlerts={vi.fn()}
           onStartScheduledSession={vi.fn()}
           onPauseCohort={vi.fn()}
           onResumeCohort={vi.fn()}
@@ -718,8 +757,6 @@ describe('ProctorDashboard runtime controls', () => {
           runtimeSnapshots={[]}
           sessions={[]}
           alerts={[]}
-          onUpdateSessions={vi.fn()}
-          onUpdateAlerts={vi.fn()}
           onStartScheduledSession={vi.fn()}
           onPauseCohort={vi.fn()}
           onResumeCohort={vi.fn()}
@@ -806,8 +843,8 @@ describe('ProctorDashboard runtime controls', () => {
 
     it('warns a student from the roster card and records the local violation', async () => {
       const warnSpy = vi.spyOn(examDeliveryService, 'warnStudent').mockResolvedValue({ success: true });
-      const onUpdateSessions = vi.fn();
-      render(<DashboardHarness {...baseProps()} onUpdateSessions={onUpdateSessions} />);
+      const commands = fakeCommands();
+      render(<DashboardHarness {...baseProps()} commands={commands} />);
       selectCohort();
 
       await act(async () => {
@@ -815,7 +852,7 @@ describe('ProctorDashboard runtime controls', () => {
       });
 
       expect(warnSpy).toHaveBeenCalledWith('student-1', expect.any(String), expect.any(String));
-      expect(onUpdateSessions).toHaveBeenCalled();
+      expect(commands.studentAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'student-1', scheduleId: 'sched-1' }), 'warn', expect.any(String), undefined);
       expect(screen.getByText('Jane Roe: warned')).toBeInTheDocument();
     });
 
@@ -834,9 +871,9 @@ describe('ProctorDashboard runtime controls', () => {
     it('pauses and resumes a paused student directly from the roster card actions', async () => {
       const pauseSpy = vi.spyOn(examDeliveryService, 'pauseStudentAttempt').mockResolvedValue({ success: true });
       const resumeSpy = vi.spyOn(examDeliveryService, 'resumeStudentAttempt').mockResolvedValue({ success: true });
-      const onUpdateSessions = vi.fn();
+      const commands = fakeCommands();
       const { rerender } = render(
-        <DashboardHarness {...baseProps()} sessions={[makeSession()]} onUpdateSessions={onUpdateSessions} />,
+        <DashboardHarness {...baseProps()} sessions={[makeSession()]} commands={commands} />,
       );
       selectCohort();
 
@@ -845,14 +882,14 @@ describe('ProctorDashboard runtime controls', () => {
         fireEvent.click(screen.getByRole('button', { name: /^pause student$/i }));
       });
       expect(pauseSpy).toHaveBeenCalledWith('student-1', expect.any(String));
-      expect(onUpdateSessions).toHaveBeenCalled();
+      expect(commands.studentAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'student-1' }), 'pause', expect.any(String), undefined);
       expect(screen.getByText('Jane Roe paused.')).toBeInTheDocument();
 
       rerender(
         <DashboardHarness
           {...baseProps()}
           sessions={[makeSession({ status: 'paused' as const })]}
-          onUpdateSessions={onUpdateSessions}
+          commands={commands}
           selectedScheduleId="sched-1"
           onSelectScheduleId={() => {}}
         />,
@@ -880,12 +917,12 @@ describe('ProctorDashboard runtime controls', () => {
 
     it('warns every selected student through bulk select', async () => {
       const warnSpy = vi.spyOn(examDeliveryService, 'warnStudent').mockResolvedValue({ success: true });
-      const onUpdateSessions = vi.fn();
+      const commands = fakeCommands();
       render(
         <DashboardHarness
           {...baseProps()}
           sessions={[makeSession(), makeSession({ id: 'student-2', studentId: 'STU-002', name: 'John Doe', email: 'john@example.com' })]}
-          onUpdateSessions={onUpdateSessions}
+          commands={commands}
         />,
       );
       selectCohort();
@@ -898,7 +935,7 @@ describe('ProctorDashboard runtime controls', () => {
       });
 
       expect(warnSpy).toHaveBeenCalledTimes(2);
-      expect(onUpdateSessions).toHaveBeenCalled();
+      expect(commands.studentAction).toHaveBeenCalledTimes(2);
       expect(screen.getByText(/2 students updated \(warn\)/)).toBeInTheDocument();
     });
 
@@ -956,7 +993,7 @@ describe('ProctorDashboard runtime controls', () => {
       selectCohort();
 
       fireEvent.click(screen.getByRole('button', { name: /^filters$/i }));
-      const statusSelect = screen.getAllByRole('combobox')[0];
+      const statusSelect = screen.getAllByRole('combobox')[0]!;
       fireEvent.change(statusSelect, { target: { value: 'warned' } });
       expect(screen.getByRole('button', { name: /open jane roe session details/i })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /open john doe session details/i })).not.toBeInTheDocument();
@@ -987,8 +1024,6 @@ describe('ProctorDashboard runtime controls', () => {
           runtimeSnapshots={[]}
           sessions={[]}
           alerts={[]}
-          onUpdateSessions={vi.fn()}
-          onUpdateAlerts={vi.fn()}
           onStartScheduledSession={vi.fn()}
           onPauseCohort={vi.fn()}
           onResumeCohort={vi.fn()}
@@ -1024,9 +1059,8 @@ describe('ProctorDashboard runtime controls', () => {
     it('saves a cohort note and toggles its resolved state', async () => {
       const { examRepository } = await import('../../../features/proctor/infrastructure/proctorGateway');
       const saveNote = vi.spyOn(examRepository, 'saveSessionNote').mockResolvedValue(undefined);
-      const saveAudit = vi.spyOn(examRepository, 'saveAuditLog').mockResolvedValue(undefined);
-      const onUpdateNotes = vi.fn();
-      render(<DashboardHarness {...baseProps()} onUpdateNotes={onUpdateNotes} />);
+      const commands = fakeCommands();
+      render(<DashboardHarness {...baseProps()} commands={commands} />);
       openDetail();
       fireEvent.click(screen.getByRole('button', { name: /^notes$/i }));
       fireEvent.change(screen.getByRole('textbox', { name: /note content/i }), { target: { value: 'Watch this cohort' } });
@@ -1036,14 +1070,12 @@ describe('ProctorDashboard runtime controls', () => {
       });
 
       expect(saveNote).toHaveBeenCalled();
-      expect(saveAudit).toHaveBeenCalled();
-      expect(onUpdateNotes).toHaveBeenCalled();
+      expect(commands.saveNote).toHaveBeenCalledWith(expect.objectContaining({ scheduleId: 'sched-1', content: 'Watch this cohort' }));
     });
 
     it('shows a note error when cohort note persistence fails', async () => {
       const { examRepository } = await import('../../../features/proctor/infrastructure/proctorGateway');
       vi.spyOn(examRepository, 'saveSessionNote').mockRejectedValue(new Error('note save down'));
-      vi.spyOn(examRepository, 'saveAuditLog').mockResolvedValue(undefined);
       render(<DashboardHarness {...baseProps()} />);
       openDetail();
       fireEvent.click(screen.getByRole('button', { name: /^notes$/i }));
@@ -1053,7 +1085,7 @@ describe('ProctorDashboard runtime controls', () => {
         fireEvent.click(screen.getByRole('button', { name: /save note/i }));
       });
 
-      expect(screen.getByText('note save down')).toBeInTheDocument();
+      expect(screen.getByText(/note save down/)).toHaveTextContent('may have been applied');
     });
 
     it('fails a student time extension and keeps the visible error state', async () => {
@@ -1081,8 +1113,7 @@ describe('ProctorDashboard runtime controls', () => {
 
     it('warns from the detail drawer and opens the auto-response rules overlay', async () => {
       const warnSpy = vi.spyOn(examDeliveryService, 'warnStudent').mockResolvedValue({ success: true });
-      const onUpdateRules = vi.fn();
-      render(<DashboardHarness {...baseProps()} violationRules={[]} onUpdateRules={onUpdateRules} />);
+      render(<DashboardHarness {...baseProps()} violationRules={[]} />);
       openDetail();
 
       await act(async () => {
@@ -1093,7 +1124,7 @@ describe('ProctorDashboard runtime controls', () => {
       fireEvent.click(screen.getByRole('button', { name: /back to list/i }));
       fireEvent.click(screen.getByRole('button', { name: /auto-response rules/i }));
       expect(screen.getByRole('dialog', { name: /auto-response rules/i })).toBeInTheDocument();
-      fireEvent.click(screen.getAllByRole('button', { name: /close auto-response rules/i })[0]);
+      fireEvent.click(screen.getAllByRole('button', { name: /close auto-response rules/i })[0]!);
       expect(screen.queryByRole('dialog', { name: /auto-response rules/i })).not.toBeInTheDocument();
     });
 

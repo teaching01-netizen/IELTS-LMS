@@ -44,10 +44,27 @@ export interface ScheduleWindowSnapshot {
   plannedDurationMinutes: number;
 }
 
-export interface RuntimeMutationResult {
+export interface DeliveryMutationResult {
   success: boolean;
-  runtime?: ExamSessionRuntime | null;
   error?: string;
+  /** Preserves transport status for callers that must distinguish uncertain writes. */
+  errorCause?: unknown;
+  commandDispatched?: boolean;
+  /** The command succeeded, but the resulting runtime could not be read. */
+  refreshError?: string;
+}
+
+export interface RuntimeMutationResult extends DeliveryMutationResult {
+  runtime?: ExamSessionRuntime | null;
+}
+
+function failedDelivery(error: unknown, fallback: string, commandDispatched: boolean): DeliveryMutationResult {
+  return {
+    success: false,
+    error: error instanceof Error ? error.message : fallback,
+    errorCause: error,
+    commandDispatched,
+  };
 }
 
 const MODULE_ORDER: ModuleType[] = ['listening', 'reading', 'writing', 'speaking', 'science'];
@@ -279,8 +296,11 @@ export class ExamDeliveryService {
     _actor: string,
     _now: Date | string = new Date(),
   ): Promise<RuntimeMutationResult> {
+    let commandDispatched = false;
+    let commandConfirmed = false;
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
+      commandDispatched = true;
       const runtimePayload = await backendPost<any>(
         `/v1/schedules/${scheduleId}/runtime/commands`,
         {
@@ -288,16 +308,15 @@ export class ExamDeliveryService {
         },
         { retries: 0 },
       );
+      commandConfirmed = true;
 
       return {
         success: true,
         runtime: mapBackendRuntime(runtimePayload, mapBackendSchedule(schedulePayload)),
       };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to start runtime',
-      };
+      if (commandConfirmed) return { success: true, runtime: null, refreshError: 'Runtime snapshot unavailable after starting exam' };
+      return failedDelivery(error, 'Failed to start runtime', commandDispatched);
     }
   }
 
@@ -321,67 +340,64 @@ export class ExamDeliveryService {
     attemptId: string,
     message: string,
     actor: string,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<DeliveryMutationResult> {
+    let commandDispatched = false;
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
       if (!scheduleId) {
         return { success: false, error: 'Attempt not found' };
       }
 
+      commandDispatched = true;
       await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/warn`, {
         actorId: actor,
         message,
       }, { retries: 0 });
       return { success: true };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to warn student',
-      };
+      return failedDelivery(error, 'Failed to warn student', commandDispatched);
     }
   }
 
   async pauseStudentAttempt(
     attemptId: string,
     actor: string,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<DeliveryMutationResult> {
+    let commandDispatched = false;
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
       if (!scheduleId) {
         return { success: false, error: 'Attempt not found' };
       }
 
+      commandDispatched = true;
       await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/pause`, {
         actorId: actor,
       }, { retries: 0 });
       return { success: true };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to pause student',
-      };
+      return failedDelivery(error, 'Failed to pause student', commandDispatched);
     }
   }
 
   async resumeStudentAttempt(
     attemptId: string,
     actor: string,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<DeliveryMutationResult> {
+    let commandDispatched = false;
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
       if (!scheduleId) {
         return { success: false, error: 'Attempt not found' };
       }
 
+      commandDispatched = true;
       await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/resume`, {
         actorId: actor,
       }, { retries: 0 });
       return { success: true };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to resume student',
-      };
+      return failedDelivery(error, 'Failed to resume student', commandDispatched);
     }
   }
 
@@ -390,13 +406,15 @@ export class ExamDeliveryService {
     actor: string,
     minutes: number,
     moduleId: string,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<DeliveryMutationResult> {
+    let commandDispatched = false;
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
       if (!scheduleId) {
         return { success: false, error: 'Attempt not found' };
       }
 
+      commandDispatched = true;
       await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/extend`, {
         operationId: createId('proctor'),
         moduleId,
@@ -405,32 +423,28 @@ export class ExamDeliveryService {
       }, { retries: 2 });
       return { success: true };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to extend student time',
-      };
+      return failedDelivery(error, 'Failed to extend student time', commandDispatched);
     }
   }
 
   async terminateStudentAttempt(
     attemptId: string,
     actor: string,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<DeliveryMutationResult> {
+    let commandDispatched = false;
     try {
       const scheduleId = await resolveAttemptScheduleId(attemptId);
       if (!scheduleId) {
         return { success: false, error: 'Attempt not found' };
       }
 
+      commandDispatched = true;
       await backendPost(`/v1/proctor/sessions/${scheduleId}/attempts/${attemptId}/terminate`, {
         actorId: actor,
       }, { retries: 0 });
       return { success: true };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to terminate student',
-      };
+      return failedDelivery(error, 'Failed to terminate student', commandDispatched);
     }
   }
 
@@ -440,8 +454,11 @@ export class ExamDeliveryService {
     reason = 'proctor_pause',
     _now: Date | string = new Date(),
   ): Promise<RuntimeMutationResult> {
+    let commandDispatched = false;
+    let commandConfirmed = false;
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
+      commandDispatched = true;
       const runtimePayload = await backendPost<any>(
         `/v1/schedules/${scheduleId}/runtime/commands`,
         {
@@ -450,16 +467,15 @@ export class ExamDeliveryService {
         },
         { retries: 0 },
       );
+      commandConfirmed = true;
 
       return {
         success: true,
         runtime: mapBackendRuntime(runtimePayload, mapBackendSchedule(schedulePayload)),
       };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to pause runtime',
-      };
+      if (commandConfirmed) return { success: true, runtime: null, refreshError: 'Runtime snapshot unavailable after pausing exam' };
+      return failedDelivery(error, 'Failed to pause runtime', commandDispatched);
     }
   }
 
@@ -468,8 +484,11 @@ export class ExamDeliveryService {
     _actor: string,
     _now: Date | string = new Date(),
   ): Promise<RuntimeMutationResult> {
+    let commandDispatched = false;
+    let commandConfirmed = false;
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
+      commandDispatched = true;
       const runtimePayload = await backendPost<any>(
         `/v1/schedules/${scheduleId}/runtime/commands`,
         {
@@ -477,16 +496,15 @@ export class ExamDeliveryService {
         },
         { retries: 0 },
       );
+      commandConfirmed = true;
 
       return {
         success: true,
         runtime: mapBackendRuntime(runtimePayload, mapBackendSchedule(schedulePayload)),
       };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to resume runtime',
-      };
+      if (commandConfirmed) return { success: true, runtime: null, refreshError: 'Runtime snapshot unavailable after resuming exam' };
+      return failedDelivery(error, 'Failed to resume runtime', commandDispatched);
     }
   }
 
@@ -498,8 +516,11 @@ export class ExamDeliveryService {
     expectedRuntimeRevision?: number | null,
     _now: Date | string = new Date(),
   ): Promise<RuntimeMutationResult> {
+    let commandDispatched = false;
+    let commandConfirmed = false;
     try {
       const schedulePayload = await backendGet<any>(`/v1/schedules/${scheduleId}`);
+      commandDispatched = true;
       const runtimePayload = await backendPost<any>(
         `/v1/proctor/sessions/${scheduleId}/control/extend-section`,
         {
@@ -511,16 +532,15 @@ export class ExamDeliveryService {
         },
         { retries: 2 },
       );
+      commandConfirmed = true;
 
       return {
         success: true,
         runtime: mapBackendRuntime(runtimePayload, mapBackendSchedule(schedulePayload)),
       };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to extend section',
-      };
+      if (commandConfirmed) return { success: true, runtime: null, refreshError: 'Runtime snapshot unavailable after extending section' };
+      return failedDelivery(error, 'Failed to extend section', commandDispatched);
     }
   }
 
@@ -547,7 +567,7 @@ export class ExamDeliveryService {
       // runtime payload.
       const runtime = await this.getRuntimeSnapshot(scheduleId);
       if (!runtime) {
-        throw new Error('Runtime snapshot unavailable after ending section');
+        return { success: true, runtime: null, refreshError: 'Runtime snapshot unavailable after ending section' };
       }
 
       return {
@@ -555,10 +575,7 @@ export class ExamDeliveryService {
         runtime,
       };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to end section',
-      };
+      return failedDelivery(error, 'Failed to end section', true);
     }
   }
 
@@ -581,7 +598,7 @@ export class ExamDeliveryService {
       // runtime payload.
       const runtime = await this.getRuntimeSnapshot(scheduleId);
       if (!runtime) {
-        throw new Error('Runtime snapshot unavailable after completing exam');
+        return { success: true, runtime: null, refreshError: 'Runtime snapshot unavailable after completing exam' };
       }
 
       return {
@@ -589,10 +606,7 @@ export class ExamDeliveryService {
         runtime,
       };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to complete runtime',
-      };
+      return failedDelivery(error, 'Failed to complete runtime', true);
     }
   }
 }

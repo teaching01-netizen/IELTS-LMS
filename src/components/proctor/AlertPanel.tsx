@@ -19,7 +19,8 @@ import { VIRTUAL_LIST_HEIGHTS } from '../../constants/uiConstants';
 
 interface AlertPanelProps {
   alerts: ProctorAlert[];
-  onUpdateAlerts: (alerts: ProctorAlert[]) => void;
+  /** Acknowledge on the server, or reopen for display (the server has no reopen). */
+  onAcknowledge: (alertIds: string[], acknowledged: boolean) => void;
   onClose: () => void;
 }
 
@@ -32,7 +33,7 @@ type AlertFilter = {
 
 type SortOption = 'timestamp' | 'severity' | 'student';
 
-export function AlertPanel({ alerts, onUpdateAlerts, onClose }: AlertPanelProps) {
+export function AlertPanel({ alerts, onAcknowledge, onClose }: AlertPanelProps) {
   const [filter, setFilter] = useState<AlertFilter>({
     severity: 'all',
     acknowledged: 'all',
@@ -93,23 +94,14 @@ export function AlertPanel({ alerts, onUpdateAlerts, onClose }: AlertPanelProps)
     }
   };
 
-  // S3-C4: stamp updatedAt on local ack so mergeById treats the local edit as
-  // newer than the last server snapshot (server rows carry no updatedAt and
-  // would otherwise overwrite the ack on the next detail poll).
   const handleToggleAcknowledge = (alertId: string) => {
-    const now = new Date().toISOString();
-    const updatedAlerts = alerts.map(alert =>
-      alert.id === alertId ? { ...alert, isAcknowledged: !alert.isAcknowledged, updatedAt: now } : alert
-    );
-    onUpdateAlerts(updatedAlerts);
+    const alert = alerts.find((candidate) => candidate.id === alertId);
+    if (!alert) return;
+    onAcknowledge([alertId], !alert.isAcknowledged);
   };
 
   const handleBulkAcknowledge = (acknowledge: boolean) => {
-    const now = new Date().toISOString();
-    const updatedAlerts = alerts.map(alert =>
-      selectedAlertIds.has(alert.id) ? { ...alert, isAcknowledged: acknowledge, updatedAt: now } : alert
-    );
-    onUpdateAlerts(updatedAlerts);
+    onAcknowledge([...selectedAlertIds], acknowledge);
     setSelectedAlertIds(new Set());
   };
 

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SatSessionRoomRoute } from '../SatSessionRoomRoute';
 import { examDeliveryService } from '../../../../features/proctor/infrastructure/proctorGateway';
@@ -10,6 +10,7 @@ const controllerMock = vi.hoisted(() => vi.fn());
 const entryInfoMock = vi.hoisted(() => vi.fn());
 const roleMock = vi.hoisted(() => ({ role: undefined as string | undefined }));
 const proctorGetMock = vi.hoisted(() => vi.fn());
+const recoveryCommandMock = vi.hoisted(() => vi.fn());
 // The real controller always reports `scheduleMetrics`; fixtures only list what they exercise.
 const formStateMock = vi.hoisted(() => vi.fn(() => ({ data: undefined as unknown, refetch: vi.fn(async () => ({ data: undefined })) })));
 // Room form state has its own suite; rooms here have no Eva SIM.
@@ -18,7 +19,7 @@ vi.mock('@/src/features/assessment-forms/api/assessmentForms', async (importOrig
   useScheduleFormState: () => formStateMock(),
 }));
 vi.mock('../../../../features/proctor/hooks/useProctorRouteController', () => ({
-  useProctorRouteController: (...args: unknown[]) => ({ scheduleMetrics: {}, ...controllerMock(...args) }),
+  useProctorRouteController: (...args: unknown[]) => ({ scheduleMetrics: {}, commands: { resolveRecovery: recoveryCommandMock }, ...controllerMock(...args) }),
 }));
 vi.mock('../../api/satRoomEntryInfo', () => ({ useSatRoomEntryInfo: entryInfoMock }));
 vi.mock('../../../../features/auth/authSession', () => ({
@@ -28,6 +29,7 @@ vi.mock('qrcode', () => ({ toDataURL: vi.fn().mockResolvedValue('data:image/png;
 vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => ({
   examDeliveryService: {
     extendCurrentSection: vi.fn(),
+    completeRuntime: vi.fn(),
     extendStudentAttempt: vi.fn(), warnStudent: vi.fn(), pauseStudentAttempt: vi.fn(), resumeStudentAttempt: vi.fn(), terminateStudentAttempt: vi.fn(),
   },
   // Staff route queue reports disabled, so the panel stays hidden and raises no alert.
@@ -99,9 +101,15 @@ function TestSessionsProbe() {
   return <p data-testid="test-sessions">{`${location.pathname}${location.search}`}</p>;
 }
 
+function SwitchRoom() {
+  const navigate = useNavigate();
+  return <button type="button" onClick={() => navigate('/sat/sessions/sched-2')}>Switch room</button>;
+}
+
 describe('SatSessionRoomRoute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    recoveryCommandMock.mockReset().mockResolvedValue({ kind: 'confirmed' });
     proctorGetMock.mockImplementation(async () => ({ enabled: false, items: [] }));
     roleMock.role = undefined;
     entryInfoMock.mockReturnValue({ data: { link: null, roster: [] }, isLoading: false, isError: false, refetch: vi.fn() });
@@ -122,6 +130,111 @@ describe('SatSessionRoomRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss room creation confirmation' }));
     expect(screen.queryByText('Room created.')).not.toBeInTheDocument();
     scroll.mockRestore();
+  });
+
+  it('keeps a rejected recovery decision open and reuses its resolution identity on retry', async () => {
+    const recovering = {
+      ...student,
+      satRecoveryPhase: 'blocked',
+      satRecoveryKind: 'entry',
+      satRecoveryModuleAttemptId: 'module-attempt-1',
+      satRecoveryBoundaryRevision: 4,
+    };
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [recovering], alerts: [], error: null, isLoading: false,
+      roomClock: resolvedRoomClock, reload: vi.fn().mockResolvedValue(undefined),
+      handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    recoveryCommandMock.mockResolvedValueOnce({ kind: 'rejected', error: 'Recovery decision rejected' });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /review recovery decision/i }));
+    fireEvent.change(screen.getByLabelText('Reason for the recovery decision'), { target: { value: 'Device was checked.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start module' }));
+    await screen.findAllByText('Recovery decision rejected');
+    expect(screen.getByRole('group', { name: 'Recovery decision preview' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Reason for the recovery decision')).toHaveValue('Device was checked.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start module' }));
+    await waitFor(() => expect(recoveryCommandMock).toHaveBeenCalledTimes(2));
+    expect(recoveryCommandMock.mock.calls[1]?.[0].resolutionId).toBe(recoveryCommandMock.mock.calls[0]?.[0].resolutionId);
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Recovery decision preview' })).not.toBeInTheDocument());
+  });
+
+  it('refreshes the room and retains the decision when a recovery response is uncertain', async () => {
+    const recovering = {
+      ...student, satRecoveryPhase: 'blocked', satRecoveryKind: 'entry',
+      satRecoveryModuleAttemptId: 'module-attempt-1', satRecoveryBoundaryRevision: 4,
+    };
+    const reload = vi.fn().mockResolvedValue(undefined);
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [recovering], alerts: [], error: null, isLoading: false,
+      roomClock: resolvedRoomClock, reload, handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(),
+      handleResumeCohort: vi.fn(), handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    recoveryCommandMock.mockResolvedValueOnce({ kind: 'uncertain', error: 'The action may have been applied. Check the room before trying again.' });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+
+    fireEvent.click(await screen.findByRole('button', { name: /review recovery decision/i }));
+    fireEvent.change(screen.getByLabelText('Reason for the recovery decision'), { target: { value: 'Device was checked.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Start module' }));
+    await screen.findAllByText(/may have been applied/i);
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole('group', { name: 'Recovery decision preview' })).toBeInTheDocument();
+    expect(recoveryCommandMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a pending room action and its feedback bound to the room where it started', async () => {
+    let finishPauseA: () => void = () => {};
+    let finishPauseB: () => void = () => {};
+    const pause = vi.fn((roomId: string) => new Promise<void>((resolve) => {
+      if (roomId === 'sched-1') finishPauseA = resolve;
+      else finishPauseB = resolve;
+    }));
+    const otherSchedule = { ...schedule, id: 'sched-2', cohortName: 'Afternoon' };
+    const otherRuntime = { ...runtime, id: 'runtime-2', scheduleId: 'sched-2', cohortName: 'Afternoon' };
+    const otherStudent = { ...student, id: 'attempt-2', scheduleId: 'sched-2', name: 'Another student' };
+    controllerMock.mockReturnValue({
+      schedules: [schedule, otherSchedule], runtimeSnapshots: [runtime, otherRuntime], sessions: [student, otherStudent],
+      alerts: [], error: null, isLoading: false, roomClock: resolvedRoomClock, reload: vi.fn().mockResolvedValue(undefined),
+      handleStartScheduledSession: vi.fn(), handlePauseCohort: pause, handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><SwitchRoom /><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pause exam' }));
+    await waitFor(() => expect(pause).toHaveBeenCalledWith('sched-1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch room' }));
+    expect(await screen.findByRole('heading', { name: 'Afternoon' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pause exam' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Pause exam' }));
+    await waitFor(() => expect(pause).toHaveBeenCalledWith('sched-2'));
+    await act(async () => { finishPauseA(); });
+    expect(screen.queryByText('Exam paused.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /pausing/i })).toHaveAttribute('aria-busy', 'true');
+    await act(async () => { finishPauseB(); });
+    expect(await screen.findByText('Exam paused.')).toBeInTheDocument();
+  });
+
+  it('dismisses a room confirmation when the route changes to another room', async () => {
+    const otherSchedule = { ...schedule, id: 'sched-2', cohortName: 'Afternoon' };
+    const otherRuntime = { ...runtime, id: 'runtime-2', scheduleId: 'sched-2', cohortName: 'Afternoon' };
+    controllerMock.mockReturnValue({
+      schedules: [schedule, otherSchedule], runtimeSnapshots: [runtime, otherRuntime], sessions: [student],
+      alerts: [], error: null, isLoading: false, roomClock: resolvedRoomClock, reload: vi.fn().mockResolvedValue(undefined),
+      handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><SwitchRoom /><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'End exam' }));
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Switch room', hidden: true }));
+    expect(await screen.findByRole('heading', { name: 'Afternoon' })).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(examDeliveryService.completeRuntime).not.toHaveBeenCalled();
   });
 
   it('keeps creation confirmed while its page loads, including a partial snapshot', () => {
@@ -486,7 +599,7 @@ describe('SatSessionRoomRoute', () => {
 
   it('keeps per-action pending isolated: one student action never freezes room controls', async () => {
     const { examDeliveryService } = await import('../../../../features/proctor/infrastructure/proctorGateway');
-    let releaseExtend: ((value: { success: boolean }) => void) | null = null;
+    let releaseExtend: (value: { success: boolean }) => void = () => { throw new Error('Extension request did not start'); };
     (examDeliveryService.extendStudentAttempt as ReturnType<typeof vi.fn>).mockImplementation(
       () => new Promise((resolve) => { releaseExtend = resolve; }),
     );
@@ -495,7 +608,7 @@ describe('SatSessionRoomRoute', () => {
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Add 5 minutes for Ananda S.?');
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Add 5 minutes' }));
     expect(screen.getByRole('button', { name: 'Pause exam' })).toBeEnabled();
-    releaseExtend?.({ success: true });
+    releaseExtend({ success: true });
     await screen.findByText(/Added 5 minutes for Ananda S/);
   });
 
@@ -509,6 +622,37 @@ describe('SatSessionRoomRoute', () => {
     render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
     fireEvent.click(screen.getByRole('button', { name: 'Pause exam' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Exam paused. However, the live view could not refresh. Retry to confirm.');
+  });
+
+  it('reports a confirmed room completion accurately if the follow-up refresh fails', async () => {
+    const reload = vi.fn().mockRejectedValue(new Error('reload failed'));
+    vi.mocked(examDeliveryService.completeRuntime).mockResolvedValue({ success: true });
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [student], alerts: [], error: null, isLoading: false,
+      roomClock: resolvedRoomClock, reload, handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'More' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'End exam' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'End exam' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Room completed. However, the live view could not refresh. Retry to confirm.');
+    expect(examDeliveryService.completeRuntime).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks staff to check the room when a warning response is lost', async () => {
+    vi.mocked(examDeliveryService.warnStudent).mockResolvedValue({
+      success: false, error: 'Connection lost', errorCause: new TypeError('Connection lost'), commandDispatched: true,
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Send warning…' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Send warning' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('may have been applied');
+    expect(screen.getByRole('alert')).toHaveTextContent('Check the room before trying again.');
+    expect(examDeliveryService.warnStudent).toHaveBeenCalledTimes(1);
   });
 
   it('moves through the roster with an arrow key from its single tab stop', () => {
@@ -573,6 +717,28 @@ describe('SatSessionRoomRoute', () => {
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Send warning' }));
     expect(await screen.findByText(/Warning sent to Ananda S/)).toBeInTheDocument();
     expect(examDeliveryService.warnStudent).toHaveBeenCalledWith('attempt-1', 'Please return your attention to the exam.', expect.anything());
+  });
+
+  it('keeps student action pending and feedback on the selected attempt', async () => {
+    const otherStudent = { ...student, id: 'attempt-2', studentId: 'W2502', name: 'Becky S.' };
+    let finishWarning: (result: { success: boolean }) => void = () => {};
+    vi.mocked(examDeliveryService.warnStudent).mockImplementationOnce(() => new Promise((resolve) => { finishWarning = resolve; }));
+    controllerMock.mockReturnValue({
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [student, otherStudent], alerts: [], error: null, isLoading: false,
+      roomClock: resolvedRoomClock, reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(),
+      handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(), handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: 'Send warning…' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Send warning' }));
+    await waitFor(() => expect(examDeliveryService.warnStudent).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('option', { name: 'Open Becky S.' }));
+    expect(screen.getByRole('button', { name: 'Send warning…' })).toBeEnabled();
+    await act(async () => { finishWarning({ success: true }); });
+    expect(screen.queryByText(/Warning sent to Ananda S/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'Open Ananda S.' }));
+    expect(await screen.findByText(/Warning sent to Ananda S/)).toBeInTheDocument();
   });
 
   it('previews a time extension with remaining context before applying', async () => {
@@ -718,8 +884,10 @@ describe('SatSessionRoomRoute', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Open Budi T.' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('End Ananda S.’s attempt?');
     fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'End attempt' }));
+    await waitFor(() => expect(examDeliveryService.terminateStudentAttempt).toHaveBeenCalledWith('attempt-1', expect.anything()));
+    expect(screen.queryByText(/Ananda S.*attempt ended/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'Open Ananda S.' }));
     expect(await screen.findByText(/Ananda S.*attempt ended/)).toBeInTheDocument();
-    expect(examDeliveryService.terminateStudentAttempt).toHaveBeenCalledWith('attempt-1', expect.anything());
   });
 
   it('shows an error instead of acting when the bound student left the roster', async () => {

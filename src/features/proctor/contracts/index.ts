@@ -1,3 +1,4 @@
+import type { CommandOutcome } from '../domain/commandOutcome';
 /**
  * Proctor Feature Contracts
  * 
@@ -16,6 +17,16 @@ export interface ProctorScheduleMetrics {
   alertCount: number;
   violationCount: number;
   degradedLiveMode: boolean;
+}
+
+export interface SatRecoveryCommand {
+  scheduleId: string;
+  attemptId: string;
+  resolutionId: string;
+  moduleAttemptId: string;
+  expectedBoundaryRevision: number;
+  action: 'activate_entry' | 'continue_confirmed';
+  reason: string;
 }
 
 /**
@@ -49,6 +60,31 @@ export interface ProctorData {
 }
 
 /**
+ * Typed staff commands for proctor views. Each resolves a CommandOutcome
+ * (confirmed / rejected / uncertain / confirmed_refresh_failed); views never
+ * receive a setter for server entities.
+ */
+export interface ProctorViewCommands {
+  resolveRecovery: (request: SatRecoveryCommand) => Promise<CommandOutcome>;
+  studentAction: (
+    session: Pick<StudentSession, 'id' | 'scheduleId'>,
+    action: 'warn' | 'pause' | 'resume' | 'terminate',
+    actor: string,
+    message?: string,
+  ) => Promise<CommandOutcome>;
+  extendStudent: (
+    session: Pick<StudentSession, 'id' | 'scheduleId' | 'runtimeCurrentModuleId'>,
+    minutes: number,
+    actor: string,
+  ) => Promise<CommandOutcome>;
+  acknowledgeAlerts: (scheduleId: string | null, alertIds: readonly string[], acknowledged: boolean) => Promise<CommandOutcome>;
+  saveNote: (note: SessionNote) => Promise<CommandOutcome>;
+  deleteNote: (note: Pick<SessionNote, 'id' | 'scheduleId'>) => Promise<CommandOutcome>;
+  saveRule: (rule: ViolationRule) => Promise<CommandOutcome>;
+  deleteRule: (rule: Pick<ViolationRule, 'id' | 'scheduleId'>) => Promise<CommandOutcome>;
+}
+
+/**
  * Proctor operation callbacks
  */
 export interface ProctorOperationCallbacks {
@@ -56,17 +92,8 @@ export interface ProctorOperationCallbacks {
   onExit: () => void;
   onSwitchToSat?: (() => void) | undefined;
   
-  // Update sessions
-  onUpdateSessions: (sessions: StudentSession[]) => void;
-  
-  // Update alerts
-  onUpdateAlerts: (alerts: ProctorAlert[]) => void;
-
-  // Update notes
-  onUpdateNotes: (notes: SessionNote[]) => void;
-
-  // Update schedule-scoped automatic violation responses
-  onUpdateRules: (rules: ViolationRule[]) => void;
+  // Typed staff commands (students, alerts, notes, rules)
+  commands: ProctorViewCommands;
   
   // Navigate to other surfaces
   onNavigate?: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
@@ -113,10 +140,7 @@ export interface ProctorProps {
   // From ProctorOperationCallbacks
   onExit: () => void;
   onSwitchToSat?: (() => void) | undefined;
-  onUpdateSessions: (sessions: StudentSession[]) => void;
-  onUpdateAlerts: (alerts: ProctorAlert[]) => void;
-  onUpdateNotes: (notes: SessionNote[]) => void;
-  onUpdateRules: (rules: ViolationRule[]) => void;
+  commands: ProctorViewCommands;
   onNavigate?: (mode: 'builder' | 'student' | 'admin' | 'proctor') => void;
   onStartScheduledSession: (scheduleId: string) => Promise<void>;
   onPauseCohort: (scheduleId: string) => Promise<void>;

@@ -45,10 +45,7 @@ export function ProctorApp({
   onSelectScheduleId,
   onExit,
   onSwitchToSat,
-  onUpdateSessions,
-  onUpdateAlerts,
-  onUpdateNotes,
-  onUpdateRules,
+  commands,
   onStartScheduledSession,
   onPauseCohort,
   onResumeCohort,
@@ -233,10 +230,7 @@ export function ProctorApp({
             violationRules={violationRules}
             selectedScheduleId={selectedScheduleId}
             onSelectScheduleId={onSelectScheduleId}
-            onUpdateSessions={onUpdateSessions}
-            onUpdateAlerts={onUpdateAlerts}
-            onUpdateNotes={onUpdateNotes}
-            onUpdateRules={onUpdateRules}
+            commands={commands}
             onStartScheduledSession={onStartScheduledSession}
             onPauseCohort={onPauseCohort}
             onResumeCohort={onResumeCohort}
@@ -267,7 +261,9 @@ export function ProctorApp({
           >
             <AlertPanel
               alerts={alerts}
-              onUpdateAlerts={onUpdateAlerts}
+              onAcknowledge={(alertIds, acknowledged) => {
+                void commands.acknowledgeAlerts(selectedScheduleId ?? null, alertIds, acknowledged);
+              }}
               onClose={() => setIsAlertsOpen(false)}
             />
           </div>

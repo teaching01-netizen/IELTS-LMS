@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckSquare, ChevronLeft, Filter, LayoutGrid, List, Pause, Play, Settings, SkipForward, Square, StopCircle, Timer, X } from 'lucide-react';
-import type { AuditActionType, ExamGroup, ModuleType, ProctorAlert, SessionAuditLog, SessionNote, StudentSession, StudentStatus, ViolationRule } from '../../types';
+import type { ExamGroup, ModuleType, ProctorAlert, SessionAuditLog, SessionNote, StudentSession, StudentStatus, ViolationRule } from '../../types';
 import { isCohortTimingModel, type ExamSchedule, type ExamSessionRuntime } from '../../types/domain';
 import { ConfirmModal } from '../ConfirmModal';
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
@@ -10,10 +10,11 @@ import { StudentCard } from './StudentCard';
 import { StudentDetailPanel, type StudentDrawerTab } from './StudentDetailPanel';
 import { ExamGroupCard } from './ExamGroupCard';
 import { ViolationRulePanel } from './ViolationRulePanel';
-import { examRepository, examDeliveryService, backendPost } from '../../features/proctor/infrastructure/proctorGateway';
+import { examDeliveryService, backendPost } from '../../features/proctor/infrastructure/proctorGateway';
+import { isCommandConfirmed } from '../../features/proctor/domain/commandOutcome';
 import { useStudentFilters } from './hooks/useStudentFilters';
 import { logger } from '../../utils/logger';
-import type { ProctorScheduleMetrics } from '../../features/proctor/contracts';
+import type { ProctorScheduleMetrics, ProctorViewCommands } from '../../features/proctor/contracts';
 import {
   filterPastSessionGroups,
   getOverviewBucket,
@@ -37,10 +38,8 @@ interface ProctorDashboardProps {
   violationRules?: ViolationRule[];
   selectedScheduleId: string | null;
   onSelectScheduleId: (scheduleId: string | null) => void;
-  onUpdateSessions: (sessions: StudentSession[]) => void;
-  onUpdateAlerts: (alerts: ProctorAlert[]) => void;
-  onUpdateNotes?: (notes: SessionNote[]) => void;
-  onUpdateRules?: (rules: ViolationRule[]) => void;
+  /** Typed staff commands; the dashboard never writes server entities itself. */
+  commands: ProctorViewCommands;
   onStartScheduledSession: (scheduleId: string) => Promise<void> | void;
   onPauseCohort: (scheduleId: string) => Promise<void> | void;
   onResumeCohort: (scheduleId: string) => Promise<void> | void;
@@ -65,10 +64,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   violationRules = [],
   selectedScheduleId,
   onSelectScheduleId,
-  onUpdateSessions,
-  onUpdateAlerts: _onUpdateAlerts,
-  onUpdateNotes,
-  onUpdateRules,
+  commands,
   onStartScheduledSession,
   onPauseCohort,
   onResumeCohort,
@@ -90,7 +86,12 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const [drawerTab, setDrawerTab] = useState<StudentDrawerTab>('timeline');
   const [overviewBucket, setOverviewBucket] = useState<OverviewBucket>('active');
   const [pastStatusFilter, setPastStatusFilter] = useState<PastSessionStatusFilter>('all');
-  const [pendingCohortAction, setPendingCohortAction] = useState<CohortControlAction | null>(null);
+  // Pending cohort commands by room: one room's in-flight command never
+  // busies, or reports into, another room's controls.
+  const [pendingCohortActions, setPendingCohortActions] = useState<Readonly<Record<string, CohortControlAction>>>({});
+  const pendingCohortAction = (selectedScheduleId && pendingCohortActions[selectedScheduleId]) || null;
+  const selectedScheduleIdRef = useRef(selectedScheduleId);
+  selectedScheduleIdRef.current = selectedScheduleId;
   const [confirmAction, setConfirmAction] = useState<'complete' | 'end_section' | null>(null);
   const [confirmDisciplineAction, setConfirmDisciplineAction] = useState<
     | null
@@ -246,16 +247,6 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     setShowViolationRules(false);
   }, [selectedScheduleId]);
 
-  const handleUpdateViolationRules = useCallback(
-    (nextRules: ViolationRule[]) => {
-      if (!selectedScheduleId || !onUpdateRules) return;
-      onUpdateRules([
-        ...violationRules.filter((rule) => rule.scheduleId !== selectedScheduleId),
-        ...nextRules,
-      ]);
-    },
-    [onUpdateRules, selectedScheduleId, violationRules],
-  );
 
   // Proctor presence: idempotent join (guarded so StrictMode double-mount
   // sends one join), 30s heartbeat, and sendBeacon leave so the leave
@@ -384,39 +375,6 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     setSortOrder('desc');
   };
 
-  const createAuditLog = (actionType: AuditActionType, targetStudentId?: string, payload?: Record<string, unknown>): SessionAuditLog => ({
-    id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-    timestamp: new Date().toISOString(),
-    actor: currentProctorName ?? 'Proctor',
-    actionType,
-    targetStudentId,
-    sessionId: selectedScheduleId || '',
-    payload,
-  });
-
-  const applyStudentAction = (session: StudentSession, action: 'warn' | 'pause' | 'resume' | 'terminate', payload?: unknown): StudentSession => {
-    if (action === 'warn') {
-      return {
-        ...session,
-        status: 'warned',
-        warnings: session.warnings + 1,
-        violations: [
-          ...session.violations,
-          {
-            id: Math.random().toString(36).slice(2, 11),
-            type: 'PROCTOR_WARNING',
-            severity: 'medium',
-            timestamp: new Date().toISOString(),
-            description: typeof payload === 'string' ? payload : 'Warning issued by proctor',
-          },
-        ],
-      };
-    }
-    if (action === 'pause') return { ...session, status: 'paused' };
-    if (action === 'resume') return { ...session, status: 'active' };
-    return { ...session, status: 'terminated' };
-  };
-
   const pushToast = useCallback((toast: Omit<(typeof toasts)[number], 'id'>) => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     setToasts((current) => [...current, { ...toast, id }]);
@@ -434,72 +392,39 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
       const currentSession = sessions.find((session) => session.id === studentId);
       if (!currentSession) return { success: false, error: 'Student not found.' as const };
 
-      let deliveryResult: { success: boolean; error?: string } = { success: true };
-      if (action === 'warn') {
-        deliveryResult = await examDeliveryService.warnStudent(
-          studentId,
-          typeof payload === 'string' ? payload : 'Warning issued by proctor',
-          currentProctorName ?? 'Proctor',
-        );
-      } else if (action === 'pause') {
-        deliveryResult = await examDeliveryService.pauseStudentAttempt(studentId, currentProctorName ?? 'Proctor');
-      } else if (action === 'resume') {
-        deliveryResult = await examDeliveryService.resumeStudentAttempt(studentId, currentProctorName ?? 'Proctor');
-      } else if (action === 'terminate') {
-        deliveryResult = await examDeliveryService.terminateStudentAttempt(studentId, currentProctorName ?? 'Proctor');
-      }
-
-      if (!deliveryResult.success) {
-        const errorMessage = deliveryResult.error ?? 'Failed to execute student action';
+      const outcome = await commands.studentAction(
+        currentSession,
+        action,
+        currentProctorName ?? 'Proctor',
+        action === 'warn' && typeof payload === 'string' ? payload : undefined,
+      );
+      if (!isCommandConfirmed(outcome)) {
+        const errorMessage = 'error' in outcome ? outcome.error : 'Failed to execute student action';
         logger.error('Failed to execute student action:', errorMessage);
         return { success: false, error: errorMessage };
       }
-
-      const nextSession = applyStudentAction(currentSession, action, payload);
-      onUpdateSessions(
-        sessions.map((session) => (session.id === studentId ? nextSession : session)),
-      );
       return { success: true as const };
     },
-    [currentProctorName, onUpdateSessions, sessions],
+    [commands, currentProctorName, sessions],
   );
 
   const runStudentExtension = useCallback(
     async (studentId: string, minutes: number) => {
-      const moduleId = sessions.find((session) => session.id === studentId)?.runtimeCurrentModuleId;
-      if (!moduleId) {
-        throw new Error('The student’s current module is unavailable. Refresh the session before adding time.');
-      }
-      const result = await examDeliveryService.extendStudentAttempt(
-        studentId,
-        currentProctorName ?? 'Proctor',
-        minutes,
-        moduleId,
-      );
-      if (!result.success) {
-        throw new Error(result.error ?? 'Failed to extend student time');
+      const session = sessions.find((candidate) => candidate.id === studentId);
+      if (!session) throw new Error('Student not found.');
+      const outcome = await commands.extendStudent(session, minutes, currentProctorName ?? 'Proctor');
+      if (!isCommandConfirmed(outcome)) {
+        throw new Error('error' in outcome ? outcome.error : 'Failed to extend student time');
       }
 
-      const targetName = sessions.find((session) => session.id === studentId)?.name ?? 'the student';
-      onUpdateSessions(
-        sessions.map((session) =>
-          session.id === studentId
-            ? {
-                ...session,
-                timeRemaining: session.timeRemaining + minutes * 60,
-                runtimeTimeRemainingSeconds:
-                  (session.runtimeTimeRemainingSeconds ?? session.timeRemaining) + minutes * 60,
-              }
-            : session,
-        ),
-      );
+      const targetName = session.name ?? 'the student';
       pushToast({
         variant: 'success',
         title: 'Student time extended',
         message: `Added ${minutes} minutes to ${targetName}'s current section.`,
       });
     },
-    [currentProctorName, onUpdateSessions, pushToast, sessions],
+    [commands, currentProctorName, pushToast, sessions],
   );
 
   const requestDisciplineAction = useCallback(
@@ -541,17 +466,17 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     async (action: 'warn' | 'pause' | 'resume' | 'terminate', studentIds: string[]) => {
       const actor = currentProctorName ?? 'Proctor';
       const byId = new Map(sessions.map((session) => [session.id, session]));
-      const deliverFor = (studentId: string): Promise<{ success: boolean; error?: string }> => {
-        if (action === 'warn') {
-          return examDeliveryService.warnStudent(studentId, 'Bulk warning issued by proctor', actor);
-        }
-        if (action === 'pause') {
-          return examDeliveryService.pauseStudentAttempt(studentId, actor);
-        }
-        if (action === 'resume') {
-          return examDeliveryService.resumeStudentAttempt(studentId, actor);
-        }
-        return examDeliveryService.terminateStudentAttempt(studentId, actor);
+      // One command per student: serialized per attempt, independent across students.
+      const deliverFor = async (studentId: string): Promise<{ success: boolean }> => {
+        const session = byId.get(studentId);
+        if (!session) return { success: false };
+        const outcome = await commands.studentAction(
+          session,
+          action,
+          actor,
+          action === 'warn' ? 'Bulk warning issued by proctor' : undefined,
+        );
+        return { success: isCommandConfirmed(outcome) };
       };
       const succeededIds: string[] = [];
       const failedNames: string[] = [];
@@ -570,12 +495,6 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
       }
 
       if (succeededIds.length > 0) {
-        const succeeded = new Set(succeededIds);
-        onUpdateSessions(
-          sessions.map((session) =>
-            succeeded.has(session.id) ? applyStudentAction(session, action) : session,
-          ),
-        );
         pushToast({
           variant: 'success',
           title: 'Bulk action complete',
@@ -590,7 +509,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
         });
       }
     },
-    [currentProctorName, onUpdateSessions, pushToast, sessions],
+    [commands, currentProctorName, pushToast, sessions],
   );
 
   const requestBulkAction = useCallback(
@@ -672,16 +591,21 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
 
   const runCohortAction = useCallback(
     async (action: CohortControlAction, options: { label: string; successMessage: string; fn: () => Promise<void> | void }) => {
-      if (!selectedScheduleId) return;
-      if (pendingCohortAction) return;
+      const scheduleId = selectedScheduleId;
+      if (!scheduleId) return;
+      if (pendingCohortActions[scheduleId]) return;
+      const roomLabel = selectedGroup?.cohortName ?? scheduleId;
+      // Feedback for a room the proctor has since left names that room.
+      const forRoom = (message: string) =>
+        selectedScheduleIdRef.current === scheduleId ? message : `${roomLabel}: ${message}`;
 
-      setPendingCohortAction(action);
+      setPendingCohortActions((current) => ({ ...current, [scheduleId]: action }));
       try {
         await options.fn();
         pushToast({
           variant: 'success',
           title: options.label,
-          message: options.successMessage,
+          message: forRoom(options.successMessage),
         });
         return true;
       } catch (error) {
@@ -690,14 +614,17 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
         pushToast({
           variant: 'error',
           title: `${options.label} failed`,
-          message: errorMessage,
+          message: forRoom(errorMessage),
         });
         return false;
       } finally {
-        setPendingCohortAction(null);
+        setPendingCohortActions((current) => {
+          const { [scheduleId]: _finished, ...rest } = current;
+          return rest;
+        });
       }
     },
-    [pendingCohortAction, pushToast, selectedScheduleId],
+    [pendingCohortActions, pushToast, selectedGroup?.cohortName, selectedScheduleId],
   );
 
   return (
@@ -925,7 +852,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
             <button
               type="button"
               onClick={() => setShowViolationRules(true)}
-              disabled={!selectedScheduleId || !onUpdateRules}
+              disabled={!selectedScheduleId}
               className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed disabled:text-slate-400"
             >
               <Settings size={14} />
@@ -944,7 +871,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
         ) : null}
       </section>
 
-      {showViolationRules && selectedScheduleId && onUpdateRules ? (
+      {showViolationRules && selectedScheduleId ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Auto-Response Rules">
           <button
             type="button"
@@ -957,7 +884,8 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
               rules={selectedViolationRules}
               scheduleId={selectedScheduleId}
               currentProctor={currentProctorName ?? 'Proctor'}
-              onUpdateRules={handleUpdateViolationRules}
+              onSaveRule={commands.saveRule}
+              onDeleteRule={commands.deleteRule}
               onClose={() => setShowViolationRules(false)}
             />
           </div>
@@ -1216,7 +1144,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                     : undefined
                 }
                 onSaveNote={async (content, category) => {
-                  if (!selectedScheduleId || !onUpdateNotes) return;
+                  if (!selectedScheduleId) return;
                   const newNote = {
                     id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
                     scheduleId: selectedScheduleId,
@@ -1226,22 +1154,14 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                     category,
                     isResolved: false,
                   };
-                await examRepository.saveSessionNote(newNote);
-                await examRepository.saveAuditLog(
-                  createAuditLog('NOTE_CREATED', selectedStudent?.id, {
-                    noteId: newNote.id,
-                    category,
-                  }),
-                );
-                onUpdateNotes([...notes, newNote]);
+                const saved = await commands.saveNote(newNote);
+                if (!isCommandConfirmed(saved)) throw new Error('error' in saved ? saved.error : 'Failed to save note.');
               }}
               onToggleNote={async (noteId) => {
-                if (!onUpdateNotes) return;
                 const note = notes.find((n) => n.id === noteId);
                 if (!note) return;
-                const updatedNote = { ...note, isResolved: !note.isResolved };
-                await examRepository.saveSessionNote(updatedNote);
-                onUpdateNotes(notes.map((n) => (n.id === noteId ? updatedNote : n)));
+                const saved = await commands.saveNote({ ...note, isResolved: !note.isResolved });
+                if (!isCommandConfirmed(saved)) throw new Error('error' in saved ? saved.error : 'Failed to save note.');
                 }}
               />
           </div>

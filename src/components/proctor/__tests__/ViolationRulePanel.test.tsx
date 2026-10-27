@@ -1,18 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ViolationRulePanel } from '../ViolationRulePanel';
 import type { ViolationRule } from '../../../types';
+import type { CommandOutcome } from '../../../features/proctor/domain/commandOutcome';
 
-const { saveViolationRule, deleteViolationRule } = vi.hoisted(() => ({
-  saveViolationRule: vi.fn(),
-  deleteViolationRule: vi.fn(),
-}));
-
-// The panel lazy-imports the repository through the proctor gateway on every
-// mutation; stub just that seam so persistence resolves without the backend.
-vi.mock('../../../features/proctor/infrastructure/proctorGateway', () => ({
-  examRepository: { saveViolationRule, deleteViolationRule },
-}));
+const CONFIRMED: CommandOutcome = { kind: 'confirmed' };
 
 function makeRule(overrides: Partial<ViolationRule> = {}): ViolationRule {
   return {
@@ -37,32 +29,28 @@ interface PanelOverrides {
 }
 
 function renderPanel(overrides: PanelOverrides = {}) {
-  const onUpdateRules = vi.fn();
+  const onSaveRule = vi.fn<(rule: ViolationRule) => Promise<CommandOutcome>>().mockResolvedValue(CONFIRMED);
+  const onDeleteRule = vi.fn<(rule: Pick<ViolationRule, 'id' | 'scheduleId'>) => Promise<CommandOutcome>>().mockResolvedValue(CONFIRMED);
   const onClose = vi.fn();
   const utils = render(
     <ViolationRulePanel
       rules={overrides.rules ?? []}
       scheduleId={overrides.scheduleId ?? 'sched-1'}
       currentProctor={overrides.currentProctor ?? 'Proctor A'}
-      onUpdateRules={onUpdateRules}
+      onSaveRule={onSaveRule}
+      onDeleteRule={onDeleteRule}
       onClose={onClose}
-      violationCounts={overrides.violationCounts}
-      severityThresholds={overrides.severityThresholds}
+      {...(overrides.violationCounts ? { violationCounts: overrides.violationCounts } : {})}
+      {...(overrides.severityThresholds ? { severityThresholds: overrides.severityThresholds } : {})}
     />,
   );
-  return { onUpdateRules, onClose, ...utils };
+  return { onSaveRule, onDeleteRule, onClose, ...utils };
 }
 
 function openNewRuleForm() {
   fireEvent.click(screen.getByRole('button', { name: /new rule/i }));
   expect(screen.getByLabelText('Rule trigger type')).toBeInTheDocument();
 }
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  saveViolationRule.mockResolvedValue(undefined);
-  deleteViolationRule.mockResolvedValue(undefined);
-});
 
 describe('ViolationRulePanel', () => {
   it('renders the empty state with minimal props', () => {
@@ -151,63 +139,56 @@ describe('ViolationRulePanel', () => {
 
   it('toggles a rule off and persists the change', async () => {
     const rule = makeRule();
-    const { onUpdateRules } = renderPanel({ rules: [rule] });
+    const { onSaveRule } = renderPanel({ rules: [rule] });
 
     fireEvent.click(screen.getByRole('button', { name: 'Disable rule' }));
 
-    expect(onUpdateRules).toHaveBeenCalledTimes(1);
-    expect(onUpdateRules).toHaveBeenCalledWith([{ ...rule, isEnabled: false }]);
-    await waitFor(() =>
-      expect(saveViolationRule).toHaveBeenCalledWith({ ...rule, isEnabled: false }),
-    );
+    expect(onSaveRule).toHaveBeenCalledTimes(1);
+    expect(onSaveRule).toHaveBeenCalledWith({ ...rule, isEnabled: false });
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 
   it('enables a disabled rule', async () => {
     const rule = makeRule({ isEnabled: false });
-    const { onUpdateRules } = renderPanel({ rules: [rule] });
+    const { onSaveRule } = renderPanel({ rules: [rule] });
 
     fireEvent.click(screen.getByRole('button', { name: 'Enable rule' }));
 
-    expect(onUpdateRules).toHaveBeenCalledWith([{ ...rule, isEnabled: true }]);
-    await waitFor(() =>
-      expect(saveViolationRule).toHaveBeenCalledWith({ ...rule, isEnabled: true }),
-    );
+    expect(onSaveRule).toHaveBeenCalledWith({ ...rule, isEnabled: true });
   });
 
   it('deletes a rule and persists the deletion', async () => {
     const keep = makeRule({ id: 'rule-keep' });
     const remove = makeRule({ id: 'rule-remove' });
-    const { onUpdateRules } = renderPanel({ rules: [keep, remove] });
+    const { onSaveRule, onDeleteRule } = renderPanel({ rules: [keep, remove] });
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete rule rule-remove' }));
 
-    expect(onUpdateRules).toHaveBeenCalledWith([keep]);
-    await waitFor(() => expect(deleteViolationRule).toHaveBeenCalledWith('rule-remove'));
-    expect(saveViolationRule).not.toHaveBeenCalled();
+    await waitFor(() => expect(onDeleteRule).toHaveBeenCalledWith({ id: 'rule-remove', scheduleId: 'sched-1' }));
+    expect(onSaveRule).not.toHaveBeenCalled();
   });
 
   it('closes the new-rule form without notifying when cancelled', () => {
-    const { onUpdateRules } = renderPanel();
+    const { onSaveRule } = renderPanel();
     openNewRuleForm();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(screen.queryByLabelText('Rule trigger type')).not.toBeInTheDocument();
-    expect(onUpdateRules).not.toHaveBeenCalled();
+    expect(onSaveRule).not.toHaveBeenCalled();
   });
 
   it('creates a violation-count rule with edited threshold and action', async () => {
-    const { onUpdateRules } = renderPanel();
+    const { onSaveRule } = renderPanel();
     openNewRuleForm();
 
     fireEvent.change(screen.getByLabelText('Rule threshold'), { target: { value: '5' } });
     fireEvent.change(screen.getByLabelText('Rule action'), { target: { value: 'terminate' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Rule' }));
 
-    await waitFor(() => expect(onUpdateRules).toHaveBeenCalledTimes(1));
-    const created = onUpdateRules.mock.calls[0]?.[0] as ViolationRule[];
-    expect(created).toHaveLength(1);
-    expect(created[0]).toMatchObject({
+    await waitFor(() => expect(onSaveRule).toHaveBeenCalledTimes(1));
+    const created = onSaveRule.mock.calls[0]?.[0];
+    expect(created).toMatchObject({
       scheduleId: 'sched-1',
       triggerType: 'violation_count',
       threshold: 5,
@@ -215,13 +196,12 @@ describe('ViolationRulePanel', () => {
       isEnabled: true,
       createdBy: 'Proctor A',
     });
-    expect(created[0]?.id).toEqual(expect.any(String));
-    await waitFor(() => expect(saveViolationRule).toHaveBeenCalledWith(created[0]));
+    expect(created?.id).toEqual(expect.any(String));
     expect(screen.queryByLabelText('Rule trigger type')).not.toBeInTheDocument();
   });
 
   it('shows the violation-type field for specific-violation-type triggers and saves it', async () => {
-    const { onUpdateRules } = renderPanel();
+    const { onSaveRule } = renderPanel();
     openNewRuleForm();
 
     expect(screen.queryByLabelText('Specific violation type')).not.toBeInTheDocument();
@@ -233,16 +213,15 @@ describe('ViolationRulePanel', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save Rule' }));
 
-    await waitFor(() => expect(onUpdateRules).toHaveBeenCalledTimes(1));
-    const created = onUpdateRules.mock.calls[0]?.[0] as ViolationRule[];
-    expect(created[0]).toMatchObject({
+    await waitFor(() => expect(onSaveRule).toHaveBeenCalledTimes(1));
+    expect(onSaveRule.mock.calls[0]?.[0]).toMatchObject({
       triggerType: 'specific_violation_type',
       specificViolationType: 'TAB_SWITCH',
     });
   });
 
   it('shows the severity field for severity-threshold triggers and saves it', async () => {
-    const { onUpdateRules } = renderPanel();
+    const { onSaveRule } = renderPanel();
     openNewRuleForm();
 
     expect(screen.queryByLabelText('Specific severity')).not.toBeInTheDocument();
@@ -254,35 +233,32 @@ describe('ViolationRulePanel', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save Rule' }));
 
-    await waitFor(() => expect(onUpdateRules).toHaveBeenCalledTimes(1));
-    const created = onUpdateRules.mock.calls[0]?.[0] as ViolationRule[];
-    expect(created[0]).toMatchObject({
+    await waitFor(() => expect(onSaveRule).toHaveBeenCalledTimes(1));
+    expect(onSaveRule.mock.calls[0]?.[0]).toMatchObject({
       triggerType: 'severity_threshold',
       specificSeverity: 'high',
     });
   });
 
-  it('rolls back and surfaces persist errors when saving fails', async () => {
-    saveViolationRule.mockRejectedValueOnce(new Error('Network down'));
-    const { onUpdateRules } = renderPanel();
+  it('surfaces a refused save', async () => {
+    const { onSaveRule } = renderPanel();
+    onSaveRule.mockResolvedValueOnce({ kind: 'rejected', error: 'Network down' });
     openNewRuleForm();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Rule' }));
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Network down'));
-    expect(onUpdateRules).toHaveBeenCalledTimes(2);
-    expect(onUpdateRules).toHaveBeenLastCalledWith([]);
   });
 
-  it('surfaces a generic message for non-Error persist failures', async () => {
-    saveViolationRule.mockRejectedValueOnce('nope');
-    renderPanel();
-    openNewRuleForm();
+  it('surfaces an unconfirmed delete and clears the error on the next confirmed change', async () => {
+    const rule = makeRule();
+    const { onDeleteRule } = renderPanel({ rules: [rule] });
+    onDeleteRule.mockResolvedValueOnce({ kind: 'uncertain', error: 'Failed to delete rule.' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save Rule' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete rule rule-1' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Failed to delete rule.'));
 
-    await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('Failed to save rule.'),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Disable rule' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
   });
 });

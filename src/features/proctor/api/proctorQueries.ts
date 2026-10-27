@@ -155,8 +155,13 @@ export type ProctorSessionDetailPayload = {
   degradedLiveMode: boolean;
 };
 
+/** The detail read returns at most this many unacknowledged alerts (newest first). */
+export const ALERT_WINDOW_LIMIT = 100;
+/** The detail read returns at most this many audit entries (newest first). */
+export const AUDIT_WINDOW_LIMIT = 200;
+
 export function buildDashboardDetailEndpoint(scheduleId: string): string {
-  return `/v1/proctor/sessions/${scheduleId}?mode=dashboard&auditLimit=200&alertLimit=100`;
+  return `/v1/proctor/sessions/${scheduleId}?mode=dashboard&auditLimit=${AUDIT_WINDOW_LIMIT}&alertLimit=${ALERT_WINDOW_LIMIT}`;
 }
 
 /** Room summaries for one provider family; the payload is checked at this boundary. */

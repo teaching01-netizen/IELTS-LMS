@@ -1,6 +1,31 @@
 import type { ExamSessionRuntime, ProctorPresence } from "../../../types/domain";
 import type { StudentSession } from "../../../types";
 
+export interface RoomRuntimeProjection {
+  runtime: ExamSessionRuntime;
+  clock: { serverNow: string | null; receivedAt: number };
+}
+
+/** Polls, summaries, and socket frames use one runtime/clock reconciliation. */
+export function reconcileRoomRuntime(
+  existing: RoomRuntimeProjection | undefined,
+  incoming: RoomRuntimeProjection,
+  source: "detail" | "summary" | "socket",
+): RoomRuntimeProjection {
+  if (!existing) {
+    return { ...incoming, runtime: mergeProctorRuntime(undefined, incoming.runtime) };
+  }
+  const heldTime = existing.clock.serverNow ? Date.parse(existing.clock.serverNow) : Number.NaN;
+  const incomingTime = incoming.clock.serverNow ? Date.parse(incoming.clock.serverNow) : Number.NaN;
+  const clock = Number.isFinite(incomingTime) && (!Number.isFinite(heldTime) || incomingTime > heldTime)
+    ? incoming.clock
+    : existing.clock;
+  const runtime = source === "socket" && !runtimeProjectionSupersedes(existing.runtime, incoming.runtime)
+    ? existing.runtime
+    : mergeProctorRuntime(existing.runtime, incoming.runtime);
+  return { runtime, clock };
+}
+
 /**
  * Merge one runtime projection at the proctor boundary.
  *

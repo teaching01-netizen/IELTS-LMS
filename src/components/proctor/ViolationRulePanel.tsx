@@ -14,12 +14,15 @@ import {
 } from 'lucide-react';
 import { ViolationRule, ViolationTriggerType, ViolationAutoAction, ViolationSeverity } from '../../types';
 import { Badge } from '../ui/Badge';
+import { isCommandConfirmed, type CommandOutcome } from '../../features/proctor/domain/commandOutcome';
 
 interface ViolationRulePanelProps {
   rules: ViolationRule[];
   scheduleId: string;
   currentProctor: string;
-  onUpdateRules: (rules: ViolationRule[]) => void;
+  /** Typed commands: the room shows the pending change and rolls it back if the server refuses. */
+  onSaveRule: (rule: ViolationRule) => Promise<CommandOutcome>;
+  onDeleteRule: (rule: Pick<ViolationRule, 'id' | 'scheduleId'>) => Promise<CommandOutcome>;
   onClose: () => void;
   violationCounts?: {
     low: number;
@@ -34,7 +37,7 @@ interface ViolationRulePanelProps {
   };
 }
 
-export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdateRules, onClose, violationCounts, severityThresholds }: ViolationRulePanelProps) {
+export function ViolationRulePanel({ rules, scheduleId, currentProctor, onSaveRule, onDeleteRule, onClose, violationCounts, severityThresholds }: ViolationRulePanelProps) {
   const [showNewRule, setShowNewRule] = useState(false);
   const [newRule, setNewRule] = useState<Partial<ViolationRule>>({
     scheduleId,
@@ -60,22 +63,14 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
     terminate: 'bg-red-100 text-red-800 border-red-200'
   };
 
-  // Persist with optimistic apply + rollback so rule changes remain responsive
-  // while the backend request is in flight.
+  // The room owns the pending change (shown at once, rolled back when the
+  // server refuses); the panel reports anything but a confirmation.
   const [persistError, setPersistError] = useState<string | null>(null);
-  const persistRules = async (next: ViolationRule[], changed: ViolationRule | null, deletedId: string | null, previous: ViolationRule[]) => {
+  const persistRule = async (issue: () => Promise<CommandOutcome>) => {
     setPersistError(null);
-    onUpdateRules(next);
-    try {
-      const { examRepository } = await import('../../features/proctor/infrastructure/proctorGateway');
-      if (deletedId) {
-        await examRepository.deleteViolationRule(deletedId);
-      } else if (changed) {
-        await examRepository.saveViolationRule(changed);
-      }
-    } catch (error) {
-      onUpdateRules(previous);
-      setPersistError(error instanceof Error ? error.message : 'Failed to save rule.');
+    const outcome = await issue();
+    if (!isCommandConfirmed(outcome)) {
+      setPersistError('error' in outcome ? outcome.error : 'Failed to save rule.');
     }
   };
 
@@ -95,7 +90,7 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
       createdBy: currentProctor
     };
 
-    void persistRules([...rules, rule], rule, null, rules);
+    void persistRule(() => onSaveRule(rule));
     setShowNewRule(false);
     setNewRule({
       scheduleId,
@@ -109,16 +104,13 @@ export function ViolationRulePanel({ rules, scheduleId, currentProctor, onUpdate
   };
 
   const handleDeleteRule = (ruleId: string) => {
-    const updatedRules = rules.filter(rule => rule.id !== ruleId);
-    void persistRules(updatedRules, null, ruleId, rules);
+    void persistRule(() => onDeleteRule({ id: ruleId, scheduleId }));
   };
 
   const handleToggleRule = (ruleId: string) => {
-    const updatedRules = rules.map(rule =>
-      rule.id === ruleId ? { ...rule, isEnabled: !rule.isEnabled } : rule
-    );
-    const changed = updatedRules.find((rule) => rule.id === ruleId) ?? null;
-    void persistRules(updatedRules, changed, null, rules);
+    const rule = rules.find((candidate) => candidate.id === ruleId);
+    if (!rule) return;
+    void persistRule(() => onSaveRule({ ...rule, isEnabled: !rule.isEnabled }));
   };
 
   const getRuleDescription = (rule: ViolationRule) => {

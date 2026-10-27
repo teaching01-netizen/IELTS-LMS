@@ -34,10 +34,7 @@ export function ProctorRoot() {
     handleResumeCohort,
     handleStartScheduledSession,
     reload,
-    setAlerts,
-    setNotes,
-    setViolationRules,
-    setSessions,
+    commands,
     violationRules,
   } = useProctorRouteController();
 
@@ -76,10 +73,7 @@ export function ProctorRoot() {
       onSelectScheduleId={setSelectedScheduleId}
       onExit={() => navigate('/admin')}
       onSwitchToSat={() => navigate('/sat/sessions')}
-      onUpdateSessions={setSessions}
-      onUpdateAlerts={setAlerts}
-      onUpdateNotes={setNotes}
-      onUpdateRules={setViolationRules}
+      commands={commands}
       onStartScheduledSession={handleStartScheduledSession}
       onPauseCohort={handlePauseCohort}
       onResumeCohort={handleResumeCohort}

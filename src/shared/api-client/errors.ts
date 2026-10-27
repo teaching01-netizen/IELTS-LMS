@@ -26,6 +26,8 @@ export interface ApiErrorShape {
 export class ApiError extends Error {
   /** The shared transport has completed its bounded retry policy. */
   transportRetryHandled = false;
+  /** A successful HTTP response explicitly rejected the operation. */
+  businessRejection?: boolean;
   requestMethod?: string;
   code: string;
   requestId?: string | undefined;

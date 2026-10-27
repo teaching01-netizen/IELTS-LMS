@@ -1,5 +1,5 @@
 import { useSatNavigate } from "../ui/useSatNavigate";
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, UserRound } from 'lucide-react';
 import { useLocation, useParams } from 'react-router-dom';
 import { isExamDeliveryPath } from './satReturnPath';
@@ -8,7 +8,7 @@ import { logError, logInfo } from '../../../shared/observability/errorLogger';
 import { useAuthSession } from '../../../features/auth/authSession';
 import { useAuthoritativeDeadlineClock, useRoomClockMs } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { useProctorRouteController } from '../../../features/proctor/hooks/useProctorRouteController';
-import { examDeliveryService, proctorGateway } from '../../../features/proctor/infrastructure/proctorGateway';
+import { examDeliveryService } from '../../../features/proctor/infrastructure/proctorGateway';
 import { SatStatusPill } from '../ui/SatPage';
 import { SatSessionControls } from '../ui/SatSessionControls';
 import { useScheduleFormState } from '@/src/features/assessment-forms/api/assessmentForms';
@@ -35,12 +35,15 @@ import { SatWaitingRoomPanel } from '../ui/SatWaitingRoomPanel';
 import { SatStartCodePanel } from '../ui/SatStartCodePanel';
 import type { SatStaffRouteAssignment } from '../ui/SatStaffRoutePanel';
 import { useSatRoomEntryInfo } from '../api/satRoomEntryInfo';
+import { deliveryCommandOutcome, isCommandConfirmed, type DeliveryCommandResult } from '../../../features/proctor/domain/commandOutcome';
 import { SatRoomEntryPanel } from '../ui/room/SatRoomEntryPanel';
 import { SatRoomHeader } from '../ui/room/SatRoomHeader';
 import { SatRoomWorkspace } from '../ui/room/SatRoomWorkspace';
 import '../ui/sat-session-room.css';
 
 const RELOAD_FAILED_SUFFIX = ' However, the live view could not refresh. Retry to confirm.';
+const EMPTY_PENDING_ACTIONS: ReadonlySet<string> = new Set();
+type RoomMessage = { kind: 'success' | 'error'; text: string };
 export function SatSessionRoomRoute() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useSatNavigate();
@@ -57,8 +60,23 @@ export function SatSessionRoomRoute() {
   const [search, setSearch] = useState('');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [pendingActions, setPendingActions] = useState<ReadonlySet<string>>(() => new Set());
-  const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const [pendingByRoom, setPendingByRoom] = useState<ReadonlyMap<string, ReadonlySet<string>>>(() => new Map());
+  const pendingActions = useMemo(() => {
+    const entries = pendingByRoom.get(scheduleId ?? '');
+    if (!entries) return EMPTY_PENDING_ACTIONS;
+    const visible = new Set<string>();
+    for (const entry of entries) {
+      const [targetId, key] = JSON.parse(entry) as [string | null, string];
+      if (targetId === null || targetId === selectedStudentId) visible.add(key);
+    }
+    return visible;
+  }, [pendingByRoom, scheduleId, selectedStudentId]);
+  const pendingKeysRef = useRef(new Set<string>());
+  const pendingAttemptsRef = useRef(new Set<string>());
+  const selectedStudentIdRef = useRef(selectedStudentId);
+  selectedStudentIdRef.current = selectedStudentId;
+  const [message, setMessage] = useState<RoomMessage | null>(null);
+  const deferredMessagesRef = useRef(new Map<string, RoomMessage>());
   const [confirm, setConfirm] = useState<SatSessionRoomConfirmation | null>(null);
   const [attentionFilter, setAttentionFilter] = useState<'all' | 'needs'>('all');
   const [rosterSort, setRosterSort] = useState<SatRosterSort>('name');
@@ -73,6 +91,15 @@ export function SatSessionRoomRoute() {
   const { layout: roomLayout, ref: roomLayoutRef } = useSatRoomLayout();
   messageRef.current = message;
   const mountedRef = useRef(true);
+  const roomIdentityRef = useRef({ scheduleId, generation: 0 });
+  useLayoutEffect(() => {
+    if (roomIdentityRef.current.scheduleId !== scheduleId) {
+      roomIdentityRef.current = { scheduleId, generation: roomIdentityRef.current.generation + 1 };
+      deferredMessagesRef.current.clear();
+      setMessage(null);
+      setConfirm(null);
+    }
+  }, [scheduleId]);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
@@ -175,7 +202,6 @@ export function SatSessionRoomRoute() {
   const sessionLive = runtime?.status === 'live' || runtime?.status === 'paused';
   const sessionFinished = runtime?.status === 'completed';
   const formState = useScheduleFormState(scheduleId);
-  const completeMessageRef = useRef('Room completed.');
   const evaOpen = formState.data?.collection === 'open';
   const evaMode = formState.data?.evaSimEnabled ? formState.data.mode : null;
   const currentStage = sessionFinished
@@ -242,26 +268,59 @@ export function SatSessionRoomRoute() {
   // Errors persist until the next action clears them explicitly.
   useEffect(() => {
     if (messageRef.current?.kind === 'success') setMessage(null);
-  }, [selectedStudentId]);
+    if (!selectedStudentId) return;
+    const key = JSON.stringify([scheduleId ?? '', selectedStudentId]);
+    const deferred = deferredMessagesRef.current.get(key);
+    if (deferred) {
+      deferredMessagesRef.current.delete(key);
+      setMessage(deferred);
+    }
+  }, [scheduleId, selectedStudentId]);
 
-  const setActionPending = useCallback((key: string, active: boolean) => {
-    setPendingActions((current) => {
-      if (current.has(key) === active) return current;
-      const next = new Set(current);
-      if (active) next.add(key);
-      else next.delete(key);
+  const setActionPending = useCallback((roomId: string, key: string, targetId: string | undefined, active: boolean) => {
+    setPendingByRoom((current) => {
+      const existing = current.get(roomId) ?? EMPTY_PENDING_ACTIONS;
+      const entry = JSON.stringify([targetId ?? null, key]);
+      if (existing.has(entry) === active) return current;
+      const next = new Map(current);
+      const roomPending = new Set(existing);
+      if (active) roomPending.add(entry);
+      else roomPending.delete(entry);
+      if (roomPending.size > 0) next.set(roomId, roomPending);
+      else next.delete(roomId);
       return next;
     });
   }, []);
 
-  const run = useCallback(async (key: string, action: () => Promise<void>, success: string | (() => string)) => {
+  const run = useCallback(async (key: string, action: () => Promise<void>, success: string | (() => string), propagateFailure = false, targetStudentId?: string) => {
+    const roomId = scheduleId ?? '';
+    const generation = roomIdentityRef.current.generation;
+    const isCurrentRoom = () => mountedRef.current && roomIdentityRef.current.scheduleId === scheduleId &&
+      roomIdentityRef.current.generation === generation;
+    const reportMessage = (next: RoomMessage) => {
+      if (!isCurrentRoom()) return;
+      if (targetStudentId && selectedStudentIdRef.current !== targetStudentId) {
+        deferredMessagesRef.current.set(JSON.stringify([roomId, targetStudentId]), next);
+      } else {
+        setMessage(next);
+      }
+    };
     if (isStale) {
-      setMessage({ kind: 'error', text: 'This action was not completed because room data is out of date. Retry to confirm the current room state.' });
+      const error = new Error('This action was not completed because room data is out of date. Retry to confirm the current room state.');
+      setMessage({ kind: 'error', text: error.message });
+      if (propagateFailure) throw error;
       return;
     }
-    if (pendingActions.has(key)) return;
-    setActionPending(key, true);
-    setMessage(null);
+    const pendingKey = JSON.stringify([roomId, targetStudentId ?? null, key]);
+    const attemptKey = targetStudentId ? JSON.stringify([roomId, targetStudentId]) : null;
+    if (pendingKeysRef.current.has(pendingKey) || (attemptKey && pendingAttemptsRef.current.has(attemptKey))) {
+      if (propagateFailure) throw new Error('This action is already in progress.');
+      return;
+    }
+    pendingKeysRef.current.add(pendingKey);
+    if (attemptKey) pendingAttemptsRef.current.add(attemptKey);
+    setActionPending(roomId, key, targetStudentId, true);
+    if (!targetStudentId || selectedStudentIdRef.current === targetStudentId) setMessage(null);
     const startedAt = Date.now();
     try {
       await action();
@@ -269,26 +328,35 @@ export function SatSessionRoomRoute() {
         await controller.reload();
       } catch (reloadError) {
         logError(reloadError, { scope: 'sat.session.action.reload', action: key, scheduleId, latencyMs: Date.now() - startedAt });
-        if (mountedRef.current) setMessage({ kind: 'error', text: `${success}${RELOAD_FAILED_SUFFIX}` });
+        reportMessage({ kind: 'error', text: `${typeof success === 'function' ? success() : success}${RELOAD_FAILED_SUFFIX}` });
         return;
       }
       // IDs only — never student names or emails (PII).
       logInfo('sat.session.action', { action: key, scheduleId, latencyMs: Date.now() - startedAt, outcome: 'success' });
-      if (mountedRef.current) setMessage({ kind: 'success', text: typeof success === 'function' ? success() : success });
+      reportMessage({ kind: 'success', text: typeof success === 'function' ? success() : success });
     } catch (error) {
       logError(error, { scope: 'sat.session.action', action: key, scheduleId, latencyMs: Date.now() - startedAt });
-      if (mountedRef.current) {
-        setMessage({ kind: 'error', text: error instanceof Error ? error.message : 'The action could not be completed.' });
-      }
+      reportMessage({ kind: 'error', text: error instanceof Error ? error.message : 'The action could not be completed.' });
+      if (propagateFailure) throw error instanceof Error ? error : new Error('The action could not be completed.');
     } finally {
-      if (mountedRef.current) setActionPending(key, false);
+      pendingKeysRef.current.delete(pendingKey);
+      if (attemptKey) pendingAttemptsRef.current.delete(attemptKey);
+      if (mountedRef.current) setActionPending(roomId, key, targetStudentId, false);
     }
-  }, [controller, isStale, pendingActions, scheduleId, setActionPending]);
+  }, [controller, isStale, scheduleId, setActionPending]);
 
-  const runStudentAction = async (key: string, action: () => Promise<{ success: boolean; error?: string }>, success: string) => run(key, async () => {
-    const result = await action();
-    if (!result.success) throw new Error(result.error ?? 'The student could not be updated.');
-  }, success);
+  const requireConfirmedAction = (result: DeliveryCommandResult, fallback: string) => {
+    const outcome = deliveryCommandOutcome(result, fallback);
+    if (outcome.kind === 'uncertain') {
+      void controller.reload().catch(() => undefined);
+      throw new Error(outcome.error);
+    }
+    if (outcome.kind === 'rejected') throw new Error(outcome.error);
+  };
+
+  const runStudentAction = async (key: string, action: () => Promise<DeliveryCommandResult>, success: string, targetStudentId?: string) => run(key, async () => {
+    requireConfirmedAction(await action(), 'The student could not be updated.');
+  }, success, false, targetStudentId);
 
   const confirmCurrentAction = () => {
     const action = confirm;
@@ -301,19 +369,24 @@ export function SatSessionRoomRoute() {
     if (action.kind === 'complete') {
       // Report only what the server confirmed: the runtime command result,
       // then the re-read Eva closure time.
+      let completeMessage = 'Room completed.';
+      const generation = roomIdentityRef.current.generation;
       void run('complete', async () => {
         const result = await examDeliveryService.completeRuntime(scheduleId, proctorName);
-        if (!result.success) throw new Error(result.error ?? 'The exam could not be ended.');
-        await controller.reload();
-        const forms = await formState.refetch();
-        const closedAt = forms.data?.closedAt ? new Date(forms.data.closedAt) : null;
-        completeMessageRef.current = closedAt && !Number.isNaN(closedAt.getTime())
-          ? `Room completed. Eva SIM closed at ${closedAt.toLocaleTimeString()}.`
-          : 'Room completed.';
+        requireConfirmedAction(result, 'The exam could not be ended.');
+        try {
+          const forms = await formState.refetch();
+          const closedAt = forms.data?.closedAt ? new Date(forms.data.closedAt) : null;
+          if (closedAt && !Number.isNaN(closedAt.getTime())) {
+            completeMessage = `Room completed. Eva SIM closed at ${closedAt.toLocaleTimeString()}.`;
+          }
+        } catch (error) {
+          logError(error, { scope: 'sat.session.action.forms-refresh', scheduleId });
+        }
         requestAnimationFrame(() => {
-          if (!completeConfirmTriggerRef.current?.isConnected) document.querySelector<HTMLElement>('[data-sat-room-title]')?.focus();
+          if (roomIdentityRef.current.generation === generation && !completeConfirmTriggerRef.current?.isConnected) document.querySelector<HTMLElement>('[data-sat-room-title]')?.focus();
         });
-      }, () => completeMessageRef.current);
+      }, () => completeMessage);
       return;
     }
     if (action.kind === 'extend-session') {
@@ -333,14 +406,14 @@ export function SatSessionRoomRoute() {
       return;
     }
     if (action.kind === 'warn') {
-      void runStudentAction('student-warn', () => examDeliveryService.warnStudent(bound.id, SAT_SESSION_WARN_MESSAGE, proctorName), `Warning sent to ${bound.name}.`);
+      void runStudentAction('student-warn', () => examDeliveryService.warnStudent(bound.id, SAT_SESSION_WARN_MESSAGE, proctorName), `Warning sent to ${bound.name}.`, bound.id);
       return;
     }
     if (action.kind === 'extend-student') {
-      void runStudentAction(`student-extend-${action.minutes}`, () => examDeliveryService.extendStudentAttempt(bound.id, proctorName, action.minutes, action.moduleId), `Added ${action.minutes} minutes for ${bound.name}.`);
+      void runStudentAction(`student-extend-${action.minutes}`, () => examDeliveryService.extendStudentAttempt(bound.id, proctorName, action.minutes, action.moduleId), `Added ${action.minutes} minutes for ${bound.name}.`, bound.id);
       return;
     }
-    void runStudentAction('student-terminate', () => examDeliveryService.terminateStudentAttempt(bound.id, proctorName), `${bound.name}’s attempt ended.`);
+    void runStudentAction('student-terminate', () => examDeliveryService.terminateStudentAttempt(bound.id, proctorName), `${bound.name}’s attempt ended.`, bound.id);
   };
 
   const inspectorContent = selectedStudent ? (
@@ -364,8 +437,8 @@ export function SatSessionRoomRoute() {
             });
           }}
           onWarn={() => setConfirm({ kind: 'warn', studentId: selectedStudent.id, studentName: selectedStudent.name })}
-          onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`)}
-          onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`)}
+          onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`, selectedStudent.id)}
+          onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`, selectedStudent.id)}
           onTerminate={() => setConfirm({ kind: 'terminate', studentId: selectedStudent.id, studentName: selectedStudent.name })}
           onResolveRecovery={({ resolutionId, reason }) => {
             const moduleAttemptId = selectedStudent.satRecoveryModuleAttemptId;
@@ -376,14 +449,18 @@ export function SatSessionRoomRoute() {
             const action = selectedStudent.satRecoveryKind === 'entry' ? 'activate_entry' : 'continue_confirmed';
             return run(
               `sat-recovery-${selectedStudent.id}`,
-              () => proctorGateway.backendPost(
-                `/v1/proctor/sessions/${encodeURIComponent(scheduleId)}/attempts/${encodeURIComponent(selectedStudent.id)}/recovery/resolve`,
-                { resolutionId, moduleAttemptId, expectedBoundaryRevision, action, reason },
-                { retries: 0 },
-              ),
+              async () => {
+                const outcome = await controller.commands.resolveRecovery({
+                  scheduleId, attemptId: selectedStudent.id, resolutionId, moduleAttemptId, expectedBoundaryRevision, action, reason,
+                });
+                if (outcome.kind === 'uncertain') void controller.reload().catch(() => undefined);
+                if (!isCommandConfirmed(outcome)) throw new Error(outcome.error);
+              },
               selectedStudent.satRecoveryKind === 'entry'
                 ? `${selectedStudent.name}’s module started.`
                 : `${selectedStudent.name} continued with server-confirmed answers.`,
+              true,
+              selectedStudent.id,
             );
           }}
         />
