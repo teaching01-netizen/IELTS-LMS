@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
+    "typecheck:staff-tests": "tsc --noEmit -p tsconfig.staff-tests.json",
     "coedit:service": "bun run --cwd services/authoring-coedit start",
     "coedit:service:dev": "bun run --cwd services/authoring-coedit dev",
     "coedit:test": "bun run --cwd services/authoring-coedit test",

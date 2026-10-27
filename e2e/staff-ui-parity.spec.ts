@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { installStaffParityTransport, PARITY_NOW, type StaffRole } from "./support/staffParityTransport";
 
 /**
@@ -177,4 +179,46 @@ test.describe("staff UI parity: network baseline", () => {
       expect(transport.unhandled).toEqual([]);
     });
   }
+});
+
+test("ielts-config preserves and resolves a concurrent edit through the existing retry surface", async ({ page }) => {
+  const state = JSON.parse(readFileSync(resolve(process.cwd(), "e2e/fixtures/staff-parity/ielts-exam-state.json"), "utf8"));
+  let version = {
+    id: "ielts-version-2", examId: "ielts-exam-1", versionNumber: 2, parentVersionId: "ielts-version-1",
+    contentSnapshot: state, configSnapshot: state.config, createdBy: "admin-1", createdAt: PARITY_NOW,
+    isDraft: true, isPublished: false, revision: 3,
+  };
+  const revisions: number[] = [];
+  await page.clock.setFixedTime(new Date(PARITY_NOW));
+  await installStaffParityTransport(page, "admin");
+  await page.route("**/api/v1/versions/ielts-version-2", async (route) => {
+    await route.fulfill({ json: { success: true, data: version } });
+  });
+  await page.route("**/api/v1/exams/ielts-exam-1/draft", async (route) => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    const body = route.request().postDataJSON();
+    revisions.push(body.revision);
+    if (revisions.length === 1) {
+      const remoteConfig = { ...state.config, general: { ...state.config.general, title: "Remote title" } };
+      version = { ...version, revision: 4, configSnapshot: remoteConfig, contentSnapshot: { ...state, config: remoteConfig } };
+      await route.fulfill({ status: 409, json: { success: false, error: { code: "CONFLICT", message: "Draft changed while you were editing" } } });
+      return;
+    }
+    version = { ...version, revision: 5, configSnapshot: body.configSnapshot, contentSnapshot: body.contentSnapshot };
+    await route.fulfill({ json: { success: true, data: version } });
+  });
+  await page.goto("/builder/ielts-exam-1");
+  const title = page.getByPlaceholder("e.g. Academic Practice Test 5");
+  await title.fill("Local title");
+  await page.getByRole("button", { name: "Save Draft" }).click();
+  await expect(page.getByText("Draft changed while you were editing")).toBeVisible();
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.getByText(/Configuration changed elsewhere/)).toBeVisible();
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(title).toHaveValue("Local title");
+  await title.fill("Remote title");
+  await title.fill("Chosen title");
+  await page.getByRole("button", { name: "Save Draft" }).click();
+  await expect.poll(() => revisions).toEqual([3, 4]);
+  await expect(title).toHaveValue("Chosen title");
 });

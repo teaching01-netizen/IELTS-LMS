@@ -1,0 +1,30 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "types": ["vite/client", "vitest/globals", "node", "@testing-library/jest-dom"]
+  },
+  "include": [
+    "src/features/proctor/hooks/__tests__/useProctorRouteController.commands.test.tsx",
+    "src/features/proctor/hooks/__tests__/useProctorRouteController.room-clock.test.tsx",
+    "src/features/proctor/api/__tests__/proctorMutationOutcomes.test.ts",
+    "src/features/proctor/domain/__tests__/proctorSnapshot.test.ts",
+    "src/components/proctor/__tests__/ViolationRulePanel.test.tsx",
+    "src/components/proctor/__tests__/ProctorDashboard.test.tsx",
+    "src/products/sat/routes/__tests__/SatSessionRoomRoute.test.tsx",
+    "src/features/builder/hooks/__tests__/useConfigRouteController.test.tsx",
+    "src/features/builder/api/__tests__/configQueries.test.tsx",
+    "src/features/exam-authoring/ui/__tests__/useAuthoringSaveRouting.test.tsx",
+    "src/features/exam-authoring/realtime/__tests__/divergenceStore.test.ts",
+    "src/features/exam-authoring/realtime/coedit/__tests__/cleanlyEndedRoomReopen.test.tsx",
+    "src/features/builder/hooks/__tests__/useBuilderAutosave.test.tsx",
+    "src/shared/api/__tests__/coldStart.test.ts",
+    "src/services/__tests__/examLifecycleService.backend.test.ts",
+    "src/features/admin/hooks/__tests__/useAdminRootController.defaults.test.tsx",
+    "src/services/__tests__/adminPreferencesRepository.backend.test.ts",
+    "src/features/proctor/api/__tests__/proctorReadBoundary.test.ts",
+    "load-runner/portal/__tests__/catalog.test.ts",
+    "e2e/staff-ui-parity.spec.ts"
+  ],
+  "exclude": []
+}

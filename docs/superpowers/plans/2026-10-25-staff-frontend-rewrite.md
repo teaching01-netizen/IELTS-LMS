@@ -187,6 +187,8 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Gate:** Shared hook works for both IELTS and SAT; older snapshots never regress active module/time/status; deletion/acknowledgement behavior is correct; command rejection never shows success; room changes leak no commands or feedback. Automatic-rule cross-operator guarantees remain a release blocker until demonstrated.
 
+**Existing audit limitation:** The note repository's `saveAuditLog` method is a no-op, and the Go note upsert does not insert an audit event. The removed frontend call never recorded one. If note creation must appear in the audit log, the server must record it with the note write; a client-side follow-up cannot make those writes atomic.
+
 ### Package 5 — Rewrite IELTS config, builder orchestration, and preferences
 
 **Create:** `src/features/builder/domain/configDraftState.ts` and tests; `src/features/admin/api/adminPreferencesQueries.ts` and tests.
@@ -200,6 +202,8 @@ Each package is a small series of reviewable commits. Preserve the view props in
 - [ ] Extract nonvisual orchestration from `BuilderRoot` only where ownership becomes clearer. Do not rewrite question blocks, rich content, answer keys, or preview rendering without a reproduced defect.
 
 **Gate:** Rapid edits, save failure, offline/reload recovery, A→B→missing config navigation, version conflict, and edit-during-flush all preserve correct content. Existing builder/preview/review UI matches references.
+
+**Backend prerequisite discovered during implementation:** The draft-save endpoint atomically checks the draft revision but does not accept the expected draft version ID. The frontend now checks the loaded version ID before sending its revision, but a draft pointer could still change to another version with the same revision between that check and the write. Production-grade protection requires the endpoint to compare both expected version ID and revision in the same transaction; frontend checks alone cannot close that race.
 
 ### Package 6 — Consolidate SAT authoring without replacing its safety model
 

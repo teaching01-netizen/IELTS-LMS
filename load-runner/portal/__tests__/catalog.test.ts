@@ -62,6 +62,12 @@ describe('suite catalog', () => {
     }
   });
 
+  it('registers the staff UI parity suite as an isolated browser check', () => {
+    const coverage = PLAYWRIGHT_CONFIG_COVERAGE['playwright.staff-parity.config.ts'];
+    expect(coverage).toMatchObject({ classification: 'executable', suiteId: 'browser.specialized.staff-parity' });
+    expect(getSuite('browser.specialized.staff-parity')?.environments).toEqual(['isolated']);
+  });
+
   it('classifies every k6 scenario and helper', () => {
     const scripts: string[] = [];
     for (const entry of readdirSync(path.join(repoRoot, 'k6'), { withFileTypes: true })) {

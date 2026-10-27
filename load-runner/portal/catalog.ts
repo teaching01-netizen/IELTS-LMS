@@ -132,6 +132,7 @@ const SUITES: SuiteDefinition[] = [
     controlOwner: 'suite',
     steps: [
       { label: 'typecheck', command: 'bun', args: ['run', 'typecheck'], resultKind: 'exit' },
+      { label: 'staff test typecheck', command: 'bun', args: ['run', 'typecheck:staff-tests'], resultKind: 'exit' },
       { label: 'lint', command: 'bun', args: ['run', 'lint'], resultKind: 'exit' },
       { label: 'build', command: 'bun', args: ['run', 'build'], resultKind: 'exit' },
       {
@@ -280,6 +281,19 @@ const SUITES: SuiteDefinition[] = [
       capacity: { browserCandidates: 20 },
     }),
   ),
+  commandSuite({
+    id: 'browser.specialized.staff-parity',
+    title: 'Staff UI parity',
+    description: 'Fixture-backed SAT and IELTS staff visual and interaction references.',
+    family: 'browser-specialized',
+    environments: ISOLATED,
+    controlOwner: 'suite',
+    steps: [PLAYWRIGHT('playwright.staff-parity.config.ts')],
+    requires: ['node', 'bun', 'browsers'],
+    deadlineMinutes: 30,
+    runAll: false,
+    exclusionReason: 'Screenshot references must run on their reference platform.',
+  }),
   commandSuite({
     id: 'prod.smoke',
     title: 'Production smoke journeys',
@@ -689,6 +703,7 @@ export interface EntrypointCoverage {
 
 export const PACKAGE_SCRIPT_COVERAGE: Readonly<Record<string, EntrypointCoverage>> = Object.freeze({
   typecheck: { source: 'package.json', classification: 'executable', suiteId: 'quality.frontend', note: 'step' },
+  'typecheck:staff-tests': { source: 'package.json', classification: 'executable', suiteId: 'quality.frontend', note: 'step' },
   lint: { source: 'package.json', classification: 'executable', suiteId: 'quality.frontend', note: 'step' },
   build: { source: 'package.json', classification: 'executable', suiteId: 'quality.frontend', note: 'step' },
   'test:student-bundle': { source: 'package.json', classification: 'executable', suiteId: 'quality.frontend', note: 'step' },
@@ -764,6 +779,7 @@ export const PLAYWRIGHT_CONFIG_COVERAGE: Readonly<Record<string, EntrypointCover
   'playwright.sat-screen-zoom.config.ts': { source: 'playwright.sat-screen-zoom.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-screen-zoom', note: 'specialized' },
   'playwright.sat-spectrum.config.ts': { source: 'playwright.sat-spectrum.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-spectrum', note: 'specialized' },
   'playwright.sat-staff-ux.config.ts': { source: 'playwright.sat-staff-ux.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-staff-ux', note: 'specialized' },
+  'playwright.staff-parity.config.ts': { source: 'playwright.staff-parity.config.ts', classification: 'executable', suiteId: 'browser.specialized.staff-parity', note: 'fixture-backed visual references' },
   'playwright.sat-transition.config.ts': { source: 'playwright.sat-transition.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-transition', note: 'specialized' },
   'playwright.touch-selection.config.ts': { source: 'playwright.touch-selection.config.ts', classification: 'executable', suiteId: 'browser.specialized.touch-selection', note: 'specialized' },
 });
