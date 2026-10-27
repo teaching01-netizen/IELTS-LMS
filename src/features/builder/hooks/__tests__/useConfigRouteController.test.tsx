@@ -6,7 +6,7 @@ import { createDefaultConfig } from '../../../../constants/examDefaults';
 import { createInitialExamState } from '../../../../services/examAdapterService';
 import { useConfigRouteController } from '../useConfigRouteController';
 
-function queryWrapper({ children }: { children: React.ReactNode }) {
+function QueryWrapper({ children }: { children: React.ReactNode }) {
   const [client] = React.useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
@@ -50,7 +50,7 @@ describe('useConfigRouteController', () => {
     const currentState = createInitialExamState('Mock IELTS Exam', 'Academic');
     currentState.config = config;
     currentState.reading.passages[0] = {
-      ...currentState.reading.passages[0],
+      ...currentState.reading.passages[0]!,
       content: 'Some passage text',
       wordCount: 3,
       blocks: [
@@ -64,7 +64,7 @@ describe('useConfigRouteController', () => {
       ],
     };
     currentState.listening.parts[0] = {
-      ...currentState.listening.parts[0],
+      ...currentState.listening.parts[0]!,
       audioUrl: '',
       pins: [],
       blocks: [
@@ -92,7 +92,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: true });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -133,13 +133,14 @@ describe('useConfigRouteController', () => {
         }),
       }),
       'Builder User',
+      { versionId: 'ver-1', revision: null, isDraft: true },
     );
   });
 
   it('leaves the controller in a not-found state when the exam is missing', async () => {
     mockGetExamById.mockResolvedValue(null);
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -167,7 +168,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: false, error: 'Draft has been modified by another user' });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -196,7 +197,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: true });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -208,8 +209,8 @@ describe('useConfigRouteController', () => {
 
     expect(mockSaveDraft).toHaveBeenCalledTimes(1);
     expect(mockNavigate).toHaveBeenCalledWith('/builder/exam-1/builder');
-    expect(mockSaveDraft.mock.invocationCallOrder[0]).toBeLessThan(
-      mockNavigate.mock.invocationCallOrder[0],
+    expect(mockSaveDraft.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockNavigate.mock.invocationCallOrder[0]!,
     );
   });
 
@@ -229,7 +230,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: false, error: 'Revision mismatch' });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -260,7 +261,7 @@ describe('useConfigRouteController', () => {
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -302,7 +303,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: true });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -343,7 +344,7 @@ describe('useConfigRouteController', () => {
       }),
     );
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -381,13 +382,13 @@ describe('useConfigRouteController', () => {
       }),
     );
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    let savePromise: Promise<void>;
+    let savePromise: Promise<boolean>;
     act(() => {
       savePromise = result.current.handleSaveConfig();
     });
@@ -427,6 +428,319 @@ describe('useConfigRouteController entity identity (F3)', () => {
     vi.clearAllMocks();
   });
 
+  it('shares the confirmed configuration read while keeping each editor draft independent', async () => {
+    const a = examFixture('a');
+    let serverVersion = { ...a.version, revision: 1, isDraft: true };
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockImplementation(async () => serverVersion);
+    const { result } = renderHook(() => ({
+      first: useConfigRouteController('a'),
+      second: useConfigRouteController('a'),
+    }), { wrapper: QueryWrapper });
+
+    await waitFor(() => expect(result.current.first.config).toBeDefined());
+    await waitFor(() => expect(result.current.second.config).toBeDefined());
+    expect(mockGetExamById).toHaveBeenCalledTimes(1);
+    expect(mockGetVersionById).toHaveBeenCalledTimes(1);
+    const base = result.current.first.config!;
+    await act(async () => {
+      await result.current.first.handleUpdateConfig({ ...base, general: { ...base.general, title: 'Local edit' } });
+    });
+    const remoteConfig = { ...base, general: { ...base.general, summary: 'Remote edit' } };
+    serverVersion = { ...serverVersion, revision: 2, configSnapshot: remoteConfig, contentSnapshot: { ...serverVersion.contentSnapshot, config: remoteConfig } };
+    await act(async () => { await result.current.second.reload(); });
+
+    await waitFor(() => expect(result.current.first.config?.general).toMatchObject({ title: 'Local edit', summary: 'Remote edit' }));
+    expect(result.current.second.config?.general).toMatchObject({ title: 'Title a', summary: 'Remote edit' });
+    expect(mockGetExamById).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not start overlapping saves for the same exam from two mounted editors', async () => {
+    const a = examFixture('a');
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockResolvedValue(a.version);
+    const save = deferred<{ success: boolean }>();
+    mockSaveDraft.mockReturnValue(save.promise);
+    const { result } = renderHook(() => ({
+      first: useConfigRouteController('a'),
+      second: useConfigRouteController('a'),
+    }), { wrapper: QueryWrapper });
+    await waitFor(() => expect(result.current.first.config && result.current.second.config).toBeDefined());
+    let firstSave!: Promise<boolean>;
+    let secondSave!: Promise<boolean>;
+    act(() => {
+      firstSave = result.current.first.handleSaveConfig();
+      secondSave = result.current.second.handleSaveConfig();
+    });
+    expect(mockSaveDraft).toHaveBeenCalledTimes(1);
+    expect(result.current.second.isSaving).toBe(true);
+    await expect(secondSave).resolves.toBe(false);
+    await act(async () => { save.resolve({ success: true }); await firstSave; });
+  });
+
+  it('refreshes the original exam for another editor when a save finishes after navigation', async () => {
+    const a = examFixture('a');
+    const b = examFixture('b');
+    let versionA = { ...a.version, revision: 1, isDraft: true };
+    mockGetExamById.mockImplementation(async (id: string) => id === 'a' ? a.entity : b.entity);
+    mockGetVersionById.mockImplementation(async (id: string) => id === 'ver-a' ? versionA : b.version);
+    const save = deferred<{ success: boolean }>();
+    mockSaveDraft.mockReturnValue(save.promise);
+    const { result, rerender } = renderHook(({ examId }) => ({
+      changing: useConfigRouteController(examId),
+      watching: useConfigRouteController('a'),
+    }), { wrapper: QueryWrapper, initialProps: { examId: 'a' } });
+    await waitFor(() => expect(result.current.changing.config && result.current.watching.config).toBeDefined());
+    let pending!: Promise<boolean>;
+    act(() => { pending = result.current.changing.handleSaveConfig(); });
+    rerender({ examId: 'b' });
+    await waitFor(() => expect(result.current.changing.config?.general.title).toBe('Title b'));
+    const updatedConfig = { ...a.version.configSnapshot, general: { ...a.version.configSnapshot.general, title: 'Saved A' } };
+    versionA = { ...versionA, revision: 2, configSnapshot: updatedConfig, contentSnapshot: { ...versionA.contentSnapshot, config: updatedConfig } };
+    await act(async () => { save.resolve({ success: true }); await pending; });
+    await waitFor(() => expect(result.current.watching.config?.general.title).toBe('Saved A'));
+    expect(result.current.changing.config?.general.title).toBe('Title b');
+  });
+
+  it('binds a config save to the version and revision that supplied its content', async () => {
+    const a = examFixture('a');
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockResolvedValue({ ...a.version, revision: 7, isDraft: true });
+    mockSaveDraft.mockResolvedValue({ success: false, error: 'Draft changed while you were editing' });
+    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: QueryWrapper });
+    await waitFor(() => expect(result.current.config).toBeDefined());
+    const config = result.current.config!;
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...config, general: { ...config.general, title: 'My unsaved edit' } });
+    });
+    await act(async () => { expect(await result.current.handleSaveConfig()).toBe(false); });
+
+    expect(mockSaveDraft).toHaveBeenCalledWith('a', expect.anything(), 'Builder User', {
+      versionId: 'ver-a', revision: 7, isDraft: true,
+    });
+    expect(result.current.config?.general.title).toBe('My unsaved edit');
+    expect(result.current.error).toMatch(/changed/i);
+  });
+
+  it('saves the latest edit even when save is requested before React rerenders', async () => {
+    mockSaveDraft.mockReset();
+    const a = examFixture('a');
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockResolvedValue(a.version);
+    mockSaveDraft.mockResolvedValue({ success: true });
+    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: QueryWrapper });
+    await waitFor(() => expect(result.current.config).toBeDefined());
+    const base = result.current.config!;
+    let saving!: Promise<boolean>;
+    act(() => {
+      void result.current.handleUpdateConfig({ ...base, general: { ...base.general, title: 'Immediate edit' } });
+      saving = result.current.handleSaveConfig();
+    });
+    await act(async () => { await saving; });
+
+    expect(mockSaveDraft).toHaveBeenCalledWith('a', expect.objectContaining({
+      config: expect.objectContaining({ general: expect.objectContaining({ title: 'Immediate edit' }) }),
+    }), 'Builder User', expect.anything());
+  });
+
+  it('does not replace an acknowledged config with an older post-save version read', async () => {
+    mockSaveDraft.mockReset();
+    const a = examFixture('a');
+    const originalVersion = { ...a.version, revision: 1, isDraft: true };
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockResolvedValue(originalVersion);
+    mockSaveDraft.mockImplementation(async (_id: string, content: typeof a.version.contentSnapshot) => ({
+      success: true,
+      version: { ...originalVersion, revision: 2, configSnapshot: content.config, contentSnapshot: content },
+    }));
+    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: QueryWrapper });
+    await waitFor(() => expect(result.current.config).toBeDefined());
+    const base = result.current.config!;
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...base, general: { ...base.general, title: 'Saved title' } });
+    });
+    await act(async () => { expect(await result.current.handleSaveConfig()).toBe(true); });
+
+    expect(result.current.config?.general.title).toBe('Saved title');
+    await act(async () => { expect(await result.current.handleSaveConfig()).toBe(true); });
+    expect(mockSaveDraft).toHaveBeenLastCalledWith('a', expect.anything(), 'Builder User', {
+      versionId: 'ver-a', revision: 2, isDraft: true,
+    });
+  });
+
+  it('does not navigate to the builder when a newer config edit arrives during the save', async () => {
+    const a = examFixture('a');
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockResolvedValue(a.version);
+    const save = deferred<{ success: boolean }>();
+    mockSaveDraft.mockReturnValueOnce(save.promise);
+    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: QueryWrapper });
+    await waitFor(() => expect(result.current.config).toBeDefined());
+    const base = result.current.config!;
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...base, general: { ...base.general, title: 'First edit' } });
+    });
+
+    let navigating!: Promise<void>;
+    act(() => { navigating = result.current.handleNavigateToBuilder(); });
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...base, general: { ...base.general, title: 'Newer edit' } });
+      save.resolve({ success: true });
+      await navigating;
+    });
+
+    expect(result.current.config?.general.title).toBe('Newer edit');
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(result.current.error).toMatch(/changed while saving/i);
+  });
+
+  it('keeps saving and failure feedback scoped to the exam that initiated the save', async () => {
+    const a = examFixture('a');
+    const b = examFixture('b');
+    mockGetExamById.mockImplementation(async (id: string) => id === 'a' ? a.entity : b.entity);
+    mockGetVersionById.mockImplementation(async (id: string) => id === 'ver-a' ? a.version : b.version);
+    const saveA = deferred<{ success: boolean; error?: string }>();
+    const saveB = deferred<{ success: boolean; error?: string }>();
+    mockSaveDraft.mockReturnValueOnce(saveA.promise).mockReturnValueOnce(saveB.promise);
+    const { result, rerender } = renderHook(({ examId }) => useConfigRouteController(examId), {
+      wrapper: QueryWrapper,
+      initialProps: { examId: 'a' },
+    });
+    await waitFor(() => expect(result.current.config?.general.title).toBe('Title a'));
+
+    let pendingA!: Promise<boolean>;
+    act(() => { pendingA = result.current.handleSaveConfig(); });
+    await waitFor(() => expect(mockSaveDraft).toHaveBeenCalledTimes(1));
+    rerender({ examId: 'b' });
+    await waitFor(() => expect(result.current.config?.general.title).toBe('Title b'));
+    expect(result.current.isSaving).toBe(false);
+
+    let pendingB!: Promise<boolean>;
+    act(() => { pendingB = result.current.handleSaveConfig(); });
+    await waitFor(() => expect(mockSaveDraft).toHaveBeenCalledTimes(2));
+    expect(result.current.isSaving).toBe(true);
+    await act(async () => { saveA.resolve({ success: false, error: 'Exam A save failed' }); await pendingA; });
+    expect(result.current.error).toBeNull();
+    expect(result.current.isSaving).toBe(true);
+    expect(result.current.config?.general.title).toBe('Title b');
+
+    await act(async () => { saveB.resolve({ success: true }); await pendingB; });
+    expect(result.current.isSaving).toBe(false);
+  });
+
+  it('rebases independent config edits onto newer saved content after a conflict', async () => {
+    mockSaveDraft.mockReset();
+    const a = examFixture('a');
+    let serverVersion = { ...a.version, revision: 1, isDraft: true };
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockImplementation(async () => serverVersion);
+    mockSaveDraft.mockResolvedValueOnce({ success: false, error: 'Draft changed while you were editing' });
+    mockSaveDraft.mockImplementationOnce(async (_id: string, content: typeof a.version.contentSnapshot) => {
+      serverVersion = { ...serverVersion, revision: 3, contentSnapshot: content, configSnapshot: content.config };
+      return { success: true, version: serverVersion };
+    });
+    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: QueryWrapper });
+    await waitFor(() => expect(result.current.config).toBeDefined());
+    const base = result.current.config!;
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...base, general: { ...base.general, title: 'Local title' } });
+    });
+    await act(async () => { expect(await result.current.handleSaveConfig()).toBe(false); });
+
+    const remoteConfig = { ...base, general: { ...base.general, summary: 'Remote summary' } };
+    serverVersion = {
+      ...serverVersion,
+      revision: 2,
+      configSnapshot: remoteConfig,
+      contentSnapshot: {
+        ...serverVersion.contentSnapshot,
+        writing: {
+          ...serverVersion.contentSnapshot.writing,
+          tasks: serverVersion.contentSnapshot.writing.tasks?.map((task) =>
+            task.taskId === 'task2' ? { ...task, prompt: 'Remote question content' } : task),
+        },
+        config: remoteConfig,
+      },
+    };
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.config?.general).toMatchObject({ title: 'Local title', summary: 'Remote summary' });
+    await act(async () => { expect(await result.current.handleSaveConfig()).toBe(true); });
+    expect(mockSaveDraft).toHaveBeenLastCalledWith('a', expect.objectContaining({
+      writing: expect.objectContaining({ tasks: expect.arrayContaining([expect.objectContaining({ taskId: 'task2', prompt: 'Remote question content' })]) }),
+      config: expect.objectContaining({ general: expect.objectContaining({ title: 'Local title', summary: 'Remote summary' }) }),
+    }), 'Builder User', { versionId: 'ver-a', revision: 2, isDraft: true });
+  });
+
+  it('retains a same-field conflict and refuses to overwrite the remote config on retry', async () => {
+    mockSaveDraft.mockReset();
+    const a = examFixture('a');
+    let serverVersion = { ...a.version, revision: 1, isDraft: true };
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockImplementation(async () => serverVersion);
+    mockSaveDraft.mockResolvedValue({ success: false, error: 'Draft changed while you were editing' });
+    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: QueryWrapper });
+    await waitFor(() => expect(result.current.config).toBeDefined());
+    const base = result.current.config!;
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...base, general: { ...base.general, title: 'Local title' } });
+    });
+    await act(async () => { expect(await result.current.handleSaveConfig()).toBe(false); });
+
+    const remoteConfig = { ...base, general: { ...base.general, title: 'Remote title' } };
+    serverVersion = { ...serverVersion, revision: 2, configSnapshot: remoteConfig, contentSnapshot: { ...serverVersion.contentSnapshot, config: remoteConfig } };
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.config?.general.title).toBe('Local title');
+    expect(result.current.error).toMatch(/configuration.*changed.*elsewhere/i);
+    await act(async () => { expect(await result.current.handleSaveConfig()).toBe(false); });
+    expect(mockSaveDraft).toHaveBeenCalledTimes(1);
+
+    // The existing Retry action returns to the preserved draft. Matching the
+    // remote value resolves the conflict, after which an explicit new edit is safe.
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.error).toBeNull();
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...result.current.config!, general: { ...result.current.config!.general, title: 'Remote title' } });
+    });
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...result.current.config!, general: { ...result.current.config!.general, title: 'Chosen title' } });
+    });
+    mockSaveDraft.mockImplementationOnce(async (_id: string, content: typeof a.version.contentSnapshot) => {
+      serverVersion = { ...serverVersion, revision: 3, contentSnapshot: content, configSnapshot: content.config };
+      return { success: true, version: serverVersion };
+    });
+    await act(async () => { expect(await result.current.handleSaveConfig()).toBe(true); });
+    expect(mockSaveDraft).toHaveBeenLastCalledWith('a', expect.objectContaining({
+      config: expect.objectContaining({ general: expect.objectContaining({ title: 'Chosen title' }) }),
+    }), 'Builder User', { versionId: 'ver-a', revision: 2, isDraft: true });
+  });
+
+  it('does not normalize away a remote timing edit when local mode changes conflict with it', async () => {
+    mockSaveDraft.mockReset();
+    const a = examFixture('a');
+    let serverVersion = { ...a.version, revision: 1, isDraft: true };
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockImplementation(async () => serverVersion);
+    mockSaveDraft.mockResolvedValue({ success: false, error: 'Draft changed while you were editing' });
+    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: QueryWrapper });
+    await waitFor(() => expect(result.current.config).toBeDefined());
+    const base = result.current.config!;
+    await act(async () => {
+      await result.current.handleUpdateConfig({ ...base, general: { ...base.general, ieltsMode: true } });
+      expect(await result.current.handleSaveConfig()).toBe(false);
+    });
+    const remoteConfig = {
+      ...base,
+      sections: { ...base.sections, reading: { ...base.sections.reading, duration: 90 } },
+    };
+    serverVersion = { ...serverVersion, revision: 2, configSnapshot: remoteConfig, contentSnapshot: { ...serverVersion.contentSnapshot, config: remoteConfig } };
+    await act(async () => { await result.current.reload(); });
+
+    expect(result.current.config?.general.ieltsMode).toBe(true);
+    expect(result.current.error).toMatch(/configuration.*changed.*elsewhere/i);
+    await act(async () => { expect(await result.current.handleSaveConfig()).toBe(false); });
+    expect(mockSaveDraft).toHaveBeenCalledTimes(1);
+  });
+
   it('a slow load for A cannot install A after navigating to B', async () => {
     const a = examFixture('a');
     const b = examFixture('b');
@@ -435,7 +749,7 @@ describe('useConfigRouteController entity identity (F3)', () => {
     mockGetVersionById.mockImplementation((id: string) => Promise.resolve(id === 'ver-a' ? a.version : b.version));
 
     const { result, rerender } = renderHook(({ examId }) => useConfigRouteController(examId), {
-      wrapper: queryWrapper,
+      wrapper: QueryWrapper,
       initialProps: { examId: 'a' },
     });
     rerender({ examId: 'b' });
@@ -456,7 +770,7 @@ describe('useConfigRouteController entity identity (F3)', () => {
     mockGetVersionById.mockResolvedValue(a.version);
 
     const { result, rerender } = renderHook(({ examId }) => useConfigRouteController(examId), {
-      wrapper: queryWrapper,
+      wrapper: QueryWrapper,
       initialProps: { examId: 'a' },
     });
     await waitFor(() => expect(result.current.config?.general.title).toBe('Title a'));
@@ -479,7 +793,7 @@ describe('useConfigRouteController entity identity (F3)', () => {
     const save = deferred<{ success: boolean }>();
     mockSaveDraft.mockReturnValueOnce(save.promise).mockResolvedValue({ success: true });
 
-    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: QueryWrapper });
     await waitFor(() => expect(result.current.config).toBeDefined());
     const base = result.current.config!;
 
@@ -508,6 +822,7 @@ describe('useConfigRouteController entity identity (F3)', () => {
       'a',
       expect.objectContaining({ config: expect.objectContaining({ general: expect.objectContaining({ title: 'Edit 2' }) }) }),
       'Builder User',
+      { versionId: 'ver-a', revision: null, isDraft: true },
     );
   });
 

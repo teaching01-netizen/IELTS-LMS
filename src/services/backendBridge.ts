@@ -238,12 +238,14 @@ function extractBackendData<T>(value: unknown): T {
       // `details` carries machine-actionable diagnostics (the publish media
       // gate names the question holding a missing object). Dropping it here
       // would turn every such answer into a generic "something went wrong".
-      throw new ApiError({
+      const rejection = new ApiError({
         code: value.error?.code ?? "UNKNOWN",
         message,
         status: 200,
         ...(value.error?.details ? { details: value.error.details } : {}),
       });
+      rejection.businessRejection = true;
+      throw rejection;
     }
     if (!("data" in value) || value.data === undefined) {
       throw new ApiError({
@@ -546,6 +548,7 @@ export function mapBackendExamVersion(payload: BackendExamVersion): ExamVersion 
     publishNotes: payload.publishNotes ?? undefined,
     isDraft: payload.isDraft,
     isPublished: payload.isPublished,
+    ...(typeof payload.revision === 'number' ? { revision: payload.revision } : {}),
   };
 }
 

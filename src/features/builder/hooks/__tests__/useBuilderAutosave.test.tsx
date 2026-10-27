@@ -336,6 +336,60 @@ describe('useBuilderAutosave', () => {
     expect(result.current.status).toBe('saved');
   });
 
+  it('flushLatest does not unlock navigation until the newest edit is persisted', async () => {
+    const first = createDeferred<void>();
+    const save = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+    const stateA = buildState('Exam A');
+    const stateB = buildState('Exam B');
+    let current = stateA;
+
+    const { result } = renderHook(() => useBuilderAutosave({ save }));
+
+    let leave: Promise<boolean> | undefined;
+    act(() => {
+      leave = result.current.flushLatest(() => current);
+    });
+    // Edit B lands while the flush of A is in flight.
+    act(() => {
+      current = stateB;
+      result.current.scheduleAutosave(stateB);
+    });
+    await act(async () => {
+      first.resolve();
+    });
+
+    await expect(leave).resolves.toBe(true);
+    expect(save.mock.calls.map(([state]) => state)).toContain(stateB);
+    expect(save.mock.calls.at(-1)?.[0]).toBe(stateB);
+  });
+
+  it('flushLatest keeps the user on the page when a newer save fails', async () => {
+    const first = createDeferred<void>();
+    const save = vi
+      .fn()
+      .mockReturnValueOnce(first.promise)
+      .mockRejectedValue(new Error('offline'));
+    const stateA = buildState('Exam A');
+    const stateB = buildState('Exam B');
+    let current = stateA;
+
+    const { result } = renderHook(() => useBuilderAutosave({ save, onError: vi.fn() }));
+
+    let leave: Promise<boolean> | undefined;
+    act(() => {
+      leave = result.current.flushLatest(() => current);
+    });
+    act(() => {
+      current = stateB;
+      result.current.scheduleAutosave(stateB);
+    });
+    await act(async () => {
+      first.resolve();
+    });
+
+    await expect(leave).resolves.toBe(false);
+  });
+
   it('honors a custom debounce window', async () => {
     const save = vi.fn().mockResolvedValue(undefined);
     const state = buildState('Exam A');

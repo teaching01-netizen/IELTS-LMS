@@ -373,7 +373,7 @@ export function BuilderRoot() {
   const {
     status: saveStatus,
     scheduleAutosave,
-    flushNow: flushAutosaveNow,
+    flushLatest,
     retry: retrySave,
   } = useBuilderAutosave({
     save: (nextState) => handleUpdateExamContentRef.current(nextState),
@@ -409,18 +409,10 @@ export function BuilderRoot() {
   });
 
   const saveDraftNow = async () => {
-    const nextState = currentStateRef.current;
-    if (!nextState) {
-      return false;
-    }
-
-    const result = await flushAutosaveNow(nextState);
-
-    if (!result.ok) {
-      return false;
-    }
-
-    if (result.isLatest) {
+    // Resolves true only once the newest edit is persisted, so a late earlier
+    // save never unlocks navigation for newer unsaved work.
+    const saved = await flushLatest(() => currentStateRef.current);
+    if (saved) {
       pushToast({
         variant: 'success',
         title: 'Saved',
@@ -428,7 +420,7 @@ export function BuilderRoot() {
         timestamp: nowLabel(),
       });
     }
-    return true;
+    return saved;
   };
 
   const updateBuilderState = (

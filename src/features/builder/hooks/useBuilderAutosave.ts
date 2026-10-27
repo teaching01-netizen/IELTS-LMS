@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import type { ExamState } from "../../../types";
 import { useDurableLatestAutosave } from "../../../hooks/useDurableLatestAutosave";
 
@@ -31,6 +32,12 @@ export interface UseBuilderAutosaveResult {
   status: BuilderSaveStatus;
   scheduleAutosave: (nextState: ExamState) => void;
   flushNow: (state: ExamState) => Promise<FlushResult>;
+  /**
+   * Flush-before-leave: persists the editor's current state and resolves true
+   * only once the newest edit is saved. An older save that lands while newer
+   * edits arrive never unlocks navigation on its own.
+   */
+  flushLatest: (getState: () => ExamState | null) => Promise<boolean>;
   /** Re-enqueues a state under a fresh request id (used by error retry actions). */
   retry: (state: ExamState) => void;
 }
@@ -57,10 +64,28 @@ export function useBuilderAutosave(options: UseBuilderAutosaveOptions): UseBuild
     autoSaveRecovered: options.autoSaveRecovered ?? false,
   });
 
+  const { flush } = autosave;
+  const flushLatest = useCallback(
+    async (getState: () => ExamState | null) => {
+      // offcut: bounded so continuous typing cannot hold navigation forever;
+      // the page stays put and autosave keeps going.
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const state = getState();
+        if (!state) return false;
+        const result = await flush(state);
+        if (!result.ok) return false;
+        if (result.isLatest) return true;
+      }
+      return false;
+    },
+    [flush],
+  );
+
   return {
     status: autosave.status,
     scheduleAutosave: autosave.schedule,
     flushNow: autosave.flush,
+    flushLatest,
     retry: autosave.retry,
   };
 }

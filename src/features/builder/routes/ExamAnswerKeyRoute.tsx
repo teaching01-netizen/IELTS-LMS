@@ -35,7 +35,7 @@ export function ExamAnswerKeyRoute() {
   const localStateRef = useRef<ExamState | null>(null);
   const recoveredDraftRef = useRef(false);
   const handleUpdateExamContentRef = useRef(controller.handleUpdateExamContent);
-  const { status: saveStatus, scheduleAutosave, flushNow: flushAutosaveNow } = useBuilderAutosave({
+  const { status: saveStatus, scheduleAutosave, flushLatest } = useBuilderAutosave({
     save: async (nextState) => {
       await handleUpdateExamContentRef.current(nextState);
       recoveredDraftRef.current = false;
@@ -69,13 +69,7 @@ export function ExamAnswerKeyRoute() {
     scheduleAutosave(resolved);
   };
 
-  const saveNow = async () => {
-    const next = localStateRef.current;
-    if (!next) return false;
-
-    const result = await flushAutosaveNow(next);
-    return result.ok;
-  };
+  const saveNow = () => flushLatest(() => localStateRef.current);
 
   const handleReturnToBuilder = () => {
     void (async () => {

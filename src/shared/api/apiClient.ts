@@ -354,7 +354,10 @@ class ApiClient {
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Request failed");
         const cancelled = signal?.aborted || (lastError.name === "AbortError" && !timedOut);
-        if (!cancelled && (timedOut || lastError instanceof TypeError)) {
+        if (cancelled) {
+          // Callers detect cancellation as `instanceof Error` named AbortError.
+          lastError = Object.assign(new Error("Request cancelled"), { name: "AbortError" });
+        } else if (timedOut || lastError instanceof TypeError) {
           lastError = new ApiClientError({
             message: timedOut ? "Connection timed out." : "Unable to connect.",
             statusCode: 0,
@@ -401,7 +404,7 @@ class ApiClient {
     // classified ApiError below is still thrown, it just does not warn.
     const expectedByCaller =
       statusCode !== undefined && (config.expectedStatuses?.includes(statusCode) ?? false);
-    if (!expectedByCaller) {
+    if (!expectedByCaller && lastError?.name !== "AbortError") {
       // Log 401 as warning since it's expected for unauthenticated requests
       if (statusCode === 401) {
         logWarn("Request failed with 401 Unauthorized", {

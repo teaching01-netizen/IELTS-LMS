@@ -14,6 +14,7 @@ import { examRepository, type IExamRepository } from './examRepository';
 import {
   ExamEntity,
   ExamVersion,
+  ExamDraftSaveFence,
   ExamEvent,
   ExamStatus,
   ExamAction,
@@ -146,7 +147,7 @@ export class ExamLifecycleService {
     }
   }
 
-  private async ensureBackendDraftVersion(examId: string): Promise<{ versionId: string; revision: number } | null> {
+  private async ensureBackendDraftVersion(examId: string): Promise<{ versionId: string; revision: number; parentVersionId: string | null } | null> {
     const reopened = await backendPost<any>(`/v1/exams/${examId}/draft/reopen`);
     const healed = reopened ? mapBackendExamVersion(reopened) : null;
     if (!healed) {
@@ -157,7 +158,7 @@ export class ExamLifecycleService {
     if (revision === null) {
       return null;
     }
-    return { versionId: healed.id, revision };
+    return { versionId: healed.id, revision, parentVersionId: healed.parentVersionId };
   }
 
   private async ensureBackendDraftVersionRevision(examId: string): Promise<number | null> {
@@ -379,13 +380,42 @@ export class ExamLifecycleService {
   async saveDraft(
     examId: string,
     content: ExamState,
-    actor: string = 'System'
+    actor: string = 'System',
+    fence?: ExamDraftSaveFence,
   ): Promise<TransitionResult> {
     const normalizedContent = normalizeExamStateTableCompletionBlocks(content);
 
     if (this.useBackendBuilder()) {
       try {
-        const revision = await this.ensureBackendDraftVersionRevision(examId);
+        let revision: number | null;
+        if (!fence) {
+          revision = await this.ensureBackendDraftVersionRevision(examId);
+        } else if (fence.isDraft) {
+          if (!Number.isInteger(fence.revision) || (fence.revision ?? -1) < 0) {
+            return { success: false, error: 'The draft revision is unavailable. Refresh before saving.' };
+          }
+          const exam = await this.repository.getExamById(examId);
+          if (!exam || exam.currentDraftVersionId !== fence.versionId) {
+            return { success: false, error: 'The draft changed while you were editing. Refresh before saving.' };
+          }
+          // The server fences the write by this revision, not by a separately
+          // fetched newer revision belonging to someone else's content.
+          revision = fence.revision;
+        } else {
+          const exam = await this.repository.getExamById(examId);
+          if (!exam) return { success: false, error: 'Exam not found' };
+          if (exam.currentDraftVersionId) {
+            const current = await this.repository.getVersionById(exam.currentDraftVersionId);
+            if (current?.isDraft) {
+              return { success: false, error: 'The draft changed while you were editing. Refresh before saving.' };
+            }
+          }
+          const reopened = await this.ensureBackendDraftVersion(examId);
+          if (!reopened || reopened.parentVersionId !== fence.versionId || reopened.revision !== 0) {
+            return { success: false, error: 'The draft changed while you were editing. Refresh before saving.' };
+          }
+          revision = reopened.revision;
+        }
         if (revision === null) {
           return { success: false, error: 'Draft version not found' };
         }
@@ -395,29 +425,40 @@ export class ExamLifecycleService {
           configSnapshot: normalizedContent.config,
           revision,
         });
-        const exam = await this.repository.getExamById(examId);
-        const desiredTitle = (normalizedContent.config?.general?.title ?? normalizedContent.title ?? '').trim();
-
-        if (exam && desiredTitle && exam.title !== desiredTitle) {
-          const nextRevision = getExamRevision(examId);
-          if (nextRevision === undefined) {
-            throw new Error('Missing exam revision after draft save.');
-          }
-
-          await backendPatch(`/v1/exams/${examId}`, {
-            title: desiredTitle,
-            revision: nextRevision,
-          });
-          await this.repository.getExamById(examId);
-        }
         const version = savedVersion ? mapBackendExamVersion(savedVersion) : null;
         notifyObjectiveGradingUpdated(examId);
 
-        return {
-          success: true,
-          exam: exam ?? undefined,
-          version: version ?? undefined,
-        };
+        try {
+          let exam = await this.repository.getExamById(examId);
+          if (!exam) throw new Error('Exam unavailable after draft save.');
+          const desiredTitle = (normalizedContent.config?.general?.title ?? normalizedContent.title ?? '').trim();
+
+          if (desiredTitle && exam.title !== desiredTitle) {
+            const nextRevision = getExamRevision(examId);
+            if (nextRevision === undefined) {
+              throw new Error('Missing exam revision after draft save.');
+            }
+
+            await backendPatch(`/v1/exams/${examId}`, {
+              title: desiredTitle,
+              revision: nextRevision,
+            });
+            exam = await this.repository.getExamById(examId);
+            if (!exam) throw new Error('Exam unavailable after title update.');
+          }
+
+          return {
+            success: true,
+            exam,
+            version: version ?? undefined,
+          };
+        } catch {
+          return {
+            success: false,
+            error: 'Draft saved, but exam details could not be confirmed. Refresh before saving again.',
+            version: version ?? undefined,
+          };
+        }
       } catch (error) {
         return {
           success: false,

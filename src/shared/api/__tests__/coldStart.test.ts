@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "../apiClient";
 import { shouldRetryQuery } from "../queryClient";
 import { connectionRecovery } from "../connectionRecovery";
+import * as errorLogger from "../../observability/errorLogger";
 
 function response(status: number) {
   return new Response(JSON.stringify({ ok: true }), {
@@ -17,6 +18,7 @@ describe("bounded cold-start recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     connectionRecovery.finish("test", "", false);
   });
 
@@ -64,6 +66,20 @@ describe("bounded cold-start recovery", () => {
     expect(await failure).toMatchObject({ name: "AbortError" });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(connectionRecovery.getSnapshot()).toBe("connected");
+  });
+
+  it("does not log an obsolete in-flight read as a request failure", async () => {
+    const errorLog = vi.spyOn(errorLogger, "logError");
+    const fetch = vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new DOMException("Cancelled", "AbortError")));
+    }));
+    vi.stubGlobal("fetch", fetch);
+    const controller = new AbortController();
+    const request = apiClient.get("/obsolete-read", { signal: controller.signal }).catch((error: unknown) => error);
+    controller.abort();
+    expect(await request).toMatchObject({ name: "AbortError" });
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("bounds hanging attempts and backoff together to sixty seconds", async () => {

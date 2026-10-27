@@ -1,6 +1,7 @@
 import type { ExamConfig, ExamState } from '../../../types';
 import type {
   ExamEntity,
+  ExamDraftSaveFence,
   ExamEvent,
   ExamSchedule,
   ExamVersionSummary,
@@ -18,6 +19,6 @@ export interface ExamAuthoringReaderContract {
 }
 
 export interface ExamAuthoringLifecycleContract {
-  saveDraft(examId: string, state: ExamState, actor: string): Promise<{ success: boolean; error?: string }>;
+  saveDraft(examId: string, state: ExamState, actor: string, fence?: ExamDraftSaveFence): Promise<{ success: boolean; error?: string }>;
   compareVersions(examId: string, versionIdA: string, versionIdB: string): Promise<VersionDiff | null>;
 }

@@ -41,10 +41,11 @@ describe('adminPreferencesRepository backend mode', () => {
       );
     global.fetch = fetchMock as typeof fetch;
 
-    const loadedConfig = await adminPreferencesRepository.loadDefaults();
-    await adminPreferencesRepository.saveDefaults(loadedConfig);
+    const loaded = await adminPreferencesRepository.loadDefaults();
+    const saved = await adminPreferencesRepository.saveDefaults(loaded.config, loaded);
 
-    expect(loadedConfig).toEqual(config);
+    expect(loaded).toEqual({ config, revision: 2, stored: true });
+    expect(saved.revision).toBe(3);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       '/api/v1/settings/exam-defaults',
@@ -82,6 +83,20 @@ describe('adminPreferencesRepository backend mode', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a caller cancellation as a cancellation, not a timeout', async () => {
+    vi.stubEnv('VITE_FEATURE_USE_BACKEND_BUILDER', 'true');
+    const controller = new AbortController();
+    global.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      }),
+    ) as typeof fetch;
+
+    const read = adminPreferencesRepository.loadDefaults(controller.signal);
+    controller.abort();
+    await expect(read).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   describe('conflicting writers (F8)', () => {
     function conflict() {
       return new Response(JSON.stringify({ success: false, error: { code: 'REVISION_CONFLICT', message: 'stale revision' } }), {
@@ -109,10 +124,10 @@ describe('adminPreferencesRepository backend mode', () => {
         return jsonResponse({ configSnapshot: puts.length ? remote : base, revision: puts.length ? 5 : 4 });
       }) as typeof fetch;
 
-      await adminPreferencesRepository.loadDefaults();
-      await expect(adminPreferencesRepository.saveDefaults(mine)).rejects.toMatchObject({
+      const loaded = await adminPreferencesRepository.loadDefaults();
+      await expect(adminPreferencesRepository.saveDefaults(mine, loaded)).rejects.toMatchObject({
         code: 'EXAM_DEFAULTS_CONFLICT',
-        latest: expect.objectContaining({ general: expect.objectContaining({ title: 'their edit' }) }),
+        latest: { revision: 5, config: expect.objectContaining({ general: expect.objectContaining({ title: 'their edit' }) }) },
       });
       expect(puts).toHaveLength(1);
     });
@@ -129,8 +144,8 @@ describe('adminPreferencesRepository backend mode', () => {
         return jsonResponse({ configSnapshot: base, revision: puts.length ? 5 : 4 });
       }) as typeof fetch;
 
-      await adminPreferencesRepository.loadDefaults();
-      await adminPreferencesRepository.saveDefaults(mine);
+      const loaded = await adminPreferencesRepository.loadDefaults();
+      await adminPreferencesRepository.saveDefaults(mine, loaded);
       expect(puts.map((put) => put.revision)).toEqual([4, 5]);
     });
 
@@ -147,8 +162,8 @@ describe('adminPreferencesRepository backend mode', () => {
         return jsonResponse({ configSnapshot: puts.length ? remote : base, revision: puts.length ? 5 : 4 });
       }) as typeof fetch;
 
-      await adminPreferencesRepository.loadDefaults();
-      await adminPreferencesRepository.saveDefaults(mine, { overwrite: true });
+      const loaded = await adminPreferencesRepository.loadDefaults();
+      await adminPreferencesRepository.saveDefaults(mine, loaded, { overwrite: true });
       expect(puts.map((put) => put.revision)).toEqual([4, 5]);
     });
   });

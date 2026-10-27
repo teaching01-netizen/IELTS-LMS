@@ -50,14 +50,14 @@ export interface IExamRepository {
   // Exam Entity operations
   getAllExamsWithLegacyMigration(providerKey?: 'sat' | 'ielts' | 'act'): Promise<ExamEntity[]>;
   getAllExams(providerKey?: 'sat' | 'ielts' | 'act'): Promise<ExamEntity[]>;
-  getExamById(id: string): Promise<ExamEntity | null>;
+  getExamById(id: string, signal?: AbortSignal): Promise<ExamEntity | null>;
   saveExam(exam: ExamEntity): Promise<void>;
   deleteExam(id: string): Promise<void>;
   
   // Exam Version operations
   getAllVersions(examId: string): Promise<ExamVersion[]>;
   getVersionSummaries(examId: string): Promise<ExamVersionSummary[]>;
-  getVersionById(id: string): Promise<ExamVersion | null>;
+  getVersionById(id: string, signal?: AbortSignal): Promise<ExamVersion | null>;
   getVersionMetadata(id: string): Promise<ExamVersionMetadata | null>;
   getVersionBuilderContent(id: string): Promise<ExamVersionBuilderContent | null>;
   saveVersion(version: ExamVersion): Promise<void>;
@@ -143,9 +143,9 @@ export class BackendExamRepository implements IExamRepository {
     return exams.map(mapBackendExamEntity);
   }
 
-  async getExamById(id: string): Promise<ExamEntity | null> {
+  async getExamById(id: string, signal?: AbortSignal): Promise<ExamEntity | null> {
     try {
-      const exam = await backendGet<any>(`/v1/exams/${encodeURIComponent(id)}`);
+      const exam = await backendGet<any>(`/v1/exams/${encodeURIComponent(id)}`, signal ? { signal } : undefined);
       return mapBackendExamEntity(exam);
     } catch (error) {
       if (isBackendNotFound(error)) {
@@ -293,14 +293,14 @@ export class BackendExamRepository implements IExamRepository {
     return versions.map(mapBackendExamVersionSummary);
   }
 
-  async getVersionById(id: string): Promise<ExamVersion | null> {
+  async getVersionById(id: string, signal?: AbortSignal): Promise<ExamVersion | null> {
     const cached = this.versionCache.get(id);
     if (cached !== undefined) {
       return cached;
     }
 
     try {
-      const version = await backendGet<any>(`/v1/versions/${id}`);
+      const version = await backendGet<any>(`/v1/versions/${id}`, signal ? { signal } : undefined);
       const mapped = mapBackendExamVersion(version);
       if (mapped.isPublished && !mapped.isDraft) {
         this.versionCache.set(id, mapped);

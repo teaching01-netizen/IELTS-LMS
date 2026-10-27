@@ -6,7 +6,7 @@ import { createDefaultConfig } from '../../../../constants/examDefaults';
 import { createInitialExamState } from '../../../../services/examAdapterService';
 import { useConfigRouteController } from '../useConfigRouteController';
 
-function queryWrapper({ children }: { children: React.ReactNode }) {
+function QueryWrapper({ children }: { children: React.ReactNode }) {
   const [client] = React.useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
@@ -65,7 +65,7 @@ describe('useConfigRouteController draft heal', () => {
       };
     });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-clone'), { wrapper: queryWrapper });
+    const { result } = renderHook(() => useConfigRouteController('exam-clone'), { wrapper: QueryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);

@@ -7,10 +7,16 @@ import {
 } from './backendBridge';
 import { ApiError } from '../shared/api-client/errors';
 
-let defaultsRevision: number | undefined;
-/** The content `defaultsRevision` represents; a 409 is only safe to retry when the server still holds it. */
-let defaultsBase: ExamConfig | undefined;
-let inFlightLoad: Promise<ExamConfig> | null = null;
+/**
+ * The saved defaults document together with the revision that describes it.
+ * `stored` is false when the server has none yet and the built-in defaults
+ * stand in; that content is not a base another writer could have changed.
+ */
+export interface ExamDefaultsSnapshot {
+  config: ExamConfig;
+  revision: number;
+  stored: boolean;
+}
 
 type DefaultsPayload = {
   configSnapshot: ExamConfig;
@@ -20,8 +26,8 @@ type DefaultsPayload = {
 /** Another writer changed the saved defaults since this client's base. */
 export class ExamDefaultsConflictError extends Error {
   readonly code = 'EXAM_DEFAULTS_CONFLICT';
-  readonly latest: ExamConfig;
-  constructor(latest: ExamConfig) {
+  readonly latest: ExamDefaultsSnapshot;
+  constructor(latest: ExamDefaultsSnapshot) {
     super('Another admin changed the saved exam defaults.');
     this.name = 'ExamDefaultsConflictError';
     this.latest = latest;
@@ -62,80 +68,65 @@ class AdminPreferencesRepository {
     return createDefaultConfig('Academic', 'Academic');
   }
 
-  async loadDefaults(): Promise<ExamConfig> {
-    // Single-flight: concurrent callers share one GET so N parallel mounts
-    // produce one request. The entry clears in `finally` (via assignment to
-    // null after settle) so a failure never pins a rejected promise.
-    if (!inFlightLoad) {
-      inFlightLoad = this.fetchDefaults().finally(() => {
-        inFlightLoad = null;
-      });
+  async loadDefaults(signal?: AbortSignal): Promise<ExamDefaultsSnapshot> {
+    try {
+      return await this.readDefaults(signal);
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError' && !signal?.aborted) {
+        throw new Error('Loading saved exam defaults timed out. Check the backend connection and retry.');
+      }
+      throw error;
     }
-    return inFlightLoad;
   }
 
-  private async fetchDefaults(): Promise<ExamConfig> {
+  private async readDefaults(signal?: AbortSignal): Promise<ExamDefaultsSnapshot> {
     try {
       const payload = await backendGet<DefaultsPayload>('/v1/settings/exam-defaults', {
         timeout: DEFAULTS_LOAD_TIMEOUT_MS,
         retries: 0,
+        ...(signal ? { signal } : {}),
       });
-      // A load adopts the server's revision together with the content it
-      // describes, so a later conflict can tell a real remote edit apart.
-      defaultsRevision = payload.revision;
-      defaultsBase = payload.configSnapshot;
-      return payload.configSnapshot;
+      return { config: payload.configSnapshot, revision: payload.revision ?? 0, stored: true };
     } catch (error) {
-      if (!isBackendNotFound(error)) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          throw new Error('Loading saved exam defaults timed out. Check the backend connection and retry.');
-        }
-        throw error;
-      }
-
-      defaultsRevision = 0;
-      defaultsBase = undefined;
-      return this.getDefaults();
+      if (!isBackendNotFound(error)) throw error;
+      return { config: this.getDefaults(), revision: 0, stored: false };
     }
   }
 
-  private async putDefaults(config: ExamConfig, revision: number): Promise<void> {
+  private async putDefaults(config: ExamConfig, revision: number): Promise<ExamDefaultsSnapshot> {
     const payload = await backendPut<DefaultsPayload>('/v1/settings/exam-defaults', {
       configSnapshot: config,
       revision,
     });
-    defaultsRevision = payload.revision;
-    defaultsBase = payload.configSnapshot ?? config;
+    return { config: payload.configSnapshot ?? config, revision: payload.revision ?? revision + 1, stored: true };
   }
 
   /**
-   * Save the full defaults document against the loaded base revision.
+   * Save the full defaults document against `base`, the snapshot this edit
+   * started from, and return the acknowledged snapshot.
    *
    * A 409 means another writer committed first. The save is retried once on
    * the fresh revision only when that cannot discard their work: the server
-   * still holds our base content (a revision-only bump) or already holds
-   * exactly what we are saving. Otherwise the caller gets a conflict and
-   * decides; `overwrite` is that explicit decision.
+   * still holds the base content (a revision-only bump) or already holds
+   * exactly what we are saving. Otherwise the caller gets a conflict carrying
+   * the latest snapshot and decides; `overwrite` is that explicit decision.
    */
-  async saveDefaults(config: ExamConfig, options: { overwrite?: boolean } = {}): Promise<void> {
+  async saveDefaults(
+    config: ExamConfig,
+    base: ExamDefaultsSnapshot,
+    options: { overwrite?: boolean } = {},
+  ): Promise<ExamDefaultsSnapshot> {
     try {
-      await this.putDefaults(config, defaultsRevision ?? 0);
+      return await this.putDefaults(config, base.revision);
     } catch (error) {
       if (!isConflict(error)) throw error;
-      let latest: DefaultsPayload | null;
-      try {
-        latest = await backendGet<DefaultsPayload>('/v1/settings/exam-defaults', {
-          timeout: DEFAULTS_LOAD_TIMEOUT_MS,
-          retries: 0,
-        });
-      } catch (readError) {
-        if (!isBackendNotFound(readError)) throw readError;
-        latest = null;
-      }
-      const remote = latest?.configSnapshot;
-      const safeToRetry = options.overwrite === true || sameContent(remote, defaultsBase) || sameContent(remote, config);
-      if (!safeToRetry) throw new ExamDefaultsConflictError(remote ?? this.getDefaults());
-      await this.putDefaults(config, latest?.revision ?? 0);
+      const latest = await this.readDefaults();
+      const safeToRetry =
+        options.overwrite === true ||
+        (base.stored && latest.stored && sameContent(latest.config, base.config)) ||
+        (latest.stored && sameContent(latest.config, config));
+      if (!safeToRetry) throw new ExamDefaultsConflictError(latest);
+      return this.putDefaults(config, latest.revision);
     }
   }
 }

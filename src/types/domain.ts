@@ -147,6 +147,15 @@ export interface ExamVersion {
   // Version state
   isDraft: boolean;
   isPublished: boolean;
+  /** Backend revision of this exact snapshot, when supplied by the server. */
+  revision?: number | undefined;
+}
+
+/** The version whose content an editor used to construct a draft save. */
+export interface ExamDraftSaveFence {
+  versionId: string;
+  revision: number | null;
+  isDraft: boolean;
 }
 
 /**

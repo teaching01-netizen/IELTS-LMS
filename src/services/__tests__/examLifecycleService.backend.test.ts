@@ -14,11 +14,13 @@ function buildState(): ExamState {
     activeModule: 'reading',
     activePassageId: 'p1',
     activeListeningPartId: 'l1',
+    activeScienceStimulusId: '',
     config,
     reading: { passages: [] },
     listening: { parts: [] },
     writing: { task1Prompt: 'Task 1', task2Prompt: 'Task 2' },
     speaking: { part1Topics: [], cueCard: '', part3Discussion: [] },
+    science: { stimuli: [] },
   };
 }
 
@@ -27,6 +29,131 @@ describe('ExamLifecycleService backend mode', () => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     global.fetch = originalFetch;
+  });
+
+  it('uses the revision of the loaded config snapshot instead of a newer editor revision', async () => {
+    const state = buildState();
+    const examId = 'config-conflict-exam';
+    const exam = {
+      id: examId, slug: examId, title: state.title, examType: 'Academic', status: 'draft',
+      visibility: 'organization', ownerId: 'owner-1', createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z', currentDraftVersionId: 'draft-1',
+      currentPublishedVersionId: null, schemaVersion: 3, revision: 2,
+    };
+    const version = {
+      id: 'draft-1', examId, versionNumber: 1, parentVersionId: null,
+      contentSnapshot: state, configSnapshot: state.config, createdBy: 'owner-1',
+      createdAt: '2026-01-01T00:00:00.000Z', isDraft: true, isPublished: false, revision: 2,
+    };
+    let sentRevision: number | undefined;
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/v1/exams/${examId}/draft` && init?.method === 'PATCH') {
+        sentRevision = JSON.parse(String(init.body)).revision;
+        const status = sentRevision === 2 ? 200 : 409;
+        return new Response(JSON.stringify(status === 200
+          ? { success: true, data: version }
+          : { success: false, error: { code: 'CONFLICT', message: 'Draft changed while you were editing' } }),
+        { status, headers: { 'content-type': 'application/json' } });
+      }
+      const data = url === '/api/v1/versions/draft-1' ? version : exam;
+      return new Response(JSON.stringify({ success: true, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    const result = await new ExamLifecycleService(examRepository).saveDraft(examId, state, 'owner-1', {
+      versionId: 'draft-1', revision: 1, isDraft: true,
+    });
+
+    expect(sentRevision).toBe(1);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/changed|conflict/i);
+  });
+
+  it.each([
+    { reopenedRevision: 0, expectedSuccess: true },
+    { reopenedRevision: 1, expectedSuccess: false },
+  ])('saves a published fallback only when its reopened draft has not changed (revision $reopenedRevision)', async ({ reopenedRevision, expectedSuccess }) => {
+    const state = buildState();
+    state.config.general.title = state.title;
+    const examId = 'config-fallback-exam';
+    const exam = {
+      id: examId, slug: examId, title: state.title, examType: 'Academic', status: 'published',
+      visibility: 'organization', ownerId: 'owner-1', createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z', currentDraftVersionId: null,
+      currentPublishedVersionId: 'published-1', schemaVersion: 3, revision: 1,
+    };
+    const draft = {
+      id: 'draft-reopened', examId, versionNumber: 2, parentVersionId: 'published-1',
+      contentSnapshot: state, configSnapshot: state.config, createdBy: 'owner-1',
+      createdAt: '2026-01-01T00:00:00.000Z', isDraft: true, isPublished: false, revision: reopenedRevision,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const data = url === `/api/v1/exams/${examId}` ? exam : draft;
+      return new Response(JSON.stringify({ success: true, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const result = await new ExamLifecycleService(examRepository).saveDraft(examId, state, 'owner-1', {
+      versionId: 'published-1', revision: 3, isDraft: false,
+    });
+
+    expect(result.success).toBe(expectedSuccess);
+    const writes = fetchMock.mock.calls.filter(([url, init]) => String(url) === `/api/v1/exams/${examId}/draft` && init?.method === 'PATCH');
+    expect(writes).toHaveLength(expectedSuccess ? 1 : 0);
+    if (expectedSuccess) expect(JSON.parse(String(writes[0]?.[1]?.body)).revision).toBe(0);
+    else expect(result.error).toMatch(/changed/i);
+  });
+
+  it('refuses a fenced config save when the loaded draft has no revision', async () => {
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as typeof fetch;
+
+    const result = await new ExamLifecycleService(examRepository).saveDraft('exam-1', buildState(), 'owner-1', {
+      versionId: 'draft-1', revision: null, isDraft: true,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/revision.*unavailable/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports a saved draft separately from a failed follow-up exam read', async () => {
+    const state = buildState();
+    const examId = 'config-refresh-failure';
+    const exam = {
+      id: examId, slug: examId, title: state.title, examType: 'Academic', status: 'draft',
+      visibility: 'organization', ownerId: 'owner-1', createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z', currentDraftVersionId: 'draft-1',
+      currentPublishedVersionId: null, schemaVersion: 3, revision: 1,
+    };
+    const savedVersion = {
+      id: 'draft-1', examId, versionNumber: 1, parentVersionId: null,
+      contentSnapshot: state, configSnapshot: state.config, createdBy: 'owner-1',
+      createdAt: '2026-01-01T00:00:00.000Z', isDraft: true, isPublished: false, revision: 2,
+    };
+    let examReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/v1/exams/${examId}` && init?.method !== 'PATCH' && ++examReads > 1) {
+        return new Response(JSON.stringify({ success: false, error: { message: 'Refresh denied' } }), {
+          status: 403, headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ success: true, data: init?.method === 'PATCH' ? savedVersion : exam }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      });
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const result = await new ExamLifecycleService(examRepository).saveDraft(examId, state, 'owner-1', {
+      versionId: 'draft-1', revision: 1, isDraft: true,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/draft saved.*refresh/i);
+    expect(result.version?.revision).toBe(2);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
   });
 
   it('creates an exam and its initial draft through the backend', async () => {
@@ -156,12 +283,14 @@ describe('ExamLifecycleService backend mode', () => {
       );
     global.fetch = fetchMock as typeof fetch;
 
+    const timing = { module1Minutes: 32, module2LowerMinutes: 32, module2HigherMinutes: 32, breakAfterMinutes: 10, minimumCorrectForHigher: 15 };
+    const configuration = { showClassroomScoreReport: true, sections: { 'reading-writing': timing, math: timing } };
     const result = await new ExamLifecycleService(examRepository).createProviderExam({
       providerKey: 'sat',
       providerExamType: 'SAT',
       title: 'Retryable SAT',
       operationKey: 'same-operation-key',
-      configuration: { showClassroomScoreReport: true },
+      configuration,
     }, 'owner-1');
 
     expect(result.success).toBe(true);
@@ -170,7 +299,7 @@ describe('ExamLifecycleService backend mode', () => {
     expect(url).toBe('/api/v1/exams');
     expect(new Headers(options.headers).get('Idempotency-Key')).toBe('same-operation-key');
     const body = JSON.parse(String(options.body));
-    expect(body.configuration).toEqual({ showClassroomScoreReport: true });
+    expect(body.configuration).toEqual(configuration);
     expect(body).not.toHaveProperty('operationKey');
   });
 

@@ -1,7 +1,8 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../../constants/examDefaults';
 import type { ExamConfig } from '../../../../types';
 import { useAdminRootController } from '../useAdminRootController';
@@ -30,8 +31,12 @@ function deferred() {
   return { promise, resolve };
 }
 
+let queryClient: QueryClient;
+
 const wrapper = ({ children }: { children: ReactNode }) => (
-  <MemoryRouter initialEntries={['/admin/settings']}>{children}</MemoryRouter>
+  <QueryClientProvider client={queryClient}>
+    <MemoryRouter initialEntries={['/admin/settings']}>{children}</MemoryRouter>
+  </QueryClientProvider>
 );
 
 async function renderLoaded() {
@@ -41,6 +46,10 @@ async function renderLoaded() {
 }
 
 describe('admin defaults persistence (F8)', () => {
+  beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
   afterEach(() => {
     global.fetch = originalFetch;
   });
@@ -122,5 +131,85 @@ describe('admin defaults persistence (F8)', () => {
       ['three', 2],
     ]);
     expect(result.current.defaultsSaveIssue).toBeNull();
+  });
+
+  it('confirms an acknowledged save in the shared cache and keeps a newer edit dirty', async () => {
+    const save = deferred();
+    let remote = { configSnapshot: withTitle('base'), revision: 1 };
+    global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') return save.promise;
+      return respond(200, { success: true, data: remote });
+    }) as typeof fetch;
+    const { result } = await renderLoaded();
+
+    act(() => result.current.contextValue.setDefaults(withTitle('four')));
+    // Edit 5 lands while save 4 is pending.
+    act(() => result.current.contextValue.setDefaults(withTitle('five')));
+    await act(async () => {
+      save.resolve(respond(200, { success: true, data: { configSnapshot: withTitle('four'), revision: 2 } }));
+    });
+
+    await waitFor(() =>
+      expect(queryClient.getQueryData(['admin', 'preferences', 'exam-defaults'])).toMatchObject({ revision: 2 }),
+    );
+    expect(result.current.contextValue.defaults.general.title).toBe('five');
+
+    // A refetch replaces the confirmed base but never the unsaved draft.
+    remote = { configSnapshot: withTitle('remote'), revision: 3 };
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['admin', 'preferences', 'exam-defaults'] });
+      // Let the query observers deliver the refetched base before asserting.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(queryClient.getQueryData(['admin', 'preferences', 'exam-defaults'])).toMatchObject({ revision: 3 });
+    expect(result.current.contextValue.defaults.general.title).toBe('five');
+  });
+
+  it('adopts the acknowledged defaults when no newer edit exists, then follows the server', async () => {
+    let remote = { configSnapshot: withTitle('base'), revision: 1 };
+    global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body));
+        remote = { configSnapshot: body.configSnapshot, revision: body.revision + 1 };
+      }
+      return respond(200, { success: true, data: remote });
+    }) as typeof fetch;
+    const { result } = await renderLoaded();
+
+    act(() => result.current.contextValue.setDefaults(withTitle('mine')));
+    await waitFor(() =>
+      expect(queryClient.getQueryData(['admin', 'preferences', 'exam-defaults'])).toMatchObject({ revision: 2 }),
+    );
+
+    remote = { configSnapshot: withTitle('later remote'), revision: 3 };
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['admin', 'preferences', 'exam-defaults'] });
+    });
+    await waitFor(() => expect(result.current.contextValue.defaults.general.title).toBe('later remote'));
+  });
+
+  it('starts a new staff session from the server, not the previous actor\'s cache', async () => {
+    let remote = { configSnapshot: withTitle('base'), revision: 4 };
+    const puts: Array<{ revision: number }> = [];
+    global.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        const body = JSON.parse(String(init.body));
+        puts.push(body);
+        remote = { configSnapshot: body.configSnapshot, revision: body.revision + 1 };
+      }
+      return respond(200, { success: true, data: remote });
+    }) as typeof fetch;
+    const first = await renderLoaded();
+    first.unmount();
+
+    // Logout clears the staff cache; another admin changes defaults meanwhile.
+    queryClient.clear();
+    remote = { configSnapshot: withTitle('changed elsewhere'), revision: 9 };
+    const { result } = await renderLoaded();
+    expect(result.current.contextValue.defaults.general.title).toBe('changed elsewhere');
+
+    act(() => result.current.contextValue.setDefaults(withTitle('mine')));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]!.revision).toBe(9);
   });
 });
