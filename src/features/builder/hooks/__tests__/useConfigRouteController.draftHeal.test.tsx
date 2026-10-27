@@ -1,8 +1,16 @@
+import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../../constants/examDefaults';
 import { createInitialExamState } from '../../../../services/examAdapterService';
 import { useConfigRouteController } from '../useConfigRouteController';
+
+function queryWrapper({ children }: { children: React.ReactNode }) {
+  const [client] = React.useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 
 const mockNavigate = vi.fn();
 const mockGetExamById = vi.fn();
@@ -57,7 +65,7 @@ describe('useConfigRouteController draft heal', () => {
       };
     });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-clone'));
+    const { result } = renderHook(() => useConfigRouteController('exam-clone'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);

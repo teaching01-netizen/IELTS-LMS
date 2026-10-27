@@ -6,6 +6,7 @@ import type {
   ScheduleWindowOptions,
 } from '../contracts';
 import { schedulingGateway } from '../infrastructure/schedulingGateway';
+import { invalidateRoomReads } from '../../proctor/api/proctorQueries';
 
 const scheduleQueryPolicy = {
   staleTime: 15 * 1000,
@@ -35,8 +36,10 @@ export function useSaveScheduleMutation() {
 
   return useMutation<void, Error, ExamSchedule>({
     mutationFn: (schedule) => schedulingGateway.repository.saveSchedule(schedule),
-    onSuccess: () => {
+    onSuccess: (_result, schedule) => {
       void queryClient.invalidateQueries({ queryKey: scheduleKeys.list() });
+      // A schedule is a room: its overview cards and detail change with it.
+      void invalidateRoomReads(queryClient, { scheduleId: schedule.id });
     },
   });
 }
@@ -46,8 +49,9 @@ export function useDeleteScheduleMutation() {
 
   return useMutation<void, Error, string>({
     mutationFn: (scheduleId) => schedulingGateway.repository.deleteSchedule(scheduleId),
-    onSuccess: () => {
+    onSuccess: (_result, scheduleId) => {
       void queryClient.invalidateQueries({ queryKey: scheduleKeys.list() });
+      void invalidateRoomReads(queryClient, { scheduleId });
     },
   });
 }
@@ -57,9 +61,10 @@ export function useStartScheduleMutation() {
 
   return useMutation<ScheduleRuntimeMutationResult, Error, string>({
     mutationFn: (scheduleId) => schedulingGateway.delivery.startRuntime(scheduleId, 'Proctor'),
-    onSuccess: (result) => {
+    onSuccess: (result, scheduleId) => {
       if (result.success) {
         void queryClient.invalidateQueries({ queryKey: scheduleKeys.list() });
+        void invalidateRoomReads(queryClient, { scheduleId });
       }
     },
   });

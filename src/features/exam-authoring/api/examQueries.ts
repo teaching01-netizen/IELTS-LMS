@@ -103,3 +103,15 @@ export function useSaveExamMutation() {
 export function invalidateExamList(queryClient: QueryClient): Promise<void> {
   return queryClient.invalidateQueries({ queryKey: examKeys.all });
 }
+
+/**
+ * After an exam's draft content or config is saved: every list (titles,
+ * question counts, status) and that exam's detail. Active views refetch;
+ * inactive ones refetch on their next mount instead of serving a stale copy.
+ */
+export function invalidateExamReads(queryClient: QueryClient, examId: string): Promise<void> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: [...examKeys.all, 'list'] }),
+    queryClient.invalidateQueries({ queryKey: examKeys.detail(examId) }),
+  ]).then(() => undefined);
+}

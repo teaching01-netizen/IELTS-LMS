@@ -72,4 +72,20 @@ describe('scheduling query boundary', () => {
     await waitFor(() => expect(mockGetAllSchedules).toHaveBeenCalledTimes(2));
     expect(mockSaveSchedule).toHaveBeenCalledWith(schedule);
   });
+
+  it('marks the affected room overview and detail stale after a schedule save', async () => {
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(['proctoring', 'sessions', 'all'], []);
+    queryClient.setQueryData(['proctoring', 'sessions', 'sat'], []);
+    queryClient.setQueryData(['proctoring', 'detail', 'sched-1'], {});
+    const save = renderHook(() => useSaveScheduleMutation(), { wrapper: createWrapper(queryClient) });
+
+    await act(async () => {
+      await save.result.current.mutateAsync({ id: 'sched-1' } as never);
+    });
+
+    expect(queryClient.getQueryState(['proctoring', 'sessions', 'all'])?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(['proctoring', 'sessions', 'sat'])?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(['proctoring', 'detail', 'sched-1'])?.isInvalidated).toBe(true);
+  });
 });

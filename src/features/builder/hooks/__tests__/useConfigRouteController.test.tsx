@@ -1,8 +1,16 @@
+import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultConfig } from '../../../../constants/examDefaults';
 import { createInitialExamState } from '../../../../services/examAdapterService';
 import { useConfigRouteController } from '../useConfigRouteController';
+
+function queryWrapper({ children }: { children: React.ReactNode }) {
+  const [client] = React.useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 
 const mockNavigate = vi.fn();
 const mockGetExamById = vi.fn();
@@ -84,7 +92,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: true });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -131,7 +139,7 @@ describe('useConfigRouteController', () => {
   it('leaves the controller in a not-found state when the exam is missing', async () => {
     mockGetExamById.mockResolvedValue(null);
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -159,7 +167,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: false, error: 'Draft has been modified by another user' });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -188,7 +196,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: true });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -221,7 +229,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: false, error: 'Revision mismatch' });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -252,7 +260,7 @@ describe('useConfigRouteController', () => {
 
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -294,7 +302,7 @@ describe('useConfigRouteController', () => {
     });
     mockSaveDraft.mockResolvedValue({ success: true });
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -335,7 +343,7 @@ describe('useConfigRouteController', () => {
       }),
     );
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -373,7 +381,7 @@ describe('useConfigRouteController', () => {
       }),
     );
 
-    const { result } = renderHook(() => useConfigRouteController('exam-1'));
+    const { result } = renderHook(() => useConfigRouteController('exam-1'), { wrapper: queryWrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -427,6 +435,7 @@ describe('useConfigRouteController entity identity (F3)', () => {
     mockGetVersionById.mockImplementation((id: string) => Promise.resolve(id === 'ver-a' ? a.version : b.version));
 
     const { result, rerender } = renderHook(({ examId }) => useConfigRouteController(examId), {
+      wrapper: queryWrapper,
       initialProps: { examId: 'a' },
     });
     rerender({ examId: 'b' });
@@ -447,6 +456,7 @@ describe('useConfigRouteController entity identity (F3)', () => {
     mockGetVersionById.mockResolvedValue(a.version);
 
     const { result, rerender } = renderHook(({ examId }) => useConfigRouteController(examId), {
+      wrapper: queryWrapper,
       initialProps: { examId: 'a' },
     });
     await waitFor(() => expect(result.current.config?.general.title).toBe('Title a'));
@@ -469,7 +479,7 @@ describe('useConfigRouteController entity identity (F3)', () => {
     const save = deferred<{ success: boolean }>();
     mockSaveDraft.mockReturnValueOnce(save.promise).mockResolvedValue({ success: true });
 
-    const { result } = renderHook(() => useConfigRouteController('a'));
+    const { result } = renderHook(() => useConfigRouteController('a'), { wrapper: queryWrapper });
     await waitFor(() => expect(result.current.config).toBeDefined());
     const base = result.current.config!;
 
@@ -499,5 +509,28 @@ describe('useConfigRouteController entity identity (F3)', () => {
       expect.objectContaining({ config: expect.objectContaining({ general: expect.objectContaining({ title: 'Edit 2' }) }) }),
       'Builder User',
     );
+  });
+
+  it('marks exam lists and the exam detail stale after a config save', async () => {
+    const a = examFixture('a');
+    mockGetExamById.mockResolvedValue(a.entity);
+    mockGetVersionById.mockResolvedValue(a.version);
+    mockSaveDraft.mockResolvedValue({ success: true });
+    const client = new QueryClient();
+    client.setQueryData(['exam-authoring', 'list', 'ielts', 'content'], { entities: [], exams: [] });
+    client.setQueryData(['exam-authoring', 'detail', 'a'], a.entity);
+    client.setQueryData(['exam-authoring', 'detail', 'b'], { id: 'b' });
+    const { result } = renderHook(() => useConfigRouteController('a'), {
+      wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    });
+    await waitFor(() => expect(result.current.config).toBeDefined());
+
+    await act(async () => {
+      await result.current.handleSaveConfig();
+    });
+
+    expect(client.getQueryState(['exam-authoring', 'list', 'ielts', 'content'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['exam-authoring', 'detail', 'a'])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(['exam-authoring', 'detail', 'b'])?.isInvalidated).toBe(false);
   });
 });

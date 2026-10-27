@@ -32,7 +32,7 @@ export interface SatRoomEntryInfo {
 export function useSatRoomEntryInfo(scheduleId: string, enabled = true) {
   return useQuery({
     queryKey: ['sat-room-entry-info', scheduleId] as const,
-    queryFn: () => proctorFacade.backendGet<SatRoomEntryInfo>(`/v1/proctor/sessions/${encodeURIComponent(scheduleId)}/entry-info`),
+    queryFn: ({ signal }) => proctorFacade.backendGet<SatRoomEntryInfo>(`/v1/proctor/sessions/${encodeURIComponent(scheduleId)}/entry-info`, { signal }),
     enabled: Boolean(scheduleId) && enabled,
     staleTime: 15_000,
     refetchOnWindowFocus: false,

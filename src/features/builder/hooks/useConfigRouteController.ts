@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useOptionalAuthSession } from '../../auth/api/authSession';
 import { examAuthoringFacade } from '../../exam-authoring/api/examAuthoringFacade';
+import { invalidateExamReads } from '../../exam-authoring/api/examQueries';
 import type { ExamConfig } from '../../../types';
 import type { ExamEntity, ExamVersion } from '../../../types/domain';
 import { syncConfigWithStandards } from '../../../constants/examDefaults';
@@ -30,6 +32,7 @@ export function useConfigRouteController(
   examId?: string,
 ): ConfigRouteController {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const authSession = useOptionalAuthSession();
   const staffActor = resolveStaffActor(authSession?.session ?? null);
 
@@ -184,6 +187,8 @@ export function useConfigRouteController(
         return false;
       }
 
+      // Lists and the exam detail carry the saved title/config.
+      void invalidateExamReads(queryClient, examId);
       if (examRef.current?.id !== examId) return true;
       // Edits typed while the save was in flight stay dirty for the next save;
       // the refresh below only adopts server config when none exist.
@@ -195,7 +200,7 @@ export function useConfigRouteController(
       isSavingRef.current = false;
       setIsSaving(false);
     }
-  }, [config, examId, loadExam, staffActor]);
+  }, [config, examId, loadExam, queryClient, staffActor]);
 
   const handleNavigateToBuilder = useCallback(async () => {
     if (!examId) {

@@ -80,7 +80,7 @@ export function useAdminResultsQuery(provider: ResultProviderKey | "all" = "all"
   const queryString = provider === "all" ? "" : `?provider=${encodeURIComponent(provider)}`;
   return useQuery({
     queryKey: resultKeys.dashboard(provider),
-    queryFn: () => resultsGateway.get<AdminResultRow[]>(`/v1/results/dashboard${queryString}`),
+    queryFn: ({ signal }) => resultsGateway.get<AdminResultRow[]>(`/v1/results/dashboard${queryString}`, { signal }),
     staleTime: 15_000,
     gcTime: 5 * 60_000,
   });
@@ -89,10 +89,8 @@ export function useAdminResultsQuery(provider: ResultProviderKey | "all" = "all"
 export function useActScienceDetailQuery(attemptId?: string | null) {
   return useQuery({
     queryKey: resultKeys.actDetail(attemptId ?? "missing"),
-    queryFn: () =>
-      resultsGateway.get<ActScienceDetail>(
-        `/v1/results/act-science/${encodeURIComponent(attemptId ?? "")}`,
-      ),
+    queryFn: ({ signal }) =>
+      resultsGateway.get<ActScienceDetail>(`/v1/results/act-science/${encodeURIComponent(attemptId ?? "")}`, { signal }),
     enabled: Boolean(attemptId),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -102,7 +100,7 @@ export function useActScienceDetailQuery(attemptId?: string | null) {
 export function useResultsAnalyticsQuery() {
   return useQuery({
     queryKey: resultKeys.analytics(),
-    queryFn: () => resultsGateway.get<ResultsAnalytics>("/v1/results/analytics"),
+    queryFn: ({ signal }) => resultsGateway.get<ResultsAnalytics>("/v1/results/analytics", { signal }),
     staleTime: 15_000,
     gcTime: 5 * 60_000,
   });

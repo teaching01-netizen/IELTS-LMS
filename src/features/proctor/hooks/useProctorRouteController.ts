@@ -8,6 +8,7 @@ import {
 } from "@shared/hooks/useAuthoritativeDeadlineClock";
 import {
   fetchProctorSessionDetail,
+  invalidateRoomReads,
   liveQueryPolicy,
   proctorKeys,
   type ProctorSessionDetailPayload,
@@ -419,7 +420,7 @@ export function useProctorRouteController(
   const detailQueryState = useQueries({
     queries: detailScheduleIds.map((scheduleId) => ({
       queryKey: proctorKeys.detail(scheduleId),
-      queryFn: () => fetchProctorSessionDetail(scheduleId),
+      queryFn: ({ signal }: { signal: AbortSignal }) => fetchProctorSessionDetail(scheduleId, signal),
       ...liveQueryPolicy,
       refetchInterval: detailPollIntervalMs,
     })),
@@ -677,6 +678,9 @@ export function useProctorRouteController(
    * reported separately as a stale view on the existing connection banner.
    */
   const loadMonitoringState = useCallback(async () => {
+    // Other provider families (SAT rooms vs. the all-provider overview) are
+    // marked stale too, so no other screen serves the pre-command state.
+    void invalidateRoomReads(queryClient, { exceptSummaries: proctorKeys.sessions(options.providerKey) });
     try {
       await refresh();
     } catch (refreshError) {
@@ -686,7 +690,7 @@ export function useProctorRouteController(
           : "Action confirmed, but live data could not be refreshed."
       );
     }
-  }, [refresh]);
+  }, [options.providerKey, queryClient, refresh]);
 
   const handleLiveUpdate = useCallback(
     (event: LiveUpdateEvent) => {

@@ -1,5 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, type QueryClient } from '@tanstack/react-query';
 import { proctorFacade } from '../application/proctorFacade';
+import { parseProctorSessionDetail, parseProctorSessionSummaries } from '../contracts/monitoringSchemas';
 import type {
   ProctorAlert,
   SessionAuditLog,
@@ -20,6 +21,26 @@ export const proctorKeys = {
   sessions: (providerKey?: 'sat' | 'ielts' | 'act') => [...proctorKeys.all, 'sessions', providerKey ?? 'all'] as const,
   detail: (scheduleId: string) => [...proctorKeys.all, 'detail', scheduleId] as const,
 };
+
+/**
+ * After a room lifecycle change (command, schedule edit): every provider's
+ * summary family, plus the room's detail when `scheduleId` is given. A caller
+ * that already refetches its own family and the detail passes
+ * `exceptSummaries` and no `scheduleId`, so nothing is requested twice.
+ */
+export function invalidateRoomReads(
+  queryClient: QueryClient,
+  options: { scheduleId?: string; exceptSummaries?: ReturnType<typeof proctorKeys.sessions> } = {},
+): Promise<void> {
+  const { scheduleId, exceptSummaries } = options;
+  return Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: [...proctorKeys.all, 'sessions'],
+      predicate: (query) => !exceptSummaries || query.queryKey[2] !== exceptSummaries[2],
+    }),
+    scheduleId ? queryClient.invalidateQueries({ queryKey: proctorKeys.detail(scheduleId) }) : undefined,
+  ]).then(() => undefined);
+}
 
 export type ProctorSessionSummaryPayload = {
   schedule: Parameters<typeof proctorFacade.mapSchedule>[0];
@@ -138,19 +159,26 @@ export function buildDashboardDetailEndpoint(scheduleId: string): string {
   return `/v1/proctor/sessions/${scheduleId}?mode=dashboard&auditLimit=200&alertLimit=100`;
 }
 
-export function fetchProctorSessionSummaries(
+/** Room summaries for one provider family; the payload is checked at this boundary. */
+export async function fetchProctorSessionSummaries(
   providerKey?: 'sat' | 'ielts' | 'act',
+  signal?: AbortSignal,
 ): Promise<ProctorSessionSummaryPayload[]> {
   const query = providerKey ? `?providerKey=${encodeURIComponent(providerKey)}` : '';
-  return proctorFacade.backendGet<ProctorSessionSummaryPayload[]>(`/v1/proctor/sessions${query}`);
+  const payload = await proctorFacade.backendGet<unknown>(`/v1/proctor/sessions${query}`, signal ? { signal } : undefined);
+  return parseProctorSessionSummaries(payload);
 }
 
-export function fetchProctorSessionDetail(
+/** One room's dashboard detail; rejects a payload describing another room. */
+export async function fetchProctorSessionDetail(
   scheduleId: string,
+  signal?: AbortSignal,
 ): Promise<ProctorSessionDetailPayload> {
-  return proctorFacade.backendGet<ProctorSessionDetailPayload>(
+  const payload = await proctorFacade.backendGet<unknown>(
     buildDashboardDetailEndpoint(scheduleId),
+    signal ? { signal } : undefined,
   );
+  return parseProctorSessionDetail(scheduleId, payload);
 }
 
 export function useProctorSessionSummaries(
@@ -167,7 +195,7 @@ export function useProctorSessionSummaries(
     : refetchInterval;
   return useQuery({
     queryKey: proctorKeys.sessions(providerKey),
-    queryFn: () => fetchProctorSessionSummaries(providerKey),
+    queryFn: ({ signal }) => fetchProctorSessionSummaries(providerKey, signal),
     ...liveQueryPolicy,
     refetchInterval: boundedRefetchInterval,
     ...(refetchOnMount === undefined ? {} : { refetchOnMount }),

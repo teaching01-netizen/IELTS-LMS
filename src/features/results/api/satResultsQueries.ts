@@ -148,7 +148,7 @@ export const satResultKeys = {
 export function useSatResultsQuery() {
   return useQuery({
     queryKey: satResultKeys.list(),
-    queryFn: () => resultsGateway.get<SatAccessGroupSummary[]>('/v1/results/sat/access-groups'),
+    queryFn: ({ signal }) => resultsGateway.get<SatAccessGroupSummary[]>('/v1/results/sat/access-groups', { signal }),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
   });
@@ -164,12 +164,12 @@ export interface SatAttemptFilters {
 export function useSatAttemptsQuery(examId?: string, scheduleId?: string, offset = 0, needle = '', scoreFilter = 'all', filters: SatAttemptFilters = {}) {
   return useQuery({
     queryKey: satResultKeys.attempts(examId ?? '', scheduleId ?? '', offset, needle, scoreFilter, filters),
-    queryFn: () => {
+    queryFn: ({ signal }) => {
       const params = new URLSearchParams({ examId: examId ?? '', scheduleId: scheduleId ?? '', limit: '50', offset: String(offset), q: needle, scoreFilter });
       if (filters.status && filters.status !== 'all') params.set('status', filters.status);
       if (filters.from) params.set('from', filters.from);
       if (filters.to) params.set('to', filters.to);
-      return resultsGateway.get<SatAttemptPage>(`/v1/results/sat/attempts?${params.toString()}`);
+      return resultsGateway.get<SatAttemptPage>(`/v1/results/sat/attempts?${params.toString()}`, { signal });
     },
     enabled: Boolean(examId && scheduleId),
     staleTime: 30_000,
@@ -180,7 +180,7 @@ export function useSatAttemptsQuery(examId?: string, scheduleId?: string, offset
 export function useSatResultQuery(resultId?: string) {
   return useQuery({
     queryKey: satResultKeys.detail(resultId ?? 'missing'),
-    queryFn: () => resultsGateway.get<SatResultDetail>(`/v1/results/sat/${encodeURIComponent(resultId ?? '')}`),
+    queryFn: ({ signal }) => resultsGateway.get<SatResultDetail>(`/v1/results/sat/${encodeURIComponent(resultId ?? '')}`, { signal }),
     enabled: Boolean(resultId),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -190,7 +190,7 @@ export function useSatResultQuery(resultId?: string) {
 export function useSatAttemptAnswersQuery(attemptId?: string) {
   return useQuery({
     queryKey: satResultKeys.attemptAnswers(attemptId ?? 'missing'),
-    queryFn: () => resultsGateway.get<SatAttemptAnswers>(`/v1/results/sat/attempts/${encodeURIComponent(attemptId ?? '')}/answers`),
+    queryFn: ({ signal }) => resultsGateway.get<SatAttemptAnswers>(`/v1/results/sat/attempts/${encodeURIComponent(attemptId ?? '')}/answers`, { signal }),
     enabled: Boolean(attemptId),
     staleTime: 0,
     refetchOnWindowFocus: 'always',
