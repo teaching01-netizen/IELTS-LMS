@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
 import { filterStudentSubmissions, gradingGateway } from '../infrastructure/gradingGateway';
+import {
+  parseReviewDraft,
+  parseReviewSections,
+  parseReviewSubmission,
+  parseReviewWritingTasks,
+} from '../contracts/reviewSchemas';
 import type {
   SessionDetailFilters,
   ReviewDraft,
@@ -36,6 +42,9 @@ export const gradingKeys = {
   submissions: (sessionId: string) => [...gradingKeys.all, sessionId, 'submissions'] as const,
   submission: (submissionId: string) => [...gradingKeys.all, 'submission', submissionId] as const,
   reviewDraft: (submissionId: string) => [...gradingKeys.all, 'review-draft', submissionId] as const,
+  sections: (submissionId: string) => [...gradingKeys.all, 'sections', submissionId] as const,
+  writingTasks: (submissionId: string) => [...gradingKeys.all, 'writing-tasks', submissionId] as const,
+  publishedVersion: (versionId: string) => [...gradingKeys.all, 'published-version', versionId] as const,
 };
 
 function throwResultError(error: unknown, fallbackMessage: string): never {
@@ -89,10 +98,27 @@ export function useSessionSubmissions(sessionId: string, filters?: SessionDetail
   });
 }
 
+/** Review reads: one checked fetcher per cache key, shared by every observer. */
+export async function fetchReviewSubmission(submissionId: string) {
+  return parseReviewSubmission(submissionId, await gradingGateway.repository.getSubmissionById(submissionId));
+}
+
+export async function fetchReviewDraft(submissionId: string) {
+  return parseReviewDraft(submissionId, await gradingGateway.repository.getReviewDraftBySubmission(submissionId));
+}
+
+export async function fetchReviewSections(submissionId: string) {
+  return parseReviewSections(submissionId, await gradingGateway.repository.getSectionSubmissionsBySubmissionId(submissionId));
+}
+
+export async function fetchReviewWritingTasks(submissionId: string) {
+  return parseReviewWritingTasks(submissionId, await gradingGateway.repository.getWritingSubmissionsBySubmissionId(submissionId));
+}
+
 export function useSubmission(submissionId: string) {
   return useQuery({
     queryKey: gradingKeys.submission(submissionId),
-    queryFn: () => gradingGateway.repository.getSubmissionById(submissionId),
+    queryFn: () => fetchReviewSubmission(submissionId),
     enabled: submissionId.length > 0,
     staleTime: 2 * 60 * 1000,
   });
@@ -101,7 +127,7 @@ export function useSubmission(submissionId: string) {
 export function useReviewDraft(submissionId: string) {
   return useQuery({
     queryKey: gradingKeys.reviewDraft(submissionId),
-    queryFn: () => gradingGateway.repository.getReviewDraftBySubmission(submissionId),
+    queryFn: () => fetchReviewDraft(submissionId),
     enabled: submissionId.length > 0,
     ...liveQueryPolicy,
   });

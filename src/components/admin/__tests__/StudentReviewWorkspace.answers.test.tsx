@@ -1,6 +1,15 @@
 import React from 'react';
 import { describe, expect, test, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+function QueryWrapper({ children }: { children: React.ReactNode }) {
+  const [client] = React.useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }),
+  );
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 
 vi.mock('../../../services/gradingRepository', () => {
   return {
@@ -161,6 +170,7 @@ describe('StudentReviewWorkspace objective answers', () => {
         currentTeacherId="t-1"
         currentTeacherName="Teacher"
       />,
+      { wrapper: QueryWrapper },
     );
 
     expect(await screen.findByText('Traceback View')).toBeInTheDocument();
@@ -322,6 +332,7 @@ describe('StudentReviewWorkspace objective answers', () => {
         currentTeacherId="t-1"
         currentTeacherName="Teacher"
       />,
+      { wrapper: QueryWrapper },
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /preview as student/i }));
@@ -404,6 +415,7 @@ describe('StudentReviewWorkspace objective answers', () => {
         currentTeacherId="t-1"
         currentTeacherName="Teacher"
       />,
+      { wrapper: QueryWrapper },
     );
 
     expect(await screen.findByText('Teacher Summary')).toBeInTheDocument();
@@ -503,6 +515,7 @@ describe('StudentReviewWorkspace objective answers', () => {
         currentTeacherId="t-1"
         currentTeacherName="Teacher"
       />,
+      { wrapper: QueryWrapper },
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /writing/i }));
@@ -611,6 +624,7 @@ describe('StudentReviewWorkspace objective answers', () => {
         currentTeacherId="t-1"
         currentTeacherName="Teacher"
       />,
+      { wrapper: QueryWrapper },
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /release now/i }));
@@ -725,6 +739,7 @@ describe('StudentReviewWorkspace objective answers', () => {
         currentTeacherId="t-1"
         currentTeacherName="Teacher"
       />,
+      { wrapper: QueryWrapper },
     );
 
     fireEvent.click(await screen.findByRole('button', { name: /schedule release/i }));

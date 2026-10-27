@@ -1,6 +1,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('../../../services/gradingRepository', () => {
   return {
@@ -118,6 +119,14 @@ import { createInitialExamState } from '../../../services/examAdapterService';
 import { examRepository } from '../../../services/examRepository';
 import { gradingRepository } from '../../../services/gradingRepository';
 import { gradingService } from '../../../services/gradingService';
+
+function QueryWrapper({ children }: { children: React.ReactNode }) {
+  const [client] = React.useState(
+    () => new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }),
+  );
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 
 const isoNow = () => new Date().toISOString();
 
@@ -267,6 +276,7 @@ function renderWorkspace(props: Record<string, any> = {}) {
       currentTeacherName="Teacher"
       {...props}
     />,
+    { wrapper: QueryWrapper },
   );
 }
 
@@ -391,11 +401,15 @@ describe('StudentReviewWorkspace section navigation', () => {
     renderWorkspace();
 
     expect(await screen.findByText('sections boom')).toBeInTheDocument();
+    // Retry re-reads the failed resource; the rest of the workspace stays put.
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([]);
     fireEvent.click(screen.getByRole('button', { name: /^retry$/i }));
 
     await waitFor(() => {
-      expect(gradingRepository.getSubmissionById).toHaveBeenCalledTimes(2);
+      expect(gradingRepository.getSectionSubmissionsBySubmissionId).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText('sections boom')).not.toBeInTheDocument();
     });
+    expect(gradingRepository.getSubmissionById).toHaveBeenCalledTimes(1);
   });
 });
 

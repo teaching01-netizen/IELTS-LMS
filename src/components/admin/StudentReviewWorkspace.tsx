@@ -1,36 +1,26 @@
-import React, { useState, useEffect, useCallback, useMemo, useReducer, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   ArrowLeft, Save, CheckCircle, Clock, FileText,
   MessageSquare, ChevronLeft, ChevronRight, Eye, Calendar,
   CheckSquare, AlertTriangle, Printer, Menu
 } from 'lucide-react';
 import { 
-  StudentSubmission, SectionSubmission, WritingTaskSubmission, ReviewDraft,
+  WritingTaskSubmission,
   StudentResult,
-  RubricAssessment, ReleaseStatus, GradingChecklist,
-  WritingAnnotation, DrawingAnnotation, CommentBankItem, WritingAnswers
+  ReleaseStatus,
+  CommentBankItem, WritingAnswers
 } from '../../types/grading';
-import {
-  gradingErrorMessage,
-  gradingRepository,
-  gradingService,
-} from '../../features/grading/infrastructure/gradingGateway';
-import { examRepository, hydrateExamState } from '../../features/exam-authoring/api/examAuthoringGateway';
-import type { ExamState, WritingTaskContent } from '../../types';
+import type { WritingTaskContent } from '../../types';
 import { WritingAnnotationCanvas } from './WritingAnnotationCanvas';
 import { ConfirmModal } from '../ConfirmModal';
 import { Dialog } from '@components/ui/Dialog';
 import { StudentReportPreview } from './StudentReportPreview';
 import { QuestionTracebackPanel } from './QuestionTracebackPanel';
-import { logger } from '../../utils/logger';
 import { SectionLoadingSkeleton } from '@components/ui';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
 import { subscribeObjectiveGradingUpdates } from '../../utils/objectiveGradingSync';
-import {
-  createReviewDraftState,
-  reviewDraftReducer,
-} from '../../features/grading/domain/reviewDraftState';
+import { useReviewWorkspaceController } from '../../features/grading/hooks/useReviewWorkspaceController';
 
 export interface StudentReviewWorkspaceProps {
   submissionId: string;
@@ -82,14 +72,6 @@ function isWritingTaskEntry(value: unknown): value is WritingTaskEntry {
   );
 }
 
-function requiresExplicitReleaseOverride(errorMessage: string): boolean {
-  const normalized = errorMessage.toLowerCase();
-  return (
-    normalized.includes('explicit grader override confirmation is required') ||
-    normalized.includes('merge_incomplete_override_required')
-  );
-}
-
 export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace({ 
   submissionId, 
   onBack, 
@@ -105,44 +87,36 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const hasPrevStudent = typeof onPreviousStudent === 'function';
   const hasNextStudent = typeof onNextStudent === 'function';
 
-  const [submission, setSubmission] = useState<StudentSubmission | null>(null);
-  const [sectionSubmissions, setSectionSubmissions] = useState<SectionSubmission[]>([]);
-  const [writingSubmissions, setWritingSubmissions] = useState<WritingTaskSubmission[]>([]);
-  const [draftState, dispatchDraft] = useReducer(reviewDraftReducer, submissionId, createReviewDraftState);
-  const reviewDraft = draftState.submissionId === submissionId ? draftState.local : null;
-  const saving = draftState.submissionId === submissionId && draftState.pendingSave !== null;
-  const saveOperationSeq = useRef(0);
-  const editDraft = useCallback(
-    (update: (draft: ReviewDraft) => ReviewDraft) => dispatchDraft({ type: 'edited', submissionId, update }),
-    [submissionId],
-  );
-  const [examState, setExamState] = useState<ExamState | null>(null);
-  const [examLoading, setExamLoading] = useState(false);
-  const [examError, setExamError] = useState<string | null>(null);
+  const workspace = useReviewWorkspaceController({
+    submissionId,
+    teacherId: currentTeacherId,
+    teacherName: currentTeacherName,
+  });
+  const {
+    submission,
+    reviewDraft,
+    sectionSubmissions,
+    writingSubmissions,
+    examState,
+    loading,
+    sectionsLoading,
+    sectionsError,
+    writingLoading,
+    examLoading,
+    examError,
+    saving,
+    releaseAction,
+    releaseError,
+    objectiveOverrideError,
+    pendingObjectiveOverrideQuestionIds,
+    editDraft,
+    updateRubricAssessment,
+    updateChecklist,
+    reloadSections,
+  } = workspace;
   const [activeSection, setActiveSection] = useState<'listening' | 'reading' | 'writing' | 'speaking' | 'science'>('reading');
   const [activeTask, setActiveTask] = useState<string>('task1');
-  const [loading, setLoading] = useState(true);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [sectionsLoading, setSectionsLoading] = useState(false);
-  const [sectionsError, setSectionsError] = useState<string | null>(null);
-  const [writingLoading, setWritingLoading] = useState(false);
-  const [writingError, setWritingError] = useState<string | null>(null);
-  const [draftError, setDraftError] = useState<string | null>(null);
-  const [objectiveOverrideError, setObjectiveOverrideError] = useState<string | null>(null);
-  const [pendingObjectiveOverrideQuestionIds, setPendingObjectiveOverrideQuestionIds] = useState<Set<string>>(
-    () => new Set(),
-  );
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const examLoadSeq = useRef(0);
-  const [releaseAction, setReleaseAction] = useState<
-    | 'mark_grading_complete'
-    | 'mark_ready_to_release'
-    | 'release_now'
-    | 'schedule_release'
-    | 'reopen'
-    | null
-  >(null);
-  const [releaseError, setReleaseError] = useState<string | null>(null);
   const [showReportPreview, setShowReportPreview] = useState(false);
   const [overrideConfirmOpen, setOverrideConfirmOpen] = useState(false);
   const [scheduleDialogOpen, setScheduleDialogOpen] = useState(false);
@@ -154,360 +128,41 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     { id: '3', category: 'coherence', label: 'Transition needed', text: 'Add a transition word to improve flow between ideas.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
     { id: '4', category: 'task_response', label: 'Address the prompt', text: 'Ensure you fully address all parts of the prompt.', isStudentVisible: true, createdBy: 'system', createdAt: '', usageCount: 0 },
   ]);
-  const submissionLoadSeq = useRef(0);
 
+  // View state belongs to one submission; the controller scopes its own data.
   useEffect(() => {
-    const publishedVersionId = submission?.publishedVersionId;
-    if (!publishedVersionId) {
-      setExamState(null);
-      setExamError(null);
-      setExamLoading(false);
-      return;
-    }
-
-    const seq = (examLoadSeq.current += 1);
-    setExamLoading(true);
-    setExamError(null);
-
-    void (async () => {
-      try {
-        // Published-first pinning (S2-C13): the student took the published
-        // version, so traceback resolves to it. Draft grading-source data is
-        // ignored here (no explicit draft override in this read path).
-        void submission?.scheduleId;
-        const versionId = publishedVersionId;
-        const version = await examRepository.getVersionById(versionId);
-        if (seq !== examLoadSeq.current) return;
-
-        if (!version) {
-          setExamState(null);
-          setExamError('Exam version not found for this submission.');
-          return;
-        }
-
-        setExamState(hydrateExamState(version.contentSnapshot as ExamState));
-      } catch (error) {
-        if (seq !== examLoadSeq.current) return;
-        setExamState(null);
-        setExamError(error instanceof Error ? error.message : 'Failed to load exam version.');
-      } finally {
-        if (seq === examLoadSeq.current) {
-          setExamLoading(false);
-        }
-      }
-    })();
-  }, [submission?.publishedVersionId, submission?.scheduleId]);
-
-  const loadData = useCallback(async () => {
-    const seq = ++submissionLoadSeq.current;
-    setLoading(true);
-    setSummaryError(null);
-    setSectionsLoading(false);
-    setSectionsError(null);
-    setWritingLoading(false);
-    setWritingError(null);
-    setDraftError(null);
-    setObjectiveOverrideError(null);
-    setPendingObjectiveOverrideQuestionIds(new Set());
-    try {
-      const subData = await gradingRepository.getSubmissionById(submissionId);
-
-      if (seq !== submissionLoadSeq.current) return;
-
-      if (!subData) {
-        setSubmission(null);
-        setSummaryError('Submission not found.');
-        return;
-      }
-
-      if (seq !== submissionLoadSeq.current) return;
-
-      setSubmission(subData);
-      setLoading(false);
-
-      // Load or create the review draft once per submission. Later reads in
-      // this load (sections, writing) never reinstall it over local edits.
-      try {
-        const existingDraft = await gradingRepository.getReviewDraftBySubmission(submissionId);
-        if (seq !== submissionLoadSeq.current) return;
-
-        if (existingDraft) {
-          dispatchDraft({ type: 'loaded', submissionId, draft: existingDraft });
-        } else if (
-          ['submitted', 'in_progress', 'reopened'].includes(subData.gradingStatus)
-        ) {
-          const result = await gradingService.startReview(submissionId, currentTeacherId, currentTeacherName);
-          if (seq !== submissionLoadSeq.current) return;
-          if (result.success && result.data) {
-            // Initialize with default checklist
-            const initializedDraft = {
-              ...result.data,
-              releaseStatus: 'draft' as ReleaseStatus,
-              drawings: [],
-              checklist: {
-                listeningReviewed: false,
-                readingReviewed: false,
-                writingTask1Reviewed: false,
-                writingTask2Reviewed: false,
-                speakingReviewed: false,
-                overallFeedbackWritten: false,
-                rubricComplete: false,
-                annotationsComplete: false
-              }
-            };
-            dispatchDraft({ type: 'loaded', submissionId, draft: initializedDraft });
-          }
-        }
-      } catch (error) {
-        if (seq !== submissionLoadSeq.current) return;
-        setDraftError(error instanceof Error ? error.message : 'Failed to load review draft.');
-      }
-
-      setSectionsLoading(true);
-      try {
-        const sectionsData = await gradingRepository.getSectionSubmissionsBySubmissionId(submissionId);
-        if (seq !== submissionLoadSeq.current) return;
-        setSectionSubmissions(sectionsData);
-      } catch (error) {
-        if (seq !== submissionLoadSeq.current) return;
-        setSectionsError(error instanceof Error ? error.message : 'Failed to load section answers.');
-      } finally {
-        if (seq === submissionLoadSeq.current) {
-          setSectionsLoading(false);
-        }
-      }
-
-      setWritingLoading(true);
-      try {
-        const writingsData = await gradingRepository.getWritingSubmissionsBySubmissionId(submissionId);
-        if (seq !== submissionLoadSeq.current) return;
-        setWritingSubmissions(writingsData);
-      } catch (error) {
-        if (seq !== submissionLoadSeq.current) return;
-        setWritingError(error instanceof Error ? error.message : 'Failed to load writing payload.');
-      } finally {
-        if (seq === submissionLoadSeq.current) {
-          setWritingLoading(false);
-        }
-      }
-
-    } catch (error) {
-      if (seq !== submissionLoadSeq.current) return;
-      logger.error('Failed to load submission:', error);
-    } finally {
-      if (seq === submissionLoadSeq.current) {
-        setLoading(false);
-      }
-    }
-  }, [submissionId, currentTeacherId, currentTeacherName]);
-
-  const reloadObjectiveSections = useCallback(async () => {
-    const seq = submissionLoadSeq.current;
-    gradingRepository.invalidateSubmissionBundle(submissionId);
-    setSectionsLoading(true);
-    setSectionsError(null);
-
-    try {
-      const sectionsData = await gradingRepository.getSectionSubmissionsBySubmissionId(submissionId);
-      if (seq !== submissionLoadSeq.current) return;
-      setSectionSubmissions(sectionsData);
-    } catch (error) {
-      if (seq !== submissionLoadSeq.current) return;
-      setSectionsError(error instanceof Error ? error.message : 'Failed to reload section answers.');
-    } finally {
-      if (seq === submissionLoadSeq.current) {
-        setSectionsLoading(false);
-      }
-    }
-  }, [submissionId]);
-
-  useEffect(() => {
-    submissionLoadSeq.current += 1;
-    setLoading(true);
-    setSubmission(null);
-    setSectionSubmissions([]);
-    setWritingSubmissions([]);
-    dispatchDraft({ type: 'reset', submissionId });
-    setExamState(null);
-    setExamError(null);
     setActiveSection('reading');
     setActiveTask('task1');
-    setReleaseAction(null);
-    setReleaseError(null);
     setShowReportPreview(false);
-    setPendingObjectiveOverrideQuestionIds(new Set());
     setMobileRailOpen(false);
-    void loadData();
-  }, [submissionId, loadData]);
+  }, [submissionId]);
 
   useEffect(() => {
     if (!submission?.examId) return undefined;
 
     return subscribeObjectiveGradingUpdates(submission.examId, () => {
-      void reloadObjectiveSections();
+      void reloadSections();
     });
-  }, [reloadObjectiveSections, submission?.examId]);
+  }, [reloadSections, submission?.examId]);
 
-  const handleSaveDraft = async () => {
+  const loadData = reloadSections;
+  const handleSaveDraft = () => {
     if (!reviewDraft || saving) return;
-    // The save is bound to this submission and the edit sequence it carries;
-    // its acknowledgement cannot erase newer edits or reach another student.
-    const operationId = (saveOperationSeq.current += 1);
-    const savedFor = submissionId;
-    dispatchDraft({ type: 'saveStarted', submissionId: savedFor, operationId });
-    try {
-      const result = await gradingService.saveReviewDraft(reviewDraft, currentTeacherId, currentTeacherName);
-      if (result.success && result.data) {
-        dispatchDraft({ type: 'saveAcknowledged', submissionId: savedFor, operationId, draft: result.data });
-      } else {
-        dispatchDraft({ type: 'saveFailed', submissionId: savedFor, operationId });
-      }
-    } catch (error) {
-      logger.error('Failed to save review draft:', error);
-      dispatchDraft({ type: 'saveFailed', submissionId: savedFor, operationId });
-    }
+    void workspace.saveDraft();
   };
-
-  const handleObjectiveOverride = async (
-    section: 'reading' | 'listening',
-    questionId: string,
-    isCorrect: boolean,
-  ) => {
-    setPendingObjectiveOverrideQuestionIds((current) => {
-      const next = new Set(current);
-      next.add(questionId);
-      return next;
-    });
-    setObjectiveOverrideError(null);
-    try {
-      const result = await gradingService.overrideObjectiveQuestion(
-        submissionId,
-        section,
-        questionId,
-        { isCorrect, reason: 'Manual grader correctness decision' },
-      );
-      if (result.success && result.data) {
-        setSectionSubmissions((current) =>
-          current.map((sectionSubmission) =>
-            sectionSubmission.id === result.data?.id ? result.data : sectionSubmission,
-          ),
-        );
-      } else {
-        setObjectiveOverrideError(
-          gradingErrorMessage(result.error, 'Failed to update answer correctness.'),
-        );
-      }
-    } catch (error) {
-      setObjectiveOverrideError(
-        error instanceof Error ? error.message : 'Failed to update answer correctness.',
-      );
-    } finally {
-      setPendingObjectiveOverrideQuestionIds((current) => {
-        const next = new Set(current);
-        next.delete(questionId);
-        return next;
-      });
-    }
-  };
-
-  const handleMarkGradingComplete = async () => {
-    if (!reviewDraft) return;
-    setReleaseAction('mark_grading_complete');
-    setReleaseError(null);
-    try {
-      const result = await gradingService.markGradingComplete(
-        submissionId,
-        currentTeacherId,
-        currentTeacherName,
-      );
-      if (result.success && result.data) {
-        dispatchDraft({ type: 'transitioned', submissionId, draft: result.data });
-      } else {
-        throw new Error(gradingErrorMessage(result.error, 'Failed to mark grading complete'));
-      }
-    } catch (error) {
-      logger.error('Failed to mark grading complete:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to mark grading complete.');
-    } finally {
-      setReleaseAction(null);
-    }
-  };
-
-  const handleMarkReadyToRelease = async () => {
-    if (!reviewDraft) return;
-    setReleaseAction('mark_ready_to_release');
-    setReleaseError(null);
-    try {
-      const result = await gradingService.markReadyToRelease(
-        submissionId,
-        currentTeacherId,
-        currentTeacherName,
-      );
-      if (result.success && result.data) {
-        dispatchDraft({ type: 'transitioned', submissionId, draft: result.data });
-      } else {
-        throw new Error(gradingErrorMessage(result.error, 'Failed to mark ready to release'));
-      }
-    } catch (error) {
-      logger.error('Failed to mark ready to release:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to mark ready to release.');
-    } finally {
-      setReleaseAction(null);
-    }
-  };
+  const handleObjectiveOverride = workspace.overrideObjective;
+  const handleMarkGradingComplete = workspace.markGradingComplete;
+  const handleMarkReadyToRelease = workspace.markReadyToRelease;
+  const handleReopen = workspace.reopen;
 
   const handleReleaseNow = async () => {
-    if (!reviewDraft) return;
-    setReleaseAction('release_now');
-    setReleaseError(null);
-    try {
-      const result = await gradingService.releaseResult(
-        submissionId,
-        currentTeacherId,
-        currentTeacherName,
-        false,
-      );
-      if (!result.success) {
-        const releaseMessage = gradingErrorMessage(result.error, 'Failed to release result');
-        if (requiresExplicitReleaseOverride(releaseMessage)) {
-          // C15: explicit override needs app-modal confirmation, never window.confirm.
-          setOverrideConfirmOpen(true);
-          return;
-        }
-        throw new Error(releaseMessage);
-      }
-      await loadData();
-    } catch (error) {
-      logger.error('Failed to release result:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to release result.');
-    } finally {
-      setReleaseAction(null);
-    }
+    // C15: explicit override needs app-modal confirmation, never window.confirm.
+    if ((await workspace.releaseNow()) === 'override_required') setOverrideConfirmOpen(true);
   };
 
   const handleConfirmOverrideRelease = async () => {
-    if (!reviewDraft) return;
     setOverrideConfirmOpen(false);
-    setReleaseAction('release_now');
-    setReleaseError(null);
-    try {
-      const result = await gradingService.releaseResult(
-        submissionId,
-        currentTeacherId,
-        currentTeacherName,
-        true,
-      );
-      if (result.success) {
-        await loadData();
-      } else {
-        throw new Error(gradingErrorMessage(result.error, 'Failed to release result'));
-      }
-    } catch (error) {
-      logger.error('Failed to release result:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to release result.');
-    } finally {
-      setReleaseAction(null);
-    }
+    await workspace.releaseNow(true);
   };
 
   const todayIso = () => {
@@ -545,129 +200,12 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     void handleScheduleRelease(scheduleDate);
   };
 
-  const handleScheduleRelease = async (date: string) => {
-    if (!reviewDraft) return;
-    setReleaseAction('schedule_release');
-    setReleaseError(null);
-    try {
-      const result = await gradingService.scheduleRelease(
-        submissionId,
-        date,
-        currentTeacherId,
-        currentTeacherName,
-      );
-      if (result.success && result.data) {
-        dispatchDraft({ type: 'transitioned', submissionId, draft: result.data });
-      } else {
-        throw new Error(gradingErrorMessage(result.error, 'Failed to schedule release'));
-      }
-    } catch (error) {
-      logger.error('Failed to schedule release:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to schedule release.');
-    } finally {
-      setReleaseAction(null);
-    }
-  };
-
-  const handleReopen = async () => {
-    if (!reviewDraft) return;
-    setReleaseAction('reopen');
-    setReleaseError(null);
-    try {
-      const result = await gradingService.reopenReview(
-        submissionId,
-        currentTeacherId,
-        currentTeacherName,
-        'Manual reopen',
-      );
-      if (result.success && result.data) {
-        dispatchDraft({ type: 'transitioned', submissionId, draft: result.data });
-      } else {
-        throw new Error(gradingErrorMessage(result.error, 'Failed to reopen review'));
-      }
-    } catch (error) {
-      logger.error('Failed to reopen review:', error);
-      setReleaseError(error instanceof Error ? error.message : 'Failed to reopen review.');
-    } finally {
-      setReleaseAction(null);
-    }
-  };
-
-  const updateRubricAssessment = (section: 'listening' | 'reading' | 'writing' | 'speaking', assessment: Partial<RubricAssessment>, taskId?: string) => {
-    if (!reviewDraft) return;
-    editDraft((previous) => {
-      if (section === 'writing' && taskId) {
-        const writing = previous.sectionDrafts.writing ?? {};
-        const task = taskId as 'task1' | 'task2';
-        return {
-          ...previous,
-          sectionDrafts: {
-            ...previous.sectionDrafts,
-            writing: { ...writing, [task]: { ...writing[task], ...assessment } as RubricAssessment },
-          },
-        };
-      }
-      return {
-        ...previous,
-        sectionDrafts: {
-          ...previous.sectionDrafts,
-          [section]: { ...previous.sectionDrafts[section], ...assessment } as RubricAssessment,
-        },
-      };
-    });
-  };
-
-  const updateChecklist = (updates: Partial<GradingChecklist>) => {
-    if (!reviewDraft) return;
-    editDraft((previous) => ({ ...previous, checklist: { ...previous.checklist, ...updates } }));
-  };
-
-  const handleAnnotationAdd = (annotation: WritingAnnotation) => {
-    if (!reviewDraft || !annotation.taskId) return;
-    if (reviewDraft.annotations.some((candidate) => candidate.id === annotation.id)) return;
-    editDraft((previous) =>
-      previous.annotations.some((candidate) => candidate.id === annotation.id)
-        ? previous
-        : { ...previous, annotations: [...previous.annotations, annotation] },
-    );
-  };
-
-  // Canvas update path: replace the annotation in place (undo/redo restore).
-  const handleAnnotationUpdate = (annotation: WritingAnnotation) => {
-    if (!reviewDraft || !annotation.taskId) return;
-    editDraft((previous) => ({
-      ...previous,
-      annotations: previous.annotations.map((candidate) =>
-        candidate.id === annotation.id ? annotation : candidate,
-      ),
-    }));
-  };
-
-  const handleAnnotationDelete = (annotationId: string) => {
-    if (!reviewDraft) return;
-    editDraft((previous) => ({
-      ...previous,
-      annotations: previous.annotations.filter((candidate) => candidate.id !== annotationId),
-    }));
-  };
-
-  const handleDrawingAdd = (drawing: DrawingAnnotation) => {
-    if (!reviewDraft || !drawing.taskId) return;
-    if (reviewDraft.drawings.some((candidate) => candidate.id === drawing.id)) return;
-    editDraft((previous) =>
-      previous.drawings.some((candidate) => candidate.id === drawing.id)
-        ? previous
-        : { ...previous, drawings: [...previous.drawings, drawing] },
-    );
-  };
-
-  const handleDrawingDelete = (drawingId: string) => {
-    if (!reviewDraft || !drawingId) return;
-    editDraft((previous) => ({
-      ...previous,
-      drawings: previous.drawings.filter((candidate) => candidate.id !== drawingId),
-    }));
-  };
+  const handleScheduleRelease = workspace.scheduleRelease;
+  const handleAnnotationAdd = workspace.addAnnotation;
+  const handleAnnotationUpdate = workspace.updateAnnotation;
+  const handleAnnotationDelete = workspace.deleteAnnotation;
+  const handleDrawingAdd = workspace.addDrawing;
+  const handleDrawingDelete = workspace.deleteDrawing;
 
   const getSectionSubmission = (section: 'listening' | 'reading' | 'writing' | 'speaking' | 'science') => {
     return sectionSubmissions.find(s => s.section === section);
