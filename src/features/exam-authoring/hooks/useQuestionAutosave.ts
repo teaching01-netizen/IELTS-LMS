@@ -193,13 +193,26 @@ export function useQuestionAutosave(
   const flushNow = useCallback(async (revision: QuestionRevision): Promise<QuestionFlushResult> => {
     latestRevisionRef.current = revision;
     setHasPendingChanges(true);
-    if (!networkWriteBlocked()) return flushAutosave(revision);
-    // Deliberately NOT ok: the caller must know the server does not have this
+    if (!networkWriteBlocked()) {
+      // An edit scheduled while this flush runs is the newest work; follow it
+      // so an older acknowledgement never reports the flush done.
+      // offcut: bounded so continuous typing cannot hold the caller forever.
+      let target = revision;
+      for (let attempt = 0; ; attempt += 1) {
+        const result = await flushAutosave(target);
+        const newer = latestRevisionRef.current;
+        if (!result.ok || result.isLatest || attempt >= 4 || !newer || newer === target) return result;
+        if (networkWriteBlocked()) break;
+        target = newer;
+      }
+    }
+    // Deliberately NOT ok: the caller must know the server does not have the
     // content yet, even though the device does. `isLatest` stays true because
     // this revision IS the newest local one — there is just nowhere safe to
     // send it yet.
-    offlineDraftRef.current = revision;
-    persistOffline(revision);
+    const newest = latestRevisionRef.current ?? revision;
+    offlineDraftRef.current = newest;
+    persistOffline(newest);
     return { ok: false, isLatest: true };
   }, [flushAutosave, networkWriteBlocked, persistOffline]);
 

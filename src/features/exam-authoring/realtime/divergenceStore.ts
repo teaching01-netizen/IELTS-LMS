@@ -181,22 +181,27 @@ export function applyDivergenceEvent(
     }
 
     case "SERVER_ACK": {
-      // The server agreed: base moves forward, remote bookkeeping clears, and
-      // any structural flag is retired because the draft is now a real revision.
+      // Advance the confirmed base without erasing edits or later remote facts.
+      // A structural event observed during a submitted write has no ordering
+      // proof against its response, so retain it until an explicit resolution.
+      if (existing && event.saved.revision < existing.baseRevision) return state;
+      const newerLocal = event.submitted && existing?.localDocument &&
+        !documentContentEquals(existing.localDocument, event.submitted) ? existing.localDocument : event.saved;
+      const remoteAhead = (existing?.remoteRevision ?? -1) > event.saved.revision;
       const entry: QuestionDivergence = {
         ...(existing ?? emptyEntry(event.examQuestionId, at)),
         baseRevision: event.saved.revision,
         baseDocument: event.saved,
-        localDocument: event.saved,
-        remoteRevision: null,
-        remoteDocument: null,
-        remoteAuthor: undefined,
-        deletedRemotely: undefined,
-        movedRemotely: undefined,
-        bulkChangedRemotely: undefined,
+        localDocument: newerLocal,
+        remoteRevision: remoteAhead ? existing?.remoteRevision ?? null : null,
+        remoteDocument: remoteAhead ? existing?.remoteDocument ?? null : null,
+        remoteAuthor: remoteAhead ? existing?.remoteAuthor : undefined,
+        deletedRemotely: event.submitted ? existing?.deletedRemotely : undefined,
+        movedRemotely: event.submitted ? existing?.movedRemotely : undefined,
+        bulkChangedRemotely: event.submitted ? existing?.bulkChangedRemotely : undefined,
         updatedAt: at,
       };
-      entries.set(event.examQuestionId, { ...entry, status: "clean" });
+      entries.set(event.examQuestionId, withStatus(entry, false));
       return { entries: prune(entries) };
     }
 

@@ -60,6 +60,31 @@ describe('staff SAT question draft durability laws', () => {
     expect(save).toHaveBeenCalledWith(current);
   });
 
+  it('does not report a flush done while a newer edit made during it is unsaved', async () => {
+    const older = revision('Sequence 4', 7);
+    const newer = revision('Sequence 5', 7);
+    const resolvers: Array<(value: QuestionRevision) => void> = [];
+    const save = vi.fn().mockImplementation(
+      (value: QuestionRevision) => new Promise<QuestionRevision>((resolve) => { resolvers.push(() => resolve(value)); })
+    );
+    const hook = renderHook(() => useQuestionAutosave({ save, durableKey: null }));
+
+    let result: { ok: boolean; isLatest: boolean } | null = null;
+    await act(async () => {
+      const pending = hook.result.current.flushNow(older).then((value) => { result = value; });
+      await Promise.resolve();
+      hook.result.current.scheduleAutosave(newer);
+      resolvers.shift()?.(older);
+      await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+      expect(result).toBeNull();
+      resolvers.shift()?.(newer);
+      await pending;
+    });
+
+    expect(save.mock.calls.at(-1)?.[0]).toBe(newer);
+    expect(result).toEqual({ ok: true, isLatest: true });
+  });
+
   it('keeps the recovered question locally when the server rejects its stale revision', async () => {
     const localDraft = revision('Keep this exact work', 7);
     await saveDurableDraft(KEY, localDraft);

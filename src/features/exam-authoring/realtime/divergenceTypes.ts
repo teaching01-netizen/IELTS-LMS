@@ -59,7 +59,7 @@ export type DivergenceEvent =
       local?: QuestionRevision | null | undefined;
     }
   | { type: "LOCAL_EDIT"; examQuestionId: string; local: QuestionRevision }
-  | { type: "SERVER_ACK"; examQuestionId: string; saved: QuestionRevision }
+  | { type: "SERVER_ACK"; examQuestionId: string; saved: QuestionRevision; submitted?: QuestionRevision | undefined }
   | {
       type: "REMOTE_REVISION";
       examQuestionId: string;

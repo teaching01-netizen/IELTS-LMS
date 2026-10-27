@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useExamQuery } from "../../api/examQueries";
 import type { StructuredContent } from "../../contracts/assessment";
-import type { CoeditFlushResult, CoeditLifecycleIssue } from "./contracts";
+import { COEDIT_CLOSED_LIFECYCLE, type CoeditFlushResult, type CoeditLifecycleIssue } from "./contracts";
 import {
   CoeditNoEditableDraftError,
   CoeditUnavailableError,
@@ -110,6 +110,9 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const providerRef = useRef<SatAuthoringWorkspaceProvider | null>(null);
+  // The document a closed/replaced room ended on. Reopening is only useful on a
+  // different document: the same one would be closed again by the service.
+  const endedDocumentRef = useRef<string | null>(null);
   // Only a successful exam read may deny the room: an exam read that is loading
   // or failed is not evidence that a draft is missing, and acting on it would
   // disable collaboration for every exam behind one transient error.
@@ -144,6 +147,13 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
       try {
         const token = await requestWorkspaceCoeditToken(examId);
         if (!active) return;
+        if (token.documentName === endedDocumentRef.current) {
+          // No newer room exists yet. Stay on the read-only error surface with
+          // an explicit Retry rather than reconnecting into a closed room.
+          setStatus("error");
+          setError(COEDIT_CLOSED_LIFECYCLE.message);
+          return;
+        }
         const provider = new SatAuthoringWorkspaceProvider({
           documentName: token.documentName,
           serviceUrl: token.serviceUrl,
@@ -210,6 +220,7 @@ export function SatAuthoringCollaborationProvider({ examId, children }: { examId
       // terminal and the server will reject the old token. Reopen the provider
       // so the token endpoint resolves the current draft's workspace instead.
       if (current.recovery.issue === "closed" || current.recovery.issue === "replaced") {
+        endedDocumentRef.current = current.documentName;
         current.destroy();
         providerRef.current = null;
         setStatus("preparing");

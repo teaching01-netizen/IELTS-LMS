@@ -15,6 +15,10 @@ const AT = "2026-09-13T12:00:00.000Z";
 const LATER = "2026-09-13T12:00:05.000Z";
 const ID = "eq-1";
 
+function prompt(text: string) {
+  return { version: 1 as const, nodes: [{ type: "paragraph" as const, id: "p", text }] };
+}
+
 function apply(state: DivergenceState, ...events: DivergenceEvent[]): DivergenceState {
   return events.reduce(
     (acc, event, index) => applyDivergenceEvent(acc, event, index === 0 ? AT : LATER),
@@ -38,7 +42,7 @@ describe("divergenceStore: a refetch is not a resolution", () => {
     const { base, state } = seeded();
     const mine = {
       ...base,
-      prompt: { type: "doc", content: [{ text: "mine" }] },
+      prompt: prompt("mine"),
     } as ReturnType<typeof makeRevision>;
     const dirty = apply(state, { type: "LOCAL_EDIT", examQuestionId: ID, local: mine });
     expect(divergenceFor(dirty, ID)?.status).toBe("dirty");
@@ -78,7 +82,7 @@ describe("divergenceStore: a refetch is not a resolution", () => {
       type: "INIT_BASELINE",
       examQuestionId: ID,
       base: makeRevision({ revision: 4 }),
-      local: { ...base, prompt: { type: "doc", content: [{ text: "mine" }] } } as ReturnType<
+      local: { ...base, prompt: prompt("mine") } as ReturnType<
         typeof makeRevision
       >,
     });
@@ -101,7 +105,7 @@ describe("divergenceStore: my OWN save is not a remote revision", () => {
     const { base, state } = seeded();
     const mine = {
       ...base,
-      prompt: { type: "doc", content: [{ text: "mine" }] },
+      prompt: prompt("mine"),
     } as ReturnType<typeof makeRevision>;
     const dirty = apply(state, { type: "LOCAL_EDIT", examQuestionId: ID, local: mine });
     // What the server returns for that save: the author's content, next revision.
@@ -122,7 +126,7 @@ describe("divergenceStore: my OWN save is not a remote revision", () => {
     const { base, state } = seeded();
     const mine = {
       ...base,
-      prompt: { type: "doc", content: [{ text: "mine" }] },
+      prompt: prompt("mine"),
     } as ReturnType<typeof makeRevision>;
     const dirty = apply(state, { type: "LOCAL_EDIT", examQuestionId: ID, local: mine });
     const saved = { ...mine, revision: 4 } as ReturnType<typeof makeRevision>;
@@ -145,7 +149,7 @@ describe("divergenceStore dirty transitions", () => {
 
   it("starts DIRTY when a recovered durable draft differs from the fetch", () => {
     const base = makeRevision();
-    const recovered = { ...base, prompt: { type: "doc", content: [{ text: "recovered" }] } };
+    const recovered = { ...base, prompt: prompt("recovered") };
     const { state } = seeded(recovered as ReturnType<typeof makeRevision>);
     expect(divergenceFor(state, ID)?.status).toBe("dirty");
   });
@@ -155,7 +159,7 @@ describe("divergenceStore dirty transitions", () => {
     const next = apply(state, {
       type: "LOCAL_EDIT",
       examQuestionId: ID,
-      local: { ...base, prompt: { type: "doc", content: [{ text: "mine" }] } } as ReturnType<
+      local: { ...base, prompt: prompt("mine") } as ReturnType<
         typeof makeRevision
       >,
     });
@@ -167,7 +171,7 @@ describe("divergenceStore dirty transitions", () => {
     const edited = apply(state, {
       type: "LOCAL_EDIT",
       examQuestionId: ID,
-      local: { ...base, prompt: { type: "doc", content: [{ text: "mine" }] } } as ReturnType<
+      local: { ...base, prompt: prompt("mine") } as ReturnType<
         typeof makeRevision
       >,
     });
@@ -192,12 +196,41 @@ describe("divergenceStore dirty transitions", () => {
     expect(entry?.baseRevision).toBe(4);
     expect(entry?.remoteRevision).toBeNull();
   });
+
+  it("keeps edits made after the submitted snapshot dirty when its acknowledgement arrives", () => {
+    const { base, state } = seeded();
+    const submitted = { ...base, prompt: prompt("first") } as ReturnType<typeof makeRevision>;
+    const newer = { ...base, prompt: prompt("newer") } as ReturnType<typeof makeRevision>;
+    const edited = apply(state, { type: "LOCAL_EDIT", examQuestionId: ID, local: newer });
+    const acked = apply(edited, { type: "SERVER_ACK", examQuestionId: ID, saved: { ...submitted, revision: 4 }, submitted });
+    expect(divergenceFor(acked, ID)?.localDocument).toBe(newer);
+    expect(divergenceFor(acked, ID)?.status).toBe("dirty");
+    expect(divergenceFor(acked, ID)?.baseRevision).toBe(4);
+  });
+
+  it("does not discard a newer remote revision when an older save acknowledgement arrives", () => {
+    const { base, state } = seeded();
+    const local = { ...base, prompt: prompt("newer local") } as ReturnType<typeof makeRevision>;
+    const changed = apply(state, { type: "LOCAL_EDIT", examQuestionId: ID, local },
+      { type: "REMOTE_REVISION", examQuestionId: ID, remoteRevision: 9 });
+    const acked = apply(changed, { type: "SERVER_ACK", examQuestionId: ID, saved: { ...base, revision: 4 }, submitted: base });
+    expect(divergenceFor(acked, ID)?.remoteRevision).toBe(9);
+    expect(divergenceFor(acked, ID)?.localDocument).toBe(local);
+    expect(divergenceFor(acked, ID)?.status).toBe("diverged");
+  });
+
+  it("does not discard a remote deletion observed while a save was pending", () => {
+    const { base, state } = seeded();
+    const deleted = apply(state, { type: "REMOTE_DELETED", examQuestionId: ID });
+    const acked = apply(deleted, { type: "SERVER_ACK", examQuestionId: ID, submitted: base, saved: { ...base, revision: 4 } });
+    expect(divergenceFor(acked, ID)?.deletedRemotely).toBe(true);
+  });
 });
 
 describe("divergenceStore remote revisions", () => {
   it("dirty + newer remote becomes DIVERGED and preserves local byte-identically", () => {
     const { base, state } = seeded();
-    const local = { ...base, prompt: { type: "doc", content: [{ text: "mine" }] } };
+    const local = { ...base, prompt: prompt("mine") };
     const edited = apply(state, {
       type: "LOCAL_EDIT",
       examQuestionId: ID,
@@ -266,7 +299,7 @@ describe("divergenceStore remote revisions", () => {
     const edited = apply(state, {
       type: "LOCAL_EDIT",
       examQuestionId: ID,
-      local: { ...base, prompt: { type: "doc", content: [{ text: "mine" }] } } as ReturnType<
+      local: { ...base, prompt: prompt("mine") } as ReturnType<
         typeof makeRevision
       >,
     });
@@ -285,7 +318,7 @@ describe("divergenceStore structural flags", () => {
     const edited = apply(state, {
       type: "LOCAL_EDIT",
       examQuestionId: ID,
-      local: { ...base, prompt: { type: "doc", content: [{ text: "mine" }] } } as ReturnType<
+      local: { ...base, prompt: prompt("mine") } as ReturnType<
         typeof makeRevision
       >,
     });
@@ -333,7 +366,7 @@ describe("divergenceStore resolution", () => {
     const edited = apply(state, {
       type: "LOCAL_EDIT",
       examQuestionId: ID,
-      local: { ...base, prompt: { type: "doc", content: [{ text: "mine" }] } } as ReturnType<
+      local: { ...base, prompt: prompt("mine") } as ReturnType<
         typeof makeRevision
       >,
     });
@@ -353,7 +386,7 @@ describe("divergenceStore resolution", () => {
 
   it("RESOLVE_KEEP_EDITING resolves nothing: still diverged, draft untouched", () => {
     const { base, state } = seeded();
-    const local = { ...base, prompt: { type: "doc", content: [{ text: "mine" }] } };
+    const local = { ...base, prompt: prompt("mine") };
     const diverged = apply(
       apply(state, {
         type: "LOCAL_EDIT",

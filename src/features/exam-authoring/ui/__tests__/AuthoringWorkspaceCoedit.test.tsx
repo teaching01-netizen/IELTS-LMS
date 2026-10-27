@@ -957,6 +957,41 @@ describe("AuthoringWorkspace × prompt co-editing", () => {
       expect(screen.getByRole("button", { name: /Couldn’t save.*Retry save/i })).toBeInTheDocument();
     });
 
+    it("reopens a cleanly closed exam room once, then stops on Retry instead of looping", async () => {
+      const { transport } = await renderWithWorkspaceRoom();
+      await act(async () => {
+        transport.ack({ stateVector: encodeStateVectorBase64(transport.document) });
+      });
+      const before = harness.tokenRequests;
+
+      // Nothing unacknowledged; the token endpoint still names the same room,
+      // which the service has closed.
+      await act(async () => {
+        transport.close("coedit:draft_replaced");
+      });
+      await waitFor(() =>
+        expect(
+          (harness.spineProps.at(-1)?.promptCollaboration as { initializationFailed?: boolean } | undefined)
+            ?.initializationFailed,
+        ).toBe(true),
+      );
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+
+      // One reopen attempt, no provider for the closed document, no loop.
+      expect(harness.tokenRequests - before).toBe(1);
+      expect(harness.transports).toHaveLength(1);
+      const binding = harness.spineProps.at(-1)?.promptCollaboration as {
+        ready: boolean;
+        initializationReason?: string;
+        onRetryInitialization?: () => void;
+      };
+      expect(binding.ready).toBe(false);
+      expect(binding.initializationReason).toMatch(/collaboration session was closed/i);
+      expect(binding.onRetryInitialization).toEqual(expect.any(Function));
+    });
+
     it("offers the prompt export when the service closes a replaced room", async () => {
       const { transport } = await renderWithRoom();
       await act(async () => {

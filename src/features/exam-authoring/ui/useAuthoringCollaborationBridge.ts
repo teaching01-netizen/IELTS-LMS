@@ -162,12 +162,20 @@ export function useAuthoringCollaborationBridge({
     const binding = workspaceCollaboration.fieldBinding(
       `question/${selectedExamQuestionId}/prompt`
     );
-    return (
-      (binding ? hydrateBinding("prompt", binding) : null) ??
-      (workspaceCollaboration.status === "preparing" || workspaceCollaboration.status === "error"
-        ? PENDING_PROMPT_COLLABORATION
-        : null)
-    );
+    if (binding) return hydrateBinding("prompt", binding);
+    if (workspaceCollaboration.status === "error") {
+      // The room could not open (or reopen). Say why and offer Retry on the
+      // composer's existing failure surface; it still mounts no editor, so no
+      // second prompt writer appears beside the room.
+      return {
+        extensions: [],
+        ready: false,
+        initializationFailed: true,
+        ...(workspaceCollaboration.error ? { initializationReason: workspaceCollaboration.error } : {}),
+        onRetryInitialization: workspaceCollaboration.retry,
+      } satisfies RichComposerCollaboration;
+    }
+    return workspaceCollaboration.status === "preparing" ? PENDING_PROMPT_COLLABORATION : null;
   }, [hydrateBinding, selectedExamQuestionId, workspaceCollaboration]);
   const coeditBinding = workspaceUiActive
     ? null

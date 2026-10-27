@@ -504,7 +504,9 @@ export function RichQuestionComposer({
     // for preview/validation but the legacy prop-driven setContent is disabled:
     // writing props back into the doc would fight the CRDT.
     if (collaboration) return;
-    if (!editor || editor.isFocused) return;
+    // A room closing rebuilds the editor without its binding; until the new
+    // instance arrives, `editor` is the destroyed one and has no commands.
+    if (!editor || editor.isDestroyed || editor.isFocused) return;
     const next = documentFromStructuredContent(value);
     const { doc } = stripTransientImages(editor.getJSON() as RichTextDocument);
     if (JSON.stringify(doc) !== JSON.stringify(next)) {
@@ -513,7 +515,7 @@ export function RichQuestionComposer({
   }, [collaboration, editor, value]);
 
   useEffect(() => {
-    if (!editor || !collaborative || !collaborationReady) return;
+    if (!editor || editor.isDestroyed || !collaborative || !collaborationReady) return;
     // The pre-sync surface is a skeleton: nothing is editable yet, and the
     // call would emit an update for the still-empty collaborative document.
     // The binding object is recreated when presence/save state changes, so

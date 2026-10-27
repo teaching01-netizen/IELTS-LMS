@@ -338,6 +338,31 @@ describe("SAT rich question composer capabilities", () => {
     expect(screen.queryByRole("toolbar", { name: "Formatting tools" })).not.toBeInTheDocument();
   });
 
+  it("survives the room closing under a mounted collaborative editor", () => {
+    // A closed room (draft replaced, session ended) withdraws the binding.
+    // The editor is rebuilt without it, and the outgoing editor is already
+    // destroyed when the uncontrolled-value sync runs.
+    const collaboration: RichComposerCollaboration = { extensions: [], ready: true };
+    const { rerender } = render(
+      <RichQuestionComposer
+        value={plainContentFromText("Room text")}
+        onChange={vi.fn()}
+        label="Question prompt"
+        collaboration={collaboration}
+      />
+    );
+    expect(() =>
+      rerender(
+        <RichQuestionComposer
+          value={plainContentFromText("Projection text")}
+          onChange={vi.fn()}
+          label="Question prompt"
+        />
+      )
+    ).not.toThrow();
+    expect(screen.getByRole("textbox", { name: "Question prompt" })).toBeInTheDocument();
+  });
+
   it("offers a retry instead of pulsing forever when a field cannot initialize", () => {
     const onRetryInitialization = vi.fn();
     const collaboration: RichComposerCollaboration = {

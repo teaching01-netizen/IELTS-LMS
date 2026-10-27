@@ -112,18 +112,15 @@ async function createExam(ctx: BrowserContext): Promise<{ examId: string; module
     headers: { "x-csrf-token": token },
     data: {},
   });
-  const shellResponse = await ctx.request.get(
-    `${WEB}/api/v1/assessment-authoring/exams/${examId}/shell`,
-  );
-  const body = (await shellResponse.json()) as { data?: Shell } & Partial<Shell>;
-  const shell = (body.data ?? body) as Shell;
+  const shell = await readShell(ctx, examId);
   return { examId, moduleId: shell.sections[0]!.modules[0]!.id };
 }
 
 async function readShell(ctx: BrowserContext, examId: string): Promise<Shell> {
   const response = await ctx.request.get(`${WEB}/api/v1/assessment-authoring/exams/${examId}/shell`);
-  const body = (await response.json()) as { data?: Shell } & Partial<Shell>;
-  return (body.data ?? body) as Shell;
+  // The read returns the shell lifecycle: { state, shell }.
+  const body = (await response.json()) as { shell: Shell };
+  return body.shell;
 }
 
 const PROMPT = { role: "textbox", name: "Question prompt" } as const;
@@ -135,8 +132,20 @@ async function openWorkspace(ctx: BrowserContext, examId: string): Promise<Page>
   // reports initial sync — so its appearance IS proof the client connected to
   // the real service over its own WebSocket.
   await page.getByRole(PROMPT.role, { name: PROMPT.name }).waitFor({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Question 1", exact: false }).first().click().catch(() => undefined);
+  // The first question is normally already selected; select it only if not.
+  await page
+    .getByRole("button", { name: "Question 1", exact: false })
+    .first()
+    .click({ timeout: 2_000 })
+    .catch(() => undefined);
   return page;
+}
+
+/** The save cluster's visible copy plus any live status regions. */
+async function saveArea(page: Page): Promise<string> {
+  const saved = await page.getByText("Saved", { exact: true }).allInnerTexts();
+  const status = await page.locator('[role="status"]').allInnerTexts();
+  return [...saved, ...status].map((text) => text.trim()).filter(Boolean).join(" | ");
 }
 
 async function promptOf(page: Page): Promise<string> {
@@ -160,7 +169,7 @@ const consoleLines: { a: string[]; b: string[] } = { a: [], b: [] };
 
 function watch(page: Page, sink: string[]): void {
   page.on("console", (message) => sink.push(`${message.type()}: ${message.text()}`.slice(0, 300)));
-  page.on("pageerror", (error) => sink.push(`pageerror: ${error.message}`.slice(0, 300)));
+  page.on("pageerror", (error) => sink.push(`pageerror: ${error.stack ?? error.message}`.slice(0, 1_500)));
 }
 
 test.beforeAll(async () => {
@@ -224,7 +233,7 @@ test("two live clients, one prompt, real service and database", async ({ browser
     record(`coedit-token as ${who}`, { status: minted.status(), ...body, token: `${body.token.slice(0, 24)}…` });
     expect(minted.status()).toBe(200);
     expect(body.mode).toBe("write");
-    expect(body.serviceUrl).toBe(`ws://127.0.0.1:1235`);
+    expect(body.serviceUrl).toBe(COEDIT.replace(/^http/, "ws"));
     expect(body.documentName).toMatch(/^coedit:v2:/);
     tokens[who] = body;
   }
@@ -296,11 +305,11 @@ test("two live clients, one prompt, real service and database", async ({ browser
   // exact committed state hash, so this is the end-to-end ack proof.
   await expect
     .poll(
-      async () => (await pageA.locator('[data-save-status], [role="status"]').allInnerTexts()).join(" | "),
+      () => saveArea(pageA),
       { timeout: 45_000, message: "the client never acknowledged its own state as Saved" },
     )
     .toContain("Saved");
-  record("save area after ack", await pageA.locator('[data-save-status], [role="status"]').allInnerTexts());
+  record("save area after ack", await saveArea(pageA));
 
   // ---- 6c. A non-prompt field shares the same exam-level room --------------
   await pageA.getByRole("radio", { name: /choice b/i }).first().click();
@@ -364,9 +373,16 @@ test("two live clients, one prompt, real service and database", async ({ browser
       : "",
   });
 
-  // ---- 9. A closed room says WHY and offers the prompt --------------------
-  // The design: a lifecycle replacement freezes the old editor and offers
-  // copy/export of the prompt before the new draft opens.
+  // ---- 9. A closed room stops, and never storms the token endpoint --------
+  // Every edit was acknowledged before the close, so this tab holds nothing to
+  // recover: the design reopens it on the current draft. The draft did not
+  // change here, so the token names the same closed document; the client must
+  // stop on the closed-session surface instead of re-minting in a loop.
+  // (Copy/export recovery is the unsaved-work path, covered by unit tests.)
+  let tokenMints = 0;
+  pageA.on("request", (request) => {
+    if (request.url().includes("/coedit-token")) tokenMints += 1;
+  });
   const closed = await control("/control/close", {
     documentNames: [tokens["builder"]!.documentName],
     reason: "draft_replaced",
@@ -374,20 +390,28 @@ test("two live clients, one prompt, real service and database", async ({ browser
   record("control /control/close", closed);
   expect((closed as { status: number }).status).toBe(200);
 
-  const replacedNotice = pageA.getByText(/a newer version is active/i);
-  await replacedNotice.waitFor({ timeout: 15_000 });
-  const copy = pageA.getByRole("button", { name: "Copy my work" });
-  await copy.waitFor();
-  await copy.click();
-  const exported = await pageA.evaluate(() => navigator.clipboard.readText());
-  record("copy prompt export", { length: exported.length, sample: exported.slice(0, 120) });
-  // The export is the room's own prompt, so it survives the closed room.
-  expect(exported).toContain("TYPOGRAPHED-BY-A");
+  await pageA
+    .getByText(/collaboration session was closed/i)
+    .first()
+    .waitFor({ state: "attached", timeout: 15_000 })
+    .catch((error: unknown) => {
+      record("page A console at close", consoleLines.a.slice(-12));
+      throw error;
+    });
+  const mintsAtStop = tokenMints;
+  await pageA.waitForTimeout(3_000);
+  record("token mints after close", { atStop: mintsAtStop, threeSecondsLater: tokenMints });
+  expect(mintsAtStop).toBeLessThanOrEqual(2);
+  expect(tokenMints).toBe(mintsAtStop);
 
-  // Frozen: the room no longer accepts writes from this editor.
+  // Closed: no editor on this page can write into the room any more.
   const editorAfterClose = pageA.getByRole(PROMPT.role, { name: PROMPT.name });
-  record("editor contenteditable after close", await editorAfterClose.evaluate((n) => n.getAttribute("contenteditable")));
-  expect(await editorAfterClose.evaluate((n) => n.getAttribute("contenteditable"))).toBe("false");
+  const editableAfterClose =
+    (await editorAfterClose.count()) === 0
+      ? null
+      : await editorAfterClose.first().evaluate((n) => n.getAttribute("contenteditable"));
+  record("editor contenteditable after close", editableAfterClose);
+  expect(editableAfterClose === null || editableAfterClose === "false").toBe(true);
 
   const notices = await pageA
     .locator('[role="status"], [role="alert"]')
@@ -396,11 +420,9 @@ test("two live clients, one prompt, real service and database", async ({ browser
 
   // A room the service has closed must never let the save vocabulary claim
   // durability for work that was not committed.
-  const saveTexts = await pageA
-    .locator("[data-save-status], [role='status']")
-    .evaluateAll((nodes) => nodes.map((n) => (n.textContent ?? "").trim()).filter(Boolean));
+  const saveTexts = await saveArea(pageA);
   record("save area after close", saveTexts);
-  expect(saveTexts.join(" | ")).not.toContain("Saved");
+  expect(saveTexts).not.toContain("Saved");
 
   // Nothing after the close reaches the service either: the stored revision is
   // exactly the one the last flush acknowledged.

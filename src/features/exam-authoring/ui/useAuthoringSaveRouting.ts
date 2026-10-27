@@ -1,14 +1,41 @@
-import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useLayoutEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { assessmentAuthoringApi } from "../api/assessmentAuthoringApi";
 import { authoringEffects } from "../api/authoringQueryEffects";
 import type { QuestionRevision } from "../contracts/assessment";
 import type { DivergenceEvent } from "../realtime";
+import { canonicalStringify } from "../realtime/threeWayCompare";
+import { ApiError } from "../../../shared/api-client/errors";
 import {
   resolveFieldWriter,
   savePromptFreeFields,
   type FieldWriter,
 } from "../realtime/coedit";
+
+const EDITABLE_FIELDS = ["questionType", "stimulus", "prompt", "answer", "rationale", "metadata", "accessibility"] as const;
+type OwnSave = { submitted: QuestionRevision; saved: QuestionRevision; promptRoom: boolean };
+
+function rebaseOwnSaves(revision: QuestionRevision, saves: readonly OwnSave[]): { revision: QuestionRevision; conflict: boolean } {
+  let current = revision;
+  for (const { submitted, saved, promptRoom } of saves) {
+    if (current.id !== submitted.id || current.questionId !== submitted.questionId || current.revision !== submitted.revision) continue;
+    const next = { ...saved };
+    for (const field of EDITABLE_FIELDS) {
+      const changedLocally = canonicalStringify(current[field]) !== canonicalStringify(submitted[field]);
+      const changedOnServer = canonicalStringify(saved[field]) !== canonicalStringify(submitted[field]);
+      if (field === "prompt" && promptRoom) {
+        next.prompt = current.prompt;
+      } else if (changedLocally) {
+        if (changedOnServer && canonicalStringify(current[field]) !== canonicalStringify(saved[field])) {
+          return { revision: current, conflict: true };
+        }
+        Object.assign(next, { [field]: current[field] });
+      }
+    }
+    current = next;
+  }
+  return { revision: current, conflict: false };
+}
 
 /**
  * Which writer owns the open question, and the save that writer permits.
@@ -70,15 +97,25 @@ export function useAuthoringSaveRouting(
   // question this save started for, which is what the write must be attributed
   // to — this ref is how the resolution learns whether the author is still
   // looking at it.
-  const selectedExamQuestionIdRef = useRef(selectedExamQuestionId);
-  useEffect(() => {
-    selectedExamQuestionIdRef.current = selectedExamQuestionId;
-  }, [selectedExamQuestionId]);
+  const identityRef = useRef({ examId, selectedExamQuestionId, questionDraftKey, fieldWriter, generation: 0 });
+  const ownSavesRef = useRef<OwnSave[]>([]);
+  useLayoutEffect(() => {
+    const current = identityRef.current;
+    if (current.examId !== examId || current.selectedExamQuestionId !== selectedExamQuestionId ||
+      current.questionDraftKey !== questionDraftKey || current.fieldWriter !== fieldWriter) {
+      identityRef.current = { examId, selectedExamQuestionId, questionDraftKey, fieldWriter, generation: current.generation + 1 };
+      ownSavesRef.current = [];
+    }
+  }, [examId, fieldWriter, questionDraftKey, selectedExamQuestionId]);
 
   const saveDraft = useCallback(
     async (revision: QuestionRevision) => {
       const examQuestionId = selectedExamQuestionId;
       if (!examQuestionId) throw new Error("Cannot save a question that is not selected.");
+      const identity = identityRef.current;
+      const stillOpen = () => identityRef.current.generation === identity.generation &&
+        identityRef.current.examId === examId && identityRef.current.selectedExamQuestionId === examQuestionId &&
+        identityRef.current.questionDraftKey === questionDraftKey && identityRef.current.fieldWriter === fieldWriter;
       // Single ownership (resolveFieldWriter): exactly one writer persists this
       // question's fields. The exam room stores the scalars and the rich roots
       // through its own acknowledged path, which the service materializes into
@@ -101,6 +138,11 @@ export function useAuthoringSaveRouting(
           "This question was deleted elsewhere. Copy your work before leaving."
         );
       }
+      const rebased = stillOpen() ? rebaseOwnSaves(revision, ownSavesRef.current) : { revision, conflict: false };
+      if (rebased.conflict) {
+        throw new ApiError({ code: "CONFLICT", status: 409, message: "This question changed while the latest edits were being saved. Review the changes before retrying." });
+      }
+      const submitted = rebased.revision;
       // A question-scoped room owns the prompt ONLY: save everything ELSE
       // through the partial endpoint. The legacy full save carries a prompt, so
       // it would be refused with a typed COEDIT_ACTIVE conflict the moment a
@@ -109,7 +151,7 @@ export function useAuthoringSaveRouting(
       const saved = fieldWriter === "prompt-room"
         ? await savePromptFreeFields({
             examQuestionId,
-            revision,
+            revision: submitted,
             base: promptFreeBaselineRef.current,
             deps: {
               saveFields: (revisionId, request) =>
@@ -117,15 +159,15 @@ export function useAuthoringSaveRouting(
               loadLatest: async (id) => (await assessmentAuthoringApi.getQuestion(id)).question,
             },
           })
-        : await assessmentAuthoringApi.saveQuestionRevision(revision.id, {
-            revision: revision.revision,
-            questionType: revision.questionType,
-            stimulus: revision.stimulus,
-            prompt: revision.prompt,
-            answer: revision.answer,
-            rationale: revision.rationale,
-            metadata: revision.metadata,
-            accessibility: revision.accessibility,
+        : await assessmentAuthoringApi.saveQuestionRevision(submitted.id, {
+            revision: submitted.revision,
+            questionType: submitted.questionType,
+            stimulus: submitted.stimulus,
+            prompt: submitted.prompt,
+            answer: submitted.answer,
+            rationale: submitted.rationale,
+            metadata: submitted.metadata,
+            accessibility: submitted.accessibility,
           });
       if (!saved) {
         // Nothing outside the prompt changed since the last acknowledgement.
@@ -141,8 +183,7 @@ export function useAuthoringSaveRouting(
       // inside a Reading & Writing question, and because this save had just been
       // acknowledged it even read as Saved. The write itself is real and stays
       // attributed to its own question (summary, acknowledgement, cache) below.
-      const stillOpen = selectedExamQuestionIdRef.current === examQuestionId;
-      if (stillOpen) {
+      if (stillOpen()) {
         promptFreeBaselineRef.current = saved;
         // The baseline advances to the server revision, but the PROMPT keeps the
         // projection the room owns: a partial field write answers with the
@@ -150,9 +191,17 @@ export function useAuthoringSaveRouting(
         // into the draft would show the author stale text in preview/validation
         // and make their next keystroke read as a field change rather than the
         // prompt-only edit it is.
-        setDraft(
-          fieldWriter === "prompt-room" ? { ...saved, prompt: revision.prompt } : saved
-        );
+        if (saved.id === submitted.id && saved.questionId === submitted.questionId && saved.revision > submitted.revision) {
+          ownSavesRef.current.push({ submitted, saved, promptRoom: fieldWriter === "prompt-room" });
+          // offcut: retain 64 acknowledgements; older queued edits safely conflict at the server.
+          if (ownSavesRef.current.length > 64) ownSavesRef.current.shift();
+        }
+        const saves = ownSavesRef.current.slice();
+        setDraft((current) => {
+          if (!stillOpen() || !current || current.id !== revision.id || current.questionId !== revision.questionId) return current;
+          const next = rebaseOwnSaves(current, saves);
+          return next.conflict ? current : next.revision;
+        });
       }
       // The author's OWN save must never read as a remote revision. `setDraft`
       // and the query-cache write land in one batch, so the divergence hook
@@ -166,8 +215,9 @@ export function useAuthoringSaveRouting(
         type: "SERVER_ACK",
         examQuestionId,
         saved,
+        submitted,
       });
-      if (recoveredQuestionDraftKeyRef.current === questionDraftKey) {
+      if (stillOpen() && recoveredQuestionDraftKeyRef.current === questionDraftKey) {
         recoveredQuestionDraftKeyRef.current = null;
       }
       updateSummaryCache(examQuestionId, saved);

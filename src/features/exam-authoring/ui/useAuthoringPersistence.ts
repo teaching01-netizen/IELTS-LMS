@@ -283,7 +283,7 @@ export function useAuthoringPersistence(
       }
       if (!draft || autosave.status === "saved") return true;
       const result = await autosave.flushNow(draft);
-      if (result.ok) return true;
+      if (result.ok && result.isLatest) return true;
       setNavigationError(
         // Fenced and diverged are the same condition with the same answer, so
         // they share one sentence: review the newer version, or take your work

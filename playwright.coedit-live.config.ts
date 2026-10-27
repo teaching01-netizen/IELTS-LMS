@@ -68,7 +68,7 @@ export const LIVE = { ROOT, API, WEB, COEDIT, DATABASE_URL, SERVICE_SECRET };
 const DSN = new URL(DATABASE_URL);
 const DB_NAME = DSN.pathname.replace(/^\//, "");
 const DB_BOOTSTRAP = [
-  "command -v mysql >/dev/null 2>&1",
+  "command -v mysql >/dev/null 2>&1 &&",
   `mysql -h ${DSN.hostname} -P ${DSN.port || 3306} -u ${decodeURIComponent(DSN.username)}`,
   DSN.password ? `-p${decodeURIComponent(DSN.password)}` : "",
   `-e 'CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4'`,
@@ -91,6 +91,8 @@ export default defineConfig({
     baseURL: WEB,
     ...devices["Desktop Chrome"],
     permissions: ["clipboard-read", "clipboard-write"],
+    // A stale locator must fail the step, not wait out the 15-minute test.
+    actionTimeout: 30_000,
   },
   projects: [{ name: "coedit-live", use: { baseURL: WEB } }],
   webServer: [
