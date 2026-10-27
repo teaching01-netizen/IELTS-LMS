@@ -46,10 +46,12 @@ describe('ExamLifecycleService backend mode', () => {
       createdAt: '2026-01-01T00:00:00.000Z', isDraft: true, isPublished: false, revision: 2,
     };
     let sentRevision: number | undefined;
+    let sentVersionId: string | undefined;
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === `/api/v1/exams/${examId}/draft` && init?.method === 'PATCH') {
         sentRevision = JSON.parse(String(init.body)).revision;
+        sentVersionId = JSON.parse(String(init.body)).expectedDraftVersionId;
         const status = sentRevision === 2 ? 200 : 409;
         return new Response(JSON.stringify(status === 200
           ? { success: true, data: version }
@@ -65,6 +67,7 @@ describe('ExamLifecycleService backend mode', () => {
     });
 
     expect(sentRevision).toBe(1);
+    expect(sentVersionId).toBe('draft-1');
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/changed|conflict/i);
   });
@@ -101,7 +104,12 @@ describe('ExamLifecycleService backend mode', () => {
     expect(result.success).toBe(expectedSuccess);
     const writes = fetchMock.mock.calls.filter(([url, init]) => String(url) === `/api/v1/exams/${examId}/draft` && init?.method === 'PATCH');
     expect(writes).toHaveLength(expectedSuccess ? 1 : 0);
-    if (expectedSuccess) expect(JSON.parse(String(writes[0]?.[1]?.body)).revision).toBe(0);
+    if (expectedSuccess) {
+      const body = JSON.parse(String(writes[0]?.[1]?.body));
+      expect(body.revision).toBe(0);
+      // The server checks the reopened draft's identity with the revision.
+      expect(body.expectedDraftVersionId).toBe('draft-reopened');
+    }
     else expect(result.error).toMatch(/changed/i);
   });
 

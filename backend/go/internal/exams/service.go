@@ -280,6 +280,10 @@ type SaveDraftRequest struct {
 	Content  json.RawMessage
 	Config   json.RawMessage
 	Revision int
+	// ExpectedDraftVersionID, when set, must name the current draft. It is
+	// checked under the same row lock as Revision: a different draft version
+	// can carry the same revision number.
+	ExpectedDraftVersionID *string
 }
 
 // PublishRequest mirrors PublishExamRequest with revision fencing.
@@ -929,7 +933,7 @@ func (s *Service) SaveDraft(ctx context.Context, examID string, actorID string, 
 			}
 			return err
 		}
-		if draftRev != req.Revision {
+		if draftRev != req.Revision || (req.ExpectedDraftVersionID != nil && *req.ExpectedDraftVersionID != draftID) {
 			return conflictError("Draft changed while you were editing; refresh before retrying.")
 		}
 		config, err := preserveForms(req.Config, storedConfig.String)

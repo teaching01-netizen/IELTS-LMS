@@ -4163,6 +4163,24 @@ paths:
           in: path
           required: true
           schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [contentSnapshot, configSnapshot, revision]
+              properties:
+                contentSnapshot: { type: object }
+                configSnapshot: { type: object }
+                revision:
+                  type: integer
+                  description: Revision of the draft version the editor loaded.
+                expectedDraftVersionId:
+                  type: string
+                  description: >-
+                    Draft version the editor loaded. Checked with `revision` under one
+                    row lock; a different current draft returns 409.
       responses:
         "200":
           description: Draft
@@ -4173,6 +4191,7 @@ paths:
               schema: { type: object }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /exams/{id}/draft/reopen:
     post:
       tags: [exams]

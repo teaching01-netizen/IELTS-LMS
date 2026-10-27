@@ -203,7 +203,7 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Gate:** Rapid edits, save failure, offline/reload recovery, A→B→missing config navigation, version conflict, and edit-during-flush all preserve correct content. Existing builder/preview/review UI matches references.
 
-**Backend prerequisite discovered during implementation:** The draft-save endpoint atomically checks the draft revision but does not accept the expected draft version ID. The frontend now checks the loaded version ID before sending its revision, but a draft pointer could still change to another version with the same revision between that check and the write. Production-grade protection requires the endpoint to compare both expected version ID and revision in the same transaction; frontend checks alone cannot close that race.
+**Backend prerequisite (resolved):** The draft-save endpoint now accepts `expectedDraftVersionId` and compares it with the revision under the same draft row lock (`internal/exams/service.go` `SaveDraft`). Fenced config saves send the loaded or reopened draft version ID, so a draft pointer that moves to another version with the same revision returns 409 instead of overwriting it.
 
 ### Package 6 — Consolidate SAT authoring without replacing its safety model
 

@@ -157,9 +157,10 @@ func examsDraftHandler(app *App) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			Content  json.RawMessage `json:"contentSnapshot"`
-			Config   json.RawMessage `json:"configSnapshot"`
-			Revision int             `json:"revision"`
+			Content                json.RawMessage `json:"contentSnapshot"`
+			Config                 json.RawMessage `json:"configSnapshot"`
+			Revision               int             `json:"revision"`
+			ExpectedDraftVersionID *string         `json:"expectedDraftVersionId"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -167,9 +168,10 @@ func examsDraftHandler(app *App) http.HandlerFunc {
 		}
 		id := chi.URLParam(r, "id")
 		out, err := app.Exams.SaveDraftForActor(r.Context(), actorOf(r.Context()), id, exams.SaveDraftRequest{
-			Content:  req.Content,
-			Config:   req.Config,
-			Revision: req.Revision,
+			Content:                req.Content,
+			Config:                 req.Config,
+			Revision:               req.Revision,
+			ExpectedDraftVersionID: req.ExpectedDraftVersionID,
 		})
 		if err != nil {
 			httpx.WriteError(w, r, err)

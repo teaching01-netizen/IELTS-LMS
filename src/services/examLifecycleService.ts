@@ -388,6 +388,9 @@ export class ExamLifecycleService {
     if (this.useBackendBuilder()) {
       try {
         let revision: number | null;
+        // Sent with the revision so the server checks both under one lock; the
+        // reads below only fail fast before a write the server would refuse.
+        let expectedDraftVersionId: string | undefined;
         if (!fence) {
           revision = await this.ensureBackendDraftVersionRevision(examId);
         } else if (fence.isDraft) {
@@ -401,6 +404,7 @@ export class ExamLifecycleService {
           // The server fences the write by this revision, not by a separately
           // fetched newer revision belonging to someone else's content.
           revision = fence.revision;
+          expectedDraftVersionId = fence.versionId;
         } else {
           const exam = await this.repository.getExamById(examId);
           if (!exam) return { success: false, error: 'Exam not found' };
@@ -415,6 +419,7 @@ export class ExamLifecycleService {
             return { success: false, error: 'The draft changed while you were editing. Refresh before saving.' };
           }
           revision = reopened.revision;
+          expectedDraftVersionId = reopened.versionId;
         }
         if (revision === null) {
           return { success: false, error: 'Draft version not found' };
@@ -424,6 +429,7 @@ export class ExamLifecycleService {
           contentSnapshot: normalizedContent,
           configSnapshot: normalizedContent.config,
           revision,
+          ...(expectedDraftVersionId ? { expectedDraftVersionId } : {}),
         });
         const version = savedVersion ? mapBackendExamVersion(savedVersion) : null;
         notifyObjectiveGradingUpdated(examId);
