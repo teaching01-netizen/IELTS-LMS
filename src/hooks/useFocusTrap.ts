@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
+import { acquireBodyScrollLock, releaseBodyScrollLock } from '../components/ui/bodyScrollLock';
 
 /**
  * Custom hook to trap focus within a modal or dialog
- * Ensures keyboard navigation stays within the modal when it's open
+ * Ensures keyboard navigation stays within the modal when it's open, and
+ * holds the shared body scroll lock (the Dialog/Drawer owner) while active.
  *
  * @param isActive - Whether the focus trap should be active
  * @param onEscape - Optional callback when Escape key is pressed
@@ -74,10 +76,12 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>(isActive: bool
 
     container.addEventListener('keydown', handleTabKey);
     document.addEventListener('keydown', handleEscapeKey);
+    acquireBodyScrollLock();
 
     return () => {
       container.removeEventListener('keydown', handleTabKey);
       document.removeEventListener('keydown', handleEscapeKey);
+      releaseBodyScrollLock();
       if (previouslyFocused?.isConnected) {
         previouslyFocused.focus();
       }

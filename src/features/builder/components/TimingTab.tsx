@@ -12,9 +12,10 @@ interface TimingTabProps {
 export function TimingTab({ config, onChange }: TimingTabProps) {
   const sectionPlan = useMemo(() => examDeliveryService.buildSectionPlan(config), [config]);
   const isIeltsMode = Boolean(config.general.ieltsMode);
-  const sectionKeys: ModuleType[] = config.general.type === 'ACT'
-    ? ['science']
-    : ['listening', 'reading', 'writing', 'speaking'];
+  const sectionKeys = useMemo<ModuleType[]>(
+    () => (config.general.type === 'ACT' ? ['science'] : ['listening', 'reading', 'writing', 'speaking']),
+    [config.general.type],
+  );
 
   const timingValidation = useMemo(() => {
     const errors: Array<{ field: string; message: string }> = [];

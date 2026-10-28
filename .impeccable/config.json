@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/proctor/ProctorDashboard.tsx"
+        ],
+        "createdAt": "2026-10-27T10:04:22.994Z",
+        "reason": "User requested preserving the existing UI; this pre-existing style is unchanged."
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/proctor/ViolationRulePanel.tsx"
+        ],
+        "createdAt": "2026-10-27T10:04:27.085Z",
+        "reason": "User requested preserving the existing UI; this pre-existing style is unchanged."
+      }
+    ]
+  }
+}

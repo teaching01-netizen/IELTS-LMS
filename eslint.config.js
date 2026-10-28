@@ -76,35 +76,24 @@ export default tseslint.config(
     },
   },
   {
-    // Staff rewrite ratchet: every migrated state owner and view is clean of
-    // effect-dependency and explicit-any findings, so new ones fail lint.
+    // Staff rewrite ratchet: all staff feature, product, and view code is clean
+    // of effect-dependency and explicit-any findings, so new ones fail lint.
     files: [
-      "src/features/admin/**/*.{ts,tsx}",
-      // Builder: the config/defaults/autosave owners this rewrite migrated.
-      // Answer-key, timing, and preview code were not rewritten (plan Package 5).
-      "src/features/builder/api/**/*.{ts,tsx}",
-      "src/features/builder/domain/**/*.{ts,tsx}",
-      "src/features/builder/hooks/**/*.{ts,tsx}",
-      "src/features/builder/routes/BuilderRoot.tsx",
-      "src/features/grading/**/*.{ts,tsx}",
-      "src/features/proctor/**/*.{ts,tsx}",
-      "src/features/results/**/*.{ts,tsx}",
-      "src/features/scheduling/**/*.{ts,tsx}",
-      "src/features/exam-authoring/realtime/**/*.{ts,tsx}",
-      "src/features/exam-authoring/hooks/useQuestionAutosave.ts",
-      "src/features/exam-authoring/ui/useAuthoringPersistence.ts",
-      "src/features/exam-authoring/ui/useAuthoringSaveRouting.ts",
-      "src/components/proctor/**/*.{ts,tsx}",
-      "src/components/admin/AdminExams.tsx",
-      "src/components/admin/AdminResults.tsx",
-      "src/components/admin/AdminSettings.tsx",
-      "src/components/admin/StudentReviewWorkspace.tsx",
-      "src/components/admin/useExamListUrlState.ts",
-      "src/products/sat/routes/SatSessionRoomRoute.tsx",
+      "src/features/{admin,answer-history,assessment-forms,auth,builder,content-library,exam-authoring,grading,preferences,proctor,proctoring,results,sat-score-conversion,scheduling}/**/*.{ts,tsx}",
+      "src/products/**/*.{ts,tsx}",
+      "src/components/{admin,answer-history,proctor}/**/*.{ts,tsx}",
       "src/hooks/useFocusTrap.ts",
       "src/services/adminPreferencesRepository.ts",
     ],
-    ignores: ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**"],
+    // The answer-key editor probes loosely typed block shapes; the plan keeps
+    // it out of the rewrite until a defect is reproduced (Package 5).
+    ignores: [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/__tests__/**",
+      "src/features/builder/routes/ExamAnswerKeyRoute.tsx",
+      "src/features/builder/utils/answerKeyOverview.ts",
+    ],
     rules: {
       "react-hooks/exhaustive-deps": "error",
       "@typescript-eslint/no-explicit-any": "error",

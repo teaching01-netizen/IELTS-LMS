@@ -8,7 +8,13 @@ import { normalizeWritingTaskContents } from '../../utils/writingTaskUtils';
 import { ConfirmModal } from '../ConfirmModal';
 import { useVersionHistory } from './hooks/useVersionHistory';
 import { examRepository, hydrateExamState } from '../../features/exam-authoring/api/examAuthoringGateway';
-import type { ExamVersion } from '../../types/domain';
+import type { ExamVersion, ExamVersionSummary } from '../../types/domain';
+
+interface VersionTreeNode {
+  version: ExamVersionSummary;
+  children: VersionTreeNode[];
+  parent: string | null;
+}
 
 export function ExamVersionHistory({
   exam,
@@ -38,7 +44,7 @@ export function ExamVersionHistory({
   }, []);
 
   // Version label formatting function
-  const getVersionLabel = (version: any): string => {
+  const getVersionLabel = (version: ExamVersionSummary): string => {
     const isCurrentPublished = version.id === exam.currentPublishedVersionId;
     
     if (version.isDraft) {
@@ -50,7 +56,7 @@ export function ExamVersionHistory({
     return `Version ${version.versionNumber}`;
   };
 
-  const getVersionIcon = (version: any) => {
+  const getVersionIcon = (version: ExamVersionSummary) => {
     if (version.isDraft) {
       return <FileText size={16} className="text-slate-600" aria-hidden="true" />;
     }
@@ -59,7 +65,7 @@ export function ExamVersionHistory({
 
   // Build tree structure for visualization
   const versionTree = useMemo(() => {
-    const tree: any = {};
+    const tree: Record<string, VersionTreeNode> = {};
     versions.forEach(version => {
       tree[version.id] = {
         version,
@@ -69,9 +75,9 @@ export function ExamVersionHistory({
     });
     
     // Build parent-child relationships
-    Object.values(tree).forEach((node: any) => {
-      if (node.parent && tree[node.parent]) {
-        tree[node.parent].children.push(node);
+    Object.values(tree).forEach((node) => {
+      if (node.parent) {
+        tree[node.parent]?.children.push(node);
       }
     });
     
@@ -79,7 +85,7 @@ export function ExamVersionHistory({
   }, [versions]);
 
   // Get children for a version
-  const getVersionChildren = (versionId: string) => {
+  const getVersionChildren = (versionId: string): VersionTreeNode[] => {
     return versionTree[versionId]?.children || [];
   };
 
@@ -89,7 +95,7 @@ export function ExamVersionHistory({
   };
 
   // Render tree connector lines
-  const renderTreeConnector = (version: any, index: number, total: number) => {
+  const renderTreeConnector = (version: ExamVersionSummary, index: number, total: number) => {
     if (!version.parentVersionId) return null;
     
     const isLastChild = index === total - 1;

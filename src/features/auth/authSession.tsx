@@ -282,6 +282,9 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     try {
       await authService.logout();
     } finally {
+      // Logout is an in-app redirect, not a reload: drop this actor's cached
+      // server data so the next staff login on this tab never renders it.
+      queryClient.clear();
       setSessionState(null, setSession, setStatus);
     }
   }, []);
@@ -290,6 +293,9 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     try {
       await authService.logoutAll();
     } finally {
+      // Logout is an in-app redirect, not a reload: drop this actor's cached
+      // server data so the next staff login on this tab never renders it.
+      queryClient.clear();
       setSessionState(null, setSession, setStatus);
     }
   }, []);

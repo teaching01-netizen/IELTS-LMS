@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Calendar, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
 import type { ExamSchedule, ExamVersion } from '../../types/domain';
 import type { AdminSchedulingProps } from '../../features/scheduling/contracts';
@@ -88,7 +88,7 @@ export function AdminScheduling({
     };
   }, [draft.examId, draft.publishedVersionId, examEntities, loadVersionById]);
 
-  const openCreateModal = (targetExamId?: string) => {
+  const openCreateModal = useCallback((targetExamId?: string) => {
     const exam = examEntities.find((item) => item.id === targetExamId) ?? examEntities[0];
     const versionId = exam?.currentPublishedVersionId || exam?.currentDraftVersionId || '';
     const displayName = exam?.title || '';
@@ -101,7 +101,7 @@ export function AdminScheduling({
       gradingDisplayName: displayName,
     });
     setShowModal(true);
-  };
+  }, [defaultExamId, examEntities]);
 
   useEffect(() => {
     if (!autoOpenCreate || hasConsumedRouteIntent || showModal || examEntities.length === 0) {
@@ -110,7 +110,7 @@ export function AdminScheduling({
 
     openCreateModal(initialExamId);
     setHasConsumedRouteIntent(true);
-  }, [autoOpenCreate, examEntities, hasConsumedRouteIntent, initialExamId, showModal]);
+  }, [autoOpenCreate, examEntities, hasConsumedRouteIntent, initialExamId, openCreateModal, showModal]);
 
   const openEditModal = async (schedule: ExamSchedule) => {
     setEditingScheduleId(schedule.id);

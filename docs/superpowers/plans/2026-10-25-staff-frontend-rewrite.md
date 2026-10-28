@@ -219,6 +219,16 @@ Each package is a small series of reviewable commits. Preserve the view props in
 - [ ] Preserve dirty-draft adoption protection, recovery choices, publication/deletion freezes, divergence resolution, room acknowledgement truth, and flush-before-route-change.
 - [ ] Test settings/form section saves against concurrent question edits, import/reorder/bulk-delete revision changes, room creation after latest saved content, remote deletion/publication, reconnect, and entity switching.
 
+**Writer inventory (recorded before extraction):**
+
+| Field family | Single persistence owner | Notes |
+|---|---|---|
+| Question rich roots (prompt, passage, choices) and scalar record (type, answer, metadata, accessibility) | `resolveFieldWriter` (`realtime/coedit/fieldWriter.ts`): the workspace room when mounted, otherwise the prompt room for the prompt only, otherwise the legacy full-revision save | `useWorkspaceProjectionWrites` is the only pump between the room and the React draft. `useAuthoringSaveRouting` and `useAuthoringPersistence` both route through the same resolver. |
+| Editable document in React | `useAuthoringDraft` | Editors and validators read from it. Server snapshots are adopted only when clean (dirty-draft adoption protection). |
+| Queue/shell projection (module order, question list) | Shell lifecycle query plus `useAuthoringQuestionCommands`: reorder sends the expected question order, and bulk delete sends the expected per-question revisions | Never written from a question save. |
+| Exam settings and forms (registration, section entry, Eva SIM) | `FormsSettingsPanel` section saves, fenced by `expectedVersionId` and `expectedRevision` | Independent of question content. An acknowledgement settles only the submitted snapshot and keeps edits typed since. |
+| Recovery and divergence | `useAuthoringConflictRecovery`, `useCoeditRecoveryAndPresence`, and the divergence store | Recovery offers choices; it never writes on its own. |
+
 **Gate:** One writer per field; no query/HTTP snapshot clobbers collaborative or dirty local content. Existing authoring and real collaboration lifecycle tests pass. A large file alone is not a reason to replace these working rules.
 
 ### Package 7 — Complete staff lists, scheduling, results, and overlay contracts

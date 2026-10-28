@@ -185,7 +185,7 @@ async function createPreviewSchedule(
     autoStop: false,
   });
 
-  const created = await backendPost<any>('/v1/schedules', { ...payload, satStartMode: 'proctor' });
+  const created = await backendPost<Parameters<typeof mapBackendSchedule>[0]>('/v1/schedules', { ...payload, satStartMode: 'proctor' });
   return mapBackendSchedule(created);
 }
 
@@ -337,7 +337,7 @@ async function ensurePreviewAttemptWithPrecheck(
   });
 
   try {
-    await backendPost<any>(
+    await backendPost<unknown>(
       studentSessionTransport.paths.precheck(schedule.id),
       {
         studentKey,

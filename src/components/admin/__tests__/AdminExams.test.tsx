@@ -158,6 +158,32 @@ describe('AdminExams', () => {
     expect(onBulkDelete).toHaveBeenCalledWith(['exam-2']);
   });
 
+  it('reports a partial bulk failure per exam and keeps only the failed exam selected', async () => {
+    const onBulkPublish = vi.fn().mockResolvedValue({
+      success: true,
+      total: 2,
+      succeeded: 1,
+      failed: 1,
+      results: [
+        { examId: 'exam-1', examTitle: 'Alpha Academic Mock', success: true },
+        { examId: 'exam-2', examTitle: 'Beta General Mock', success: false, error: 'Already published' },
+      ],
+    } satisfies BulkOperationResult);
+    renderInRouter(<AdminExams {...buildProps({ onBulkPublish })} />);
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0] as HTMLElement); // select both
+    fireEvent.click(screen.getByRole('button', { name: 'Publish 2 selected exams' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm publish selected exams' }));
+    await vi.waitFor(() => expect(onBulkPublish).toHaveBeenCalledWith(['exam-1', 'exam-2']));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Bulk Operation Result' });
+    expect(dialog).toHaveTextContent('Some operations failed');
+    expect(dialog).toHaveTextContent('1 of 2 succeeded (1 failed)');
+    expect(dialog).toHaveTextContent('Already published');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByText('1 exam selected')).toBeInTheDocument();
+  });
+
   it('keeps keyboard focus in the create dialog, closes on Escape, and restores focus', () => {
     renderInRouter(<AdminExams {...buildProps()} />);
     const trigger = screen.getByRole('button', { name: 'Create Exam' });
@@ -167,9 +193,11 @@ describe('AdminExams', () => {
     // The title field's autoFocus is kept; the trap does not move focus to Close.
     expect(document.activeElement).toBe(screen.getByPlaceholderText('e.g. Academic Practice Test 5'));
     expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.body.style.overflow).toBe('hidden');
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Create New Exam' })).not.toBeInTheDocument();
     expect(document.activeElement).toBe(trigger);
+    expect(document.body.style.overflow).toBe('');
   });
 
   it('create flow fires onCreateExam with the entered title', () => {

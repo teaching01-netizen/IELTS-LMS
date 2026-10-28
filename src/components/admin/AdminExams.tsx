@@ -1177,6 +1177,7 @@ export function AdminExams({
                             ) : (
                               <span className="text-red-600" title={result.error}>
                                 <XCircle size={14} /> Failed
+                                {result.error && <span className="sr-only">: {result.error}</span>}
                               </span>
                             )}
                           </td>
