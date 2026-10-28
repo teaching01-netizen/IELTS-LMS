@@ -115,12 +115,12 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Create:** `playwright.staff-parity.config.ts`, `e2e/staff-ui-parity.spec.ts`, and Playwright-generated screenshot references for that spec. Keep a dedicated fixture configuration without database seeding for pure visual references.
 
-- [ ] Inventory the route/role matrix from `src/app/router/createRouter.tsx`; record every staff entry and legacy redirect, including SAT release aliases and IELTS `/builder/:examId` variants.
-- [ ] Add deterministic fixture states for SAT library/authoring/settings/room/forms/responses and IELTS library/config/builder/scheduling/proctor/grading/results. Pin data, fonts, clock, timezone, browser, and reduced-motion preference.
-- [ ] Capture full-page and critical-dialog screenshots at 390, 768, and 1440 CSS pixels; separately cover 200% zoom/reflow and keyboard focus where a visual reference matters.
-- [ ] Record current network calls, mutation counts, visible status, selected IDs, scroll return, and focus for each critical journey.
-- [ ] Triage the three existing SAT fixture-browser failures recorded below. Correct stale locators/expectations to the existing latest-saved-exam behavior; do not change the UI to satisfy obsolete publication assumptions. Recheck contrast after the sheet's entry animation settles before attributing the measured colors to final tokens.
-- [ ] Run the first meaningful regression tests below against the old owners and observe failures before implementing fixes. A passing new test must be examined for whether it exercises the timing window.
+- [x] Inventory the route/role matrix from `src/app/router/createRouter.tsx`; record every staff entry and legacy redirect, including SAT release aliases and IELTS `/builder/:examId` variants.
+- [x] Add deterministic fixture states for SAT library/authoring/settings/room/forms/responses and IELTS library/config/builder/scheduling/proctor/grading/results. Pin data, fonts, clock, timezone, browser, and reduced-motion preference.
+- [x] Capture full-page and critical-dialog screenshots at 390, 768, and 1440 CSS pixels; separately cover 200% zoom/reflow and keyboard focus where a visual reference matters.
+- [x] Record current network calls, mutation counts, visible status, selected IDs, scroll return, and focus for each critical journey.
+- [x] Triage the three existing SAT fixture-browser failures recorded below. Correct stale locators/expectations to the existing latest-saved-exam behavior; do not change the UI to satisfy obsolete publication assumptions. Recheck contrast after the sheet's entry animation settles before attributing the measured colors to final tokens.
+- [x] Run the first meaningful regression tests below against the old owners and observe failures before implementing fixes. A passing new test must be examined for whether it exercises the timing window.
 
 **Gate:** Current rendered design and intended behavior have reproducible references; baseline defects are identified separately from intended behavior.
 
@@ -130,13 +130,13 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Extend tests:** Existing `StudentReviewWorkspace.core.test.tsx`, `useConfigRouteController.test.tsx`, `useProctorRouteController.backend.test.tsx`, `useProctorRouteController.live-update.test.tsx`, `gradingQueries.test.tsx`, `AdminSettings.test.tsx`, and `adminPreferencesRepository.backend.test.ts` in their current `__tests__` directories.
 
-- [ ] Reproduce F1/F2 with deferred section reads and save promises. Remove duplicate draft initialization; prevent obsolete acknowledgements from replacing newer edits or another submission.
-- [ ] Reproduce F3 with A/B reads resolved in reverse order, B missing, and edit-during-save. Fence loads/acknowledgements by entity and sequence, clear stale identity on a real entity transition, and retain existing draft/published fallback.
-- [ ] Reproduce F4 with `{ success: false }` end/extend/complete responses through the real controller-to-dashboard path. Propagate rejection and preserve the existing error surface.
-- [ ] Reproduce F5 using a real QueryClient with both SAT and all-provider observers. Correct provider targeting and verify required refresh failure propagation.
-- [ ] Reproduce F7 by rerendering filtered submission queries within their stale window. Cache the current service's unfiltered result and derive filtered views without changing other observers' data.
-- [ ] Reproduce F8 with persistence failure and two conflicting preference writers. Expose pending/error confirmation to the current settings owner, preserve the draft, and avoid blind full-document conflict retry.
-- [ ] Commit each corrected failure path with its regression test; run the relevant package tests and parity scenario before proceeding.
+- [x] Reproduce F1/F2 with deferred section reads and save promises. Remove duplicate draft initialization; prevent obsolete acknowledgements from replacing newer edits or another submission.
+- [x] Reproduce F3 with A/B reads resolved in reverse order, B missing, and edit-during-save. Fence loads/acknowledgements by entity and sequence, clear stale identity on a real entity transition, and retain existing draft/published fallback.
+- [x] Reproduce F4 with `{ success: false }` end/extend/complete responses through the real controller-to-dashboard path. Propagate rejection and preserve the existing error surface.
+- [x] Reproduce F5 using a real QueryClient with both SAT and all-provider observers. Correct provider targeting and verify required refresh failure propagation.
+- [x] Reproduce F7 by rerendering filtered submission queries within their stale window. Cache the current service's unfiltered result and derive filtered views without changing other observers' data.
+- [x] Reproduce F8 with persistence failure and two conflicting preference writers. Expose pending/error confirmation to the current settings owner, preserve the draft, and avoid blind full-document conflict retry.
+- [x] Commit each corrected failure path with its regression test; run the relevant package tests and parity scenario before proceeding.
 
 **Gate:** F1–F5, F7, and F8 regressions fail before their change and pass after; no visual change. F6 is handled with the explicit collection semantics in Package 4, not an unsafe blanket replacement.
 
@@ -146,12 +146,12 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Create only where missing:** `src/features/proctor/contracts/monitoringSchemas.ts`, `src/features/grading/contracts/reviewSchemas.ts`; feature-local API tests. Extend existing exam/settings/form contracts instead of duplicating them.
 
-- [ ] Trace each migrated read to its actual Go/OpenAPI payload and define one runtime parser at the feature boundary. Preserve required identity, revision, deadline, nullable score, and provider fields; accept additive fields.
-- [ ] Pass TanStack query context `signal` through feature functions and existing transport configuration. Test cancellation at the actual fetch boundary; retain entity fencing even when cancellation arrives too late.
-- [ ] Reuse feature key factories. Include server query parameters in identity; keep purely local filters in selectors. Do not merge legacy and feature cache families merely because their names look similar.
-- [ ] Inventory mutation-to-read dependencies and make invalidation explicit: exam/config → affected list/detail/validation; room lifecycle → provider summaries/detail/entry state; grading save/release → draft/submission/queue/results; schedule change → schedule list and affected room overview.
-- [ ] Preserve the existing no-blind-mutation-retry policy, rate-limit handling, cookies/CSRF, and auth cache cleanup. Retain domain result codes when normalizing failures.
-- [ ] Test malformed payload, 401, 403, 409, 429/Retry-After, canceled read, network failure, and uncertain write response at each changed boundary. Do not log answers, access codes, names, email, tokens, or draft content.
+- [x] Trace each migrated read to its actual Go/OpenAPI payload and define one runtime parser at the feature boundary. Preserve required identity, revision, deadline, nullable score, and provider fields; accept additive fields.
+- [x] Pass TanStack query context `signal` through feature functions and existing transport configuration. Test cancellation at the actual fetch boundary; retain entity fencing even when cancellation arrives too late.
+- [x] Reuse feature key factories. Include server query parameters in identity; keep purely local filters in selectors. Do not merge legacy and feature cache families merely because their names look similar.
+- [x] Inventory mutation-to-read dependencies and make invalidation explicit: exam/config → affected list/detail/validation; room lifecycle → provider summaries/detail/entry state; grading save/release → draft/submission/queue/results; schedule change → schedule list and affected room overview.
+- [x] Preserve the existing no-blind-mutation-retry policy, rate-limit handling, cookies/CSRF, and auth cache cleanup. Retain domain result codes when normalizing failures.
+- [x] Test malformed payload, 401, 403, 409, 429/Retry-After, canceled read, network failure, and uncertain write response at each changed boundary. Do not log answers, access codes, names, email, tokens, or draft content.
 
 **Gate:** One checked contract per migrated resource, request identity and cancellation work, and mutations refresh every affected current view without global invalidation.
 
@@ -161,12 +161,12 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Modify:** `src/components/admin/StudentReviewWorkspace.tsx`, `src/features/grading/routes/GradingRoute.tsx`, `src/features/grading/api/gradingQueries.ts`, and `src/components/admin/providers/AdminShellProvider.tsx` only after checking its other consumers.
 
-- [ ] Move submission, section, writing, and published-version reads into existing/extended feature queries. Load independent resources concurrently where the current backend bundle cache permits it; retain independent partial-failure presentation.
-- [ ] Move editable review state into the entity-scoped draft reducer using the acknowledgement contract. Preserve annotations, drawings, rubric bands, feedback, checklist, teacher summary, objective overrides, and current save/release business rules.
-- [ ] Make review initialization one operation per submission, with the server deciding idempotency. Preserve current auto-start behavior; the loading phase must not become a second writer during Strict Mode or refetch.
-- [ ] Compose save, finalize, ready-to-release, release, reopen, and override mutations in the controller. Release uses a successfully persisted current draft and authoritative result; failures retain local edits.
-- [ ] Give the existing JSX a typed view model and named commands; remove direct service/repository calls from that JSX. Keep markup/classes and print/report rendering intact.
-- [ ] Persist selected grading session/submission in validated search parameters on `/admin/grading`; retain the current breadcrumb/back design. The URL replaces `gradingLevel` plus independent nullable IDs as navigation authority. Avoid changing unrelated AdminShell consumers.
+- [x] Move submission, section, writing, and published-version reads into existing/extended feature queries. Load independent resources concurrently where the current backend bundle cache permits it; retain independent partial-failure presentation.
+- [x] Move editable review state into the entity-scoped draft reducer using the acknowledgement contract. Preserve annotations, drawings, rubric bands, feedback, checklist, teacher summary, objective overrides, and current save/release business rules.
+- [x] Make review initialization one operation per submission, with the server deciding idempotency. Preserve current auto-start behavior; the loading phase must not become a second writer during Strict Mode or refetch.
+- [x] Compose save, finalize, ready-to-release, release, reopen, and override mutations in the controller. Release uses a successfully persisted current draft and authoritative result; failures retain local edits.
+- [x] Give the existing JSX a typed view model and named commands; remove direct service/repository calls from that JSX. Keep markup/classes and print/report rendering intact.
+- [x] Persist selected grading session/submission in validated search parameters on `/admin/grading`; retain the current breadcrumb/back design. The URL replaces `gradingLevel` plus independent nullable IDs as navigation authority. Avoid changing unrelated AdminShell consumers.
 
 **Gate:** Edit/save/edit, switch-student during load/save, two-grader 409, partial answer load failure, release rejection, keyboard/back/refresh, and published-version traceback all pass. No draft loss or false release confirmation.
 
@@ -176,14 +176,14 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Modify/reuse:** `useProctorRouteController.ts` as a temporary compatibility adapter; `src/features/proctor/domain/mergeProctorRuntime.ts`; `src/features/proctor/api/proctorQueries.ts`; `ProctorRoot.tsx`; `ProctorDashboard.tsx`; `src/products/sat/routes/SatSessionRoomRoute.tsx`; authoritative clock and live-update hooks.
 
-- [ ] Separate query subscription, snapshot reconciliation, staff commands, and local selection. Remove parallel local arrays only after their writers have moved to the cache boundary.
-- [ ] Make the selected detail cache the room projection owner. Poll/detail responses and socket patches use one pure reconciliation function; do not create another broad Zustand store. Summary cards keep their summary query. Any summary contribution to the selected room passes through the same revision checks and cannot replace detail-only fields.
-- [ ] Preserve `mergeProctorRuntime`/session identity fences: runtime revision, attempt revision, module attempt identity/revision, server timestamp, and one room clock anchor. Older poll responses cannot reverse newer socket or command state.
-- [ ] Define completeness per collection using actual endpoint behavior. Full notes/rules snapshots remove confirmed missing records; bounded alert/audit windows update their covered window or use explicit deletion information. Pending local mutations are separate overlays, not undocumented synthetic timestamps.
-- [ ] Remove broad setters such as `setSessions`/`setAlerts` from public view contracts. Expose typed acknowledge, note/rule CRUD, pause/resume, warn, terminate, extend, recovery, and room commands.
-- [ ] Bind pending/feedback to the captured room/attempt/operation. Ignore stale UI completion after route changes while reconciling the original entity's cache.
-- [ ] Preserve poll floors/jitter, presence cleanup, rate-limit behavior, reconnect fallback, and current timing models. Coalesce burst invalidations at the existing live-update boundary instead of creating unbounded parallel reads.
-- [ ] Resolve automatic-rule authority before changing it: demonstrate server-side idempotent execution across two operators, or record a backend prerequisite with rule/attempt/trigger identity. Do not remove current behavior until its replacement passes the same scenarios; do not claim frontend-only dedupe is production-safe.
+- [x] Separate query subscription, snapshot reconciliation, staff commands, and local selection. Remove parallel local arrays only after their writers have moved to the cache boundary.
+- [x] Make the selected detail cache the room projection owner. Poll/detail responses and socket patches use one pure reconciliation function; do not create another broad Zustand store. Summary cards keep their summary query. Any summary contribution to the selected room passes through the same revision checks and cannot replace detail-only fields.
+- [x] Preserve `mergeProctorRuntime`/session identity fences: runtime revision, attempt revision, module attempt identity/revision, server timestamp, and one room clock anchor. Older poll responses cannot reverse newer socket or command state.
+- [x] Define completeness per collection using actual endpoint behavior. Full notes/rules snapshots remove confirmed missing records; bounded alert/audit windows update their covered window or use explicit deletion information. Pending local mutations are separate overlays, not undocumented synthetic timestamps.
+- [x] Remove broad setters such as `setSessions`/`setAlerts` from public view contracts. Expose typed acknowledge, note/rule CRUD, pause/resume, warn, terminate, extend, recovery, and room commands.
+- [x] Bind pending/feedback to the captured room/attempt/operation. Ignore stale UI completion after route changes while reconciling the original entity's cache.
+- [x] Preserve poll floors/jitter, presence cleanup, rate-limit behavior, reconnect fallback, and current timing models. Coalesce burst invalidations at the existing live-update boundary instead of creating unbounded parallel reads.
+- [x] Resolve automatic-rule authority before changing it: demonstrate server-side idempotent execution across two operators, or record a backend prerequisite with rule/attempt/trigger identity. Do not remove current behavior until its replacement passes the same scenarios; do not claim frontend-only dedupe is production-safe.
 
 **Gate:** Shared hook works for both IELTS and SAT; older snapshots never regress active module/time/status; deletion/acknowledgement behavior is correct; command rejection never shows success; room changes leak no commands or feedback. Automatic-rule cross-operator guarantees remain a release blocker until demonstrated.
 
@@ -197,11 +197,11 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Modify/reuse:** `useConfigRouteController.ts`, `useBuilderRouteController.ts`, `useReviewRouteController.ts`, `BuilderRoot.tsx`, existing route components and `useBuilderAutosave.ts`; `src/hooks/useDurableLatestAutosave.ts`; `src/components/admin/AdminSettings.tsx`; admin defaults controller/context and preferences repository.
 
-- [ ] Apply query-owned exam/version loading plus entity-scoped config drafts. Keep `syncConfigWithStandards` as the current normalization owner.
-- [ ] Preserve full content/config coherence and expected revisions when saving. Configuration must not silently overwrite newer question content or vice versa; verify the service/Go save contract for the shared version.
-- [ ] Retain durable latest-wins autosave, actor-scoped recovery, serialized writes, `flushNow`/`isLatest`, and existing navigation blocking. Use a named controller command to flush before preview/review/publication; a late earlier save never unlocks navigation for newer unsaved work.
-- [ ] Move defaults into a query plus explicit draft/save mutation. Commit confirmed defaults only after acknowledgement; retain failed local input. Resolve a conflict through current settings feedback instead of retrying a stale entire configuration automatically.
-- [ ] Extract nonvisual orchestration from `BuilderRoot` only where ownership becomes clearer. Do not rewrite question blocks, rich content, answer keys, or preview rendering without a reproduced defect.
+- [x] Apply query-owned exam/version loading plus entity-scoped config drafts. Keep `syncConfigWithStandards` as the current normalization owner.
+- [x] Preserve full content/config coherence and expected revisions when saving. Configuration must not silently overwrite newer question content or vice versa; verify the service/Go save contract for the shared version.
+- [x] Retain durable latest-wins autosave, actor-scoped recovery, serialized writes, `flushNow`/`isLatest`, and existing navigation blocking. Use a named controller command to flush before preview/review/publication; a late earlier save never unlocks navigation for newer unsaved work.
+- [x] Move defaults into a query plus explicit draft/save mutation. Commit confirmed defaults only after acknowledgement; retain failed local input. Resolve a conflict through current settings feedback instead of retrying a stale entire configuration automatically.
+- [x] Extract nonvisual orchestration from `BuilderRoot` only where ownership becomes clearer. Do not rewrite question blocks, rich content, answer keys, or preview rendering without a reproduced defect.
 
 **Gate:** Rapid edits, save failure, offline/reload recovery, A→B→missing config navigation, version conflict, and edit-during-flush all preserve correct content. Existing builder/preview/review UI matches references.
 
@@ -213,11 +213,11 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Tests:** Existing authoring hook tests, `AuthoringWorkspace.test.tsx`, `AuthoringWorkspaceCoedit.test.tsx`, `src/features/exam-authoring/realtime/coedit/__tests__/`, question autosave durability tests, and `e2e/coedit-live/` for actual collaborative-service verification.
 
-- [ ] Inventory current writers by field: collaborative rich document, scalar metadata, queue/shell projection, settings/forms, and recovery. Record the existing owner before extracting any code.
-- [ ] Keep `useAuthoringDraft` as the editable document owner and `resolveFieldWriter`/save routing as persistence authority. Strengthen command interfaces only where broad draft setters cross ownership boundaries.
-- [ ] Move remaining request orchestration out of markup into the existing cohesive owners; split presentational sections without remounting editors or changing element identity.
-- [ ] Preserve dirty-draft adoption protection, recovery choices, publication/deletion freezes, divergence resolution, room acknowledgement truth, and flush-before-route-change.
-- [ ] Test settings/form section saves against concurrent question edits, import/reorder/bulk-delete revision changes, room creation after latest saved content, remote deletion/publication, reconnect, and entity switching.
+- [x] Inventory current writers by field: collaborative rich document, scalar metadata, queue/shell projection, settings/forms, and recovery. Record the existing owner before extracting any code.
+- [x] Keep `useAuthoringDraft` as the editable document owner and `resolveFieldWriter`/save routing as persistence authority. Strengthen command interfaces only where broad draft setters cross ownership boundaries.
+- [x] Move remaining request orchestration out of markup into the existing cohesive owners; split presentational sections without remounting editors or changing element identity.
+- [x] Preserve dirty-draft adoption protection, recovery choices, publication/deletion freezes, divergence resolution, room acknowledgement truth, and flush-before-route-change.
+- [x] Test settings/form section saves against concurrent question edits, import/reorder/bulk-delete revision changes, room creation after latest saved content, remote deletion/publication, reconnect, and entity switching.
 
 **Writer inventory (recorded before extraction):**
 
@@ -235,11 +235,11 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Modify:** `src/features/exam-authoring/routes/ExamsRoute.tsx`, `src/components/admin/AdminExams.tsx`, library feature/routes, `src/features/scheduling/routes/SchedulingRoute.tsx`, `src/features/scheduling/ui/Scheduling/Scheduling.tsx`, `src/components/admin/AdminResults.tsx`, SAT route controllers, and existing list-parameter/return helpers.
 
-- [ ] Apply the established query/mutation contracts to create/clone/archive/delete/bulk operations; return individual outcomes for partial failure. Selection reconciles against current IDs and is not silently assigned to reordered rows.
-- [ ] Preserve list filter/search/sort/page and return position through existing URL helpers; add equivalent route-owned state where an existing staff view loses its place on back/refresh.
-- [ ] Keep schedule recurrence, timezone, pinned version, entry/start modes, and validation in their current domain owners. A rejected start does not look like a successful navigation.
-- [ ] Keep results nullable, pending, invalidated, released, and saved-answer states distinct. Preserve existing SAT unscored response review and IELTS published-version detail semantics.
-- [ ] Consolidate overlay ownership only for affected staff surfaces. Reuse current Radix-backed or existing tested primitive contracts with the same styles; test nested confirmation, Escape, focus return, scroll lock, and sheet-close during pending save. Avoid a global primitive replacement affecting student delivery.
+- [x] Apply the established query/mutation contracts to create/clone/archive/delete/bulk operations; return individual outcomes for partial failure. Selection reconciles against current IDs and is not silently assigned to reordered rows.
+- [x] Preserve list filter/search/sort/page and return position through existing URL helpers; add equivalent route-owned state where an existing staff view loses its place on back/refresh.
+- [x] Keep schedule recurrence, timezone, pinned version, entry/start modes, and validation in their current domain owners. A rejected start does not look like a successful navigation.
+- [x] Keep results nullable, pending, invalidated, released, and saved-answer states distinct. Preserve existing SAT unscored response review and IELTS published-version detail semantics.
+- [x] Consolidate overlay ownership only for affected staff surfaces. Reuse current Radix-backed or existing tested primitive contracts with the same styles; test nested confirmation, Escape, focus return, scroll lock, and sheet-close during pending save. Avoid a global primitive replacement affecting student delivery.
 
 **Gate:** Every included route is accounted for; back/refresh and partial bulk failures work; no selected entity survives under the wrong ID; results and exports reflect server data; screenshots and keyboard flows remain consistent.
 
@@ -247,12 +247,12 @@ Each package is a small series of reviewable commits. Preserve the view props in
 
 **Modify:** Existing `src/test/architecture/` guards, `eslint.config.js`, `.github/workflows/ci.yml`, and existing observability/performance owners. Remove only proven unused compatibility code and imports after caller migration.
 
-- [ ] Extend the existing architecture guard to migrated staff feature boundaries where necessary. The current empty baseline must remain empty; do not widen baselines to accept a new bypass.
-- [ ] Resolve effect-dependency and explicit-any findings in migrated owners; ratchet those rules to errors by migrated path once clean. Do not disable them or turn all 1,124 existing warnings into a prerequisite unrelated cleanup.
-- [ ] Add a test TypeScript configuration following current aliases to typecheck the changed test files without weakening application strictness. Expand only as existing test debt is resolved.
-- [ ] Profile representative authoring, large-room monitoring, and grading interactions. Compare route transfer size, commit duration/count, long tasks, input responsiveness, and requests per action to Package 0; optimize only demonstrated regressions/bottlenecks.
-- [ ] Reuse existing privacy-safe error/action instrumentation. Record operation outcome and entity/trace identity where permitted; exclude document/answer content and personal fields.
-- [ ] Remove old state arrays, compatibility setters/controllers, duplicate key exports, and redundant repository caches only when call-site search and tests show the new owner covers all callers.
+- [x] Extend the existing architecture guard to migrated staff feature boundaries where necessary. The current empty baseline must remain empty; do not widen baselines to accept a new bypass.
+- [x] Resolve effect-dependency and explicit-any findings in migrated owners; ratchet those rules to errors by migrated path once clean. Do not disable them or turn all 1,124 existing warnings into a prerequisite unrelated cleanup.
+- [x] Add a test TypeScript configuration following current aliases to typecheck the changed test files without weakening application strictness. Expand only as existing test debt is resolved.
+- [x] Profile representative authoring, large-room monitoring, and grading interactions. Compare route transfer size, commit duration/count, long tasks, input responsiveness, and requests per action to Package 0; optimize only demonstrated regressions/bottlenecks.
+- [x] Reuse existing privacy-safe error/action instrumentation. Record operation outcome and entity/trace identity where permitted; exclude document/answer content and personal fields.
+- [x] Remove old state arrays, compatibility setters/controllers, duplicate key exports, and redundant repository caches only when call-site search and tests show the new owner covers all callers.
 
 **Gate:** No unexplained correctness, visual, accessibility, request-volume, or measured interaction regression; dependencies and lockfile unchanged unless a separately justified need arises.
 
@@ -332,16 +332,16 @@ The 287 passing existing unit/integration tests provide a baseline, not evidence
 | Check | Result |
 |---|---|
 | `bun run typecheck`, `bun run typecheck:staff-tests` | PASS |
-| `bun run lint` | PASS: 0 errors, 1,104 warnings (baseline 1,124). `react-hooks/exhaustive-deps` and `no-explicit-any` are errors for every migrated owner: admin, grading, proctor, results and scheduling features; builder api/domain/hooks and `BuilderRoot`; exam-authoring realtime and save routing; `components/proctor`; `AdminExams`, `AdminResults`, `AdminSettings`, `StudentReviewWorkspace`; `SatSessionRoomRoute`; `useFocusTrap`. |
-| `bun run test:run` | PASS: 838 files, 7,254 tests (2 skipped). |
+| `bun run lint` | PASS: 0 errors, 1,085 warnings (baseline 1,124). `react-hooks/exhaustive-deps` and `no-explicit-any` are errors for all staff code: every staff feature directory, `src/products/**`, and `src/components/{admin,answer-history,proctor}/**`. The only exception is the answer-key editor (`ExamAnswerKeyRoute`, `answerKeyOverview`), which the plan keeps out of the rewrite without a reproduced defect. The remaining warnings are almost all `jsx-a11y` label/markup rules and unused variables outside those two rules; the plan does not make them a prerequisite. |
+| `bun run test:run` | PASS: 838 files, 7,242 tests (2 skipped). The count fell because the unused `WritingAnnotationCanvasLegacy` and its 16 tests were removed; 4 tests were added. |
 | `bun run build`, `bun run test:student-bundle` | PASS; student provider bundle isolation verified. |
 | `playwright.staff-parity.config.ts` | PASS: 112/112, references unchanged (no `--update-snapshots`). Includes the network-baseline request counts (no request-volume regression) and a smoke pass over the 9 staff routes with no reference screenshot, so every route in the route matrix is accounted for. |
-| `playwright.sat-staff-ux.config.ts` | PASS: 16/16 (the three planning-time failures are resolved). |
-| `playwright.coedit-live.config.ts` (own Go API, Hocuspocus service, MySQL) | PASS: 2/2. Found and fixed a composer crash on room close and an unbounded token re-mint loop after a clean close. |
+| `playwright.sat-staff-ux.config.ts` | PASS: 16/16 on three consecutive full runs. One earlier full run failed the keyboard room-controls test once; it passed alone 3/3 and in every full rerun. That room does not use the changed focus-trap code. |
+| `playwright.coedit-live.config.ts` (own Go API, Hocuspocus service, MySQL) | PASS: 2/2, rerun on the final tree in an isolated workspace and database. Found and fixed a composer crash on room close and an unbounded token re-mint loop after a clean close. |
 | Go: `internal/exams`, `internal/proctor`, OpenAPI drift, MySQL receipt suites | PASS, including `TestAutoRuleEnforcementIsIdempotentAcrossOperatorsMySQL`. |
-
 | `bun run coedit:test` | PASS: 128 tests. |
-| Real-backend journeys on an isolated database (`grading-workflow`, `scheduling-workflow`, `proctor-student-interventions`, `staff-draft-durability`, `sat-authoring-lifecycle`, `ielts-personal-timing`, chromium) | PASS: 22/22, including 500 concurrent IELTS candidates. Found and fixed: a closed IELTS accessibility dialog rendering over the exam, and a malformed forms response crashing the SAT workspace. Publish-then-create SAT tests for the removed release workflow were retired; the current single-operation room creation is covered by unit tests and `sat-staff-room-ux`. |
+| Real-backend journeys on an isolated database (`grading-workflow`, `scheduling-workflow`, `proctor-student-interventions`, `staff-draft-durability`, `sat-authoring-lifecycle`, `ielts-personal-timing`, chromium) | PASS on the final tree. In one run, 21/22 passed: the 500-candidate test missed its transition-latency limit (p95 21.1 s against 20 s) with 0 failed checks and 0 failed requests, while unit and lint jobs were loading the same machine. Rerun alone on a fresh database, it passed. Earlier findings fixed: a closed IELTS accessibility dialog rendering over the exam, and a malformed forms response crashing the SAT workspace. The publish-then-create SAT tests for the removed release workflow were retired; single-operation room creation is covered by unit tests and `sat-staff-room-ux`. |
+| `playwright.staff-perf.config.ts` | PASS: 3/3 on the final tree. |
 
 `playwright.staff-perf.config.ts` profiles the three representative interactions on a production build at 4x CPU throttling with the fixture transport. The same spec ran three times on the Package 0 commit (`7e00687e`) and on HEAD. Medians:
 
@@ -355,10 +355,14 @@ Run-to-run ranges overlap (proctor events: 376–400 on P0, 384–456 on HEAD), 
 
 Other Package 7 and 8 gates:
 
-- Overlays: every hand-rolled staff modal now has dialog semantics, `useFocusTrap` focus containment, Escape, and focus return. These are the `AdminExams` create, clone, bulk and version-history dialogs; `ScheduleSessionModal`; `StudentReportPreview`; `VersionCompareView`; and the co-edit `CollisionWarning`. The AdminRoot mobile sidebar backdrop is non-modal and stays as it is.
+- Overlays: every hand-rolled staff modal now has dialog semantics, `useFocusTrap` focus containment, Escape, focus return, and the shared body scroll lock (`bodyScrollLock`, the Dialog/Drawer owner; counted, so nested overlays release correctly). These are the `AdminExams` create, clone, bulk and version-history dialogs; `ScheduleSessionModal`; `StudentReportPreview`; `VersionCompareView`; and the co-edit `CollisionWarning`. The AdminRoot mobile sidebar backdrop is non-modal and stays as it is.
 - Architecture guard: `feature-internal-boundary` now covers `src/features/proctor` as well as assessment authoring. Every proctor consumer goes through `features/proctor/api`, and the baseline is still empty.
 - Instrumentation: `apiClient` already logs every failed operation with endpoint (entity IDs), request ID and attempt count, and no payload or personal content. Typed `CommandOutcome`s carry the outcome to callers. No new telemetry was needed.
-- Compatibility removal: the unused SAT room path constants and the old authoring-internal layer list were removed after call-site search. Grading list views (`GradingSessionList`, `GradingSessionDetail`, objective panels) and `AdminScheduling` were not named for rewrite. They still read their existing services, which are not unused, so they stay.
+- Bulk actions: each bulk operation returns per-exam outcomes. The list refreshes when any item succeeds, the result dialog lists each failure with its reason (exposed to assistive technology as well), and only the failed exams stay selected. Covered by `AdminExams.test`.
+- Auth transition: explicit logout and logout-all now clear the query cache, as the 401 handler already did. Logout is an in-app redirect, so before this fix the next staff login on the same tab could render the previous actor's cached data (`AuthSessionLogout.test`, failing before the fix). Local recovery drafts were already actor-scoped through `buildStaffDraftKey`.
+- Compatibility removal: a call-site search over every export deleted since `7e00687e` finds zero references for all 13 removed symbols: `AdminShellProvider`, `useAdminShell`, `GradingLevel`, `SessionNotesPanel`, and the superseded review hooks `useSubmission`, `useReviewDraft`, `useSaveReviewDraft`, `useAddWritingAnnotation`, `useFinalizeReview`, `useMarkReadyToRelease`, `useMarkGradingComplete`, `useReleaseResult`, `useSessionQueueSummary`. `WritingAnnotationCanvasLegacy` was referenced only by its own test and was removed. `useProctorRouteController` is now a thin composition of monitoring and typed commands, with no entity setters. The grading list views and `AdminScheduling` were not named for rewrite and still read their services, which are in use.
+- Package 1 regressions: each fix commit's regression tests were run against that commit's pre-fix source. F1/F2 (`61d8483e`): 3 failing. F3 (`8d801cd0`): 3 failing. F4 (`73f1fd97`, `ProctorRoot.commands`): 3 failing. F5: 1 failing. F7 (`c1d06c5c`): 2 failing. F8 (`67275b01`): 1 failing. All pass after their fixes.
+- Section 6 scenarios map to tests: load/switch/edit-during-save (`StudentReviewWorkspace.core`, `useConfigRouteController`); provider refresh (`useProctorRouteController.live-update`); old poll after socket and alert/rule reconciliation (`mergeProctorRuntime`, `proctorSnapshot`); business rejection (`ProctorRoot.commands`); accepted command with failed read (`proctorMutationOutcomes`); two operators (`TestAutoRuleEnforcementIsIdempotentAcrossOperatorsMySQL`); filter observers (`gradingQueries`); settings conflict (`adminPreferencesRepository.backend`, `useAdminRootController.defaults`); auth transition (`AuthSessionLogout`, `useAdminRootController.defaults`); recovery (`useDurableLatestAutosave`, `staff-draft-durability`); collaborative authoring (`fieldWriter`, `AuthoringWorkspaceCoedit`, coedit-live); keyboard/parity (staff parity, `sat-staff-ux`, overlay tests).
 
 ## 9. Reference basis
 
