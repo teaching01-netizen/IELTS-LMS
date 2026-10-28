@@ -17,7 +17,7 @@ describe('answerHistoryService', () => {
 
   it('requests submission overview endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true, data: { submissionId: 'sub-1' } }), {
+      new Response(JSON.stringify({ success: true, data: { submissionId: 'sub-1', attemptId: 'attempt-1', questionSummaries: [], sectionStats: [], signals: [] } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }),
@@ -32,9 +32,16 @@ describe('answerHistoryService', () => {
     );
   });
 
+  it('rejects an incomplete overview instead of returning it to the screen', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: {} }), { status: 200, headers: { 'content-type': 'application/json' } }),
+    ) as typeof fetch;
+    await expect(fetchAnswerHistoryOverviewBySubmission('sub-incomplete')).rejects.toThrow(/incomplete/i);
+  });
+
   it('requests attempt overview endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true, data: { attemptId: 'attempt-1' } }), {
+      new Response(JSON.stringify({ success: true, data: { attemptId: 'attempt-1', questionSummaries: [], sectionStats: [], signals: [] } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }),

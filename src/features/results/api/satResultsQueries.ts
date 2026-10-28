@@ -177,10 +177,35 @@ export function useSatAttemptsQuery(examId?: string, scheduleId?: string, offset
   });
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/** Views index these collections directly; an incomplete payload is a load error, not a crash. */
+function checkSatResultDetail(value: unknown): SatResultDetail {
+  if (
+    !isRecord(value) ||
+    !isRecord(value['summary']) ||
+    typeof value['summary']['outcomeStatus'] !== 'string' ||
+    !Array.isArray(value['sections']) ||
+    !Array.isArray(value['questions'])
+  ) {
+    throw new Error('The result response was incomplete. Try again.');
+  }
+  return value as unknown as SatResultDetail;
+}
+
+function checkSatAttemptAnswers(value: unknown): SatAttemptAnswers {
+  if (!isRecord(value) || typeof value['attemptId'] !== 'string' || !Array.isArray(value['questions'])) {
+    throw new Error('The saved answers response was incomplete. Try again.');
+  }
+  return value as unknown as SatAttemptAnswers;
+}
+
 export function useSatResultQuery(resultId?: string) {
   return useQuery({
     queryKey: satResultKeys.detail(resultId ?? 'missing'),
-    queryFn: ({ signal }) => resultsGateway.get<SatResultDetail>(`/v1/results/sat/${encodeURIComponent(resultId ?? '')}`, { signal }),
+    queryFn: ({ signal }) =>
+      resultsGateway.get<unknown>(`/v1/results/sat/${encodeURIComponent(resultId ?? '')}`, { signal }).then(checkSatResultDetail),
     enabled: Boolean(resultId),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -190,7 +215,10 @@ export function useSatResultQuery(resultId?: string) {
 export function useSatAttemptAnswersQuery(attemptId?: string) {
   return useQuery({
     queryKey: satResultKeys.attemptAnswers(attemptId ?? 'missing'),
-    queryFn: ({ signal }) => resultsGateway.get<SatAttemptAnswers>(`/v1/results/sat/attempts/${encodeURIComponent(attemptId ?? '')}/answers`, { signal }),
+    queryFn: ({ signal }) =>
+      resultsGateway
+        .get<unknown>(`/v1/results/sat/attempts/${encodeURIComponent(attemptId ?? '')}/answers`, { signal })
+        .then(checkSatAttemptAnswers),
     enabled: Boolean(attemptId),
     staleTime: 0,
     refetchOnWindowFocus: 'always',

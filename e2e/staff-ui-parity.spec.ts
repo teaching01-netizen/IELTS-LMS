@@ -222,3 +222,38 @@ test("ielts-config preserves and resolves a concurrent edit through the existing
   await expect.poll(() => revisions).toEqual([3, 4]);
   await expect(title).toHaveValue("Chosen title");
 });
+
+/**
+ * Route accounting (Package 7 gate): every staff route in the route/role
+ * matrix either has a parity reference above or must at least render here
+ * without a page error or the route error boundary. No screenshots: these
+ * routes had no pre-change reference to compare against.
+ */
+const UNREFERENCED_ROUTES: Array<{ path: string; role?: StaffRole }> = [
+  { path: "/admin" },
+  { path: "/admin/answer-history/submission-1" },
+  { path: "/sat" },
+  { path: "/sat/results/attempts/sat-attempt-1" },
+  { path: "/sat/results/result-1" },
+  { path: "/sat/exams/sat-exam-1/release" },
+  { path: "/sat/exams/sat-exam-1/preview" },
+  { path: "/builder/ielts-exam-1/answer-key" },
+  { path: "/proctor/answer-history/sat-attempt-1" },
+];
+
+test.describe("staff routes: every matrix entry renders", () => {
+  for (const route of UNREFERENCED_ROUTES) {
+    test(`${route.path} renders without a route error`, async ({ page }) => {
+      const pageErrors: string[] = [];
+      page.on("pageerror", (error) => pageErrors.push(error.message));
+      await page.clock.setFixedTime(new Date(PARITY_NOW));
+      await installStaffParityTransport(page, route.role ?? "admin");
+      await page.goto(route.path);
+      await page.waitForLoadState("networkidle").catch(() => undefined);
+      await expect(page.locator("main, [role='main'], #root > *").first()).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole("heading", { name: "Something went wrong" })).toHaveCount(0);
+      expect(page.url()).not.toContain("/login");
+      expect(pageErrors).toEqual([]);
+    });
+  }
+});

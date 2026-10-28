@@ -35,10 +35,25 @@ function dedupedGet<T>(key: string, fetch: () => Promise<T>): Promise<T> {
   return pending;
 }
 
+/** The overview screens index these lists directly; an incomplete payload is a load error. */
+function checkOverview(value: unknown): AnswerHistoryOverview {
+  const record = value as Record<string, unknown> | null;
+  if (
+    typeof record !== 'object' || record === null ||
+    typeof record['attemptId'] !== 'string' ||
+    !Array.isArray(record['questionSummaries']) ||
+    !Array.isArray(record['sectionStats']) ||
+    !Array.isArray(record['signals'])
+  ) {
+    throw new Error('The answer history response was incomplete. Try again.');
+  }
+  return value as AnswerHistoryOverview;
+}
+
 export async function fetchAnswerHistoryOverviewBySubmission(submissionId: string) {
   assertNonEmptyId('submission', submissionId);
   return dedupedGet(`overview:submission:${submissionId}`, () =>
-    backendGet<AnswerHistoryOverview>(`/v1/answer-history/submissions/${encode(submissionId)}/overview`),
+    backendGet<unknown>(`/v1/answer-history/submissions/${encode(submissionId)}/overview`).then(checkOverview),
   );
 }
 
@@ -46,7 +61,7 @@ export async function fetchAnswerHistoryOverviewByAttempt(attemptId: string) {
   assertNonEmptyId('attempt', attemptId);
   try {
     return await dedupedGet(`overview:attempt:${attemptId}`, () =>
-      backendGet<AnswerHistoryOverview>(`/v1/answer-history/attempts/${encode(attemptId)}/overview`),
+      backendGet<unknown>(`/v1/answer-history/attempts/${encode(attemptId)}/overview`).then(checkOverview),
     );
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
