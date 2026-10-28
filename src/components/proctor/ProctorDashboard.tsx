@@ -22,6 +22,7 @@ import {
   type OverviewBucket,
   type PastSessionStatusFilter,
 } from './proctorOverviewSessions';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface ProctorDashboardProps {
   schedules: ExamSchedule[];
@@ -83,6 +84,8 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [listDensity, setListDensity] = useState<'compact' | 'comfortable'>('compact');
   const [showViolationRules, setShowViolationRules] = useState(false);
+  // The panel, not the full-screen backdrop button, receives initial focus.
+  const rulesPanelRef = useFocusTrap<HTMLDivElement>(showViolationRules, () => setShowViolationRules(false));
   const [drawerTab, setDrawerTab] = useState<StudentDrawerTab>('timeline');
   const [overviewBucket, setOverviewBucket] = useState<OverviewBucket>('active');
   const [pastStatusFilter, setPastStatusFilter] = useState<PastSessionStatusFilter>('all');
@@ -879,7 +882,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
             aria-label="Close auto-response rules"
             onClick={() => setShowViolationRules(false)}
           />
-          <div className="relative z-10 flex h-[min(760px,calc(100vh-2rem))] w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl">
+          <div ref={rulesPanelRef} className="relative z-10 flex h-[min(760px,calc(100vh-2rem))] w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl">
             <ViolationRulePanel
               rules={selectedViolationRules}
               scheduleId={selectedScheduleId}

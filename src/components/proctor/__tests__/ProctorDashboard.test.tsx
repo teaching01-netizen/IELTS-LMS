@@ -1128,6 +1128,21 @@ describe('ProctorDashboard runtime controls', () => {
       expect(screen.queryByRole('dialog', { name: /auto-response rules/i })).not.toBeInTheDocument();
     });
 
+    it('keeps keyboard focus in the rules overlay, closes on Escape, and restores focus', () => {
+      render(<DashboardHarness {...baseProps()} violationRules={[]} />);
+      openDetail();
+      fireEvent.click(screen.getByRole('button', { name: /back to list/i }));
+      const trigger = screen.getByRole('button', { name: /auto-response rules/i });
+      trigger.focus();
+      fireEvent.click(trigger);
+
+      const dialog = screen.getByRole('dialog', { name: /auto-response rules/i });
+      expect(dialog.contains(document.activeElement)).toBe(true);
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('dialog', { name: /auto-response rules/i })).not.toBeInTheDocument();
+      expect(document.activeElement).toBe(trigger);
+    });
+
     it('shows the multi-proctor collision warning and proceeds explicitly', () => {
       const collisionRuntime = {
         ...liveRuntime,
