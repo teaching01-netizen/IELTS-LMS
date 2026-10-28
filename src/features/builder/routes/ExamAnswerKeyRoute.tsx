@@ -5,7 +5,7 @@ import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { Header } from '@components/Header';
 import { useBuilderRouteController } from '@builder/hooks/useBuilderRouteController';
 import { useBuilderAutosave } from '@builder/hooks/useBuilderAutosave';
-import type { ExamState, ModuleType } from '../../../types';
+import type { ExamState, ModuleType, QuestionBlock, SingleMCQQuestion, TFNGQuestion } from '../../../types';
 import { AcceptedAnswersEditor } from '@components/blocks/AcceptedAnswersEditor';
 import { resolveAcceptedAnswers } from '../../../utils/acceptedAnswers';
 import { applyAnswerKeyEdit, buildAnswerKeyRows, type AnswerKeyRow } from '../utils/answerKeyOverview';
@@ -386,7 +386,7 @@ function AnswerControl({
   const { block, question, answerIndex } = descriptor;
 
   if (descriptor.isSubAnswerTreeLeaf) {
-    const currentAccepted = getSubAnswerLeafAcceptedAnswers(block as any, descriptor.id);
+    const currentAccepted = getSubAnswerLeafAcceptedAnswers(block, descriptor.id);
     return (
       <div>
         <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Accepted Answers</div>
@@ -403,15 +403,15 @@ function AnswerControl({
 
   switch (block.type) {
     case 'TFNG': {
-      const current = question && 'correctAnswer' in question ? String((question as any).correctAnswer ?? '') : '';
-      const mode = (block as any).mode === 'YNNG' ? 'YNNG' : 'TFNG';
-      const choices = mode === 'YNNG' ? ['Y', 'N', 'NG'] : ['T', 'F', 'NG'];
+      const current = question && 'correctAnswer' in question ? String(question.correctAnswer ?? '') : '';
+      const mode = block.mode === 'YNNG' ? 'YNNG' : 'TFNG';
+      const choices: TFNGQuestion['correctAnswer'][] = mode === 'YNNG' ? ['Y', 'N', 'NG'] : ['T', 'F', 'NG'];
       return (
         <div className="flex items-center gap-3">
           <label className="text-xs font-semibold text-slate-600">Correct</label>
           <select
             value={current}
-            onChange={(e) => onEdit({ kind: 'set_tfng', questionId: descriptor.answerKey, value: e.target.value as any })}
+            onChange={(e) => onEdit({ kind: 'set_tfng', questionId: descriptor.answerKey, value: e.target.value as TFNGQuestion['correctAnswer'] })}
             className="rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-semibold text-slate-800"
           >
             <option value="">(none)</option>
@@ -425,7 +425,7 @@ function AnswerControl({
 
     case 'CLOZE':
     case 'SHORT_ANSWER': {
-      const base = question && 'correctAnswer' in question ? (question as any) : null;
+      const base = question && 'correctAnswer' in question ? question : null;
       const currentAccepted = base ? resolveAcceptedAnswers(base) : [];
       return (
         <div>
@@ -442,10 +442,10 @@ function AnswerControl({
     }
 
     case 'SENTENCE_COMPLETION': {
-      if (!question || !('blanks' in question) || !Array.isArray((question as any).blanks) || typeof answerIndex !== 'number') {
+      if (!question || !('blanks' in question) || !Array.isArray(question.blanks) || typeof answerIndex !== 'number') {
         return <div className="text-xs text-slate-600">Blank not found.</div>;
       }
-      const blank = (question as any).blanks[answerIndex];
+      const blank = question.blanks[answerIndex];
       const currentAccepted = blank ? resolveAcceptedAnswers(blank) : [];
       return (
         <div>
@@ -453,7 +453,7 @@ function AnswerControl({
           <div className="mt-2">
             <AcceptedAnswersEditor
               value={currentAccepted}
-              onChange={(next) => onEdit({ kind: 'set_sentence_blank_accepted_answer_fields', questionId: (question as any).id, blankIndex: answerIndex, acceptedAnswers: next })}
+              onChange={(next) => onEdit({ kind: 'set_sentence_blank_accepted_answer_fields', questionId: question.id, blankIndex: answerIndex, acceptedAnswers: next })}
               placeholder="Enter accepted answer…"
             />
           </div>
@@ -462,10 +462,10 @@ function AnswerControl({
     }
 
     case 'NOTE_COMPLETION': {
-      if (!question || !('blanks' in question) || !Array.isArray((question as any).blanks) || typeof answerIndex !== 'number') {
+      if (!question || !('blanks' in question) || !Array.isArray(question.blanks) || typeof answerIndex !== 'number') {
         return <div className="text-xs text-slate-600">Blank not found.</div>;
       }
-      const blank = (question as any).blanks[answerIndex];
+      const blank = question.blanks[answerIndex];
       const currentAccepted = blank ? resolveAcceptedAnswers(blank) : [];
       return (
         <div>
@@ -473,7 +473,7 @@ function AnswerControl({
           <div className="mt-2">
             <AcceptedAnswersEditor
               value={currentAccepted}
-              onChange={(next) => onEdit({ kind: 'set_note_blank_accepted_answer_fields', questionId: (question as any).id, blankIndex: answerIndex, acceptedAnswers: next })}
+              onChange={(next) => onEdit({ kind: 'set_note_blank_accepted_answer_fields', questionId: question.id, blankIndex: answerIndex, acceptedAnswers: next })}
               placeholder="Enter accepted answer…"
             />
           </div>
@@ -482,10 +482,10 @@ function AnswerControl({
     }
 
     case 'TABLE_COMPLETION': {
-      if (typeof answerIndex !== 'number' || !('cells' in block) || !Array.isArray((block as any).cells)) {
+      if (typeof answerIndex !== 'number' || !Array.isArray(block.cells)) {
         return <div className="text-xs text-slate-600">Cell not found.</div>;
       }
-      const cell = (block as any).cells[answerIndex];
+      const cell = block.cells[answerIndex];
       const currentAccepted = cell ? resolveAcceptedAnswers(cell) : [];
       return (
         <div>
@@ -502,8 +502,8 @@ function AnswerControl({
     }
 
     case 'MATCHING': {
-      const headings = Array.isArray((block as any).headings) ? (block as any).headings : [];
-      const current = question && 'correctHeading' in question ? String((question as any).correctHeading ?? '') : '';
+      const headings = Array.isArray(block.headings) ? block.headings : [];
+      const current = question && 'correctHeading' in question ? String(question.correctHeading ?? '') : '';
       return (
         <div className="flex items-center gap-3">
           <label className="text-xs font-semibold text-slate-600">Correct</label>
@@ -513,7 +513,7 @@ function AnswerControl({
             className="min-w-[220px] rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-medium text-slate-800"
           >
             <option value="">(none)</option>
-            {headings.map((h: any, index: number) => (
+            {headings.map((h, index) => (
               <option key={h.id} value={toRoman(index)}>
                 {toRoman(index)}. {h.text}
               </option>
@@ -524,7 +524,7 @@ function AnswerControl({
     }
 
     case 'MAP': {
-      const current = question && 'correctAnswer' in question ? String((question as any).correctAnswer ?? '') : '';
+      const current = question && 'correctAnswer' in question ? String(question.correctAnswer ?? '') : '';
       return (
         <div className="flex items-center gap-3">
           <label className="text-xs font-semibold text-slate-600">Correct</label>
@@ -540,17 +540,17 @@ function AnswerControl({
     }
 
     case 'MULTI_MCQ': {
-      const options = Array.isArray((block as any).options) ? (block as any).options : [];
+      const options = Array.isArray(block.options) ? block.options : [];
       const currentCorrect = new Set<string>(
         options
-          .filter((opt: any) => opt.isCorrect)
-          .map((opt: any) => String(opt.id)),
+          .filter((opt) => opt.isCorrect)
+          .map((opt) => String(opt.id)),
       );
       return (
         <div className="space-y-2">
           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Correct Options</div>
           <div className="grid gap-2 md:grid-cols-2">
-            {options.map((opt: any) => (
+            {options.map((opt) => (
               <label key={opt.id} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
                 <input
                   type="checkbox"
@@ -572,18 +572,22 @@ function AnswerControl({
     }
 
     case 'SINGLE_MCQ': {
-      const blockQuestions = Array.isArray((block as any).questions) && (block as any).questions.length > 0
-        ? (block as any).questions
-        : [{ id: block.id, stem: (block as any).stem ?? '', options: (block as any).options ?? [] }];
-      const matched = blockQuestions.find((q: any) => q.id === descriptor.answerKey) ?? blockQuestions[0];
-      const options = Array.isArray(matched?.options) ? matched.options : [];
-      const selected = options.find((opt: any) => opt.isCorrect)?.id ?? '';
+      const blockQuestions: Pick<SingleMCQQuestion, 'id' | 'stem' | 'options'>[] =
+        Array.isArray(block.questions) && block.questions.length > 0
+          ? block.questions
+          : [{ id: block.id, stem: block.stem ?? '', options: block.options ?? [] }];
+      const matched = blockQuestions.find((q) => q.id === descriptor.answerKey) ?? blockQuestions[0];
+      if (!matched) {
+        return <div className="text-xs text-slate-600">Question not found.</div>;
+      }
+      const options = Array.isArray(matched.options) ? matched.options : [];
+      const selected = options.find((opt) => opt.isCorrect)?.id ?? '';
 
       return (
         <div className="space-y-2">
           <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Correct Option</div>
           <div className="grid gap-2 md:grid-cols-2">
-            {options.map((opt: any) => (
+            {options.map((opt) => (
               <label key={opt.id} className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
                 <input
                   type="radio"
@@ -600,10 +604,10 @@ function AnswerControl({
     }
 
     case 'DIAGRAM_LABELING': {
-      if (typeof answerIndex !== 'number' || !Array.isArray((block as any).labels)) {
+      if (typeof answerIndex !== 'number' || !Array.isArray(block.labels)) {
         return <div className="text-xs text-slate-600">Label not found.</div>;
       }
-      const label = (block as any).labels[answerIndex];
+      const label = block.labels[answerIndex];
       const current = label ? String(label.correctAnswer ?? '') : '';
       return (
         <div className="flex items-center gap-3">
@@ -620,10 +624,10 @@ function AnswerControl({
     }
 
     case 'FLOW_CHART': {
-      if (typeof answerIndex !== 'number' || !Array.isArray((block as any).steps)) {
+      if (typeof answerIndex !== 'number' || !Array.isArray(block.steps)) {
         return <div className="text-xs text-slate-600">Step not found.</div>;
       }
-      const step = (block as any).steps[answerIndex];
+      const step = block.steps[answerIndex];
       const current = step ? String(step.correctAnswer ?? '') : '';
       return (
         <div className="flex items-center gap-3">
@@ -643,8 +647,8 @@ function AnswerControl({
       if (typeof answerIndex !== 'number') {
         return <div className="text-xs text-slate-600">Item not found.</div>;
       }
-      const categories = Array.isArray((block as any).categories) ? (block as any).categories : [];
-      const item = Array.isArray((block as any).items) ? (block as any).items[answerIndex] : null;
+      const categories = Array.isArray(block.categories) ? block.categories : [];
+      const item = Array.isArray(block.items) ? block.items[answerIndex] : null;
       const current = item ? String(item.correctCategory ?? '') : '';
       return (
         <div className="flex items-center gap-3">
@@ -667,8 +671,8 @@ function AnswerControl({
       if (typeof answerIndex !== 'number') {
         return <div className="text-xs text-slate-600">Feature not found.</div>;
       }
-      const options = Array.isArray((block as any).options) ? (block as any).options : [];
-      const feature = Array.isArray((block as any).features) ? (block as any).features[answerIndex] : null;
+      const options = Array.isArray(block.options) ? block.options : [];
+      const feature = Array.isArray(block.features) ? block.features[answerIndex] : null;
       const current = feature ? String(feature.correctMatch ?? '') : '';
       return (
         <div className="flex items-center gap-3">
@@ -702,13 +706,17 @@ function parseTreeLeafId(leafId: string): { rootNodeId: string; nodeId: string }
   return { rootNodeId, nodeId };
 }
 
-function findTreeNodeAcceptedAnswers(root: any, nodeId: string): string[] {
-  const visit = (node: any): string[] | null => {
+// Stored answer trees are untrusted shapes; every field is checked before use.
+function findTreeNodeAcceptedAnswers(root: unknown, nodeId: string): string[] {
+  const visit = (node: unknown): string[] | null => {
     if (!node || typeof node !== 'object') return null;
-    if (node.id === nodeId) {
-      return Array.isArray(node.acceptedAnswers) ? node.acceptedAnswers.filter((x: any) => typeof x === 'string') : [];
+    const record = node as { id?: unknown; acceptedAnswers?: unknown; children?: unknown };
+    if (record.id === nodeId) {
+      return Array.isArray(record.acceptedAnswers)
+        ? record.acceptedAnswers.filter((x): x is string => typeof x === 'string')
+        : [];
     }
-    const children = Array.isArray(node.children) ? node.children : [];
+    const children: unknown[] = Array.isArray(record.children) ? record.children : [];
     for (const child of children) {
       const found = visit(child);
       if (found) return found;
@@ -719,11 +727,14 @@ function findTreeNodeAcceptedAnswers(root: any, nodeId: string): string[] {
   return visit(root) ?? [];
 }
 
-function getSubAnswerLeafAcceptedAnswers(block: any, leafId: string): string[] {
+function getSubAnswerLeafAcceptedAnswers(block: QuestionBlock, leafId: string): string[] {
   const parsed = parseTreeLeafId(leafId);
   if (!parsed) return [];
-  const roots = Array.isArray(block?.answerTree) ? block.answerTree : [];
-  const root = roots.find((r: any) => r && typeof r === 'object' && r.id === parsed.rootNodeId);
+  const tree: unknown = 'answerTree' in block ? block.answerTree : undefined;
+  const roots: unknown[] = Array.isArray(tree) ? tree : [];
+  const root = roots.find(
+    (r) => r !== null && typeof r === 'object' && (r as { id?: unknown }).id === parsed.rootNodeId,
+  );
   if (!root) return [];
   return findTreeNodeAcceptedAnswers(root, parsed.nodeId);
 }

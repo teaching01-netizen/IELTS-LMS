@@ -85,15 +85,7 @@ export default tseslint.config(
       "src/hooks/useFocusTrap.ts",
       "src/services/adminPreferencesRepository.ts",
     ],
-    // The answer-key editor probes loosely typed block shapes; the plan keeps
-    // it out of the rewrite until a defect is reproduced (Package 5).
-    ignores: [
-      "**/*.test.ts",
-      "**/*.test.tsx",
-      "**/__tests__/**",
-      "src/features/builder/routes/ExamAnswerKeyRoute.tsx",
-      "src/features/builder/utils/answerKeyOverview.ts",
-    ],
+    ignores: ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**"],
     rules: {
       "react-hooks/exhaustive-deps": "error",
       "@typescript-eslint/no-explicit-any": "error",

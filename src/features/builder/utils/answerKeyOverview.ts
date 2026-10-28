@@ -357,17 +357,16 @@ export function applyAnswerKeyEdit(
       if (block.type !== 'TFNG') return block;
       return {
         ...block,
-        questions: (block as any).questions.map((q: any) => (q.id === edit.questionId ? { ...q, correctAnswer: edit.value } : q)),
+        questions: block.questions.map((q) => (q.id === edit.questionId ? { ...q, correctAnswer: edit.value } : q)),
       };
     }
 
     if (edit.kind === 'set_text_answer') {
       if (block.type === 'CLOZE' || block.type === 'SHORT_ANSWER' || block.type === 'MAP') {
-        const withQuestions = block as any;
         return {
-          ...withQuestions,
-          questions: withQuestions.questions.map((q: any) => (q.id === edit.questionId ? { ...q, correctAnswer: edit.value } : q)),
-        };
+          ...block,
+          questions: block.questions.map((q) => (q.id === edit.questionId ? { ...q, correctAnswer: edit.value } : q)),
+        } as typeof block;
       }
       return block;
     }
@@ -375,77 +374,80 @@ export function applyAnswerKeyEdit(
     if (edit.kind === 'set_accepted_answer_fields') {
       const fields = buildAcceptedAnswerFields(edit.acceptedAnswers);
       if (block.type === 'CLOZE' || block.type === 'SHORT_ANSWER') {
-        const withQuestions = block as any;
         return {
-          ...withQuestions,
-          questions: withQuestions.questions.map((q: any) =>
-            q.id === edit.questionId ? { ...q, ...fields } : q,
-          ),
-        };
+          ...block,
+          questions: block.questions.map((q) => (q.id === edit.questionId ? { ...q, ...fields } : q)),
+        } as typeof block;
       }
       return block;
     }
 
+    // Stored blocks can predate a field; a missing collection stays an empty one.
     if (edit.kind === 'set_diagram_label_answer') {
       if (block.type !== 'DIAGRAM_LABELING') return block;
-      const next = { ...(block as any) };
-      next.labels = Array.isArray(next.labels)
-        ? next.labels.map((label: any, index: number) => (index === edit.labelIndex ? { ...label, correctAnswer: edit.value } : label))
-        : [];
-      return next;
+      return {
+        ...block,
+        labels: Array.isArray(block.labels)
+          ? block.labels.map((label, index) => (index === edit.labelIndex ? { ...label, correctAnswer: edit.value } : label))
+          : [],
+      };
     }
 
     if (edit.kind === 'set_flow_step_answer') {
       if (block.type !== 'FLOW_CHART') return block;
-      const next = { ...(block as any) };
-      next.steps = Array.isArray(next.steps)
-        ? next.steps.map((step: any, index: number) => (index === edit.stepIndex ? { ...step, correctAnswer: edit.value } : step))
-        : [];
-      return next;
+      return {
+        ...block,
+        steps: Array.isArray(block.steps)
+          ? block.steps.map((step, index) => (index === edit.stepIndex ? { ...step, correctAnswer: edit.value } : step))
+          : [],
+      };
     }
 
     if (edit.kind === 'set_table_cell_accepted_answer_fields') {
       if (block.type !== 'TABLE_COMPLETION') return block;
       const fields = buildAcceptedAnswerFields(edit.acceptedAnswers);
-      const next = { ...(block as any) };
-      next.cells = Array.isArray(next.cells)
-        ? next.cells.map((cell: any, index: number) => (index === edit.cellIndex ? { ...cell, ...fields } : cell))
-        : [];
-      return next;
+      return {
+        ...block,
+        cells: Array.isArray(block.cells)
+          ? block.cells.map((cell, index) => (index === edit.cellIndex ? { ...cell, ...fields } : cell))
+          : [],
+      };
     }
 
     if (edit.kind === 'set_sentence_blank_accepted_answer_fields') {
       if (block.type !== 'SENTENCE_COMPLETION') return block;
       const fields = buildAcceptedAnswerFields(edit.acceptedAnswers);
-      const next = { ...(block as any) };
-      next.questions = Array.isArray(next.questions)
-        ? next.questions.map((q: any) => {
-            if (q.id !== edit.questionId) return q;
-            const blanks = Array.isArray(q.blanks) ? q.blanks : [];
-            return {
-              ...q,
-              blanks: blanks.map((blank: any, index: number) => (index === edit.blankIndex ? { ...blank, ...fields } : blank)),
-            };
-          })
-        : [];
-      return next;
+      return {
+        ...block,
+        questions: Array.isArray(block.questions)
+          ? block.questions.map((q) => {
+              if (q.id !== edit.questionId) return q;
+              const blanks = Array.isArray(q.blanks) ? q.blanks : [];
+              return {
+                ...q,
+                blanks: blanks.map((blank, index) => (index === edit.blankIndex ? { ...blank, ...fields } : blank)),
+              };
+            })
+          : [],
+      };
     }
 
     if (edit.kind === 'set_note_blank_accepted_answer_fields') {
       if (block.type !== 'NOTE_COMPLETION') return block;
       const fields = buildAcceptedAnswerFields(edit.acceptedAnswers);
-      const next = { ...(block as any) };
-      next.questions = Array.isArray(next.questions)
-        ? next.questions.map((q: any) => {
-            if (q.id !== edit.questionId) return q;
-            const blanks = Array.isArray(q.blanks) ? q.blanks : [];
-            return {
-              ...q,
-              blanks: blanks.map((blank: any, index: number) => (index === edit.blankIndex ? { ...blank, ...fields } : blank)),
-            };
-          })
-        : [];
-      return next;
+      return {
+        ...block,
+        questions: Array.isArray(block.questions)
+          ? block.questions.map((q) => {
+              if (q.id !== edit.questionId) return q;
+              const blanks = Array.isArray(q.blanks) ? q.blanks : [];
+              return {
+                ...q,
+                blanks: blanks.map((blank, index) => (index === edit.blankIndex ? { ...blank, ...fields } : blank)),
+              };
+            })
+          : [],
+      };
     }
 
     if (edit.kind === 'set_classification_category') {
@@ -470,9 +472,8 @@ export function applyAnswerKeyEdit(
       if (!('answerTree' in block)) {
         return block;
       }
-      const currentTree = (block as any).answerTree as SubAnswerTreeNode[] | undefined;
-      const nextTree = updateSubAnswerTreeLeafAcceptedAnswers(currentTree, edit.leafId, edit.acceptedAnswers);
-      return { ...(block as any), answerTree: nextTree };
+      const nextTree = updateSubAnswerTreeLeafAcceptedAnswers(block.answerTree, edit.leafId, edit.acceptedAnswers);
+      return { ...block, answerTree: nextTree } as typeof block;
     }
 
     return block;
