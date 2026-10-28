@@ -52,6 +52,13 @@ func serve(t *testing.T, table map[string]Policy, template, method, path, role s
 // expectedAnnotated lists every route() annotation key (main.go 360-600).
 var expectedAnnotated = []string{
 	"GET /session", "POST /logout", "POST /logout-all",
+	"POST /student/device-recovery/{grantID}/claim",
+	"POST /student/device-recovery/{grantID}/ready",
+	"POST /student/device-recovery/{grantID}/begin",
+	"GET /{scheduleID}/audio-checkpoint",
+	"POST /{scheduleID}/audio-checkpoint",
+	"POST /{scheduleID}/attempts/{attemptID}/device-recovery/original-ready",
+	"POST /sessions/{scheduleID}/attempts/{attemptID}/device-recovery/restore-original",
 	"POST /login", "POST /student/entry", "GET /student/schedules/{id}",
 	"POST /activate", "POST /password/reset-request", "POST /password/reset-complete",
 	"POST /public/access-links/{linkID}/resolve-entry",
@@ -103,6 +110,8 @@ var expectedAnnotated = []string{
 	"POST /sessions/{scheduleID}/attempts/{attemptID}/terminate",
 	"GET /sessions/{scheduleID}/attempts/{attemptID}/late-evidence",
 	"POST /sessions/{scheduleID}/attempts/{attemptID}/late-evidence/review",
+	"GET /sessions/{scheduleID}/attempts/{attemptID}/device-recovery",
+	"POST /sessions/{scheduleID}/attempts/{attemptID}/device-recovery",
 	"GET /sessions/{scheduleID}/device-transfers",
 	"POST /sessions/{scheduleID}/device-transfers/{requestID}/decision",
 	"GET /sessions/{scheduleID}/start-code", "POST /sessions/{scheduleID}/start-code/rotate", "GET /sessions/{scheduleID}/entry-info",

@@ -42,6 +42,11 @@ var RequiredTables = []string{
 	"sat_pdf_exports",
 	// SAT configurable forms (0101): registration admission and native Eva.
 	"assessment_form_responses",
+	// Staff-assisted exam recovery (0105, 0108): a missing grant table would
+	// let staff issue a transfer whose claim can never be audited; a missing
+	// checkpoint table would silently lose listening continuity.
+	"attempt_device_recovery_grants",
+	"attempt_audio_checkpoints",
 }
 
 // RequiredColumns: 19 durability-critical columns from the Rust
@@ -96,6 +101,22 @@ var RequiredColumns = []RequiredColumn{
 	// Explicit End Exam Eva closure (0101): every native Eva write reads it.
 	{Table: "exam_schedules", Column: "eva_sim_closed_at"},
 	{Table: "exam_schedules", Column: "eva_sim_closed_by"},
+	// Staff-assisted exam recovery (0105-0108): writer authority, completion
+	// generations and module-run scoping are read by every trusted write.
+	{Table: "student_attempts", Column: "recovery_control"},
+	{Table: "student_attempts", Column: "terminal_generation"},
+	{Table: "attempt_terminalizations", Column: "terminal_generation"},
+	{Table: "student_submissions", Column: "terminal_generation"},
+	{Table: "assessment_results", Column: "terminal_generation"},
+	{Table: "attempt_submissions_v2", Column: "terminal_generation"},
+	{Table: "assessment_module_attempts", Column: "run_generation"},
+	{Table: "assessment_module_boundaries", Column: "run_generation"},
+	{Table: "assessment_module_close_intents", Column: "run_generation"},
+	{Table: "ielts_attempt_section_timelines", Column: "completion_reason"},
+	// Scoped recovery sessions (0109): a session row that cannot name its
+	// bound attempt would fall back to general student authority, so the
+	// binding column is part of the boot gate.
+	{Table: "user_sessions", Column: "recovery_attempt_id"},
 }
 
 // RequiredIndex is one (table, index) pair the runtime depends on.
@@ -129,6 +150,10 @@ var RequiredIndexes = []RequiredIndex{
 	{Table: "sat_start_code_reservation_slots", Index: "idx_sat_start_code_slots_lease"},
 	{Table: "sat_pdf_exports", Index: "uq_sat_pdf_export_scope"},
 	{Table: "sat_pdf_exports", Index: "idx_sat_pdf_export_expiry"},
+	// Staff-assisted exam recovery (0105-0106): at most one live grant per
+	// attempt, and exactly one current submission per completion generation.
+	{Table: "attempt_device_recovery_grants", Index: "uq_attempt_device_recovery_grants_active"},
+	{Table: "student_submissions", Index: "uq_student_submissions_attempt_generation"},
 }
 
 // SchemaVerifier queries information_schema for the required lists.

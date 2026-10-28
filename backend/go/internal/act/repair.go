@@ -38,7 +38,7 @@ func (s *Service) RepairCanonicalRows(ctx context.Context, batch int64) (int64, 
 			NOT EXISTS (
 				SELECT 1 FROM student_submissions ss
 				JOIN section_submissions sec ON sec.submission_id = ss.id AND sec.section = 'science'
-				WHERE ss.attempt_id = a.id AND ss.provider_key = 'act'
+				WHERE ss.attempt_id = a.id AND ss.provider_key = 'act' AND ss.terminal_generation = a.terminal_generation
 			)
 			OR NOT EXISTS (
 				SELECT 1 FROM grading_sessions gs WHERE gs.schedule_id = a.schedule_id
@@ -76,6 +76,10 @@ func (s *Service) RepairCanonicalRows(ctx context.Context, batch int64) (int64, 
 				FROM student_attempts WHERE id = ? FOR UPDATE`, attemptID).
 				Scan(&versionID, &answersRaw, &finalRaw, &submittedAt); err != nil {
 				return err
+			}
+			// A candidate selected before a recovery may now be working again.
+			if !submittedAt.Valid {
+				return nil
 			}
 			details, err := s.ScoreAttemptDetails(ctx, q, attemptID, versionID, json.RawMessage(answersRaw.String))
 			if err != nil {
@@ -116,7 +120,7 @@ func (s *Service) projectRepairedAttempt(ctx context.Context, q tx.Tx, attemptID
 
 	var submissionID, storedProvider string
 	err := q.QueryRowContext(ctx,
-		"SELECT id, provider_key FROM student_submissions WHERE attempt_id = ? FOR UPDATE", attemptID).
+		"SELECT id, provider_key FROM student_submissions WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL) FOR UPDATE", attemptID).
 		Scan(&submissionID, &storedProvider)
 	if err == sql.ErrNoRows {
 		submissionID = uuid.NewString()
@@ -138,9 +142,9 @@ func (s *Service) projectRepairedAttempt(ctx context.Context, q tx.Tx, attemptID
 		INSERT INTO student_submissions (
 			id, attempt_id, schedule_id, exam_id, published_version_id, provider_key,
 			student_id, student_name, student_email, cohort_name, submitted_at,
-			grading_status, section_statuses, created_at, updated_at
+			grading_status, section_statuses, created_at, updated_at, terminal_generation
 		)
-		VALUES (?, ?, ?, ?, ?, 'act', ?, ?, ?, ?, ?, 'submitted', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+		SELECT ?, ?, ?, ?, ?, 'act', ?, ?, ?, ?, ?, 'submitted', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), terminal_generation FROM student_attempts WHERE id = ?
 		ON DUPLICATE KEY UPDATE
 			schedule_id = VALUES(schedule_id), exam_id = VALUES(exam_id),
 			published_version_id = VALUES(published_version_id), provider_key = 'act',
@@ -149,7 +153,7 @@ func (s *Service) projectRepairedAttempt(ctx context.Context, q tx.Tx, attemptID
 			submitted_at = VALUES(submitted_at), section_statuses = VALUES(section_statuses),
 			updated_at = UTC_TIMESTAMP(6)`,
 		submissionID, attemptID, scheduleID, examID, versionID, studentID, studentName,
-		emailArg, cohortName, submittedAt, sectionStatuses); err != nil {
+		emailArg, cohortName, submittedAt, sectionStatuses, attemptID); err != nil {
 		return err
 	}
 
@@ -230,7 +234,7 @@ func (s *Service) projectRepairedAttempt(ctx context.Context, q tx.Tx, attemptID
 	if resultID != "" {
 		_, err = q.ExecContext(ctx, `
 			UPDATE assessment_results
-			SET submission_id = ?, provider_key = 'act', outcome_status = 'scored',
+			SET terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = assessment_results.attempt_id), submission_id = ?, provider_key = 'act', outcome_status = 'scored',
 				total_score = ?, score_payload = ?, release_status = ?,
 				updated_at = UTC_TIMESTAMP(6), revision = revision + 1
 			WHERE id = ?`, submissionID, total, string(resultPayload), releaseStatus, resultID)
@@ -238,9 +242,9 @@ func (s *Service) projectRepairedAttempt(ctx context.Context, q tx.Tx, attemptID
 	}
 	_, err = q.ExecContext(ctx, `
 		INSERT INTO assessment_results
-			(id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status)
-		VALUES (?, ?, ?, 'act', 'scored', ?, ?, ?)`,
-		uuid.NewString(), attemptID, submissionID, total, string(resultPayload), releaseStatus)
+			(id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status, terminal_generation)
+		SELECT ?, ?, ?, 'act', 'scored', ?, ?, ?, terminal_generation FROM student_attempts WHERE id = ?`,
+		uuid.NewString(), attemptID, submissionID, total, string(resultPayload), releaseStatus, attemptID)
 	return err
 }
 
@@ -279,31 +283,31 @@ func ensureACTGradingSession(ctx context.Context, q tx.Tx, scheduleID string) er
 		UPDATE grading_sessions
 		SET total_students = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 			),
 			submitted_count = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 				  AND grading_status IN ('submitted', 'reopened')
 			),
 			pending_manual_reviews = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 				  AND grading_status IN ('submitted', 'reopened')
 			),
 			in_progress_reviews = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 				  AND grading_status = 'in_progress'
 			),
 			finalized_reviews = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 				  AND grading_status IN ('grading_complete', 'ready_to_release', 'released')
 			),
 			overdue_reviews = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act' AND is_overdue
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL) AND is_overdue
 			),
 			updated_at = UTC_TIMESTAMP(6)
 		WHERE schedule_id = ?`, scheduleID, scheduleID, scheduleID, scheduleID, scheduleID, scheduleID, scheduleID)

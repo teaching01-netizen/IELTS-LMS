@@ -88,7 +88,7 @@ func (s *Service) GradeObjective(ctx context.Context, submissionID string, answe
 	err := s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		var scheduleID, publishedVersionID string
 		if err := t.QueryRowContext(ctx,
-			"SELECT schedule_id, published_version_id FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&scheduleID, &publishedVersionID); err != nil {
+			"SELECT schedule_id, published_version_id FROM student_submissions WHERE id = ? AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = student_submissions.attempt_id AND current_attempt.terminal_generation = student_submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL FOR SHARE) FOR UPDATE", submissionID).Scan(&scheduleID, &publishedVersionID); err != nil {
 			if err == sql.ErrNoRows {
 				return apperrors.New(apperrors.CodeNotFound, "Submission not found.")
 			}
@@ -176,7 +176,7 @@ func (s *Service) OverrideObjectiveQuestion(ctx context.Context, submissionID, s
 	return s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		var subStatus string
 		if err := t.QueryRowContext(ctx,
-			"SELECT grading_status FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&subStatus); err != nil {
+			"SELECT grading_status FROM student_submissions WHERE id = ? AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = student_submissions.attempt_id AND current_attempt.terminal_generation = student_submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL FOR SHARE) FOR UPDATE", submissionID).Scan(&subStatus); err != nil {
 			if err == sql.ErrNoRows {
 				return apperrors.New(apperrors.CodeNotFound, "Submission not found.")
 			}
@@ -241,7 +241,7 @@ func (s *Service) OverrideObjectiveQuestion(ctx context.Context, submissionID, s
 			// transaction as the question result. The integrity audit is kept
 			// intact; unresolved/invalid audits still block release.
 			var statuses sql.NullString
-			if err := t.QueryRowContext(ctx, "SELECT section_statuses FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&statuses); err != nil {
+			if err := t.QueryRowContext(ctx, "SELECT section_statuses FROM student_submissions WHERE id = ? AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = student_submissions.attempt_id AND current_attempt.terminal_generation = student_submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL FOR SHARE) FOR UPDATE", submissionID).Scan(&statuses); err != nil {
 				return err
 			}
 			statusMap := map[string]any{}
@@ -363,7 +363,7 @@ func updateACTAssessmentResult(ctx context.Context, t tx.Tx, submissionID string
 	err := t.QueryRowContext(ctx, `
 		SELECT ar.id, CAST(ar.score_payload AS CHAR)
 		FROM assessment_results ar
-		JOIN student_submissions submission ON submission.attempt_id = ar.attempt_id
+		JOIN student_submissions submission ON submission.attempt_id = ar.attempt_id AND submission.terminal_generation = ar.terminal_generation
 		WHERE submission.id = ? AND ar.provider_key = 'act'
 		FOR UPDATE`, submissionID).Scan(&resultID, &payloadRaw)
 	if err == sql.ErrNoRows {
@@ -450,7 +450,7 @@ func (s *Service) SaveDraftWithRevision(ctx context.Context, submissionID, teach
 	return s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		var studentID string
 		if err := t.QueryRowContext(ctx,
-			"SELECT student_id FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&studentID); err != nil {
+			"SELECT student_id FROM student_submissions WHERE id = ? AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = student_submissions.attempt_id AND current_attempt.terminal_generation = student_submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL FOR SHARE) FOR UPDATE", submissionID).Scan(&studentID); err != nil {
 			if err == sql.ErrNoRows {
 				return apperrors.New(apperrors.CodeNotFound, "Submission not found.")
 			}
@@ -573,7 +573,7 @@ func (s *Service) ReleaseNow(ctx context.Context, submissionID, teacherID string
 	return s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		var studentID, studentName, scheduleID, publishedVersionID, status string
 		if err := t.QueryRowContext(ctx,
-			"SELECT student_id, student_name, schedule_id, published_version_id, grading_status FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(
+			"SELECT student_id, student_name, schedule_id, published_version_id, grading_status FROM student_submissions WHERE id = ? AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = student_submissions.attempt_id AND current_attempt.terminal_generation = student_submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL FOR SHARE) FOR UPDATE", submissionID).Scan(
 			&studentID, &studentName, &scheduleID, &publishedVersionID, &status); err != nil {
 			if err == sql.ErrNoRows {
 				return apperrors.New(apperrors.CodeNotFound, "Submission not found.")
@@ -691,7 +691,7 @@ func (s *Service) ScheduleRelease(ctx context.Context, submissionID, teacherID s
 		}
 		var studentID, studentName, scheduleID, publishedVersionID, subStatus string
 		if err := t.QueryRowContext(ctx,
-			"SELECT student_id, student_name, schedule_id, published_version_id, grading_status FROM student_submissions WHERE id = ? FOR UPDATE",
+			"SELECT student_id, student_name, schedule_id, published_version_id, grading_status FROM student_submissions WHERE id = ? AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = student_submissions.attempt_id AND current_attempt.terminal_generation = student_submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL FOR SHARE) FOR UPDATE",
 			submissionID).Scan(&studentID, &studentName, &scheduleID, &publishedVersionID, &subStatus); err != nil {
 			if err == sql.ErrNoRows {
 				return apperrors.New(apperrors.CodeNotFound, "Submission not found.")
@@ -827,7 +827,7 @@ func (s *Service) ReopenReview(ctx context.Context, submissionID, teacherID, rea
 	return s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		var status string
 		if err := t.QueryRowContext(ctx,
-			"SELECT grading_status FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&status); err != nil {
+			"SELECT grading_status FROM student_submissions WHERE id = ? AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = student_submissions.attempt_id AND current_attempt.terminal_generation = student_submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL FOR SHARE) FOR UPDATE", submissionID).Scan(&status); err != nil {
 			if err == sql.ErrNoRows {
 				return apperrors.New(apperrors.CodeNotFound, "Submission not found.")
 			}
@@ -879,7 +879,7 @@ func (s *Service) Export(ctx context.Context, actor auth.ActorContext, submissio
 		FROM student_submissions sub
 		JOIN exam_schedules sch ON sch.id = sub.schedule_id
 		LEFT JOIN section_submissions ss ON ss.submission_id = sub.id AND ss.section = 'science'
-		LEFT JOIN assessment_results ar ON ar.attempt_id = sub.attempt_id AND ar.provider_key = sub.provider_key
+		LEFT JOIN assessment_results ar ON ar.attempt_id = sub.attempt_id AND ar.provider_key = sub.provider_key AND ar.terminal_generation = sub.terminal_generation
 		JOIN grading_export_profiles prof ON prof.id = ?
 			AND (prof.organization_id IS NULL OR prof.organization_id = sch.organization_id)
 		WHERE sub.id IN (` + placeholders + `)`
@@ -1066,7 +1066,7 @@ func (s *Service) ObjectiveIntegrityOverview(ctx context.Context, scheduleID str
 	}
 	var studentCount int64
 	if err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM student_submissions WHERE schedule_id = ? AND provider_key = 'ielts'",
+		"SELECT COUNT(*) FROM student_submissions WHERE schedule_id = ? AND provider_key = 'ielts' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)",
 		scheduleID).Scan(&studentCount); err != nil {
 		return nil, err
 	}
@@ -1085,7 +1085,7 @@ func (s *Service) ObjectiveIntegrityOverview(ctx context.Context, scheduleID str
 			ON ss.submission_id = s.id
 			AND ss.section IN ('listening', 'reading')
 		WHERE s.schedule_id = ?
-		  AND s.provider_key = 'ielts'
+		  AND s.provider_key = 'ielts' AND s.terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = s.attempt_id AND submitted_at IS NOT NULL)
 		ORDER BY s.student_name ASC, s.id ASC, ss.section ASC`, scheduleID)
 	if err != nil {
 		return nil, err
@@ -1286,7 +1286,7 @@ func (s *Service) transitionSubmission(ctx context.Context, submissionID, teache
 	return s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		var status string
 		if err := t.QueryRowContext(ctx,
-			"SELECT grading_status FROM student_submissions WHERE id = ? FOR UPDATE", submissionID).Scan(&status); err != nil {
+			"SELECT grading_status FROM student_submissions WHERE id = ? AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = student_submissions.attempt_id AND current_attempt.terminal_generation = student_submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL FOR SHARE) FOR UPDATE", submissionID).Scan(&status); err != nil {
 			if err == sql.ErrNoRows {
 				return apperrors.New(apperrors.CodeNotFound, "Submission not found.")
 			}
@@ -1511,7 +1511,7 @@ func strPtr(s string) *string { return &s }
 func lockObjectiveIntegrityForSubmission(ctx context.Context, t tx.Tx, submissionID, scheduleID, publishedVersionID string) error {
 	var lockedScheduleID, lockedPublishedVersionID string
 	if err := t.QueryRowContext(ctx,
-		"SELECT schedule_id, published_version_id FROM student_submissions WHERE id = ? FOR UPDATE",
+		"SELECT schedule_id, published_version_id FROM student_submissions WHERE id = ? AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = student_submissions.attempt_id AND current_attempt.terminal_generation = student_submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL FOR SHARE) FOR UPDATE",
 		submissionID).Scan(&lockedScheduleID, &lockedPublishedVersionID); err != nil {
 		if err == sql.ErrNoRows {
 			return apperrors.New(apperrors.CodeNotFound, "Submission not found.")

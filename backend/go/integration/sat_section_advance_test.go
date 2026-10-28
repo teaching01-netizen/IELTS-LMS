@@ -66,6 +66,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
 	"example.com/ielts-proctoring/internal/schedules"
+	"example.com/ielts-proctoring/internal/terminalization"
 	"github.com/google/uuid"
 )
 
@@ -175,8 +176,10 @@ func newSATAdvanceFixture(t *testing.T) *satAdvanceFixture {
 		db:        db,
 		examSvc:   exams.NewService(db, runner),
 		schedules: schedules.NewService(db, runner),
-		proctor:   proctor.NewService(runner, db, nil, nil, nil),
-		actor:     actor,
+		// The real terminalizer: the sweep is global, so it must seal any
+		// expired start-code attempt the shared database holds, as production does.
+		proctor: proctor.NewService(runner, db, terminalization.NewService(runner, nil, nil), nil, nil),
+		actor:   actor,
 	}
 
 	exam, err := f.examSvc.Create(ctx, exams.CreateRequest{

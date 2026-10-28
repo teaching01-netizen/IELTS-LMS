@@ -283,7 +283,7 @@ func loadSubmissionReceipt(ctx context.Context, q tx.Tx, attemptID string) (stor
 	var receiptJSON string
 	var digest string
 	var submittedAt time.Time
-	err := q.QueryRowContext(ctx, `SELECT submission_id, request_hash, final_response_digest, CAST(receipt AS CHAR), submitted_at FROM attempt_submissions_v2 WHERE attempt_id=? FOR UPDATE`, attemptID).Scan(&r.SubmissionID, &r.RequestHash, &digest, &receiptJSON, &submittedAt)
+	err := q.QueryRowContext(ctx, `SELECT submission_id, request_hash, final_response_digest, CAST(receipt AS CHAR), submitted_at FROM attempt_submissions_v2 WHERE attempt_id=? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = attempt_submissions_v2.attempt_id) FOR UPDATE`, attemptID).Scan(&r.SubmissionID, &r.RequestHash, &digest, &receiptJSON, &submittedAt)
 	if err == sql.ErrNoRows {
 		return r, false, nil
 	}
@@ -311,7 +311,7 @@ func insertSubmissionReceipt(ctx context.Context, q tx.Tx, cmd SubmitCommand, at
 	if cmd.ExpectedRevision != nil {
 		expected = *cmd.ExpectedRevision
 	}
-	if _, err := q.ExecContext(ctx, `INSERT INTO attempt_submissions_v2 (attempt_id, submission_id, lease_epoch, control_epoch, request_hash, expected_attempt_revision, attempt_revision, final_response_digest, receipt, submitted_at) VALUES (?,?,?,?,?,?,?,?,?,?)`, cmd.AttemptID, cmd.SubmissionID, cmd.LeaseEpoch, attempt.ControlEpoch, reqHash, expected, actualRev, digest, string(receiptJSON), now); err != nil {
+	if _, err := q.ExecContext(ctx, `INSERT INTO attempt_submissions_v2 (attempt_id, submission_id, lease_epoch, control_epoch, request_hash, expected_attempt_revision, attempt_revision, final_response_digest, receipt, submitted_at, terminal_generation) VALUES (?,?,?,?,?,?,?,?,?,?,(SELECT terminal_generation FROM student_attempts WHERE id = ?))`, cmd.AttemptID, cmd.SubmissionID, cmd.LeaseEpoch, attempt.ControlEpoch, reqHash, expected, actualRev, digest, string(receiptJSON), now, cmd.AttemptID); err != nil {
 		if isDup(err) {
 			return &apperrors.Error{Code: apperrors.CodeSubmissionReplayMisuse, Message: "Submission identity already used.", HTTPStatus: 409}
 		}
@@ -423,6 +423,17 @@ func (s *Service) takeoverInTx(ctx context.Context, q tx.Tx, claims crypto.Attem
 	var active, policy sql.NullString
 	if err := q.QueryRowContext(ctx, `SELECT active_client_session_id, writer_policy FROM student_attempts WHERE id=?`, attemptID).Scan(&active, &policy); err != nil {
 		return TakeoverResult{}, err
+	}
+	// Staff recovery fences the writer slot and binds exactly one target
+	// browser at Begin. Self-service takeover must not bypass either state.
+	// The bound recovery browser still receives credentials from the recovery
+	// begin/retry path, not from this legacy rotation.
+	authority, err := ReadRecoveryAuthority(ctx, q, attemptID)
+	if err != nil {
+		return TakeoverResult{}, err
+	}
+	if authority.Control != nil && (!authority.Working() || authority.ActiveSessionID != clientSessionID) {
+		return TakeoverResult{}, transferError(apperrors.CodeTransferApprovalRequired, "Staff recovery controls this attempt.", "recovery_hold")
 	}
 	// Single-writer attempts change owner only through an approved device
 	// transfer: the legacy self-service takeover must not bypass approval.

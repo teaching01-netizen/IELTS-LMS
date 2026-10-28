@@ -89,7 +89,7 @@ func TestGradingSectionsHandlerRecoversSnapshotBackedRowAnswers(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(`
 		SELECT COALESCE(s.attempt_id, ''), COALESCE(a.protocol_version, 1)
 		FROM student_submissions s
-		LEFT JOIN student_attempts a ON a.id = s.attempt_id
+		LEFT JOIN student_attempts a ON a.id = s.attempt_id AND a.terminal_generation = s.terminal_generation AND a.submitted_at IS NOT NULL
 		WHERE s.id = ? AND s.provider_key = 'ielts'`)).WithArgs("submission-1").WillReturnRows(
 		sqlmock.NewRows([]string{"attempt_id", "protocol_version"}).AddRow("attempt-1", 2),
 	)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -28,16 +29,16 @@ func readyIELTSPersonalSectionInTx(
 		return apperrors.New(apperrors.CodeConflict, "Individual section readiness is only available for IELTS.")
 	}
 	var extraTime int
-	var deliveryStatus, proctorStatus string
+	var deliveryStatus, proctorStatus, rawRecovery string
 	var submitted sql.NullTime
 	err = q.QueryRowContext(ctx, `
 		SELECT COALESCE(a.delivery_status, 'running'), a.submitted_at,
 		       COALESCE(a.proctor_status, 'active'),
-		       COALESCE(reg.extra_time_minutes, 0)
+		       COALESCE(reg.extra_time_minutes, 0), COALESCE(a.recovery_control,'')
 		FROM student_attempts a
 		LEFT JOIN schedule_registrations reg ON reg.id = a.registration_id
 		WHERE a.id = ? AND a.schedule_id = ? AND COALESCE(a.user_id, '') = ?
-		FOR UPDATE`, attemptID, scheduleID, actorUserID).Scan(&deliveryStatus, &submitted, &proctorStatus, &extraTime)
+		FOR UPDATE`, attemptID, scheduleID, actorUserID).Scan(&deliveryStatus, &submitted, &proctorStatus, &extraTime, &rawRecovery)
 	if err == sql.ErrNoRows || (err == nil && (submitted.Valid || deliveryStatus == "submitted" || deliveryStatus == "terminated" || deliveryStatus == "locked" || deliveryStatus == "cancelled")) {
 		return apperrors.New(apperrors.CodeNotFound, "Active student attempt not found.")
 	}
@@ -63,6 +64,14 @@ func readyIELTSPersonalSectionInTx(
 		return apperrors.New(apperrors.CodeConflict, "The exam was ended by an authorised control.")
 	}
 
+	recovery, err := examdomain.ParseRecoveryControl([]byte(rawRecovery))
+	if err != nil {
+		return err
+	}
+	if recovery != nil {
+		_, err := AdvanceIELTSRecoveryInTx(ctx, q, attemptID, sectionKey, proctorStatus, recovery, out, changed)
+		return err
+	}
 	var order, minutes, gapAfter, sectionExtension int
 	var actualStart, actualEnd, sectionPausedAt sql.NullTime
 	var sectionStatus string
@@ -142,7 +151,8 @@ func readyIELTSPersonalSectionInTx(
 				return nil
 			}
 			if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
-				SET state = 'completed', finished_at = COALESCE(finished_at, deadline_at), revision = revision + 1
+				SET state = 'completed', finished_at = COALESCE(finished_at, deadline_at),
+				    completion_reason = COALESCE(completion_reason, 'time_expired'), revision = revision + 1
 				WHERE attempt_id = ? AND section_key = ? AND state = 'active' AND deadline_at <= ?`,
 				attemptID, previousKey, now); err != nil {
 				return err
@@ -267,7 +277,8 @@ func readyIELTSPersonalSectionInTx(
 	}
 	if state == "active" && deadline.Valid && !now.Before(deadline.Time.UTC()) {
 		if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
-			SET state = 'completed', finished_at = COALESCE(finished_at, deadline_at), revision = revision + 1
+			SET state = 'completed', finished_at = COALESCE(finished_at, deadline_at),
+			    completion_reason = COALESCE(completion_reason, 'time_expired'), revision = revision + 1
 			WHERE attempt_id = ? AND section_key = ? AND state = 'active' AND deadline_at <= ?`, attemptID, sectionKey, now); err != nil {
 			return err
 		}

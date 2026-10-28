@@ -418,6 +418,10 @@ func (s *Service) saveInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptCl
 			if attempt.ProviderKey != string(ProviderSAT) || !isPersonalTimingModel(owner.TimingModel) || owner.ModuleID != frozenModuleID || (owner.ModuleState != "active" && owner.ModuleState != "review") {
 				return SaveResult{}, moduleRejection(apperrors.CodeAttemptNotWritable, "The frozen answer is outside the active SAT recovery boundary.", ReasonModuleClosed, c.QuestionID, owner.ModuleID)
 			}
+		} else if attempt.RecoveryControl != nil {
+			if err := ensureRecoveryQuestion(attempt, owner, c.QuestionID); err != nil {
+				return SaveResult{}, err
+			}
 		} else if err := ensureQuestionAdmittedForProvider(owner, gate, c.QuestionID, attempt.ProviderKey); err != nil {
 			return SaveResult{}, err
 		}
@@ -563,11 +567,12 @@ func lockAttempt(ctx context.Context, q tx.Tx, id string) (AttemptState, error) 
 	var a AttemptState
 	var deadline, grace, submitted sql.NullTime
 	var finalSub, providerKey, timingModel sql.NullString
+	var rawRecovery string
 	// Round 166: fresh entry-minted attempts carry NULL organization_id
 	// (game-day: 5 submit-path 500s `converting NULL to string`). Scan
 	// nullable and default to "" so NULL orgs submit cleanly.
 	var org sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT id, schedule_id, user_id, organization_id, protocol_version, delivery_status, phase, lease_epoch, control_epoch, active_client_session_id, response_revision, deadline_at, closing_grace_until, submitted_at, final_submission, proctor_status, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), ''), COALESCE((SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = student_attempts.schedule_id), '') FROM student_attempts WHERE id=? FOR UPDATE`, id).Scan(&a.ID, &a.ScheduleID, &a.UserID, &org, &a.ProtocolVersion, &a.DeliveryStatus, &a.Phase, &a.LeaseEpoch, &a.ControlEpoch, &a.ActiveClientSessionID, &a.ResponseRevision, &deadline, &grace, &submitted, &finalSub, &a.ProctorStatus, &providerKey, &timingModel)
+	err := q.QueryRowContext(ctx, `SELECT id, schedule_id, user_id, organization_id, protocol_version, delivery_status, phase, lease_epoch, control_epoch, active_client_session_id, response_revision, deadline_at, closing_grace_until, submitted_at, final_submission, proctor_status, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), ''), COALESCE((SELECT timing_model FROM exam_session_runtimes WHERE schedule_id = student_attempts.schedule_id), ''), COALESCE(recovery_control, '') FROM student_attempts WHERE id=? FOR UPDATE`, id).Scan(&a.ID, &a.ScheduleID, &a.UserID, &org, &a.ProtocolVersion, &a.DeliveryStatus, &a.Phase, &a.LeaseEpoch, &a.ControlEpoch, &a.ActiveClientSessionID, &a.ResponseRevision, &deadline, &grace, &submitted, &finalSub, &a.ProctorStatus, &providerKey, &timingModel, &rawRecovery)
 	if org.Valid {
 		a.OrganizationID = org.String
 	}
@@ -599,7 +604,8 @@ func lockAttempt(ctx context.Context, q tx.Tx, id string) (AttemptState, error) 
 	if timingModel.Valid {
 		a.TimingModel = timingModel.String
 	}
-	return a, nil
+	a.RecoveryControl, err = RecoveryControlFromRow([]byte(rawRecovery))
+	return a, err
 }
 
 func (s *Service) validateTokenSession(ctx context.Context, q tx.Tx, claims crypto.AttemptClaims) error {
@@ -647,6 +653,9 @@ func ensureActiveSession(a AttemptState, claims crypto.AttemptClaims) error {
 	// First-writer-wins claim is enforced by a conditional UPDATE elsewhere;
 	// here we fence mismatched active sessions using the value already read
 	// with the locked attempt row.
+	if a.RecoveryControl != nil && a.RecoveryControl.Phase != "working" {
+		return leaseFenced()
+	}
 	active := a.ActiveClientSessionID
 	if active.Valid && active.String != "" && active.String != claims.ClientSessionID {
 		return leaseFenced()
@@ -744,6 +753,9 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	}
 	if a.ProctorStatus == "terminated" || a.ProctorStatus == "paused" {
 		return &apperrors.Error{Code: apperrors.CodeAttemptProctorBlocked, Message: "Attempt is blocked by proctor state.", HTTPStatus: 403}
+	}
+	if a.RecoveryControl != nil {
+		return ensureRecoveryWritable(a, gate, now)
 	}
 	ieltsNaturalRoomEnd := personalIELTS && gate.Status == "completed" && gate.CompletionReason == "time_expired"
 	if gate.Status != "" && gate.Status != "live" && !(satClosing && gate.Status == "completed") && !ieltsNaturalRoomEnd {

@@ -70,7 +70,7 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 	query := `SELECT a.id, sch.exam_title, version.version_number, a.candidate_id,
 		a.candidate_name, sch.cohort_name, a.delivery_status, a.protocol_version,
 		a.response_revision, (SELECT ar.outcome_status FROM assessment_results ar
-			WHERE ar.attempt_id = a.id AND ar.provider_key = 'sat' LIMIT 1),
+			WHERE ar.attempt_id = a.id AND ar.provider_key = 'sat' AND ar.terminal_generation = a.terminal_generation AND a.submitted_at IS NOT NULL LIMIT 1),
 		(SELECT MIN(ma.started_at) FROM assessment_module_attempts ma WHERE ma.attempt_id = a.id),
 		a.submitted_at
 		FROM student_attempts a

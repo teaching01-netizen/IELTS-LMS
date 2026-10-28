@@ -251,8 +251,8 @@ func TestAssembleBootstrapPublishesTheLateArrivalsEntryWindow(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_responses_v2 v LEFT JOIN")).WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response", "server_revision", "module_attempt_id", "exam_question_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"candidate_name", "proctor_status", "proctor_note", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at"}).
-			AddRow("Jane", "active", nil, "running", nil, "exam", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"candidate_name", "proctor_status", "proctor_note", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "recovery_control"}).
+			AddRow("Jane", "active", nil, "running", nil, "exam", false, nil, ""))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE attempt_id")).WithArgs("att-1").
 		WillReturnError(sql.ErrNoRows)
 	// The room: Reading & Writing live on a 64-minute clock since 09:00.

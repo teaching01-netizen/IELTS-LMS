@@ -11,6 +11,7 @@ import (
 	"context"
 	"database/sql"
 	"example.com/ielts-proctoring/internal/assessmentforms"
+	"fmt"
 	"time"
 
 	"example.com/ielts-proctoring/internal/accesslinks"
@@ -18,6 +19,7 @@ import (
 	"example.com/ielts-proctoring/internal/answeredpdf"
 	"example.com/ielts-proctoring/internal/answerhistory"
 	"example.com/ielts-proctoring/internal/attempts"
+	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoring"
 	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/delivery"
@@ -157,7 +159,40 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	if concurrency > cfg.DBPoolMaxWorker-2 {
 		concurrency = cfg.DBPoolMaxWorker - 2
 	}
-	deliverySvc := delivery.NewService(pool, s.Tx).SetReconcileConcurrency(concurrency)
+	deliverySvc := delivery.NewService(pool, s.Tx).SetReconcileConcurrency(concurrency).
+		SetStaffDeviceRecovery(cfg.StaffDeviceRecoveryEnabled, []byte(cfg.AuthSecret))
+	deliverySvc.SetRecoveryContinuation(func(ctx context.Context, q tx.Tx, req delivery.RecoveryCredentialRequest) (delivery.RecoveryCredentialIdentity, error) {
+		id, token, csrf, err := auth.CreateSessionInTx(ctx, q, cfg, req.UserID, auth.RoleStudent, auth.SessionProof{Source: auth.SessionSourceRecovery, RecoveryAttemptID: req.AttemptID}, req.UserAgentHash, req.IPMetadata, req.Now)
+		if err != nil {
+			return delivery.RecoveryCredentialIdentity{}, err
+		}
+		bearer, expires, err := auth.IssueAttemptTokenTx(ctx, q, cfg, req.UserID, req.ScheduleID, req.AttemptID, req.ClientSessionID, req.OrganizationID, &req.LeaseEpoch, req.Now)
+		if err != nil {
+			return delivery.RecoveryCredentialIdentity{}, err
+		}
+		return delivery.RecoveryCredentialIdentity{SessionID: id, SessionToken: token, CSRFToken: csrf, AttemptToken: bearer, AttemptExpiresAt: expires, ClientSessionID: req.ClientSessionID}, nil
+	}, func(ctx context.Context, q tx.Tx, attemptID string, now time.Time) (uint64, error) {
+		var scheduleID, raw string
+		if err := q.QueryRowContext(ctx, `SELECT schedule_id, COALESCE(recovery_control,'') FROM student_attempts WHERE id = ?`, attemptID).Scan(&scheduleID, &raw); err != nil {
+			return 0, err
+		}
+		control, err := exams.ParseRecoveryControl([]byte(raw))
+		if err != nil {
+			return 0, err
+		}
+		if control == nil {
+			return 0, fmt.Errorf("recovery control missing")
+		}
+		var actorID string
+		if err := q.QueryRowContext(ctx, `SELECT issued_by_user_id FROM attempt_device_recovery_grants WHERE id = ? AND attempt_id = ?`, control.ActiveGrantID, attemptID).Scan(&actorID); err != nil {
+			return 0, err
+		}
+		return s.Terminal.ReopenTimedOutInTx(ctx, q, attemptID, scheduleID, actorID, control.ID, control.Target)
+	})
+	deliverySvc.SetRecoveryTimeoutSealer(func(ctx context.Context, q tx.Tx, attemptID, scheduleID, controlID string, deadline time.Time) error {
+		_, err := s.Terminal.TerminalizeInTx(ctx, q, terminalization.SealCommand{AttemptID: attemptID, ScheduleID: scheduleID, Outcome: terminalization.OutcomeSubmitted, Reason: terminalization.ReasonTimeExpired, ActorKind: terminalization.ActorSystem, RecoveryControlID: controlID, EffectiveAt: &deadline})
+		return err
+	})
 	liveOrigin := ""
 	if deps.LiveBus != nil {
 		liveOrigin = deps.LiveBus.Origin()

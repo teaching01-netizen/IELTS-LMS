@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"example.com/ielts-proctoring/internal/auth"
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/httpx"
@@ -80,16 +81,64 @@ func runtimePollInner(app *App, w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, notModified, err := app.Runtime.PollView(r.Context(), app.DB, scheduleID, since, time.Now().UTC())
+	// The scoped session identifies exactly one sitting. Its attempt revision
+	// participates in conditional reads so a staff transfer cannot be hidden
+	// behind an unchanged shared-room validator.
+	var recovery *examdomain.RecoveryControl
+	var attemptRevision int64
+	var proctorStatus, roomCompletion string
+	etagScope := scheduleID
+	if sess := SessionOf(r.Context()); sess != nil && sess.Proof.IsRecovery() {
+		var raw string
+		err := app.DB.QueryRowContext(r.Context(), `SELECT COALESCE(a.recovery_control,''),a.revision,COALESCE(a.proctor_status,'active'),COALESCE(rt.completion_reason,'')
+FROM student_attempts a LEFT JOIN exam_session_runtimes rt ON rt.schedule_id=a.schedule_id
+WHERE a.id=? AND a.schedule_id=? AND a.user_id=?`, sess.Proof.RecoveryAttemptID, scheduleID, sess.UserID).Scan(&raw, &attemptRevision, &proctorStatus, &roomCompletion)
+		if err != nil {
+			httpx.WriteError(w, r, MapDBError(err))
+			return
+		}
+		recovery, err = examdomain.ParseRecoveryControl([]byte(raw))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		etagScope += "-" + sess.Proof.RecoveryAttemptID
+		// Conditional comparison happens after combining room and attempt state.
+	}
+	roomSince := since
+	if etagScope != scheduleID {
+		roomSince = nil
+	}
+	view, notModified, err := app.Runtime.PollView(r.Context(), app.DB, scheduleID, roomSince, time.Now().UTC())
 	if err != nil {
 		httpx.WriteError(w, r, MapDBError(err))
 		return
+	}
+	if etagScope != scheduleID {
+		view.Revision += attemptRevision
+		notModified = since != nil && *since == view.Revision
+		if recovery != nil {
+			view.PollAfterSecs = 2
+			if recovery.Phase != examdomain.RecoveryPhaseWorking {
+				view.Status = "paused"
+				view.ActiveSection = nil
+			} else if view.Status == "live" || view.Status == "paused" || (view.Status == "completed" && roomCompletion == "time_expired") {
+				view.ActiveSection = &recovery.Target.SectionKey
+				view.FocusDeadlineAt = recovery.FocusDeadlineAt
+				if view.Status == "completed" {
+					view.Status = "live"
+				}
+				if proctorStatus == "paused" {
+					view.Status = "paused"
+				}
+			}
+		}
 	}
 	// Uniform conditional read: the ETag always reflects the authorized
 	// view; If-None-Match matching it renders 304 even when the client
 	// omits (or lags) sinceRevision. sinceRevision == current keeps its
 	// legacy 304 path as a deprecated alias.
-	etag := runtimePollETag(scheduleID, view.Revision)
+	etag := runtimePollETag(etagScope, view.Revision)
 	if writeETagOrNotModified(w, r, etag) {
 		telemetry.IncCounter(telemetry.MRuntimePollTotal, "result", "not_modified")
 		return

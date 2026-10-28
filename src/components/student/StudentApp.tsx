@@ -1196,6 +1196,7 @@ export function StudentApp({
         <StudentHighlightSelectionManagerProvider>
           <StudentExamWorkspaceSession
             examState={examState}
+ listeningCheckpointAuthorization={attemptState.attempt ? {scheduleId:attemptState.attempt.scheduleId,attemptId:attemptState.attempt.id} : undefined}
             actMediaAuthorization={
               attemptState.attempt
                 ? {

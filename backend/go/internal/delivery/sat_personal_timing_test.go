@@ -51,7 +51,7 @@ func personalReconcileDrained(mock sqlmock.Sqlmock) {
 	deliverySaveBegin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key", "recovery_control"}).AddRow("att-1", "sat", ""))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).

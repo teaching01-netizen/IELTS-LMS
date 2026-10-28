@@ -58,7 +58,7 @@ func fanoutWorker(db *sql.DB, seal *captureSealer) *Runner {
 func loadRow(mock sqlmock.Sqlmock, attempt, provider, proctor string) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts a JOIN exam_entities e")).
 		WithArgs(attempt, "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "proctor_status"}).AddRow(provider, proctor))
+		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "proctor_status", "terminal_generation"}).AddRow(provider, proctor, 0))
 }
 
 func fanoutEvent(ids ...string) outbox.Event {

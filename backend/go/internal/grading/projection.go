@@ -26,6 +26,7 @@ import (
 // IELTS attempt. Snapshots are copied from the pinned exam version by the
 // worker query; callers must not pass live client state here.
 type ProjectionAttempt struct {
+	TerminalGeneration uint64
 	ID                 string
 	ScheduleID         string
 	ExamID             string
@@ -68,6 +69,13 @@ func (s *Service) ProjectIELTSAttempt(ctx context.Context, attempt ProjectionAtt
 
 	var report ProjectionReport
 	err := s.runner.WithTxRetry(ctx, 3, func(ctx context.Context, q tx.Tx) error {
+		var currentID string
+		if err := q.QueryRowContext(ctx, `SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? AND terminal_generation = ? AND submitted_at IS NOT NULL FOR UPDATE`, attempt.ID, attempt.ScheduleID, attempt.TerminalGeneration).Scan(&currentID); err != nil {
+			if err == sql.ErrNoRows {
+				return apperrors.New(apperrors.CodeConflict, "The completion generation was superseded.")
+			}
+			return err
+		}
 		objectiveContent, objectiveConfig, objectiveVersion, err := loadProjectionObjectiveSource(
 			ctx, q, attempt.ScheduleID, attempt.PublishedVersionID, content, config,
 		)
@@ -153,7 +161,7 @@ func ensureProjectionSubmission(ctx context.Context, q tx.Tx, attempt Projection
 	// stored (FK 1452 — the grading worker then stalls on this attempt).
 	var submissionID string
 	err := q.QueryRowContext(ctx,
-		"SELECT id FROM student_submissions WHERE attempt_id = ? FOR UPDATE",
+		"SELECT id FROM student_submissions WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id) FOR UPDATE",
 		attempt.ID).Scan(&submissionID)
 	if err != nil && err != sql.ErrNoRows {
 		return "", err
@@ -175,9 +183,9 @@ func ensureProjectionSubmission(ctx context.Context, q tx.Tx, attempt Projection
 		INSERT INTO student_submissions (
 			id, attempt_id, schedule_id, exam_id, published_version_id, provider_key,
 			student_id, student_name, student_email, cohort_name, submitted_at,
-			grading_status, section_statuses, created_at, updated_at
+			grading_status, section_statuses, created_at, updated_at, terminal_generation
 		)
-		VALUES (?, ?, ?, ?, ?, 'ielts', ?, ?, ?, ?, ?, 'submitted', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+		VALUES (?, ?, ?, ?, ?, 'ielts', ?, ?, ?, ?, ?, 'submitted', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), (SELECT terminal_generation FROM student_attempts WHERE id = ?))
 		ON DUPLICATE KEY UPDATE
 			schedule_id = VALUES(schedule_id),
 			provider_key = 'ielts',
@@ -191,7 +199,7 @@ func ensureProjectionSubmission(ctx context.Context, q tx.Tx, attempt Projection
 			section_statuses = VALUES(section_statuses),
 			updated_at = UTC_TIMESTAMP(6)`,
 		submissionID, attempt.ID, attempt.ScheduleID, attempt.ExamID, attempt.PublishedVersionID,
-		attempt.StudentID, attempt.StudentName, email, attempt.CohortName, submittedAt, sectionStatuses,
+		attempt.StudentID, attempt.StudentName, email, attempt.CohortName, submittedAt, sectionStatuses, attempt.ID,
 	)
 	if err != nil {
 		return "", err
@@ -199,7 +207,7 @@ func ensureProjectionSubmission(ctx context.Context, q tx.Tx, attempt Projection
 	// Return the id actually stored: a concurrent worker may have inserted
 	// the row first, in which case our generated id was never written.
 	err = q.QueryRowContext(ctx,
-		"SELECT id FROM student_submissions WHERE attempt_id = ?", attempt.ID).Scan(&submissionID)
+		"SELECT id FROM student_submissions WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id)", attempt.ID).Scan(&submissionID)
 	return submissionID, err
 }
 

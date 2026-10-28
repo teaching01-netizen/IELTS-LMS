@@ -26,10 +26,11 @@ const (
 // PollView is the versioned runtime poll projection (plan C3): exactly what
 // a student needs to track cohort state without a socket.
 type PollView struct {
-	Revision      int64   `json:"revision"`
-	Status        string  `json:"status"`
-	ActiveSection *string `json:"activeSection"`
-	PollAfterSecs int     `json:"pollAfterSecs"`
+	Revision        int64      `json:"revision"`
+	Status          string     `json:"status"`
+	ActiveSection   *string    `json:"activeSection"`
+	PollAfterSecs   int        `json:"pollAfterSecs"`
+	FocusDeadlineAt *time.Time `json:"focusDeadlineAt,omitempty"`
 }
 
 // PollView resolves the versioned poll projection for one schedule:

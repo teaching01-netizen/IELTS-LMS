@@ -54,18 +54,16 @@ test.describe("Student multi-device fingerprint mismatch", () => {
       )
       .toBe(true);
 
+    // Same signed-in student, different user agent. A cold browser cannot
+    // re-register another principal's wcode; that path is staff recovery.
     const context2 = await browser.newContext({
+      storageState: await context1.storageState(),
       userAgent:
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
     await stubScreenDetails(context2);
     const page2 = await context2.newPage();
 
-    await studentCheckIn(page2, manifest.student.scheduleId, {
-      wcode,
-      email: `e2e+${wcode.toLowerCase()}@example.com`,
-      fullName: "E2E Candidate",
-    });
     await openStudentSessionWithRetry(page2, manifest.student.scheduleId, wcode);
     await expect(page2.getByTestId("student-exam-shell")).toBeVisible({ timeout: 30_000 });
     await showQuestionsIfTabbed(page2);

@@ -55,6 +55,9 @@ func sectionEntryDecision(c attemptContext, section, module, state string, pendi
 }
 
 func sectionEntryState(ctx context.Context, q queryer, c attemptContext, section string) (SectionEntryState, error) {
+	if c.Recovery != nil && c.Recovery.Target.SectionKey != section {
+		return SectionEntryState{}, conflict("RECOVERY_FOCUS", "Only the recovery section is available.", nil)
+	}
 	if definition.SectionFormKey(section) == "" {
 		return SectionEntryState{}, apperrors.New(apperrors.CodeValidation, "Unknown SAT section.")
 	}
@@ -198,10 +201,10 @@ func (s *Service) SubmitSectionEntry(ctx context.Context, cred Credential, secti
 			// available_at (the legacy worker interprets it as auto-start).
 			// An initial form accepted before staff/code release keeps no deadline.
 			if _, err = q.ExecContext(ctx, `INSERT INTO assessment_module_boundaries
-              (module_attempt_id,attempt_id,phase,policy_version,entry_deadline_at,next_action_at)
+              (module_attempt_id,attempt_id,phase,policy_version,entry_deadline_at,next_action_at,run_generation)
               SELECT ma.id,ma.attempt_id,'preparing',JSON_UNQUOTE(JSON_EXTRACT(s.sat_delivery_policy,'$.version')),
                 TIMESTAMPADD(SECOND,CAST(JSON_EXTRACT(s.sat_delivery_policy,'$.entryRecoverySeconds') AS SIGNED),UTC_TIMESTAMP(6)),
-                TIMESTAMPADD(SECOND,CAST(JSON_EXTRACT(s.sat_delivery_policy,'$.entryRecoverySeconds') AS SIGNED),UTC_TIMESTAMP(6))
+                TIMESTAMPADD(SECOND,CAST(JSON_EXTRACT(s.sat_delivery_policy,'$.entryRecoverySeconds') AS SIGNED),UTC_TIMESTAMP(6)),ma.run_generation
               FROM assessment_module_attempts ma JOIN student_attempts a ON a.id=ma.attempt_id JOIN exam_schedules s ON s.id=a.schedule_id
               WHERE ma.attempt_id=? AND ma.module_id=? AND ma.state='not_started' AND s.status='live'
                 AND s.sat_delivery_policy IS NOT NULL AND (a.sat_start_code_required=0 OR a.sat_start_code_accepted_at IS NOT NULL)

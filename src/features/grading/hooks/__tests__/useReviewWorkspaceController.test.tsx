@@ -120,6 +120,36 @@ beforeEach(() => {
 });
 
 describe('useReviewWorkspaceController', () => {
+  it('keeps a historical draft readable and refuses edits, saves, transitions and overrides', async () => {
+    repo.getSubmissionById.mockImplementation(async id => submission(id, { historical: true, terminalGeneration: 0 }) as never);
+    const { result } = setup();
+    await waitFor(() => expect(result.current.reviewDraft?.submissionId).toBe('sub-a'));
+    act(() => result.current.editDraft(feedback('must not replace history') as never));
+    await act(async () => {
+      expect(await result.current.saveDraft()).toBe(false);
+      await result.current.markGradingComplete();
+      await result.current.markReadyToRelease();
+      expect(await result.current.releaseNow()).toBe('failed');
+      await result.current.overrideObjective('reading', 'q1', true);
+    });
+    expect(result.current.reviewDraft?.overallFeedback).toBeUndefined();
+    expect(service.startReview).not.toHaveBeenCalled();
+    expect(service.saveReviewDraft).not.toHaveBeenCalled();
+    expect(service.markGradingComplete).not.toHaveBeenCalled();
+    expect(service.markReadyToRelease).not.toHaveBeenCalled();
+    expect(service.releaseResult).not.toHaveBeenCalled();
+    expect(service.overrideObjectiveQuestion).not.toHaveBeenCalled();
+  });
+
+  it('does not initialize a new review for a historical submission without a draft', async () => {
+    repo.getSubmissionById.mockImplementation(async id => submission(id, { historical: true, gradingStatus: 'submitted' }) as never);
+    repo.getReviewDraftBySubmission.mockResolvedValue(null);
+    const { result } = setup();
+    await waitFor(() => expect(result.current.submission?.historical).toBe(true));
+    expect(result.current.reviewDraft).toBeNull();
+    expect(service.startReview).not.toHaveBeenCalled();
+  });
+
   it('starts every independent read at once', async () => {
     const hold = deferred<never>();
     repo.getSubmissionById.mockReturnValue(hold.promise);

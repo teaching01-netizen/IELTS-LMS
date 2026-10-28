@@ -19,7 +19,7 @@ func testCfg() config.Config {
 }
 
 func sessionRows() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"id", "user_id", "role_snapshot", "csrf_token", "organization_id", "expires_at", "idle_timeout_at", "revoked_at", "authentication_source", "practice_schedule_id", "role", "state"})
+	return sqlmock.NewRows([]string{"id", "user_id", "role_snapshot", "csrf_token", "organization_id", "expires_at", "idle_timeout_at", "revoked_at", "authentication_source", "practice_schedule_id", "recovery_attempt_id", "schedule_id", "role", "state"})
 }
 
 // A2 RED: LookupSessionWithCache serves the second lookup with zero SQL.
@@ -34,7 +34,7 @@ func TestLookupSessionCacheHitNoSQL(t *testing.T) {
 	cfg := testCfg()
 
 	rows := sessionRows().
-		AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), nil, "account", nil, "student", "active")
+		AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), nil, "account", nil, nil, nil, "student", "active")
 	mock.ExpectQuery("SELECT s.id").WillReturnRows(rows)
 	// Touch UPDATE may or may not fire on first load depending on coalesce
 	// origin; allow but do not require it.
@@ -71,7 +71,7 @@ func TestLookupSessionCacheRevokeVisible(t *testing.T) {
 	cfg := testCfg()
 
 	rows := sessionRows().
-		AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), nil, "account", nil, "student", "active")
+		AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), nil, "account", nil, nil, nil, "student", "active")
 	mock.ExpectQuery("SELECT s.id").WillReturnRows(rows)
 	mock.ExpectExec("UPDATE user_sessions SET last_seen_at").WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -87,7 +87,7 @@ func TestLookupSessionCacheRevokeVisible(t *testing.T) {
 	revoked := sql.NullTime{}
 	_ = revoked
 	rows2 := sessionRows().
-		AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), now, "account", nil, "student", "active")
+		AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), now, "account", nil, nil, nil, "student", "active")
 	mock.ExpectQuery("SELECT s.id").WillReturnRows(rows2)
 	got, err := LookupSessionWithCache(ctx, db, cache, cfg, "raw-token-1", now)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestLookupSessionRejectsPersistentCookieAfterServerDeadline(t *testing.T) {
 			}
 			defer db.Close()
 
-			rows := sessionRows().AddRow("s1", "u1", "student", "csrf-1", nil, tc.expiresAt, tc.idleTimeoutAt, nil, "account", nil, "student", "active")
+			rows := sessionRows().AddRow("s1", "u1", "student", "csrf-1", nil, tc.expiresAt, tc.idleTimeoutAt, nil, "account", nil, nil, nil, "student", "active")
 			mock.ExpectQuery("SELECT s.id").WillReturnRows(rows)
 
 			got, err := LookupSession(context.Background(), db, testCfg(), "persistent-browser-cookie", now)
@@ -149,7 +149,7 @@ func TestLookupSessionTouchCoalesced(t *testing.T) {
 	cfg := testCfg()
 
 	rows := sessionRows().
-		AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), nil, "account", nil, "student", "active")
+		AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), nil, "account", nil, nil, nil, "student", "active")
 	mock.ExpectQuery("SELECT s.id").WillReturnRows(rows)
 	mock.ExpectExec("UPDATE user_sessions SET last_seen_at").WillReturnResult(sqlmock.NewResult(0, 1))
 
@@ -178,7 +178,7 @@ func TestLookupSessionCacheDisabledPassthrough(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		rows := sessionRows().
-			AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), nil, "account", nil, "student", "active")
+			AddRow("s1", "u1", "student", "csrf-1", nil, now.Add(time.Hour), now.Add(30*time.Minute), nil, "account", nil, nil, nil, "student", "active")
 		mock.ExpectQuery("SELECT s.id").WillReturnRows(rows)
 		mock.ExpectExec("UPDATE user_sessions SET last_seen_at").WillReturnResult(sqlmock.NewResult(0, 1))
 		if _, err := LookupSessionWithCache(context.Background(), db, cache, cfg, "raw-token-1", now); err != nil {

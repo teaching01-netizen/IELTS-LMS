@@ -41,10 +41,13 @@ func TestTakeoverUsesLiveSessionColumns(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "schedule_id", "user_id", "organization_id", "protocol_version",
 			"delivery_status", "phase", "lease_epoch", "control_epoch", "active_client_session_id", "response_revision",
-			"deadline_at", "closing_grace_until", "submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model",
-		}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 1, 2, "cs-old", 0, nil, nil, nil, nil, "active", "", ""))
+			"deadline_at", "closing_grace_until", "submitted_at", "final_submission", "proctor_status", "provider_key", "timing_model", "recovery_control",
+		}).AddRow("att-1", "sched-1", "u-1", nil, 2, "running", "exam", 1, 2, "cs-old", 0, nil, nil, nil, nil, "active", "", "", ""))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT active_client_session_id, writer_policy FROM student_attempts WHERE id=?")).
 		WillReturnRows(sqlmock.NewRows([]string{"active_client_session_id", "writer_policy"}).AddRow("cs-old", nil))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).
+		WillReturnRows(sqlmock.NewRows([]string{"recovery_control", "active_client_session_id", "lease_epoch", "control_epoch", "terminal_generation", "writer_policy"}).
+			AddRow("", "cs-old", 1, 2, 0, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id=? AND revoked_at IS NULL FOR UPDATE")).
 		WillReturnRows(sqlmock.NewRows([]string{"attempt_id", "client_session_id", "revoked_at", "expires_at"}).
 			AddRow("att-1", "cs-new", nil, time.Date(2026, 9, 8, 13, 0, 0, 0, time.UTC)))

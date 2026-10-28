@@ -186,7 +186,6 @@ func TestEnsureWritablePersonalSATHasNoRoomClosingGrace(t *testing.T) {
 		t.Fatalf("personal SAT attempt must ignore the room section grace: %v", err)
 	}
 
-
 	cohort := openAttempt()
 	cohort.ProviderKey = string(ProviderSAT)
 	cohort.TimingModel = "cohort_section_v3"

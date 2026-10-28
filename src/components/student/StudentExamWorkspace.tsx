@@ -1,3 +1,4 @@
+import type { ListeningCheckpointAuthorization } from '@student/infrastructure/audioCheckpointGateway';
 import React from "react";
 import type { ExamState, ModuleType, QuestionAnswer } from "../../types";
 import type { StudentQuestionDescriptor } from "@student/application/studentExamContentFacade";
@@ -19,6 +20,7 @@ export interface StudentExamWorkspaceProps {
   examState: ExamState;
   /** S1-C3: sessionStorage base key (per exam) for split ratio + tab persistence. */
   persistenceKeyBase?: string | undefined;
+  listeningCheckpointAuthorization?: ListeningCheckpointAuthorization | undefined;
   actMediaAuthorization?: ActStudentMediaAuthorization | undefined;
   currentQuestionId: string | null;
   allQuestions: StudentQuestionDescriptor[];
@@ -62,6 +64,7 @@ export function StudentExamWorkspace({
   examState,
   persistenceKeyBase,
   actMediaAuthorization,
+ listeningCheckpointAuthorization,
   currentQuestionId,
   allQuestions,
   answers,
@@ -119,6 +122,7 @@ export function StudentExamWorkspace({
 
         {currentModule === "listening" ? (
           <StudentListening
+ checkpointAuthorization={listeningCheckpointAuthorization}
             state={examState}
             answers={answers}
             onAnswerChange={onObjectiveAnswerChange}

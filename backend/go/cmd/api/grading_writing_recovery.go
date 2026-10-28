@@ -24,7 +24,7 @@ func recoverSealedWritingForReview(ctx context.Context, db *sql.DB, submissionID
 	var raw sql.NullString
 	var attemptID string
 	var protocolVersion int
-	err := db.QueryRowContext(ctx, `SELECT a.id, COALESCE(a.protocol_version, 1), a.final_submission FROM student_submissions s JOIN student_attempts a ON a.id = s.attempt_id WHERE s.id = ? AND s.provider_key = 'ielts'`, submissionID).Scan(&attemptID, &protocolVersion, &raw)
+	err := db.QueryRowContext(ctx, `SELECT a.id, COALESCE(a.protocol_version, 1), a.final_submission FROM student_submissions s JOIN student_attempts a ON a.id = s.attempt_id AND a.terminal_generation = s.terminal_generation AND a.submitted_at IS NOT NULL WHERE s.id = ? AND s.provider_key = 'ielts'`, submissionID).Scan(&attemptID, &protocolVersion, &raw)
 	if err == sql.ErrNoRows {
 		return nil
 	}

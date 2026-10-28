@@ -138,6 +138,8 @@ export function useReviewWorkspaceController({ submissionId, teacherId, teacherN
   });
 
   const submission: StudentSubmission | null = submissionQuery.data ?? null;
+  const historicalRef = useRef(false);
+  historicalRef.current = submission?.historical === true;
   // Published-first pinning (S2-C13): the student took the published version,
   // so traceback resolves to it.
   const publishedVersionId = submission?.publishedVersionId ?? '';
@@ -177,7 +179,7 @@ export function useReviewWorkspaceController({ submissionId, teacherId, teacherN
   // idempotency for the start itself.
   const startedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (draftQuery.data !== null || !submission) return;
+    if (draftQuery.data !== null || !submission || submission.historical) return;
     if (!AUTO_START_STATUSES.includes(submission.gradingStatus)) return;
     if (startedForRef.current === submissionId) return;
     startedForRef.current = submissionId;
@@ -197,7 +199,9 @@ export function useReviewWorkspaceController({ submissionId, teacherId, teacherN
   }, [draftQuery.data, queryClient, submission, submissionId, teacherId, teacherName]);
 
   const editDraft = useCallback(
-    (update: (draft: ReviewDraft) => ReviewDraft) => dispatch({ type: 'edited', submissionId, update }),
+    (update: (draft: ReviewDraft) => ReviewDraft) => {
+      if (!historicalRef.current) dispatch({ type: 'edited', submissionId, update });
+    },
     [dispatch, submissionId],
   );
 
@@ -281,6 +285,7 @@ export function useReviewWorkspaceController({ submissionId, teacherId, teacherN
 
   /** One overlapping save per submission; its acknowledgement never erases newer edits. */
   const saveDraft = useCallback((): Promise<boolean> => {
+    if (historicalRef.current) return Promise.resolve(false);
     const pending = pendingSaveRef.current;
     if (pending?.submissionId === submissionId) return pending.promise;
     const state = stateRef.current;
@@ -352,7 +357,7 @@ export function useReviewWorkspaceController({ submissionId, teacherId, teacherN
       call: () => Promise<{ success: boolean; data?: ReviewDraft | undefined; error?: unknown }>,
       flushFirst: boolean,
     ) => {
-      if (!stateRef.current.local) return;
+      if (!stateRef.current.local || historicalRef.current) return;
       const forSubmission = submissionId;
       setReleaseAction(action);
       setReleaseError(null);
@@ -403,7 +408,7 @@ export function useReviewWorkspaceController({ submissionId, teacherId, teacherN
    */
   const releaseNow = useCallback(
     async (override = false): Promise<'released' | 'override_required' | 'failed'> => {
-      if (!stateRef.current.local) return 'failed';
+      if (!stateRef.current.local || historicalRef.current) return 'failed';
       const forSubmission = submissionId;
       setReleaseAction('release_now');
       setReleaseError(null);
@@ -441,6 +446,7 @@ export function useReviewWorkspaceController({ submissionId, teacherId, teacherN
 
   const overrideObjective = useCallback(
     async (section: 'reading' | 'listening', questionId: string, isCorrect: boolean) => {
+      if (historicalRef.current) return;
       const forSubmission = submissionId;
       setPendingObjectiveOverrideQuestionIds((current) => new Set(current).add(questionId));
       setObjectiveOverrideError(null);

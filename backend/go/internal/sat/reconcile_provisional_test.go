@@ -18,9 +18,9 @@ func expectRepairPrefix(mock sqlmock.Sqlmock) {
 	satNoReceipt(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT submitted_at IS NULL, final_submission IS NULL FROM student_attempts WHERE id = ? FOR UPDATE")).
 		WillReturnRows(sqlmock.NewRows([]string{"submitted_at", "final_submission"}).AddRow(true, true))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id) FOR UPDATE")).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = assessment_results.attempt_id AND submitted_at IS NOT NULL) FOR UPDATE")).
 		WillReturnError(sql.ErrNoRows)
 	satUnscopedRun(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_session_mode, 'practice') = 'classroom', COALESCE(s.section_key, ''), ma.state")).
@@ -64,9 +64,9 @@ func TestSATWatchdogLeavesExistingResultForDedicatedRepair(t *testing.T) {
 	satNoReceipt(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT submitted_at IS NULL, final_submission IS NULL FROM student_attempts WHERE id = ? FOR UPDATE")).
 		WillReturnRows(sqlmock.NewRows([]string{"submitted_at", "final_submission"}).AddRow(true, true))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id) FOR UPDATE")).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = assessment_results.attempt_id AND submitted_at IS NOT NULL) FOR UPDATE")).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("existing-result"))
 	mock.ExpectCommit()
 

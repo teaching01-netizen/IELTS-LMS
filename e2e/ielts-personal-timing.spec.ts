@@ -1280,7 +1280,7 @@ test.describe("IELTS individual section timing", () => {
           line
         )
       )
-      .slice(0, 25)
+      .slice(-25)
       .join("\n");
     expect(
       exitCode,

@@ -64,7 +64,11 @@ func scratchService(t *testing.T) (*Service, *sql.DB) {
 	if _, err := db.Exec(string(migration)); err != nil {
 		t.Fatalf("apply 0087: %v", err)
 	}
-	if _, err := db.Exec("CREATE TABLE assessment_results (id VARCHAR(36) PRIMARY KEY, provider_key VARCHAR(32) NOT NULL, release_status VARCHAR(32) NOT NULL, score_payload JSON NOT NULL)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE assessment_results (id VARCHAR(36) PRIMARY KEY, attempt_id VARCHAR(36) NOT NULL, terminal_generation BIGINT UNSIGNED NOT NULL DEFAULT 0, provider_key VARCHAR(32) NOT NULL, release_status VARCHAR(32) NOT NULL, score_payload JSON NOT NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	// Impact compares only current-generation results of sealed attempts.
+	if _, err := db.Exec("CREATE TABLE student_attempts (id VARCHAR(36) PRIMARY KEY, terminal_generation BIGINT UNSIGNED NOT NULL DEFAULT 0, submitted_at DATETIME(6) NULL)"); err != nil {
 		t.Fatal(err)
 	}
 	ResetCacheForTest()
@@ -539,7 +543,18 @@ func TestOverlayLeavesWithheldResultsAlone(t *testing.T) {
 func insertResult(t *testing.T, db *sql.DB, release, sections string) {
 	t.Helper()
 	doc := `{"classroomRaw":{"sections":` + sections + `}}`
-	if _, err := db.Exec("INSERT INTO assessment_results (id, provider_key, release_status, score_payload) VALUES (?, 'sat', ?, ?)", uuid.NewString(), release, doc); err != nil {
+	insertAttemptResult(t, db, release, doc, 0)
+}
+
+// insertAttemptResult stores a result for a sealed attempt whose current
+// generation is current; a lower result generation models a reopened sitting.
+func insertAttemptResult(t *testing.T, db *sql.DB, release, doc string, attemptGeneration uint64) {
+	t.Helper()
+	attemptID := uuid.NewString()
+	if _, err := db.Exec("INSERT INTO student_attempts (id, terminal_generation, submitted_at) VALUES (?, ?, UTC_TIMESTAMP(6))", attemptID, attemptGeneration); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO assessment_results (id, attempt_id, provider_key, release_status, score_payload) VALUES (?, ?, 'sat', ?, ?)", uuid.NewString(), attemptID, release, doc); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -561,9 +576,10 @@ func TestImpactReportIsBoundedAndMatchesTheOverlay(t *testing.T) {
 	}
 	insertResult(t, db, "pending", mathRow(0, 0)) // withheld: not counted
 	// A JSON-null report and an empty report are not results to compare.
-	if _, err := db.Exec("INSERT INTO assessment_results (id, provider_key, release_status, score_payload) VALUES (?, 'sat', 'released', '{\"classroomRaw\":{\"sections\":null}}'), (?, 'sat', 'released', '{\"classroomRaw\":{\"sections\":[]}}')", uuid.NewString(), uuid.NewString()); err != nil {
-		t.Fatal(err)
-	}
+	insertAttemptResult(t, db, "released", `{"classroomRaw":{"sections":null}}`, 0)
+	insertAttemptResult(t, db, "released", `{"classroomRaw":{"sections":[]}}`, 0)
+	// A superseded generation-0 result of a reopened sitting is history.
+	insertAttemptResult(t, db, "released", `{"classroomRaw":{"sections":`+mathRow(3, 3)+`}}`, 1)
 	insertResult(t, db, "released", `[{"sectionKey":"math","rawCorrect":9,"total":10,"modules":[{"moduleKey":"math-m1","rawCorrect":4,"total":5},{"moduleKey":"math-m2-lower","rawCorrect":5,"total":5}]}]`)
 
 	d, _ := s.CreateDraft(ctx, "a", "r", nil)

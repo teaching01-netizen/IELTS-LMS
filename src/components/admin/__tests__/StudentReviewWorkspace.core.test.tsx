@@ -292,6 +292,18 @@ beforeEach(() => {
 });
 
 describe('StudentReviewWorkspace core render', () => {
+  test('labels historical work and keeps section navigation available while grading is read only', async () => {
+    seedWorkspace({ submission: { ...makeSubmission(), historical: true, terminalGeneration: 0 } });
+    renderWorkspace();
+    expect(await screen.findByText(/Historical submission — read only/)).toBeVisible();
+    await openWritingSection();
+    expect(saveButton()).toBeDisabled();
+    for (const input of screen.getAllByRole('spinbutton')) expect(input).toBeDisabled();
+    for (const input of screen.getAllByRole('textbox')) expect(input).toHaveAttribute('readonly');
+    expect(screen.getByRole('button', { name: /^reading$/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /mark grading complete/i })).toBeDisabled();
+  });
+
   test('renders header, section navigation, checklist and disabled save with minimal props', async () => {
     seedWorkspace();
     renderWorkspace();

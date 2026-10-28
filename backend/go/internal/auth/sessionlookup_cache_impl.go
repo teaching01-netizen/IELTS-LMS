@@ -57,20 +57,27 @@ func LookupSessionWithCache(ctx context.Context, db Querier, cache *SessionCache
 	}
 	var s Session
 	var revokedAt sql.NullTime
-	var orgID, source, practiceScope sql.NullString
+	var orgID, source, practiceScope, recoveryAttempt, recoverySchedule sql.NullString
 	var currentRole, currentState string
 	err := db.QueryRowContext(ctx,
-		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at, s.authentication_source, s.practice_schedule_id, u.role, u.state
-		 FROM user_sessions s JOIN users u ON u.id = s.user_id
+		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at, s.authentication_source, s.practice_schedule_id, s.recovery_attempt_id, a.schedule_id, u.role, u.state
+		 FROM user_sessions s
+		 JOIN users u ON u.id = s.user_id
+		 LEFT JOIN student_attempts a ON a.id = s.recovery_attempt_id
 		 WHERE s.session_token_hash = ?`, tokenHash).Scan(
-		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt, &source, &practiceScope, &currentRole, &currentState)
+		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt, &source, &practiceScope, &recoveryAttempt, &recoverySchedule, &currentRole, &currentState)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("auth: lookup session: %w", err)
 	}
-	s.Proof = SessionProof{Source: source.String, PracticeScheduleID: practiceScope.String}
+	s.Proof = SessionProof{
+		Source:             source.String,
+		PracticeScheduleID: practiceScope.String,
+		RecoveryAttemptID:  recoveryAttempt.String,
+		RecoveryScheduleID: recoverySchedule.String,
+	}
 	if s.Proof.validateStored(s.Role) != nil || currentRole != s.Role || currentState != "active" {
 		return nil, nil
 	}

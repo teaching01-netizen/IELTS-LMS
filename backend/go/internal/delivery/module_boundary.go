@@ -67,7 +67,7 @@ func ensureSatModuleBoundaryWithPolicyTx(ctx context.Context, q tx.Tx, attemptID
 	_, err := q.ExecContext(ctx, `
 		INSERT INTO assessment_module_boundaries
 			(module_attempt_id, attempt_id, phase, policy_version, work_deadline_at,
-			 entry_deadline_at, recovery_deadline_at, next_action_at)
+			 entry_deadline_at, recovery_deadline_at, next_action_at, run_generation)
 		SELECT ma.id, ma.attempt_id,
 			CASE WHEN ma.state = 'active' AND ma.started_at IS NOT NULL THEN 'working' ELSE 'preparing' END,
 			?,
@@ -80,7 +80,7 @@ func ensureSatModuleBoundaryWithPolicyTx(ctx context.Context, q tx.Tx, attemptID
 			CASE WHEN ma.state = 'active' AND ma.started_at IS NOT NULL
 			THEN TIMESTAMPADD(SECOND, ma.allocated_seconds + ma.extension_seconds + ma.accumulated_paused_seconds, ma.started_at)
 				WHEN ma.state = 'not_started' AND ma.available_at IS NOT NULL`+sectionEntryActivationSQL("ma")+`
-				THEN TIMESTAMPADD(SECOND, ?, ma.available_at) END
+				THEN TIMESTAMPADD(SECOND, ?, ma.available_at) END, ma.run_generation
 		FROM assessment_module_attempts ma
 		WHERE ma.id = ? AND ma.attempt_id = ?
 		ON DUPLICATE KEY UPDATE module_attempt_id = module_attempt_id`,
@@ -116,7 +116,7 @@ func beginSatModuleBoundaryTx(ctx context.Context, q tx.Tx, attemptID, moduleAtt
 	var err error
 	res, err := q.ExecContext(ctx, `
 		UPDATE assessment_module_boundaries b
-		JOIN assessment_module_attempts ma ON ma.id = b.module_attempt_id
+		JOIN assessment_module_attempts ma ON ma.id = b.module_attempt_id AND ma.run_generation = b.run_generation
 		SET b.phase = 'working',
 		    b.work_deadline_at = TIMESTAMPADD(SECOND, ? + ma.extension_seconds + ma.accumulated_paused_seconds, ?),
 		    b.entry_deadline_at = NULL,
@@ -140,7 +140,7 @@ func beginSatModuleBoundaryTx(ctx context.Context, q tx.Tx, attemptID, moduleAtt
 		var version string
 		var entryDeadline sql.NullTime
 		if err := q.QueryRowContext(ctx,
-			"SELECT phase, policy_version, entry_deadline_at FROM assessment_module_boundaries WHERE module_attempt_id = ? AND attempt_id = ? FOR UPDATE",
+			"SELECT phase, policy_version, entry_deadline_at FROM assessment_module_boundaries WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundaries.module_attempt_id) AND attempt_id = ? FOR UPDATE",
 			moduleAttemptID, attemptID).Scan(&phase, &version, &entryDeadline); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return false, satBoundaryTransition{}, apperrors.New(apperrors.CodeConflict, "SAT module recovery boundary is missing.")
@@ -154,7 +154,7 @@ func beginSatModuleBoundaryTx(ctx context.Context, q tx.Tx, attemptID, moduleAtt
 			blocked, err := q.ExecContext(ctx, `
 				UPDATE assessment_module_boundaries
 				SET phase = 'blocked', next_action_at = NULL, revision = revision + 1
-				WHERE module_attempt_id = ? AND attempt_id = ? AND phase = 'preparing'
+				WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundaries.module_attempt_id) AND attempt_id = ? AND phase = 'preparing'
 				  AND entry_deadline_at <= UTC_TIMESTAMP(6)`, moduleAttemptID, attemptID)
 			if err != nil {
 				return false, satBoundaryTransition{}, err
@@ -170,7 +170,7 @@ func beginSatModuleBoundaryTx(ctx context.Context, q tx.Tx, attemptID, moduleAtt
 		if enforceEntryWindow && phase == "blocked" && entryDeadline.Valid {
 			var expired bool
 			if err := q.QueryRowContext(ctx, `SELECT entry_deadline_at <= UTC_TIMESTAMP(6)
-				FROM assessment_module_boundaries WHERE module_attempt_id = ? AND attempt_id = ?`,
+				FROM assessment_module_boundaries WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundaries.module_attempt_id) AND attempt_id = ?`,
 				moduleAttemptID, attemptID).Scan(&expired); err != nil {
 				return false, satBoundaryTransition{}, err
 			}
@@ -191,7 +191,7 @@ func lockSatModuleBoundaryTx(ctx context.Context, q tx.Tx, moduleAttemptID strin
 	err := q.QueryRowContext(ctx, `
 		SELECT module_attempt_id, attempt_id, phase, policy_version, work_deadline_at,
 		       entry_deadline_at, recovery_deadline_at, revision
-		FROM assessment_module_boundaries WHERE module_attempt_id = ? FOR UPDATE`, moduleAttemptID).
+		FROM assessment_module_boundaries WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundaries.module_attempt_id) FOR UPDATE`, moduleAttemptID).
 		Scan(&out.moduleAttemptID, &out.attemptID, &out.phase, &out.policyVersion,
 			&workDeadline, &entryDeadline, &recoveryDeadline, &out.revision)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -223,7 +223,7 @@ func setSatBoundaryPhaseTx(ctx context.Context, q tx.Tx, moduleAttemptID string,
 	res, err := q.ExecContext(ctx, `
 		UPDATE assessment_module_boundaries
 		SET phase = ?, next_action_at = ?, revision = revision + 1
-		WHERE module_attempt_id = ? AND phase = ?`, to, next, moduleAttemptID, from)
+		WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundaries.module_attempt_id) AND phase = ?`, to, next, moduleAttemptID, from)
 	if err != nil {
 		return err
 	}

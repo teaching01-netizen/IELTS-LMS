@@ -216,6 +216,20 @@ func admitInTx(ctx context.Context, q tx.Tx, cmd AdmitCommand, session string, i
 		}
 	}
 	out := Admission{AttemptID: row.ID, ClientSessionID: session, LeaseEpoch: row.LeaseEpoch, SingleWriter: enforced || claimable}
+	// Staff recovery is attempt-owned and provider-independent. While held (or
+	// returning), no ordinary admission may claim the empty writer slot or mint
+	// a credential. A working recovery admits only the browser bound at Begin.
+	// This check precedes the terminal branch: a sealed attempt under recovery
+	// must not hand out even a read credential through the ordinary path.
+	authority, err := ReadRecoveryAuthority(ctx, q, row.ID)
+	if err != nil {
+		return Admission{}, err
+	}
+	if authority.Control != nil && (!authority.Working() || authority.ActiveSessionID != session) {
+		out.Outcome = AdmissionBlocked
+		out.SingleWriter = true
+		return out, nil
+	}
 	switch {
 	case row.terminal():
 		out.Outcome = AdmissionClosed
@@ -270,7 +284,7 @@ func WriterPolicyOf(ctx context.Context, q interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }, attemptID string) (enforced bool, owner string, err error) {
 	var policy, active sql.NullString
-	err = q.QueryRowContext(ctx, `SELECT writer_policy, active_client_session_id FROM student_attempts WHERE id = ?`, attemptID).Scan(&policy, &active)
+	err = q.QueryRowContext(ctx, `SELECT CASE WHEN recovery_control IS NOT NULL THEN 'sat_single_writer_v1' ELSE writer_policy END, active_client_session_id FROM student_attempts WHERE id = ?`, attemptID).Scan(&policy, &active)
 	if err == sql.ErrNoRows {
 		return false, "", nil
 	}

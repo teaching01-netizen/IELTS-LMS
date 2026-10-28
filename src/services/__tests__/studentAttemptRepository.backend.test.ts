@@ -3,6 +3,7 @@ import {
   mapBackendStudentAttempt,
   resetStudentAttemptPendingMutationIndexedDbForTests,
   studentAttemptRepository,
+  prepareRecoveredStudentWriter,
 } from '../studentAttemptRepository';
 import type { StudentAttemptMutation } from '../../types/studentAttempt';
 
@@ -153,6 +154,31 @@ describe('studentAttemptRepository backend mode', () => {
     if (originalCryptoDescriptor) {
       Object.defineProperty(globalThis, 'crypto', originalCryptoDescriptor);
     }
+  });
+
+  it('quarantines original-browser legacy drafts before a new writer and preserves fresh work on retry', async () => {
+    const old = mapBackendStudentAttempt(buildBackendAttempt({ leaseEpoch: 1, activeClientSessionId: 'old-writer' }));
+    await studentAttemptRepository.saveAttempt(old);
+    const pending: StudentAttemptMutation = { id: 'old-unsent', attemptId: old.id, scheduleId: old.scheduleId, timestamp: old.updatedAt, type: 'answer', payload: { questionId: 'q1', value: 'old unsent answer' } };
+    await studentAttemptRepository.savePendingMutations(old.id, [pending]);
+    const checkpointKey = `ielts_student_answer_checkpoint_v1:${old.id}`;
+    const rawCheckpoint = JSON.stringify({ attemptId: old.id, savedAt: old.updatedAt, mutationVersion: 1, mutations: [pending] });
+    localStorage.setItem(checkpointKey, rawCheckpoint);
+
+    await prepareRecoveredStudentWriter(old.id, 'recovery-writer');
+    expect(await studentAttemptRepository.getPendingMutations(old.id)).toEqual([]);
+    expect(await studentAttemptRepository.getPendingMutations(`recovery-quarantine:${old.id}:recovery-writer`)).toEqual([pending]);
+    expect(localStorage.getItem(checkpointKey)).toBeNull();
+    expect(localStorage.getItem(`${checkpointKey}:recovery-quarantine:recovery-writer`)).toBe(rawCheckpoint);
+
+    const current = mapBackendStudentAttempt(buildBackendAttempt({ leaseEpoch: 3, activeClientSessionId: 'recovery-writer', answers: { q1: 'server accepted answer' } }));
+    await studentAttemptRepository.saveAttempt(current);
+    const stored = (await studentAttemptRepository.getAllAttempts()).find(attempt => attempt.id === current.id);
+    expect(stored?.answers).toEqual({ q1: 'server accepted answer' });
+    const fresh = { ...pending, id: 'fresh-unsent', payload: { questionId: 'q1', value: 'fresh writer answer' } } as StudentAttemptMutation;
+    await studentAttemptRepository.savePendingMutations(current.id, [fresh]);
+    await prepareRecoveredStudentWriter(current.id, 'recovery-writer');
+    expect(await studentAttemptRepository.getPendingMutations(current.id)).toEqual([fresh]);
   });
 
   it('bootstraps a student attempt through the backend and caches it locally', async () => {

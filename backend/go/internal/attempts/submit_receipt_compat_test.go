@@ -51,7 +51,7 @@ func TestSubmitWithoutExpectedRevisionWritesReceipt(t *testing.T) {
 		WithArgs(uint64(9), sqlmock.AnyArg(), "att-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO attempt_submissions_v2").
-		WithArgs("att-1", "sub-live", uint64(3), uint64(7), sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(9), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WithArgs("att-1", "sub-live", uint64(3), uint64(7), sqlmock.AnyArg(), sqlmock.AnyArg(), uint64(9), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "att-1").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 

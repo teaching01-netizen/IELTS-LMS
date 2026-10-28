@@ -1,3 +1,4 @@
+import { DeviceRecoveryAction } from '../../../features/proctor/ui/DeviceRecoveryDialog';
 import { AlertTriangle, ChevronRight, MessageSquareWarning, Pause, Play, Timer } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { StudentSession } from '../../../types';
@@ -271,6 +272,8 @@ export function StudentDetail({
           {student.studentId}{student.email ? ` · ${student.email}` : ''}
         </p>
       </div>
+
+      <DeviceRecoveryAction scheduleId={student.scheduleId} attemptId={student.id} disabled={blocked} />
 
       {attentionFirst ? <StudentAttention student={student} count={attentionCount} /> : null}
 

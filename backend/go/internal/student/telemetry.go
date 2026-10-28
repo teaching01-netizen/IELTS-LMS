@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"github.com/google/uuid"
@@ -57,6 +58,7 @@ type telemetryAttempt struct {
 	UserID                sql.NullString
 	CandidateName         string
 	ActiveClientSessionID sql.NullString
+	RecoveryControl       sql.NullString
 	Integrity             string
 	Recovery              string
 	Violations            string
@@ -85,6 +87,9 @@ func (s *Service) RecordPrecheck(ctx context.Context, req PrecheckRequest) (map[
 		return nil, err
 	}
 	if err := authorizeTelemetryAttempt(ctx, tx, &attempt, req.StudentKey, req.ActorUserID); err != nil {
+		return nil, err
+	}
+	if err := authorizeTelemetryRecovery(attempt, req.ClientSessionID); err != nil {
 		return nil, err
 	}
 	clientSessionID, err := ensureTelemetryClientSession(ctx, tx, attempt, req.ClientSessionID)
@@ -167,6 +172,9 @@ func (s *Service) RecordHeartbeat(ctx context.Context, req HeartbeatRequest) (ma
 		return nil, false, err
 	}
 	if err := authorizeTelemetryAttempt(ctx, tx, &attempt, req.StudentKey, req.ActorUserID); err != nil {
+		return nil, false, err
+	}
+	if err := authorizeTelemetryRecovery(attempt, req.ClientSessionID); err != nil {
 		return nil, false, err
 	}
 	clientSessionID, err := ensureTelemetryClientSession(ctx, tx, attempt, req.ClientSessionID)
@@ -328,11 +336,11 @@ func loadTelemetryAttempt(ctx context.Context, q interface {
 	var attempt telemetryAttempt
 	err := q.QueryRowContext(ctx, `
 		SELECT id, schedule_id, student_key, user_id, candidate_name,
-		       active_client_session_id, CAST(integrity AS CHAR), CAST(recovery AS CHAR),
+		       active_client_session_id, COALESCE(recovery_control, ''), CAST(integrity AS CHAR), CAST(recovery AS CHAR),
 		       CAST(violations_snapshot AS CHAR)
 		FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE`, attemptID, scheduleID).Scan(
 		&attempt.ID, &attempt.ScheduleID, &attempt.StudentKey, &attempt.UserID, &attempt.CandidateName,
-		&attempt.ActiveClientSessionID, &attempt.Integrity, &attempt.Recovery, &attempt.Violations)
+		&attempt.ActiveClientSessionID, &attempt.RecoveryControl, &attempt.Integrity, &attempt.Recovery, &attempt.Violations)
 	if err == sql.ErrNoRows {
 		return telemetryAttempt{}, apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
 	}
@@ -360,6 +368,30 @@ func authorizeTelemetryAttempt(ctx context.Context, q interface {
 		attempt.UserID = sql.NullString{String: actorUserID, Valid: true}
 	}
 	return nil
+}
+
+// authorizeTelemetryRecovery keeps precheck/heartbeat owner claims inside the
+// staff recovery authority. While held no client session may recreate an
+// owner; while working only the browser bound at Begin may report telemetry.
+// The check is provider-independent and runs under the attempt row lock.
+func authorizeTelemetryRecovery(attempt telemetryAttempt, requested string) error {
+	control, err := examdomain.ParseRecoveryControl([]byte(attempt.RecoveryControl.String))
+	if err != nil {
+		return apperrors.New(apperrors.CodeConflict, "Staff recovery state is unavailable.")
+	}
+	if control == nil {
+		return nil
+	}
+	requested = strings.TrimSpace(requested)
+	if requested == "" && attempt.ActiveClientSessionID.Valid {
+		requested = strings.TrimSpace(attempt.ActiveClientSessionID.String)
+	}
+	if control.Phase == examdomain.RecoveryPhaseWorking &&
+		requested != "" && attempt.ActiveClientSessionID.Valid &&
+		strings.TrimSpace(attempt.ActiveClientSessionID.String) == requested {
+		return nil
+	}
+	return apperrors.New(apperrors.CodeActiveSessionSuperseded, "Attempt is under staff recovery.")
 }
 
 func ensureTelemetryClientSession(ctx context.Context, q interface {

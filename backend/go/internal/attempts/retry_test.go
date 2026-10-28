@@ -30,7 +30,7 @@ func TestSaveRetriesDeadlockOnce(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"answers", "writing_answers", "flags"}).AddRow("{}", "{}", "{}"))
 	mock.ExpectExec("UPDATE student_attempts SET answers=").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("INSERT INTO attempt_responses_v2").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("INSERT INTO attempt_mutations_v2").WillReturnError(&mysql.MySQLError{Number:1213,Message:"Deadlock found when trying to get lock; try restarting transaction"})
+	mock.ExpectExec("INSERT INTO attempt_mutations_v2").WillReturnError(&mysql.MySQLError{Number: 1213, Message: "Deadlock found when trying to get lock; try restarting transaction"})
 	mock.ExpectRollback()
 
 	// Retry: full chain again, then commit.

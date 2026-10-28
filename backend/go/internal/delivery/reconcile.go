@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"example.com/ielts-proctoring/internal/attempts"
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
@@ -90,13 +91,17 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		hubEvents = nil
 		autoStartLag = nil
 		recoveryTransitions = nil
-		var attemptRow, providerKey string
+		var attemptRow, providerKey, rawRecovery string
 		if err := t.QueryRowContext(ctx,
-			"SELECT id, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), '') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
-			attemptID, scheduleID).Scan(&attemptRow, &providerKey); err != nil {
+			"SELECT id, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), ''), COALESCE(recovery_control,'') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&attemptRow, &providerKey, &rawRecovery); err != nil {
 			if err == sql.ErrNoRows {
 				return nil
 			}
+			return err
+		}
+		recoveryControl, err := examdomain.ParseRecoveryControl([]byte(rawRecovery))
+		if err != nil {
 			return err
 		}
 		var runtimeID, runtimeStatus, timingModel string
@@ -109,6 +114,18 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				return nil
 			}
 			return err
+		}
+		if recoveryControl != nil && recoveryControl.Phase == examdomain.RecoveryPhaseWorking {
+			if runtimeStatus == "completed" {
+				var reason string
+				if err := t.QueryRowContext(ctx, `SELECT COALESCE(completion_reason,'') FROM exam_session_runtimes WHERE schedule_id=?`, scheduleID).Scan(&reason); err != nil {
+					return err
+				}
+				if reason == "time_expired" {
+					runtimeStatus = "live"
+				}
+			}
+			timingModel = examruntime.TimingModelPersonal
 		}
 		if examruntime.IsSatPersonal(timingModel) {
 			if err := t.QueryRowContext(ctx, "SELECT COALESCE(sat_handoff_mode, 'server_start') FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&handoffMode); err != nil {
@@ -231,8 +248,8 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			}
 		}
 		var followup *moduleFollowupContext
-		if !examruntime.IsSatPersonal(timingModel) || recoveryPolicyLoaded {
-			followup = &moduleFollowupContext{
+		if !examruntime.IsSatPersonal(timingModel) || recoveryPolicyLoaded || recoveryControl != nil {
+			followup = &moduleFollowupContext{recoveryControl: recoveryControl,
 				timingModel:    timingModel,
 				handoffMode:    handoffMode,
 				recoveryPolicy: recoveryPolicy,
@@ -259,6 +276,9 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 					shouldComplete = true
 				}
 				break
+			}
+			if recoveryControl != nil && recoveryControl.Phase == examdomain.RecoveryPhaseWorking && mod.id != recoveryControl.Target.ModuleAttemptID {
+				return nil
 			}
 			if providerKey == "sat" && examruntime.IsSatPersonal(timingModel) {
 				handled, boundaryChanged, transition, err := reconcileSatRecoveryBoundaryTx(ctx, t, attemptID, mod)
@@ -326,7 +346,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			if terminalModules > 0 {
 				var terminalCount int
 				if err := t.QueryRowContext(ctx,
-					"SELECT COUNT(*) FROM attempt_terminalizations WHERE attempt_id = ?",
+					"SELECT COUNT(*) FROM attempt_terminalizations WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id=attempt_terminalizations.attempt_id)",
 					attemptID).Scan(&terminalCount); err != nil {
 					return err
 				}
@@ -414,7 +434,7 @@ func (s *Service) reconcileSteady(ctx context.Context, attemptID string) (bool, 
 	}
 	var receipts int
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM attempt_terminalizations WHERE attempt_id = ?`,
+		`SELECT COUNT(*) FROM attempt_terminalizations WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id=attempt_terminalizations.attempt_id)`,
 		attemptID).Scan(&receipts); err != nil {
 		return false, err
 	}
@@ -587,7 +607,11 @@ func (s *Service) ReconcilePersonalTimeouts(ctx context.Context, asOf time.Time,
 		return 0, nil
 	}
 	_, changed, err := s.reconcileExpiredPersonalModules(ctx, asOf, batchSize)
-	return changed, err
+	if err != nil {
+		return changed, err
+	}
+	recovered, err := s.reconcileRecoveryTimeouts(ctx, batchSize)
+	return changed + recovered, err
 }
 
 // reconcileExpiredPersonalModules uses an indexed started-at scan, then the
@@ -626,7 +650,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			  AND a.submitted_at IS NULL
 			  AND COALESCE(a.proctor_status, 'active') <> 'paused'
 			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
-			  AND NOT EXISTS (SELECT 1 FROM assessment_module_boundaries owned WHERE owned.module_attempt_id = m.id)
+			  AND NOT EXISTS (SELECT 1 FROM assessment_module_boundaries owned WHERE owned.module_attempt_id = m.id AND owned.run_generation = m.run_generation)
 			  AND m.id > ?
 			ORDER BY m.id LIMIT ?`, closingAsOf, int64(attempts.SATHandoff().CloseWindow/time.Second), asOf.UTC(), cursor, limit)
 		if err != nil {
@@ -670,7 +694,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 		const dueBoundaries = `
 				SELECT b.next_action_at, b.module_attempt_id, a.id, a.schedule_id
 				FROM assessment_module_boundaries b
-				JOIN assessment_module_attempts m ON m.id = b.module_attempt_id
+				JOIN assessment_module_attempts m ON m.id = b.module_attempt_id AND m.run_generation = b.run_generation
 				JOIN student_attempts a ON a.id = b.attempt_id
 				JOIN exam_schedules s ON s.id = a.schedule_id
 				JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id

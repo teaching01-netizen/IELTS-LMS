@@ -83,6 +83,7 @@ func (s *Service) Impact(ctx context.Context, draftID string) (*ImpactReport, er
 		rows, err := s.db.QueryContext(ctx, `
 			SELECT ar.id, CAST(JSON_EXTRACT(ar.score_payload, '$.classroomRaw.sections') AS CHAR)
 			FROM assessment_results ar
+			JOIN student_attempts a ON a.id = ar.attempt_id AND a.terminal_generation = ar.terminal_generation AND a.submitted_at IS NOT NULL
 			WHERE ar.provider_key = 'sat' AND ar.release_status = 'released' AND ar.id > ?
 			  AND JSON_EXTRACT(ar.score_payload, '$.classroomRaw.sections') IS NOT NULL
 			ORDER BY ar.id LIMIT ?`, cursor, impactBatch)

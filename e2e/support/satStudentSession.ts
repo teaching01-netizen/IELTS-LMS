@@ -75,6 +75,7 @@ export async function createRunningSatSession(
     .first();
   await expect(sessionRow).toBeVisible({ timeout: 30_000 });
   await sessionRow.click();
+  await expect(adminPage).toHaveURL(/\/sat\/sessions\/[0-9a-f-]+$/i, { timeout: 30_000 });
   const scheduleId = new URL(adminPage.url()).pathname.split("/").filter(Boolean).at(-1);
   if (!scheduleId) throw new Error("SAT room route did not include a schedule id.");
   await expect(adminPage).toHaveURL(new RegExp(`/sat/sessions/${scheduleId}$`));

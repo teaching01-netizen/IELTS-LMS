@@ -151,7 +151,7 @@ func (s *Service) ResolveSATRecovery(
 		if err := t.QueryRowContext(ctx, `
 			SELECT request_hash, CAST(receipt AS CHAR)
 			FROM assessment_module_boundary_resolutions
-			WHERE module_attempt_id = ? AND resolution_id = ? FOR UPDATE`, module.id, req.ResolutionID).
+			WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundary_resolutions.module_attempt_id) AND resolution_id = ? FOR UPDATE`, module.id, req.ResolutionID).
 			Scan(&storedHash, &storedReceipt); err != nil && err != sql.ErrNoRows {
 			return err
 		}
@@ -263,7 +263,7 @@ func (s *Service) ResolveSATRecovery(
 				SET phase = 'settled', next_action_at = NULL, resolution = 'continue_confirmed',
 				    resolution_id = ?, resolution_hash = ?, resolution_reason = ?, resolution_receipt = ?,
 				    resolved_by = ?, resolved_at = ?, revision = revision + 1
-				WHERE module_attempt_id = ? AND attempt_id = ? AND phase = 'blocked'
+				WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundaries.module_attempt_id) AND attempt_id = ? AND phase = 'blocked'
 				  AND resolution IS NULL AND revision = ?`,
 				req.ResolutionID, requestHash, nullableResolutionReason(req.Reason), string(receiptJSON), actorID, now.UTC(),
 				module.id, attemptID, boundary.revision)
@@ -297,10 +297,10 @@ func (s *Service) ResolveSATRecovery(
 		}
 		if _, err := t.ExecContext(ctx, `
 			INSERT INTO assessment_module_boundary_resolutions
-			    (module_attempt_id, attempt_id, resolution_id, request_hash, action, actor_type, actor_id, reason, receipt, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			    (module_attempt_id, attempt_id, resolution_id, request_hash, action, actor_type, actor_id, reason, receipt, created_at, run_generation)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT run_generation FROM assessment_module_attempts WHERE id = ?))`,
 			module.id, attemptID, req.ResolutionID, requestHash, req.Action, actorType,
-			actorID, nullableResolutionReason(req.Reason), string(receiptJSON), now.UTC()); err != nil {
+			actorID, nullableResolutionReason(req.Reason), string(receiptJSON), now.UTC(), module.id); err != nil {
 			return err
 		}
 		newState := "settled"
@@ -362,7 +362,7 @@ func activateSATRecoveryEntryTx(
 		SET phase = 'working', work_deadline_at = TIMESTAMPADD(SECOND, ? + ?, ?),
 		    entry_deadline_at = NULL, recovery_deadline_at = TIMESTAMPADD(SECOND, ? + ? + ? + ?, ?),
 		    next_action_at = TIMESTAMPADD(SECOND, ? + ?, ?), revision = revision + 1
-		WHERE module_attempt_id = ? AND attempt_id = ? AND phase = 'blocked' AND revision = ?
+		WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundaries.module_attempt_id) AND attempt_id = ? AND phase = 'blocked' AND revision = ?
 		  AND policy_version = ?`,
 		module.allocatedSeconds, module.extensionSeconds+module.accumulatedPausedSeconds, now,
 		module.allocatedSeconds, module.extensionSeconds, module.accumulatedPausedSeconds, policy.RecoverySeconds, now,

@@ -50,7 +50,7 @@ func materializeClassroom(t *testing.T, mode string, sections *sqlmock.Rows, wan
 		}
 	}
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_results")).
-		WithArgs(sqlmock.AnyArg(), "att-1", wantInsert[0], sqlmock.AnyArg(), wantInsert[1]).
+		WithArgs(sqlmock.AnyArg(), "att-1", wantInsert[0], sqlmock.AnyArg(), wantInsert[1], "att-1").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
@@ -101,7 +101,7 @@ func TestClassroomScoreFailureKeepsReceiptAndWithholds(t *testing.T) {
 		WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(true))
 	mock.ExpectQuery(regexp.QuoteMeta(rawScoreQuery)).WithArgs("att-1").WillReturnError(sql.ErrConnDone)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_results")).
-		WithArgs(sqlmock.AnyArg(), "att-1", "pending", sqlmock.AnyArg(), "pending").
+		WithArgs(sqlmock.AnyArg(), "att-1", "pending", sqlmock.AnyArg(), "pending", "att-1").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 	svc := NewService(tx.NewRunner(db), SQLTerminalizationRepository{}, SQLOutboxEnqueuer{})

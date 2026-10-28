@@ -1,3 +1,5 @@
+import { useListeningCheckpoint } from '@student/hooks/useListeningCheckpoint';
+import type { ListeningCheckpointAuthorization } from '@student/infrastructure/audioCheckpointGateway';
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { DiagramLabelingBlock, ExamState, QuestionAnswer } from "../../types";
 import { Play, Pause, SkipBack, SkipForward, Volume2 } from "lucide-react";
@@ -20,6 +22,7 @@ import type { StudentLayoutMode } from "./layout/studentLayoutMode";
 const emptyCaptionTrackUrl = "data:text/vtt;charset=utf-8,WEBVTT%0A%0A";
 
 interface StudentListeningProps {
+ checkpointAuthorization?: ListeningCheckpointAuthorization | undefined;
   state: ExamState;
   answers: Record<string, QuestionAnswer>;
   onAnswerChange: (
@@ -75,6 +78,7 @@ export function StudentListening({
   onPlaybackRateChange,
   registerLiveAnswer,
   persistenceKeyBase,
+ checkpointAuthorization,
 }: StudentListeningProps) {
   // The exam shell (StudentApp) is the single owner of the zoom preference.
   const isTabletMode = Boolean(tabletMode);
@@ -147,6 +151,7 @@ export function StudentListening({
   const hasAudioSource = Boolean(activePart?.audioUrl);
   const canPlayAudio = audioPlaybackEnabled && hasAudioSource;
   const shouldShowAudioPanel = audioPlaybackEnabled;
+ const checkpointError = useListeningCheckpoint(audioRef, checkpointAuthorization, activePart?.id, activePart?.audioUrl, canPlayAudio);
   const activeDiagramBlocks = useMemo(() => {
     const diagramBlocks = (activePart?.blocks ?? []).filter(
       (block): block is DiagramLabelingBlock => block.type === "DIAGRAM_LABELING"
@@ -390,6 +395,8 @@ export function StudentListening({
           </h2>
 
           {canPlayAudio ? (
+            <>
+            {checkpointError && <p role="status" className="text-sm text-amber-700">{checkpointError}</p>}
             <audio
               ref={audioRef}
               src={activePart.audioUrl}
@@ -421,6 +428,7 @@ export function StudentListening({
                 label="Transcript"
               />
             </audio>
+            </>
           ) : null}
 
           {shouldShowAudioPanel ? (

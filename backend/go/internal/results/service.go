@@ -280,7 +280,7 @@ type ACTScienceRow struct {
 // tenant actors narrow to their organization plus a live staff assignment;
 // actors with neither see zero rows (AND 1 = 0).
 func (s *Service) Analytics(ctx context.Context, actor auth.ActorContext) (Analytics, error) {
-	query := "SELECT COUNT(*) AS total_results, COUNT(CASE WHEN results.release_status = \u0027released\u0027 THEN 1 END) AS released_results, COUNT(CASE WHEN results.release_status = \u0027ready_to_release\u0027 THEN 1 END) AS ready_to_release, COALESCE(AVG(results.overall_band), 0) AS average_overall_band FROM student_results results JOIN student_submissions submissions ON submissions.id = results.submission_id JOIN exam_schedules schedules ON schedules.id = submissions.schedule_id WHERE submissions.provider_key = \u0027ielts\u0027 AND results.version = (SELECT MAX(latest.version) FROM student_results latest WHERE latest.submission_id = results.submission_id)"
+	query := "SELECT COUNT(*) AS total_results, COUNT(CASE WHEN results.release_status = \u0027released\u0027 THEN 1 END) AS released_results, COUNT(CASE WHEN results.release_status = \u0027ready_to_release\u0027 THEN 1 END) AS ready_to_release, COALESCE(AVG(results.overall_band), 0) AS average_overall_band FROM student_results results JOIN student_submissions submissions ON submissions.id = results.submission_id AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = submissions.attempt_id AND current_attempt.terminal_generation = submissions.terminal_generation AND current_attempt.submitted_at IS NOT NULL) JOIN exam_schedules schedules ON schedules.id = submissions.schedule_id WHERE submissions.provider_key = \u0027ielts\u0027 AND results.version = (SELECT MAX(latest.version) FROM student_results latest WHERE latest.submission_id = results.submission_id)"
 	args := []any{}
 	if actor.IsPlatformRead() {
 		// Platform scope: no additional predicate.
@@ -366,7 +366,7 @@ func (s *Service) listIELTSDashboard(ctx context.Context, actor auth.ActorContex
 			version.version_number, sch.cohort_name, sch.institution,
 			submission.submitted_at
 		FROM student_results result
-		JOIN student_submissions submission ON submission.id = result.submission_id
+		JOIN student_submissions submission ON submission.id = result.submission_id AND EXISTS (SELECT 1 FROM student_attempts current_attempt WHERE current_attempt.id = submission.attempt_id AND current_attempt.terminal_generation = submission.terminal_generation AND current_attempt.submitted_at IS NOT NULL)
 		JOIN exam_schedules sch ON sch.id = submission.schedule_id
 		JOIN exam_versions version ON version.id = submission.published_version_id
 		WHERE submission.provider_key = 'ielts'
@@ -441,7 +441,7 @@ func (s *Service) listAssessmentDashboard(ctx context.Context, actor auth.ActorC
 				''
 			)
 		FROM assessment_results ar
-		JOIN student_attempts a ON a.id = ar.attempt_id
+		JOIN student_attempts a ON a.id = ar.attempt_id AND a.terminal_generation = ar.terminal_generation AND a.submitted_at IS NOT NULL
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		JOIN exam_versions version ON version.id = a.published_version_id
 		WHERE a.submitted_at IS NOT NULL`
@@ -581,7 +581,7 @@ func (s *Service) ListReadyToRelease(ctx context.Context, actor auth.ActorContex
 			a.schedule_id, a.exam_id, sch.exam_title, version.version_number,
 			a.candidate_id, a.candidate_name, a.candidate_email, sch.cohort_name, a.submitted_at
 		FROM assessment_results ar
-		JOIN student_attempts a ON a.id = ar.attempt_id
+		JOIN student_attempts a ON a.id = ar.attempt_id AND a.terminal_generation = ar.terminal_generation AND a.submitted_at IS NOT NULL
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		JOIN exam_versions version ON version.id = a.published_version_id
 		WHERE ar.outcome_status = 'scored' AND ar.release_status = 'ready_to_release'`
@@ -639,7 +639,7 @@ func (s *Service) ListSATResults(ctx context.Context, actor auth.ActorContext) (
 			a.schedule_id, a.exam_id, sch.exam_title, version.version_number,
 			a.candidate_id, a.candidate_name, a.candidate_email, sch.cohort_name, a.submitted_at
 		FROM assessment_results ar
-		JOIN student_attempts a ON a.id = ar.attempt_id
+		JOIN student_attempts a ON a.id = ar.attempt_id AND a.terminal_generation = ar.terminal_generation AND a.submitted_at IS NOT NULL
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		JOIN exam_versions version ON version.id = a.published_version_id
 		WHERE ar.provider_key = 'sat'
@@ -709,7 +709,7 @@ func (s *Service) ListSATAccessGroups(ctx context.Context, actor auth.ActorConte
 		LEFT JOIN assessment_access_links access ON access.schedule_id = sch.id
 		LEFT JOIN student_attempts a ON a.schedule_id = sch.id
 		LEFT JOIN (SELECT attempt_id, MIN(started_at) AS started_at FROM assessment_module_attempts GROUP BY attempt_id) st ON st.attempt_id = a.id
-		LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat'
+		LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat' AND ar.terminal_generation = a.terminal_generation AND a.submitted_at IS NOT NULL
 		WHERE 1 = 1` + scope + `
 		GROUP BY sch.id, access.id, access.name, access.lifecycle_state,
 			sch.exam_id, sch.exam_title, version.version_number, sch.cohort_name
@@ -763,7 +763,7 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 	from := ` FROM student_attempts a
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		JOIN exam_entities exam ON exam.id = a.exam_id AND exam.provider_key = 'sat'
-		LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat'`
+		LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat' AND ar.terminal_generation = a.terminal_generation AND a.submitted_at IS NOT NULL`
 	where := ` WHERE a.exam_id = ? AND a.schedule_id = ?` + scope
 	args := append([]any{examID, scheduleID}, scopeArgs...)
 	needle = strings.TrimSpace(needle)
@@ -979,7 +979,7 @@ func (s *Service) GetSATResult(ctx context.Context, actor auth.ActorContext, res
 			a.candidate_id, a.candidate_name, a.candidate_email, sch.cohort_name, a.submitted_at,
 			(SELECT MIN(ma.started_at) FROM assessment_module_attempts ma WHERE ma.attempt_id = a.id)
 		FROM assessment_results ar
-		JOIN student_attempts a ON a.id = ar.attempt_id
+		JOIN student_attempts a ON a.id = ar.attempt_id AND a.terminal_generation = ar.terminal_generation AND a.submitted_at IS NOT NULL
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		JOIN exam_versions version ON version.id = a.published_version_id
 		WHERE ar.id = ? AND ar.provider_key = 'sat'` + scope
@@ -1053,7 +1053,7 @@ func (s *Service) ListACTScience(ctx context.Context, scheduleID string, limit i
 			COALESCE(ar.release_status, 'ready_to_release')
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
-		LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'act'
+		LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'act' AND ar.terminal_generation = a.terminal_generation AND a.submitted_at IS NOT NULL
 		WHERE e.provider_key = 'act'
 		  AND a.submitted_at IS NOT NULL`
 	args := []any{}
@@ -1097,7 +1097,7 @@ func (s *Service) RematerializeFromSnapshot(ctx context.Context, actor auth.Acto
 	err := s.db.QueryRowContext(ctx, `
 		SELECT submission_id, student_id, release_status, overall_band, section_bands,
 			listening_result, reading_result, writing_results, speaking_result
-		FROM student_results WHERE id = ?`, resultID).
+		FROM student_results WHERE id = ? AND EXISTS (SELECT 1 FROM student_submissions sub JOIN student_attempts a ON a.id = sub.attempt_id AND a.terminal_generation = sub.terminal_generation AND a.submitted_at IS NOT NULL WHERE sub.id = student_results.submission_id)`, resultID).
 		Scan(&submissionID, &studentID, &release, &band, &bands,
 			&payloadListening, &payloadReading, &payloadWriting, &payloadSpeaking)
 	if err == sql.ErrNoRows {

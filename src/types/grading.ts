@@ -231,6 +231,8 @@ export interface GradingSession {
  * Level 2: One row per student attempt in session detail
  */
 export interface StudentSubmission {
+  terminalGeneration?: number;
+  historical?: boolean;
   id: string;
   submissionId: string;
   scheduleId: string;

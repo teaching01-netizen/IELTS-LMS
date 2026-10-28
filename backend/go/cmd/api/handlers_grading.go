@@ -498,7 +498,7 @@ func recoverSealedObjectiveAnswersForReview(ctx context.Context, db *sql.DB, sub
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(s.attempt_id, ''), COALESCE(a.protocol_version, 1)
 		FROM student_submissions s
-		LEFT JOIN student_attempts a ON a.id = s.attempt_id
+		LEFT JOIN student_attempts a ON a.id = s.attempt_id AND a.terminal_generation = s.terminal_generation AND a.submitted_at IS NOT NULL
 		WHERE s.id = ? AND s.provider_key = 'ielts'`, submissionID).Scan(&attemptID, &protocolVersion); err == sql.ErrNoRows {
 		return nil
 	} else if err != nil {

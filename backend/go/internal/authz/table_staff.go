@@ -175,7 +175,14 @@ func init() {
 		// live proctor assignment, 404-collapse).
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/route":            {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/recovery/resolve": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
-		"GET /sessions/{scheduleID}/route-queue":                            {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		// Staff-assisted device recovery (handler: requireStaffSchedule +
+		// requireProctorAttemptScope, 404-collapse; the service rechecks the
+		// attempt belongs to the schedule and the rollout gate).
+		"GET /sessions/{scheduleID}/attempts/{attemptID}/device-recovery":                   {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/device-recovery/restore-original": {MinRoles: []string{RoleAdmin, RoleProctor}},
+		"POST /{scheduleID}/attempts/{attemptID}/device-recovery/original-ready":            {MinRoles: []string{RoleStudent}},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/device-recovery":                  {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"GET /sessions/{scheduleID}/route-queue":                                            {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 
 		// library passages/questions.
 		"GET /passages":                         {MinRoles: readStaff},
@@ -283,10 +290,12 @@ func init() {
 		// a full-path key here silently denies every handshake (403).
 		"GET /ws/authoring": {MinRoles: readStaff},
 		// V2: attempt bearer credential (handler).
-		"POST /{attemptID}/responses:batch": {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{attemptID}/submit":          {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{attemptID}/takeover":        {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{attemptID}/responses":        {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/audio-checkpoint":  {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/audio-checkpoint": {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{attemptID}/responses:batch":   {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{attemptID}/submit":            {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{attemptID}/takeover":          {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{attemptID}/responses":          {Bearer: true, Scope: ScopeAttemptOwner},
 	} {
 		Table[k] = v
 	}

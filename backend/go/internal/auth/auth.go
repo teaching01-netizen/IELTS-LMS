@@ -29,6 +29,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/crypto"
+	"example.com/ielts-proctoring/internal/platform/tx"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
@@ -244,6 +245,28 @@ type Session struct {
 	Proof          SessionProof
 }
 
+// RecoveryScoped reports whether this session exists only to continue one
+// staff-approved attempt. Such sessions never gain general account authority.
+func (s *Session) RecoveryScoped() bool {
+	return s != nil && s.Proof.IsRecovery()
+}
+
+// RecoveryAttemptID returns the bound attempt for a recovery session.
+func (s *Session) RecoveryAttemptID() string {
+	if s == nil {
+		return ""
+	}
+	return s.Proof.RecoveryAttemptID
+}
+
+// RecoveryScheduleID returns the schedule derived from the bound attempt.
+func (s *Session) RecoveryScheduleID() string {
+	if s == nil {
+		return ""
+	}
+	return s.Proof.RecoveryScheduleID
+}
+
 // idleTimeoutFor returns the idle window: 30m staff, 60m student.
 func idleTimeoutFor(role string, cfg config.Config) time.Duration {
 	if role == RoleStudent {
@@ -280,7 +303,40 @@ func SessionExpiry(cfg config.Config, role string, now time.Time) (expiresAt, id
 // CreateSession inserts a user_sessions row + a created audit event and
 // returns the session id, the raw bearer session token (only copy) and the
 // csrf token. now should be UTC (callers may pass DB time).
+//
+// It remains the public entry point for flows that own no transaction. The
+// recovery Begin path calls CreateSessionInTx instead so the scoped session
+// and the attempt credential commit exactly once.
 func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, role string, proof SessionProof, userAgentHash *string, ipMetadata *string, now time.Time) (sessionID, sessionToken, csrfToken string, err error) {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		// Round 152: same client-gone honesty as the issuance re-read —
+		// a canceled begin is a gone client, not an INTERNAL.
+		if isClientGone(err) {
+			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+		}
+		return "", "", "", fmt.Errorf("auth: create session begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	sessionID, sessionToken, csrfToken, err = CreateSessionInTx(ctx, tx, cfg, userID, role, proof, userAgentHash, ipMetadata, now)
+	if err != nil {
+		return "", "", "", err
+	}
+	if err := tx.Commit(); err != nil {
+		// Round 158: a commit racing a gone client is retryable 503.
+		if isClientGone(err) {
+			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+		}
+		return "", "", "", fmt.Errorf("auth: create session commit: %w", err)
+	}
+	return sessionID, sessionToken, csrfToken, nil
+}
+
+// CreateSessionInTx inserts a user_sessions row + a created audit event into
+// the caller's transaction and returns the uncommitted credentials. The
+// caller commits; on any error the whole transaction (including a recovery
+// attempt credential) rolls back.
+func CreateSessionInTx(ctx context.Context, q tx.Tx, cfg config.Config, userID, role string, proof SessionProof, userAgentHash *string, ipMetadata *string, now time.Time) (sessionID, sessionToken, csrfToken string, err error) {
 	if err := proof.validate(role); err != nil {
 		return "", "", "", err
 	}
@@ -297,18 +353,8 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 	expiresAt, idleAt := SessionExpiry(cfg, role, now)
 	tokenHash := SHA256Hex(sessionToken)
 
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		// Round 152: same client-gone honesty as the issuance re-read —
-		// a canceled begin is a gone client, not an INTERNAL.
-		if isClientGone(err) {
-			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
-		}
-		return "", "", "", fmt.Errorf("auth: create session begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	var currentRole, currentState string
-	if err := tx.QueryRowContext(ctx, "SELECT role, state FROM users WHERE id = ? FOR SHARE", userID).Scan(&currentRole, &currentState); err != nil {
+	if err := q.QueryRowContext(ctx, "SELECT role, state FROM users WHERE id = ? FOR SHARE", userID).Scan(&currentRole, &currentState); err != nil {
 		return "", "", "", err
 	}
 	if currentRole != role || currentState != "active" {
@@ -323,9 +369,9 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 	if ipMetadata != nil {
 		ipMeta = *ipMetadata
 	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO user_sessions (id, user_id, session_token_hash, csrf_token, role_snapshot, issued_at, last_seen_at, expires_at, idle_timeout_at, user_agent_hash, ip_metadata, authentication_source, practice_schedule_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''))`,
-		sessionID, userID, tokenHash, csrfToken, role, now, now, expiresAt, idleAt, ua, ipMeta, proof.Source, proof.PracticeScheduleID); err != nil {
+	if _, err := q.ExecContext(ctx,
+		`INSERT INTO user_sessions (id, user_id, session_token_hash, csrf_token, role_snapshot, issued_at, last_seen_at, expires_at, idle_timeout_at, user_agent_hash, ip_metadata, authentication_source, practice_schedule_id, recovery_attempt_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
+		sessionID, userID, tokenHash, csrfToken, role, now, now, expiresAt, idleAt, ua, ipMeta, proof.Source, proof.PracticeScheduleID, proof.RecoveryAttemptID); err != nil {
 		// Round 157: same client-gone honesty (r156: 5 masked 500s) —
 		// a client gone mid-session-row insert is retryable 503.
 		if isClientGone(err) {
@@ -333,7 +379,7 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 		}
 		return "", "", "", fmt.Errorf("auth: insert user_sessions: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := q.ExecContext(ctx,
 		`INSERT INTO user_session_events (id, session_id, user_id, event_type, created_at) VALUES (?, ?, ?, 'created', ?)`,
 		uuid.NewString(), sessionID, userID, now); err != nil {
 		// Round 158: same client-gone honesty (r157: 1 masked 500) —
@@ -342,13 +388,6 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
 		}
 		return "", "", "", fmt.Errorf("auth: insert user_session_events: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		// Round 158: a commit racing a gone client is retryable 503.
-		if isClientGone(err) {
-			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
-		}
-		return "", "", "", fmt.Errorf("auth: create session commit: %w", err)
 	}
 	return sessionID, sessionToken, csrfToken, nil
 }
@@ -362,20 +401,27 @@ func LookupSession(ctx context.Context, db Querier, cfg config.Config, sessionTo
 	var s Session
 	var revokedAt sql.NullTime
 	var orgID sql.NullString
-	var source, practiceScope sql.NullString
+	var source, practiceScope, recoveryAttempt, recoverySchedule sql.NullString
 	var currentRole, currentState string
 	err := db.QueryRowContext(ctx,
-		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at, s.authentication_source, s.practice_schedule_id, u.role, u.state
-		 FROM user_sessions s JOIN users u ON u.id = s.user_id
+		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at, s.authentication_source, s.practice_schedule_id, s.recovery_attempt_id, a.schedule_id, u.role, u.state
+		 FROM user_sessions s
+		 JOIN users u ON u.id = s.user_id
+		 LEFT JOIN student_attempts a ON a.id = s.recovery_attempt_id
 		 WHERE s.session_token_hash = ?`, tokenHash).Scan(
-		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt, &source, &practiceScope, &currentRole, &currentState)
+		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt, &source, &practiceScope, &recoveryAttempt, &recoverySchedule, &currentRole, &currentState)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("auth: lookup session: %w", err)
 	}
-	s.Proof = SessionProof{Source: source.String, PracticeScheduleID: practiceScope.String}
+	s.Proof = SessionProof{
+		Source:             source.String,
+		PracticeScheduleID: practiceScope.String,
+		RecoveryAttemptID:  recoveryAttempt.String,
+		RecoveryScheduleID: recoverySchedule.String,
+	}
 	if s.Proof.validateStored(s.Role) != nil || currentRole != s.Role || currentState != "active" {
 		return nil, nil
 	}

@@ -123,6 +123,8 @@ func TestSATStrictSPRMathRoutingMySQL(t *testing.T) {
 			}
 			// Seed the scored result header required by the review surface; its
 			// question verdicts are computed by the real read service below.
+			// Current results are visible only for a sealed current generation.
+			exec(`UPDATE student_attempts SET submitted_at = UTC_TIMESTAMP(6), final_submission = JSON_OBJECT() WHERE id = ?`, attemptID)
 			resultID := uuid.NewString()
 			exec(`INSERT INTO assessment_results (id,attempt_id,provider_key,outcome_status,score_payload,release_status) VALUES (?,?,'sat','scored','{}','ready_to_release')`, resultID, attemptID)
 			detail, err := results.NewService(f.db).GetSATResult(ctx, auth.NewActorContext("strict-admin", auth.RoleAdmin), resultID)

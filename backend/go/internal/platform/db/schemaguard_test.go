@@ -37,11 +37,11 @@ func TestVerifyFailsClosedOnMissingTable(t *testing.T) {
 }
 
 func TestSchemaGuardListSizes(t *testing.T) {
-	if len(RequiredTables) != 11 {
-		t.Fatalf("RequiredTables must include the authoring table, 3 existing SAT start-code tables, the 0081 slot table, the 3 0087 score-conversion tables, and the 0088 room-operation receipt, the 0092 PDF export table, and the 0101 form-response table; got %d", len(RequiredTables))
+	if len(RequiredTables) != 13 {
+		t.Fatalf("RequiredTables must include the authoring table, 3 existing SAT start-code tables, the 0081 slot table, the 3 0087 score-conversion tables, the 0088 room-operation receipt, the 0092 PDF export table, the 0101 form-response table, and the 0105/0108 recovery tables; got %d", len(RequiredTables))
 	}
-	if len(RequiredIndexes) != 15 {
-		t.Fatalf("RequiredIndexes must include the 10 existing guards, 3 SAT slot indexes and 2 PDF export indexes, got %d", len(RequiredIndexes))
+	if len(RequiredIndexes) != 17 {
+		t.Fatalf("RequiredIndexes must include the 10 existing guards, 3 SAT slot indexes, 2 PDF export indexes, and the recovery grant/submission guards, got %d", len(RequiredIndexes))
 	}
 	seen := map[string]bool{}
 	for _, c := range RequiredColumns {
@@ -53,6 +53,20 @@ func TestSchemaGuardListSizes(t *testing.T) {
 	}
 	if !seen["exam_entities.sat_section_scope"] {
 		t.Fatal("SAT exam section scope must be required before serving")
+	}
+	// Recovery is fail-closed: a database without the writer-authority or
+	// generation columns must never accept traffic that could reopen a sitting.
+	for _, required := range []string{
+		"student_attempts.recovery_control",
+		"student_attempts.terminal_generation",
+		"attempt_terminalizations.terminal_generation",
+		"student_submissions.terminal_generation",
+		"assessment_module_attempts.run_generation",
+		"user_sessions.recovery_attempt_id",
+	} {
+		if !seen[required] {
+			t.Fatalf("recovery schema guard is missing %s", required)
+		}
 	}
 }
 

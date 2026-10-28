@@ -50,7 +50,8 @@ const gradingSubmissionColumns = "s.id, s.attempt_id, s.schedule_id, s.exam_id, 
 	"s.published_version_id, s.student_id, s.student_name, s.student_email, " +
 	"s.cohort_name, s.submitted_at, s.time_spent_seconds, s.grading_status, " +
 	"s.assigned_teacher_id, s.assigned_teacher_name, s.is_flagged, s.flag_reason, " +
-	"s.is_overdue, s.due_date, s.section_statuses, s.created_at, s.updated_at"
+	"s.is_overdue, s.due_date, s.section_statuses, s.created_at, s.updated_at, s.terminal_generation, " +
+	"NOT EXISTS (SELECT 1 FROM student_attempts a WHERE a.id=s.attempt_id AND a.terminal_generation=s.terminal_generation AND a.submitted_at IS NOT NULL)"
 
 // GradingSession is one grading_sessions read-model row (camelCase).
 type GradingSession struct {
@@ -95,6 +96,8 @@ type GradingSessionPage struct {
 // schedule_registrations.metadata, mirroring the Rust student_submission_query
 // join; studentEmail is omitted when NULL.
 type GradingSubmission struct {
+	TerminalGeneration  uint64     `json:"terminalGeneration"`
+	Historical          bool       `json:"historical"`
 	ID                  string     `json:"id"`
 	AttemptID           string     `json:"attemptId"`
 	ScheduleID          string     `json:"scheduleId"`
@@ -298,7 +301,7 @@ func scanGradingSubmission(row interface{ Scan(dest ...any) error }) (GradingSub
 		&s.PublishedVersionID, &s.StudentID, &s.StudentName, &email,
 		&s.CohortName, &s.SubmittedAt, &s.TimeSpentSeconds, &s.GradingStatus,
 		&teacherID, &teacherName, &flagged, &flagReason,
-		&overdue, &dueDate, &sectionsRaw, &s.CreatedAt, &s.UpdatedAt,
+		&overdue, &dueDate, &sectionsRaw, &s.CreatedAt, &s.UpdatedAt, &s.TerminalGeneration, &s.Historical,
 		&nickname, &course); err != nil {
 		return GradingSubmission{}, err
 	}
@@ -458,7 +461,7 @@ func (s *Service) GetSessionDetail(ctx context.Context, role string, allowedSche
 	}
 	var total int64
 	if err := s.db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM student_submissions WHERE schedule_id = ? AND provider_key IN ('ielts','act')",
+		"SELECT COUNT(*) FROM student_submissions WHERE schedule_id = ? AND provider_key IN ('ielts','act') AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)",
 		session.ScheduleID).Scan(&total); err != nil {
 		return GradingSessionDetail{}, err
 	}
@@ -468,7 +471,7 @@ func (s *Service) GetSessionDetail(ctx context.Context, role string, allowedSche
 		"JSON_UNQUOTE(JSON_EXTRACT(r.metadata, '$.ieltsCourse')) " +
 		"FROM student_submissions s LEFT JOIN schedule_registrations r " +
 		"ON r.schedule_id = s.schedule_id AND r.student_id = s.student_id " +
-		"WHERE s.provider_key IN ('ielts','act') AND s.schedule_id = ? " +
+		"WHERE s.provider_key IN ('ielts','act') AND s.schedule_id = ? AND s.terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = s.attempt_id AND submitted_at IS NOT NULL) " +
 		"ORDER BY s.submitted_at DESC, s.id DESC LIMIT ? OFFSET ?"
 	rows, err := s.db.QueryContext(ctx, subQuery, session.ScheduleID, int64(pageSize), offset)
 	if err != nil {

@@ -172,6 +172,19 @@ export function readAnswerSyncCheckpoint(attemptId: string): StudentAttemptMutat
   }
 }
 
+/** Retain the old draft as evidence without hydrating it into a new writer. */
+export function quarantineAnswerSyncCheckpoint(attemptId: string, writerId: string): void {
+  const storage = readCheckpointStorage();
+  if (!storage) return;
+  const key = checkpointStorageKey(attemptId);
+  const raw = storage.getItem(key);
+  if (!raw) return;
+  const archive = `${key}:recovery-quarantine:${writerId}`;
+  // Replaying Continue must not overwrite the original archived evidence.
+  if (storage.getItem(archive) === null) storage.setItem(archive, raw);
+  storage.removeItem(key);
+}
+
 function shouldDebounceAnswerDurability(mutation: StudentAttemptMutation): boolean {
   if (mutation.type === 'writing_answer') {
     return true;

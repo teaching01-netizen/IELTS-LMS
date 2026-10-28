@@ -1126,9 +1126,10 @@ type nextModuleRow struct {
 // Callers without those authoritative snapshots pass nil and keep the lookup
 // path below.
 type moduleFollowupContext struct {
-	timingModel    string
-	handoffMode    string
-	recoveryPolicy *attempts.SATDeliveryPolicy
+	recoveryControl *examdomain.RecoveryControl
+	timingModel     string
+	handoffMode     string
+	recoveryPolicy  *attempts.SATDeliveryPolicy
 }
 
 // Route basis values recorded on assessment_route_decisions.route_basis: what
@@ -1173,6 +1174,9 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 			"SAT modules can only close when authoritative time ends or an authorized proctor acts.",
 		)
 	}
+	if followup != nil && followup.recoveryControl != nil && followup.recoveryControl.Phase == examdomain.RecoveryPhaseWorking && followup.recoveryControl.Target.ModuleAttemptID != active.id {
+		return nil, recoveryConflict("RECOVERY_FOCUS", "Only the focused recovery module may close.", nil)
+	}
 	scoring, err := loadScoringRowsTx(ctx, t, active.id, active.moduleID)
 	if err != nil {
 		return nil, err
@@ -1190,6 +1194,15 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 	}
 	if n != 1 {
 		return nil, apperrors.New(apperrors.CodeAssessmentConflict, "The SAT module was already finalized by another request.")
+	}
+	if followup != nil && followup.recoveryControl != nil && followup.recoveryControl.Phase == examdomain.RecoveryPhaseWorking {
+		if len(followup.recoveryControl.Suspended) > 0 {
+			return s.resumeRecoverySuccessor(ctx, t, attemptID, followup.recoveryControl)
+		}
+		if _, err := t.ExecContext(ctx, `UPDATE student_attempts SET recovery_control=NULL,deadline_at=NULL,closing_grace_until=NULL,control_epoch=control_epoch+1,revision=revision+1 WHERE id=?`, attemptID); err != nil {
+			return nil, err
+		}
+		followup.recoveryControl = nil
 	}
 	var currentSectionID string
 	var breakAfterSeconds int

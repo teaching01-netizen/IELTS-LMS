@@ -304,7 +304,7 @@ func LoadResultForAttempt(ctx context.Context, db tx.Tx, attemptID string) (map[
 	err := db.QueryRowContext(ctx, `
 		SELECT id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status
 		FROM assessment_results
-		WHERE attempt_id = ? AND provider_key = 'act'`, attemptID).
+		WHERE attempt_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = assessment_results.attempt_id AND submitted_at IS NOT NULL)`, attemptID).
 		Scan(&id, &submissionID, &provider, &outcome, &total, &payload, &release)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -523,10 +523,10 @@ func (s *Service) ListScienceReports(ctx context.Context, f ReportFilter) ([]Sci
 			COALESCE(ar.release_status, 'ready_to_release')
 		FROM student_attempts a
 		JOIN exam_entities e ON e.id = a.exam_id
-		LEFT JOIN student_submissions sub ON sub.attempt_id = a.id AND sub.provider_key = 'act'
+		LEFT JOIN student_submissions sub ON sub.attempt_id = a.id AND sub.provider_key = 'act' AND sub.terminal_generation = a.terminal_generation AND a.submitted_at IS NOT NULL
 		LEFT JOIN section_submissions ss ON ss.submission_id = sub.id AND ss.section = 'science'
 		LEFT JOIN assessment_results ar
-			ON ar.attempt_id = a.id AND ar.provider_key = 'act'
+			ON ar.attempt_id = a.id AND ar.provider_key = 'act' AND ar.terminal_generation = a.terminal_generation AND a.submitted_at IS NOT NULL
 		WHERE (e.provider_key = 'act' OR e.exam_type = 'ACT')
 		  AND (ss.id IS NOT NULL OR JSON_UNQUOTE(JSON_EXTRACT(a.final_submission, '$.section')) = 'science')
 		  AND a.submitted_at IS NOT NULL`
@@ -596,10 +596,10 @@ func (s *Service) GetScienceDetail(ctx context.Context, actor auth.ActorContext,
 		JOIN exam_entities e ON e.id = a.exam_id
 		JOIN exam_schedules sch ON sch.id = a.schedule_id
 		LEFT JOIN schedule_registrations reg ON reg.id = a.registration_id
-		LEFT JOIN student_submissions sub ON sub.attempt_id = a.id AND sub.provider_key = 'act'
+		LEFT JOIN student_submissions sub ON sub.attempt_id = a.id AND sub.provider_key = 'act' AND sub.terminal_generation = a.terminal_generation AND a.submitted_at IS NOT NULL
 		LEFT JOIN section_submissions ss ON ss.submission_id = sub.id AND ss.section = 'science'
 		LEFT JOIN assessment_results ar
-			ON ar.attempt_id = a.id AND ar.provider_key = 'act'
+			ON ar.attempt_id = a.id AND ar.provider_key = 'act' AND ar.terminal_generation = a.terminal_generation AND a.submitted_at IS NOT NULL
 		WHERE a.id = ? AND (e.provider_key = 'act' OR e.exam_type = 'ACT')
 		  AND a.submitted_at IS NOT NULL` + scope
 	args := append([]any{attemptID}, scopeArgs...)

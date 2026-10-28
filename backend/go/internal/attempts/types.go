@@ -2,6 +2,7 @@ package attempts
 
 import (
 	"database/sql"
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"time"
 )
 
@@ -139,7 +140,8 @@ type AttemptState struct {
 	// schedule has no runtime row yet). The attempt-level deadline/grace
 	// columns belong to the cohort section clock, so the personal SAT model
 	// (sat_personal_v1) must not be bound by them.
-	TimingModel string
+	TimingModel     string
+	RecoveryControl *examdomain.RecoveryControl
 }
 
 // personalTimingModel is the attempt-owned SAT timing model. It is spelled

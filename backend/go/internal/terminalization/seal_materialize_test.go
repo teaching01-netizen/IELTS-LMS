@@ -17,9 +17,9 @@ func lockAttemptRowV2() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "schedule_id", "organization_id", "exam_id", "published_version_id",
 		"phase", "delivery_status", "proctor_status", "revision", "answer_revision",
-		"answers", "writing_answers", "flags", "protocol_version",
+		"answers", "writing_answers", "flags", "protocol_version", "terminal_generation",
 	}).AddRow("att-1", "sched-1", nil, "exam-1", "pv-1", "exam",
-		"running", "active", int64(4), int64(9), []byte("{}"), []byte("{}"), []byte("{}"), 2)
+		"running", "active", int64(4), int64(9), []byte("{}"), []byte("{}"), []byte("{}"), 2, 0)
 }
 
 // B3 RED: seal on a V2 attempt materializes blobs from rows synchronously
@@ -111,7 +111,7 @@ func lockAttemptRowV2V1() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "schedule_id", "organization_id", "exam_id", "published_version_id",
 		"phase", "delivery_status", "proctor_status", "revision", "answer_revision",
-		"answers", "writing_answers", "flags", "protocol_version",
+		"answers", "writing_answers", "flags", "protocol_version", "terminal_generation",
 	}).AddRow("att-1", "sched-1", nil, "exam-1", "pv-1", "exam",
-		"running", "active", int64(4), int64(9), []byte(`{"q-0":"kept"}`), []byte("{}"), []byte("{}"), 1)
+		"running", "active", int64(4), int64(9), []byte(`{"q-0":"kept"}`), []byte("{}"), []byte("{}"), 1, 0)
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"github.com/google/uuid"
@@ -128,6 +129,7 @@ type v1AttemptRow struct {
 	FinalResponseDigest   sql.NullString
 	ActiveClientSessionID sql.NullString
 	ProctorStatus         string
+	RecoveryControl       *examdomain.RecoveryControl
 }
 
 // ParseMutationBatch normalizes both V1 mutation envelopes. It deliberately
@@ -299,6 +301,24 @@ func (s *Service) ApplyMutationBatchInTx(ctx context.Context, q tx.Tx, req V1Mut
 		return V1MutationBatchResponse{}, err
 	}
 
+	recoveryIDs, err := recoveryMutationIDs(ctx, q, row)
+	if err != nil {
+		return V1MutationBatchResponse{}, err
+	}
+	if row.RecoveryControl != nil {
+		var now time.Time
+		if err := q.QueryRowContext(ctx, `SELECT UTC_TIMESTAMP(6)`).Scan(&now); err != nil {
+			return V1MutationBatchResponse{}, err
+		}
+		if row.ProctorStatus == "paused" || row.RecoveryControl.FocusDeadlineAt == nil || !now.Before(*row.RecoveryControl.FocusDeadlineAt) {
+			return V1MutationBatchResponse{}, apperrors.New(apperrors.CodeAttemptNotWritable, "The focused recovery clock is paused or has ended.")
+		}
+		for _, mutation := range req.Mutations {
+			if err := validateRecoveryMutation(row, recoveryIDs, mutation); err != nil {
+				return V1MutationBatchResponse{}, err
+			}
+		}
+	}
 	var existingMaxSeq int64
 	if err := q.QueryRowContext(ctx, "SELECT COALESCE(MAX(mutation_seq), 0) FROM student_attempt_mutations WHERE attempt_id = ?", row.ID).Scan(&existingMaxSeq); err != nil {
 		return V1MutationBatchResponse{}, err
@@ -479,6 +499,15 @@ func (s *Service) PrepareSubmitInTx(ctx context.Context, q tx.Tx, req V1SubmitRe
 		if err := json.Unmarshal(req.FinalAnswerPatch, &patch); err != nil || patch == nil {
 			return V1SubmitPreparation{}, validationError("finalAnswerPatch must be a JSON object.")
 		}
+		if row.RecoveryControl != nil {
+			ids, err := recoveryMutationIDs(ctx, q, row)
+			if err != nil {
+				return V1SubmitPreparation{}, err
+			}
+			if err := validateRecoveryPatch(row, ids, patch); err != nil {
+				return V1SubmitPreparation{}, err
+			}
+		}
 		if err := mergePatchObject(patch["answers"], answers); err != nil {
 			return V1SubmitPreparation{}, err
 		}
@@ -535,18 +564,23 @@ func orderedMutationResults(mutations []V1Mutation, byID map[string]V1MutationRe
 }
 
 func loadV1AttemptForUpdate(ctx context.Context, q tx.Tx, attemptID, scheduleID string) (v1AttemptRow, error) {
-	const query = `SELECT id, schedule_id, student_key, user_id, exam_id, published_version_id, exam_title, candidate_id, candidate_name, candidate_email, phase, current_module, current_question_id, CAST(answers AS CHAR), CAST(writing_answers AS CHAR), CAST(flags AS CHAR), CAST(violations_snapshot AS CHAR), CAST(integrity AS CHAR), CAST(recovery AS CHAR), CAST(final_submission AS CHAR), submitted_at, created_at, updated_at, revision, answer_revision, COALESCE(protocol_version, 1), COALESCE(delivery_status, 'running'), COALESCE(lease_epoch, 1), COALESCE(control_epoch, 1), COALESCE(response_revision, 0), deadline_at, closing_grace_until, final_response_digest, active_client_session_id, COALESCE(proctor_status, 'active') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE`
+	const query = `SELECT id, schedule_id, student_key, user_id, exam_id, published_version_id, exam_title, candidate_id, candidate_name, candidate_email, phase, current_module, current_question_id, CAST(answers AS CHAR), CAST(writing_answers AS CHAR), CAST(flags AS CHAR), CAST(violations_snapshot AS CHAR), CAST(integrity AS CHAR), CAST(recovery AS CHAR), CAST(final_submission AS CHAR), submitted_at, created_at, updated_at, revision, answer_revision, COALESCE(protocol_version, 1), COALESCE(delivery_status, 'running'), COALESCE(lease_epoch, 1), COALESCE(control_epoch, 1), COALESCE(response_revision, 0), deadline_at, closing_grace_until, final_response_digest, active_client_session_id, COALESCE(proctor_status, 'active'), COALESCE(recovery_control, '') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE`
 	var row v1AttemptRow
+	var rawControl string
 	err := q.QueryRowContext(ctx, query, attemptID, scheduleID).Scan(
 		&row.ID, &row.ScheduleID, &row.StudentKey, &row.UserID, &row.ExamID, &row.PublishedVersionID,
 		&row.ExamTitle, &row.CandidateID, &row.CandidateName, &row.CandidateEmail, &row.Phase,
 		&row.CurrentModule, &row.CurrentQuestionID, rawJSON(&row.Answers), rawJSON(&row.WritingAnswers), rawJSON(&row.Flags), rawJSON(&row.Violations), rawJSON(&row.Integrity), rawJSON(&row.Recovery), &row.FinalSubmission,
 		&row.SubmittedAt, &row.CreatedAt, &row.UpdatedAt, &row.Revision, &row.AnswerRevision, &row.ProtocolVersion, &row.DeliveryStatus,
-		&row.LeaseEpoch, &row.ControlEpoch, &row.ResponseRevision, &row.DeadlineAt, &row.ClosingGraceUntil, &row.FinalResponseDigest, &row.ActiveClientSessionID, &row.ProctorStatus,
+		&row.LeaseEpoch, &row.ControlEpoch, &row.ResponseRevision, &row.DeadlineAt, &row.ClosingGraceUntil, &row.FinalResponseDigest, &row.ActiveClientSessionID, &row.ProctorStatus, &rawControl,
 	)
 	if err == sql.ErrNoRows {
 		return v1AttemptRow{}, apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
 	}
+	if err != nil {
+		return row, err
+	}
+	row.RecoveryControl, err = examdomain.ParseRecoveryControl([]byte(rawControl))
 	return row, err
 }
 
@@ -590,6 +624,9 @@ func authorizeV1Attempt(ctx context.Context, q tx.Tx, row *v1AttemptRow, student
 }
 
 func ensureV1ClientSession(ctx context.Context, q tx.Tx, row v1AttemptRow, requested string) (string, error) {
+	if row.RecoveryControl != nil && row.RecoveryControl.Phase != examdomain.RecoveryPhaseWorking {
+		return "", &apperrors.Error{Code: apperrors.CodeActiveSessionSuperseded, HTTPStatus: 409, Message: "Staff recovery has stopped this device.", Details: map[string]any{"reason": "RECOVERY_HELD"}}
+	}
 	clientSessionID := strings.TrimSpace(requested)
 	if clientSessionID == "" {
 		sum := sha256.Sum256([]byte("v1:" + row.ID + ":" + row.StudentKey))
@@ -770,6 +807,10 @@ func attemptProjection(row v1AttemptRow) map[string]any {
 		"revision": row.Revision, "protocolVersion": row.ProtocolVersion, "deliveryStatus": row.DeliveryStatus,
 		"leaseEpoch": row.LeaseEpoch, "controlEpoch": row.ControlEpoch, "responseRevision": row.ResponseRevision,
 		"proctorStatus": row.ProctorStatus,
+	}
+	if row.RecoveryControl != nil {
+		c := row.RecoveryControl
+		projection["recoveryControl"] = map[string]any{"phase": c.Phase, "target": c.Target, "focusDeadlineAt": c.FocusDeadlineAt, "focusStartedAt": c.FocusStartedAt, "runGeneration": c.FocusRunGeneration}
 	}
 	if row.CurrentQuestionID.Valid {
 		projection["currentQuestionId"] = row.CurrentQuestionID.String

@@ -66,6 +66,9 @@ func (s *Service) StartBreak(ctx context.Context, scheduleID, attemptID, urlSche
 		if err := enforceWriterSessionWithAuthorityTx(ctx, t, bound, attemptID, writerBinding, &authority); err != nil {
 			return err
 		}
+		if authority.recoveryControl != nil {
+			return assessmentConflict("RECOVERY_FOCUS", "Finish the recovery module before entering a break.")
+		}
 		if err := enforceControlEpochSnapshot(attemptID, &authority, controlEpoch); err != nil {
 			return err
 		}
@@ -162,6 +165,9 @@ func (s *Service) EnterBreak(ctx context.Context, scheduleID, attemptID, urlSche
 		if err := enforceWriterSessionWithAuthorityTx(ctx, t, bound, attemptID, writerBinding, &authority); err != nil {
 			return err
 		}
+		if authority.recoveryControl != nil {
+			return assessmentConflict("RECOVERY_FOCUS", "Finish the recovery module before entering a break.")
+		}
 		if err := enforceControlEpochSnapshot(attemptID, &authority, req.ControlEpoch); err != nil {
 			return err
 		}
@@ -237,6 +243,9 @@ func (s *Service) MarkBreakVisible(ctx context.Context, scheduleID, attemptID, u
 		}
 		if err := enforceWriterSessionWithAuthorityTx(ctx, t, bound, attemptID, writerBinding, &authority); err != nil {
 			return err
+		}
+		if authority.recoveryControl != nil {
+			return assessmentConflict("RECOVERY_FOCUS", "Finish the recovery module before entering a break.")
 		}
 		if err := enforceControlEpochSnapshot(attemptID, &authority, req.ControlEpoch); err != nil {
 			return err
@@ -324,7 +333,7 @@ func completeDuePersonalBreaksTx(ctx context.Context, t tx.Tx, attemptID string,
 	if policy != nil {
 		if _, err := t.ExecContext(ctx, `
 			UPDATE assessment_module_boundaries b
-			JOIN assessment_module_attempts ma ON ma.id = b.module_attempt_id
+			JOIN assessment_module_attempts ma ON ma.id = b.module_attempt_id AND ma.run_generation = b.run_generation
 			SET b.entry_deadline_at = TIMESTAMPADD(SECOND, ?, ma.available_at),
 			    b.next_action_at = TIMESTAMPADD(SECOND, ?, ma.available_at),
 			    b.revision = b.revision + 1

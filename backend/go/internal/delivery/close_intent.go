@@ -52,7 +52,7 @@ func loadSATCloseIntentTx(ctx context.Context, q tx.Tx, moduleAttemptID string) 
 	var raw string
 	err := q.QueryRowContext(ctx, `
 		SELECT registration_id, manifest_hash, CAST(manifest AS CHAR)
-		FROM assessment_module_close_intents WHERE module_attempt_id = ?`, moduleAttemptID).
+		FROM assessment_module_close_intents WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_close_intents.module_attempt_id)`, moduleAttemptID).
 		Scan(&out.registrationID, &out.manifestHash, &raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -188,7 +188,7 @@ func (s *Service) RegisterSATCloseIntent(
 		var existingID, existingRequestHash, existingManifestHash, existingReceipt sql.NullString
 		err = t.QueryRowContext(ctx, `
 			SELECT registration_id, request_hash, manifest_hash, CAST(receipt AS CHAR)
-			FROM assessment_module_close_intents WHERE module_attempt_id = ?`, module.id).
+			FROM assessment_module_close_intents WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_close_intents.module_attempt_id)`, module.id).
 			Scan(&existingID, &existingRequestHash, &existingManifestHash, &existingReceipt)
 		if err == nil {
 			if !existingID.Valid || existingID.String != req.RegistrationID || !existingRequestHash.Valid || existingRequestHash.String != requestHash {
@@ -288,13 +288,13 @@ func (s *Service) RegisterSATCloseIntent(
 		}
 		if _, err := t.ExecContext(ctx, `
 			INSERT INTO assessment_module_close_intents
-				(module_attempt_id, attempt_id, registration_id, request_hash, manifest_hash, manifest, receipt, registered_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			module.id, bearerAttemptID, req.RegistrationID, requestHash, manifestHash, string(manifestJSON), string(receiptJSON), now.UTC()); err != nil {
+				(module_attempt_id, attempt_id, registration_id, request_hash, manifest_hash, manifest, receipt, registered_at, run_generation)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT run_generation FROM assessment_module_attempts WHERE id = ?))`,
+			module.id, bearerAttemptID, req.RegistrationID, requestHash, manifestHash, string(manifestJSON), string(receiptJSON), now.UTC(), module.id); err != nil {
 			return err
 		}
 		res, err := t.ExecContext(ctx, `UPDATE assessment_module_boundaries
-			SET revision = revision + 1 WHERE module_attempt_id = ? AND phase = 'collecting'`, module.id)
+			SET revision = revision + 1 WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundaries.module_attempt_id) AND phase = 'collecting'`, module.id)
 		if err != nil {
 			return err
 		}
@@ -371,7 +371,7 @@ func (s *Service) AuthorizeFrozenSATBatch(
 	var attemptID, storedManifestHash, rawManifest string
 	if err := q.QueryRowContext(ctx, `
 		SELECT attempt_id, manifest_hash, CAST(manifest AS CHAR)
-		FROM assessment_module_close_intents WHERE module_attempt_id = ?`, module.id).
+		FROM assessment_module_close_intents WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_close_intents.module_attempt_id)`, module.id).
 		Scan(&attemptID, &storedManifestHash, &rawManifest); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", assessmentConflict("CLOSE_FRONTIER_NOT_REGISTERED", "Register the complete frozen answer frontier before uploading recovery chunks.")

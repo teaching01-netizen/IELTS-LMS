@@ -82,8 +82,6 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   releaseActionsDisabled = false,
 }: StudentReviewWorkspaceProps) {
   // Never attribute grading to a false identity: empty id means unknown grader.
-  const isGraderUnknown = releaseActionsDisabled || currentTeacherId.trim() === '';
-  const releaseBlockedTitle = isGraderUnknown ? 'Sign in as a grader to enable release actions.' : undefined;
   const hasPrevStudent = typeof onPreviousStudent === 'function';
   const hasNextStudent = typeof onNextStudent === 'function';
 
@@ -114,6 +112,10 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     updateChecklist,
     reloadSections,
   } = workspace;
+  const historical = submission?.historical === true;
+  const isGraderUnknown = historical || releaseActionsDisabled || currentTeacherId.trim() === '';
+  const releaseBlockedTitle = historical ? 'Historical submissions are read only.' : isGraderUnknown ? 'Sign in as a grader to enable release actions.' : undefined;
+
   const [activeSection, setActiveSection] = useState<'listening' | 'reading' | 'writing' | 'speaking' | 'science'>('reading');
   const [activeTask, setActiveTask] = useState<string>('task1');
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
@@ -775,7 +777,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             </div>
             <button
               onClick={handleSaveDraft}
-              disabled={!reviewDraft?.hasUnsavedChanges || saving}
+              disabled={historical || !reviewDraft?.hasUnsavedChanges || saving}
               className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save size={16} />
@@ -785,6 +787,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
         </div>
       </div>
 
+      {historical && <div role="status" className="border-b border-amber-200 bg-amber-50 px-6 py-3 text-sm text-amber-950">Historical submission — read only. The student continued the exam through staff recovery.</div>}
       {/* Main Content */}
       <div className="relative flex flex-1 overflow-hidden">
         {mobileRailOpen ? (
@@ -928,6 +931,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
               {Object.entries(reviewDraft?.checklist || {}).map(([key, value]) => (
                 <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
                   <input
+                    disabled={historical}
                     type="checkbox"
                     checked={value}
                     onChange={(e) => updateChecklist({ [key]: e.target.checked })}
@@ -1104,6 +1108,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 {/* Annotation Canvas */}
                 <div className="p-6">
                   <WritingAnnotationCanvas
+                    readOnly={historical}
                     taskId={currentWritingTaskId}
                     studentText={currentWritingText}
                     annotations={(reviewDraft?.annotations || []).filter(a => a.taskId === currentWritingTaskId)}
@@ -1128,9 +1133,9 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 sectionSubmission={currentSectionSubmission}
                 examLoading={examLoading}
                 examError={examError}
-                onOverride={(questionId, isCorrect) =>
+                {...(historical ? {} : { onOverride: (questionId: string, isCorrect: boolean) =>
                   void handleObjectiveOverride(activeSection, questionId, isCorrect)
-                }
+                })}
                 pendingOverrideQuestionIds={pendingObjectiveOverrideQuestionIds}
                 overrideError={objectiveOverrideError}
               />
@@ -1166,6 +1171,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                       {criterion.label}
                     </label>
                     <input
+                      disabled={historical}
                       type="number"
                       min="0"
                       max="9"
@@ -1178,6 +1184,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                       }, activeTask)}
                     />
                     <textarea
+                      readOnly={historical}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                       rows={2}
                       placeholder="Notes..."
@@ -1194,6 +1201,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             <div className="mt-6 pt-6 border-t border-gray-200">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Student-Visible Feedback</h2>
               <textarea
+                readOnly={historical}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                 rows={4}
                 placeholder="Summary feedback visible to student..."
@@ -1210,6 +1218,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             <div className="mt-6 pt-6 border-t border-gray-200">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-4">Internal Notes</h2>
               <textarea
+                readOnly={historical}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                 rows={4}
                 placeholder="Private grader notes (not visible to student)..."
@@ -1230,6 +1239,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 <div>
                   <label className="text-sm font-medium text-gray-700 block mb-1">Strengths</label>
                   <textarea
+                    readOnly={historical}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     rows={2}
                     placeholder="List strengths (one per line)"
@@ -1253,6 +1263,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 <div>
                   <label className="text-sm font-medium text-gray-700 block mb-1">Top 3 Improvement Priorities</label>
                   <textarea
+                    readOnly={historical}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     rows={2}
                     placeholder="List priorities (one per line)"
@@ -1276,6 +1287,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
                 <div>
                   <label className="text-sm font-medium text-gray-700 block mb-1">Recommended Practice</label>
                   <textarea
+                    readOnly={historical}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
                     rows={2}
                     placeholder="List practice tasks (one per line)"
@@ -1427,6 +1439,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             Release date
           </label>
           <input
+            disabled={historical}
             id="release-date-input"
             type="date"
             value={scheduleDate}

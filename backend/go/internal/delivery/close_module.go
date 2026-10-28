@@ -343,13 +343,13 @@ func (s *Service) closeModule(ctx context.Context, bearerScheduleID, bearerAttem
 			if _, err := t.ExecContext(ctx, `
 				UPDATE assessment_module_boundaries
 				SET phase = 'settled', next_action_at = NULL, final_manifest = ?, manifest_hash = ?, revision = revision + 1
-				WHERE module_attempt_id = ? AND phase = 'collecting'`, string(manifestBytes), manifestHash, module.id); err != nil {
+				WHERE module_attempt_id = ? AND run_generation = (SELECT ma_run.run_generation FROM assessment_module_attempts ma_run WHERE ma_run.id = assessment_module_boundaries.module_attempt_id) AND phase = 'collecting'`, string(manifestBytes), manifestHash, module.id); err != nil {
 				return err
 			}
 			recoveryTransitions = append(recoveryTransitions, satBoundaryTransition{from: "collecting", to: "settled"})
 			boundaryPhase = "settled"
 		}
-		followup := &moduleFollowupContext{
+		followup := &moduleFollowupContext{recoveryControl: runtimeSnapshot.recoveryControl,
 			timingModel:    runtimeSnapshot.timingModel.String,
 			handoffMode:    runtimeSnapshot.handoffMode.String,
 			recoveryPolicy: recoveryPolicy,

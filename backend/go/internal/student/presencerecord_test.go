@@ -65,10 +65,10 @@ func TestRecordHeartbeatMemoryDedupes(t *testing.T) {
 
 // v1AttemptRows builds the 35-column projection row the memory path reads.
 func v1AttemptRows(attemptID, scheduleID string) *sqlmock.Rows {
-	cols := []string{"id", "schedule_id", "student_key", "user_id", "exam_id", "published_version_id", "exam_title", "candidate_id", "candidate_name", "candidate_email", "phase", "current_module", "current_question_id", "answers", "writing_answers", "flags", "violations_snapshot", "integrity", "recovery", "final_submission", "submitted_at", "created_at", "updated_at", "revision", "answer_revision", "protocol_version", "delivery_status", "lease_epoch", "control_epoch", "response_revision", "deadline_at", "closing_grace_until", "final_response_digest", "active_client_session_id", "proctor_status"}
+	cols := []string{"id", "schedule_id", "student_key", "user_id", "exam_id", "published_version_id", "exam_title", "candidate_id", "candidate_name", "candidate_email", "phase", "current_module", "current_question_id", "answers", "writing_answers", "flags", "violations_snapshot", "integrity", "recovery", "final_submission", "submitted_at", "created_at", "updated_at", "revision", "answer_revision", "protocol_version", "delivery_status", "lease_epoch", "control_epoch", "response_revision", "deadline_at", "closing_grace_until", "final_response_digest", "active_client_session_id", "proctor_status", "recovery_control"}
 	return sqlmock.NewRows(cols).AddRow(
 		attemptID, scheduleID, "sk-1", nil, "exam-1", "v-1", "Exam", "c1", "Alice", "a@x", "lobby", "listening", nil,
-		`{}`, `{}`, `{}`, `[]`, `{}`, `{}`, nil, nil, nil, nil, 0, 0, 2, "running", 1, 1, 0, nil, nil, nil, nil, "active",
+		`{}`, `{}`, `{}`, `[]`, `{}`, `{}`, nil, nil, nil, nil, 0, 0, 2, "running", 1, 1, 0, nil, nil, nil, nil, "active", "",
 	)
 }
 

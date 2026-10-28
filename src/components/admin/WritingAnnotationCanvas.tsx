@@ -19,6 +19,7 @@ import {
 } from '../../types/grading';
 
 interface WritingAnnotationCanvasProps {
+  readOnly?: boolean;
   taskId: string;
   studentText: string;
   annotations: WritingAnnotation[];
@@ -78,6 +79,7 @@ function segmentAnnotatedText(
 }
 
 export function WritingAnnotationCanvas({
+  readOnly = false,
   taskId,
   studentText,
   annotations,
@@ -394,7 +396,7 @@ export function WritingAnnotationCanvas({
   };
 
   return (
-    <div className="space-y-4">
+    <fieldset disabled={readOnly} aria-label="Writing annotations" className="min-w-0 space-y-4 border-0 p-0">
       {/* Toolbar */}
       <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg p-2">
         <div className="flex items-center gap-1 border-r border-gray-200 pr-2">
@@ -575,6 +577,6 @@ export function WritingAnnotationCanvas({
           </div>
         </div>
       )}
-    </div>
+    </fieldset>
   );
 }

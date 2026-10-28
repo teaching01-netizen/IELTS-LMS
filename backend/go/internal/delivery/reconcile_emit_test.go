@@ -40,7 +40,7 @@ func TestReconcileCompleterFailureEmitsAndRetries(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM student_attempts WHERE id").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key", "recovery_control"}).AddRow("att-1", "sat", ""))
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", "completed", "legacy_section_v1", nil))
@@ -116,7 +116,7 @@ func TestSATFinalModuleAndSealRollbackTogether(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM student_attempts WHERE id").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key", "recovery_control"}).AddRow("att-1", "sat", ""))
 	mock.ExpectQuery("FROM exam_session_runtimes WHERE schedule_id").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
 			AddRow("rt-1", "completed", "legacy_section_v1", nil))

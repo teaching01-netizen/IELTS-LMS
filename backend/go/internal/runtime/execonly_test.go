@@ -36,6 +36,8 @@ func TestPauseExecOnlySkipsWakeup(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("UPDATE assessment_module_boundaries b").
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("UPDATE student_attempts sa JOIN exam_session_runtimes").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("UPDATE student_attempts sa LEFT JOIN").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("UPDATE student_attempts sa JOIN").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO cohort_control_events").

@@ -374,8 +374,8 @@ const provisionalCandidates = `
 		  AND a.submitted_at IS NULL
 		  AND a.final_submission IS NULL
 		  AND COALESCE(a.proctor_status, 'active') <> 'terminated'
-		  AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id)
-		  AND NOT EXISTS (SELECT 1 FROM assessment_results ar WHERE ar.attempt_id = a.id AND ar.provider_key = 'sat')
+		  AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id AND t.terminal_generation = a.terminal_generation)
+		  AND NOT EXISTS (SELECT 1 FROM assessment_results ar WHERE ar.attempt_id = a.id AND ar.provider_key = 'sat' AND ar.terminal_generation = a.terminal_generation)
 		  AND EXISTS (SELECT 1 FROM assessment_module_attempts ma WHERE ma.attempt_id = a.id)
 		  AND NOT EXISTS (
 			SELECT 1 FROM assessment_module_attempts ma
@@ -485,7 +485,7 @@ func (s *Service) repairOne(ctx context.Context, attemptID, scheduleID string) (
 		// state; leave it for the dedicated data repair path.
 		var existingResultID sql.NullString
 		if err := t.QueryRowContext(ctx,
-			"SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE",
+			"SELECT id FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = assessment_results.attempt_id AND submitted_at IS NOT NULL) FOR UPDATE",
 			attempt.ID).Scan(&existingResultID); err != nil && err != sql.ErrNoRows {
 			return err
 		}
@@ -538,7 +538,7 @@ func (s *Service) OldestProvisionalAgeSeconds(ctx context.Context) (int64, error
 		  AND a.phase = 'post-exam'
 		  AND a.submitted_at IS NULL
 		  AND a.final_submission IS NULL
-		  AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id)`).Scan(&age); err != nil {
+		  AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id AND t.terminal_generation = a.terminal_generation)`).Scan(&age); err != nil {
 		return 0, err
 	}
 	if !age.Valid {
@@ -566,7 +566,7 @@ func lockAttempt(ctx context.Context, t tx.Tx, attemptID, scheduleID string) (at
 func rejectIfTerminated(ctx context.Context, t tx.Tx, a attemptCore) error {
 	var outcome sql.NullString
 	err := t.QueryRowContext(ctx,
-		"SELECT outcome FROM attempt_terminalizations WHERE attempt_id = ? FOR UPDATE", a.ID).Scan(&outcome)
+		"SELECT outcome FROM attempt_terminalizations WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = attempt_terminalizations.attempt_id) FOR UPDATE", a.ID).Scan(&outcome)
 	if err != nil && err != sql.ErrNoRows {
 		return err
 	}
@@ -579,7 +579,7 @@ func rejectIfTerminated(ctx context.Context, t tx.Tx, a attemptCore) error {
 func lockedSubmissionID(ctx context.Context, t tx.Tx, attemptID string) (string, error) {
 	var id sql.NullString
 	err := t.QueryRowContext(ctx,
-		"SELECT id FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE", attemptID).Scan(&id)
+		"SELECT id FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id) FOR UPDATE", attemptID).Scan(&id)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -727,7 +727,7 @@ func loadResult(ctx context.Context, q resultQueryer, predicate string, arg any,
 	if selectSubmissionID {
 		selectCols = "id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status"
 	}
-	row := q.QueryRowContext(ctx, "SELECT "+selectCols+" FROM assessment_results WHERE "+predicate+lockClause, arg)
+	row := q.QueryRowContext(ctx, "SELECT "+selectCols+" FROM assessment_results WHERE "+predicate+" AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = assessment_results.attempt_id AND submitted_at IS NOT NULL)"+lockClause, arg)
 	var scanErr error
 	if selectSubmissionID {
 		scanErr = row.Scan(&id, &attemptID, &submissionID, &provider, &outcome, &total, &payload, &release)

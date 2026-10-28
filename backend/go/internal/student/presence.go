@@ -211,6 +211,10 @@ func (s *Service) FlushPresence(ctx context.Context, dirty []PresenceDirty) erro
 		// Merge under the UPDATE's row lock, and preserve a newer client's
 		// ownership. A flush must preserve other answer recovery fields and
 		// never reclaim an attempt for a superseded heartbeat session.
+		// Staff recovery is attempt-owned: while held/returning no dirty flush
+		// may refill the empty writer slot, and a working recovery only keeps
+		// an owner that Begin already bound. The JSON predicate adds no bind
+		// parameter and no per-heartbeat SQL; steady beats never reach here.
 		if _, err := s.db.ExecContext(ctx, `
 			UPDATE student_attempts
 			SET integrity = JSON_MERGE_PATCH(CASE WHEN JSON_TYPE(integrity) = 'OBJECT' THEN integrity ELSE JSON_OBJECT() END, CAST(? AS JSON)),
@@ -218,7 +222,14 @@ func (s *Service) FlushPresence(ctx context.Context, dirty []PresenceDirty) erro
 			    active_client_session_id = COALESCE(NULLIF(active_client_session_id, ''), NULLIF(?, '')),
 			    revision = revision + 1, updated_at = UTC_TIMESTAMP(6)
 			WHERE id = ? AND schedule_id = ?
-			  AND (NULLIF(active_client_session_id, '') IS NULL OR active_client_session_id = ?)`,
+			  AND (NULLIF(active_client_session_id, '') IS NULL OR active_client_session_id = ?)
+			  AND (
+			    recovery_control IS NULL
+			    OR (
+			      JSON_UNQUOTE(JSON_EXTRACT(recovery_control, '$.phase')) = 'working'
+			      AND NULLIF(active_client_session_id, '') IS NOT NULL
+			    )
+			  )`,
 			integrity, recovery, d.ClientSession, d.AttemptID, d.ScheduleID, d.ClientSession); err != nil {
 			return err
 		}

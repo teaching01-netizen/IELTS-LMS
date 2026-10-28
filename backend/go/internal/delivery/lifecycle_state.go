@@ -212,7 +212,7 @@ const satLifecycleModulesQuery = `
 	JOIN assessment_modules m ON m.id = ma.module_id
 	JOIN assessment_sections sec ON sec.id = m.section_id
 	LEFT JOIN assessment_module_boundaries b
-	       ON b.module_attempt_id = ma.id AND b.attempt_id = ma.attempt_id
+	       ON b.module_attempt_id = ma.id AND b.attempt_id = ma.attempt_id AND b.run_generation = ma.run_generation
 	WHERE ma.attempt_id = ? AND sec.exam_version_id = ?
 	ORDER BY ma.created_at, ma.id`
 

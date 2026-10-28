@@ -17,7 +17,7 @@ func stageIELTSFirstSection(mock sqlmock.Sqlmock, now, roomStart time.Time) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
 			AddRow("sched-1", "exam-1", "ielts", "", TimingModelIELTSPersonal, "proctor", "pv-1", "live", 1, 180))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts a")).WithArgs("att-1", "sched-1", "user-1").
-		WillReturnRows(sqlmock.NewRows([]string{"delivery_status", "submitted_at", "proctor_status", "extra_time_minutes"}).AddRow("running", nil, "active", 0))
+		WillReturnRows(sqlmock.NewRows([]string{"delivery_status", "submitted_at", "proctor_status", "extra_time_minutes", "recovery_control"}).AddRow("running", nil, "active", 0, ""))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "actual_start_at", "completion_reason", "ielts_preparation_seconds"}).
 			AddRow("rt-1", StatusLive, TimingModelIELTSPersonal, roomStart, nil, 120))

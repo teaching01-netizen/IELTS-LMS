@@ -145,6 +145,11 @@ type SealCommand struct {
 	MinAnswerRevision *uint64
 	FinalSubmission   json.RawMessage
 	RequestID         string
+	// Background work records the generation it inspected and the origin's
+	// creation time. Both are rechecked under the attempt lock before scoring.
+	ExpectedTerminalGeneration *uint64
+	OriginRecordedAt           *time.Time
+	RecoveryControlID          string
 }
 
 // SealResult is the seal outcome. Created=false is an outcome-compatible replay.
@@ -209,7 +214,7 @@ var _ TerminalizationRepository = (*SQLTerminalizationRepository)(nil)
 
 // FindByAttemptID loads the receipt under SELECT ... FOR UPDATE.
 func (SQLTerminalizationRepository) FindByAttemptID(ctx context.Context, q tx.Tx, attemptID string) (*Receipt, error) {
-	const sel = "SELECT attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id FROM attempt_terminalizations WHERE attempt_id = ? FOR UPDATE"
+	const sel = "SELECT attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id FROM attempt_terminalizations WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = attempt_terminalizations.attempt_id) FOR UPDATE"
 	row := q.QueryRowContext(ctx, sel, attemptID)
 	var r Receipt
 	var org, actor sql.NullString
@@ -245,8 +250,8 @@ func (SQLTerminalizationRepository) FindByAttemptID(ctx context.Context, q tx.Tx
 
 // Insert performs a plain INSERT of the receipt (no upsert semantics).
 func (SQLTerminalizationRepository) Insert(ctx context.Context, q tx.Tx, r *Receipt) error {
-	const ins = "INSERT INTO attempt_terminalizations (attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-	_, err := q.ExecContext(ctx, ins, r.AttemptID, r.OrganizationID, r.TerminalizationID, r.ScheduleID, r.Outcome, r.Reason, r.ActorKind, r.ActorID, r.EffectiveAt, r.RecordedAt, r.AnswerRevision, string(r.FinalSnapshot), r.RequestID)
+	const ins = "INSERT INTO attempt_terminalizations (attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id, terminal_generation) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, terminal_generation FROM student_attempts WHERE id = ?"
+	_, err := q.ExecContext(ctx, ins, r.AttemptID, r.OrganizationID, r.TerminalizationID, r.ScheduleID, r.Outcome, r.Reason, r.ActorKind, r.ActorID, r.EffectiveAt, r.RecordedAt, r.AnswerRevision, string(r.FinalSnapshot), r.RequestID, r.AttemptID)
 	return err
 }
 
@@ -437,31 +442,32 @@ func (s *Service) MaterializeProviderResultInTx(ctx context.Context, q tx.Tx, at
 
 // attemptRow is the locked attempt subset the seal needs.
 type attemptRow struct {
-	ID              string
-	ScheduleID      string
-	OrganizationID  *string
-	ExamID          string
-	PublishedVerID  string
-	Phase           string
-	DeliveryStatus  string
-	ProctorStatus   string
-	Revision        int64
-	AnswerRevision  int64
-	Answers         json.RawMessage
-	WritingAnswers  json.RawMessage
-	Flags           json.RawMessage
-	ProtocolVersion int
+	ID                 string
+	ScheduleID         string
+	OrganizationID     *string
+	ExamID             string
+	PublishedVerID     string
+	Phase              string
+	DeliveryStatus     string
+	ProctorStatus      string
+	Revision           int64
+	AnswerRevision     int64
+	Answers            json.RawMessage
+	WritingAnswers     json.RawMessage
+	Flags              json.RawMessage
+	ProtocolVersion    int
+	TerminalGeneration uint64
 }
 
 // sealAttemptInTx implements the 12 seal steps. The receipt INSERT (step 8)
 // always precedes the claim UPDATE (step 10) in the same tx.
 func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand) (*SealResult, error) {
 	// Step 1: lock attempt FOR UPDATE.
-	const lockAttempt = "SELECT id, schedule_id, organization_id, exam_id, published_version_id, phase, COALESCE(delivery_status,'running'), COALESCE(proctor_status,'active'), revision, answer_revision, answers, writing_answers, flags, COALESCE(protocol_version,1) FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
+	const lockAttempt = "SELECT id, schedule_id, organization_id, exam_id, published_version_id, phase, COALESCE(delivery_status,'running'), COALESCE(proctor_status,'active'), revision, answer_revision, answers, writing_answers, flags, COALESCE(protocol_version,1), terminal_generation FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
 	var a attemptRow
 	var org sql.NullString
 	var answers, writing, flags []byte
-	if err := q.QueryRowContext(ctx, lockAttempt, cmd.AttemptID, cmd.ScheduleID).Scan(&a.ID, &a.ScheduleID, &org, &a.ExamID, &a.PublishedVerID, &a.Phase, &a.DeliveryStatus, &a.ProctorStatus, &a.Revision, &a.AnswerRevision, &answers, &writing, &flags, &a.ProtocolVersion); err != nil {
+	if err := q.QueryRowContext(ctx, lockAttempt, cmd.AttemptID, cmd.ScheduleID).Scan(&a.ID, &a.ScheduleID, &org, &a.ExamID, &a.PublishedVerID, &a.Phase, &a.DeliveryStatus, &a.ProctorStatus, &a.Revision, &a.AnswerRevision, &answers, &writing, &flags, &a.ProtocolVersion, &a.TerminalGeneration); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
 		}
@@ -474,6 +480,11 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 	a.Answers = append(json.RawMessage(nil), answers...)
 	a.WritingAnswers = append(json.RawMessage(nil), writing...)
 	a.Flags = append(json.RawMessage(nil), flags...)
+	if cmd.ExpectedTerminalGeneration != nil || cmd.OriginRecordedAt != nil || (cmd.ActorKind == ActorSystem && (cmd.Reason == ReasonTimeExpired || cmd.Reason == ReasonAutoStop)) {
+		if err := guardRecoverySeal(ctx, q, a.ID, a.ScheduleID, cmd); err != nil {
+			return nil, err
+		}
+	}
 
 	// B3 seal-time correctness point: V2 attempts rebuild blob columns from
 	// rows synchronously so grading/snapshot never see staleness. V1 blobs
@@ -750,13 +761,14 @@ func (s *Service) sealAttemptInTx(ctx context.Context, q tx.Tx, cmd SealCommand)
 
 	// Step 12: outbox enqueue + return created:true. No live event.
 	payload, _ := json.Marshal(map[string]any{
-		"terminalizationId": terminalizationID,
-		"attemptId":         a.ID,
-		"scheduleId":        a.ScheduleID,
-		"organizationId":    a.OrganizationID,
-		"outcome":           cmd.Outcome,
-		"reason":            cmd.Reason,
-		"answerRevision":    a.AnswerRevision,
+		"terminalizationId":  terminalizationID,
+		"attemptId":          a.ID,
+		"scheduleId":         a.ScheduleID,
+		"organizationId":     a.OrganizationID,
+		"outcome":            cmd.Outcome,
+		"reason":             cmd.Reason,
+		"answerRevision":     a.AnswerRevision,
+		"terminalGeneration": a.TerminalGeneration,
 	})
 	// B4.1: exec-only mode skips the wakeup INSERT (live moves to Hub in C).
 	if !s.outboxExecOnly {
@@ -793,6 +805,7 @@ func buildServerSnapshot(ctx context.Context, q tx.Tx, a attemptRow, providerKey
 		"publishedVersionId": a.PublishedVerID,
 		"providerKey":        providerKey,
 		"answerRevision":     a.AnswerRevision,
+		"terminalGeneration": a.TerminalGeneration,
 		"answers":            json.RawMessage(ans),
 		"writingAnswers":     json.RawMessage(wr),
 		"flags":              json.RawMessage(fl),
@@ -1014,7 +1027,7 @@ func (s *Service) materializeSATResult(ctx context.Context, q tx.Tx, attemptID, 
 		return nil
 	}
 	want := SATOutcomeStatus(outcome, actorKind)
-	const sel = "SELECT id, outcome_status FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' FOR UPDATE"
+	const sel = "SELECT id, outcome_status FROM assessment_results WHERE attempt_id = ? AND provider_key = 'sat' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = assessment_results.attempt_id) FOR UPDATE"
 	var resultID, existingStatus string
 	err = q.QueryRowContext(ctx, sel, attemptID).Scan(&resultID, &existingStatus)
 	switch {
@@ -1063,7 +1076,7 @@ func (s *Service) materializeSATResult(ctx context.Context, q tx.Tx, attemptID, 
 				})
 			}
 		}
-		_, err = q.ExecContext(ctx, "INSERT INTO assessment_results (id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status) VALUES (?, ?, NULL, 'sat', ?, NULL, ?, ?)", uuid.NewString(), attemptID, want, string(payload), relStatus)
+		_, err = q.ExecContext(ctx, "INSERT INTO assessment_results (id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status, terminal_generation) VALUES (?, ?, NULL, 'sat', ?, NULL, ?, ?, (SELECT terminal_generation FROM student_attempts WHERE id = ?)) ON DUPLICATE KEY UPDATE submission_id = VALUES(submission_id), outcome_status = VALUES(outcome_status), total_score = VALUES(total_score), score_payload = VALUES(score_payload), release_status = VALUES(release_status), terminal_generation = VALUES(terminal_generation), revision = revision + 1", uuid.NewString(), attemptID, want, string(payload), relStatus, attemptID)
 		return err
 	default:
 		return err
@@ -1158,11 +1171,12 @@ func markModule1QualificationTx(ctx context.Context, q tx.Tx, attemptID string, 
 	// Driven by the published plan, not by the decision rows: a forced section
 	// without a route decision must still be flagged (and fail closed).
 	rows, err := q.QueryContext(ctx, `
-		SELECT s.section_key, rd.raw_correct, rd.operational_question_count, CAST(rd.policy_config AS CHAR), CAST(v.sat_classroom_plan AS CHAR)
+		SELECT s.section_key, base.raw_correct, base.operational_question_count, CAST(rd.policy_config AS CHAR), CAST(v.sat_classroom_plan AS CHAR)
 		FROM student_attempts a
 		JOIN exam_versions v ON v.id = a.published_version_id
 		JOIN assessment_sections s ON s.exam_version_id = v.id
 		LEFT JOIN assessment_route_decisions rd ON rd.attempt_id = a.id AND rd.section_id = s.id
+ LEFT JOIN assessment_module_attempts base ON base.id = rd.base_module_attempt_id AND base.attempt_id = a.id
 		WHERE a.id = ?`, attemptID)
 	if err != nil {
 		return err
@@ -1304,7 +1318,7 @@ func (s *Service) materializeACTResult(ctx context.Context, q tx.Tx, attemptID, 
 		return err
 	}
 	var existingID, existingStatus string
-	err = q.QueryRowContext(ctx, "SELECT id, outcome_status FROM assessment_results WHERE attempt_id = ? AND provider_key = 'act' FOR UPDATE", attemptID).Scan(&existingID, &existingStatus)
+	err = q.QueryRowContext(ctx, "SELECT id, outcome_status FROM assessment_results WHERE attempt_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = assessment_results.attempt_id) FOR UPDATE", attemptID).Scan(&existingID, &existingStatus)
 	if err == nil {
 		if existingStatus == want {
 			return nil
@@ -1337,7 +1351,7 @@ func (s *Service) materializeACTResult(ctx context.Context, q tx.Tx, attemptID, 
 			}
 		}
 	}
-	_, err = q.ExecContext(ctx, "INSERT INTO assessment_results (id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status) VALUES (?, ?, ?, 'act', ?, ?, ?, ?)", uuid.NewString(), attemptID, submissionID, want, total, string(payloadJSON), releaseStatus)
+	_, err = q.ExecContext(ctx, "INSERT INTO assessment_results (id, attempt_id, submission_id, provider_key, outcome_status, total_score, score_payload, release_status, terminal_generation) VALUES (?, ?, ?, 'act', ?, ?, ?, ?, (SELECT terminal_generation FROM student_attempts WHERE id = ?)) ON DUPLICATE KEY UPDATE submission_id = VALUES(submission_id), outcome_status = VALUES(outcome_status), total_score = VALUES(total_score), score_payload = VALUES(score_payload), release_status = VALUES(release_status), terminal_generation = VALUES(terminal_generation), revision = revision + 1", uuid.NewString(), attemptID, submissionID, want, total, string(payloadJSON), releaseStatus, attemptID)
 	return err
 }
 
@@ -1359,7 +1373,7 @@ func (s *Service) materializeACTCanonicalProjection(ctx context.Context, q tx.Tx
 	}
 	var submissionID, storedProvider string
 	err := q.QueryRowContext(ctx,
-		"SELECT id, provider_key FROM student_submissions WHERE attempt_id = ? FOR UPDATE", attemptID).
+		"SELECT id, provider_key FROM student_submissions WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id) FOR UPDATE", attemptID).
 		Scan(&submissionID, &storedProvider)
 	if err == sql.ErrNoRows {
 		submissionID = uuid.NewString()
@@ -1386,9 +1400,9 @@ func (s *Service) materializeACTCanonicalProjection(ctx context.Context, q tx.Tx
 		INSERT INTO student_submissions (
 			id, attempt_id, schedule_id, exam_id, published_version_id, provider_key,
 			student_id, student_name, student_email, cohort_name, submitted_at,
-			grading_status, section_statuses, created_at, updated_at
+			grading_status, section_statuses, created_at, updated_at, terminal_generation
 		)
-		VALUES (?, ?, ?, ?, ?, 'act', ?, ?, ?, ?, ?, 'submitted', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))
+		VALUES (?, ?, ?, ?, ?, 'act', ?, ?, ?, ?, ?, 'submitted', ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), (SELECT terminal_generation FROM student_attempts WHERE id = ?))
 		ON DUPLICATE KEY UPDATE
 			schedule_id = VALUES(schedule_id), exam_id = VALUES(exam_id),
 			published_version_id = VALUES(published_version_id), provider_key = 'act',
@@ -1397,7 +1411,7 @@ func (s *Service) materializeACTCanonicalProjection(ctx context.Context, q tx.Tx
 			submitted_at = VALUES(submitted_at), section_statuses = VALUES(section_statuses),
 			updated_at = UTC_TIMESTAMP(6)`,
 		submissionID, attemptID, scheduleID, examID, versionID, studentID, studentName,
-		emailArg, cohortName, submittedAt, sectionStatuses)
+		emailArg, cohortName, submittedAt, sectionStatuses, attemptID)
 	if err != nil {
 		return "", "", err
 	}
@@ -1474,31 +1488,31 @@ func ensureACTGradingSession(ctx context.Context, q tx.Tx, scheduleID string) er
 		UPDATE grading_sessions
 		SET total_students = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 			),
 			submitted_count = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 				  AND grading_status IN ('submitted', 'reopened')
 			),
 			pending_manual_reviews = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 				  AND grading_status IN ('submitted', 'reopened')
 			),
 			in_progress_reviews = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 				  AND grading_status = 'in_progress'
 			),
 			finalized_reviews = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act'
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)
 				  AND grading_status IN ('grading_complete', 'ready_to_release', 'released')
 			),
 			overdue_reviews = (
 				SELECT COUNT(*) FROM student_submissions
-				WHERE schedule_id = ? AND provider_key = 'act' AND is_overdue
+				WHERE schedule_id = ? AND provider_key = 'act' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL) AND is_overdue
 			),
 			updated_at = UTC_TIMESTAMP(6)
 		WHERE schedule_id = ?`, scheduleID, scheduleID, scheduleID, scheduleID, scheduleID, scheduleID, scheduleID)
@@ -1512,14 +1526,15 @@ func terminalJSON(value any) string {
 
 // StragglerRow is one terminal-without-receipt attempt awaiting repair.
 type StragglerRow struct {
-	AttemptID       string
-	ScheduleID      string
-	OrganizationID  *string
-	ExamID          string
-	AnswerRevision  int64
-	SubmittedAt     time.Time
-	ProctorStatus   string
-	ProtocolVersion int
+	AttemptID          string
+	ScheduleID         string
+	OrganizationID     *string
+	ExamID             string
+	AnswerRevision     int64
+	SubmittedAt        time.Time
+	ProctorStatus      string
+	ProtocolVersion    int
+	TerminalGeneration uint64
 }
 
 // stragglerSweepSQL is the missing-receipt repair predicate:
@@ -1527,7 +1542,7 @@ type StragglerRow struct {
 // alone — provisional rows are submitted/post-exam/NULL/NULL and must be
 // repaired, not skipped. Force the submitted_at range index so the locking
 // repair never scans active rows while they are being saved.
-const stragglerSweepSQL = "SELECT a.id, a.schedule_id, a.organization_id, a.exam_id, a.answer_revision, a.submitted_at, COALESCE(a.proctor_status,'active'), COALESCE(a.protocol_version,1) FROM student_attempts a FORCE INDEX (idx_student_attempts_submitted_updated_id) WHERE a.submitted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id) ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE OF a"
+const stragglerSweepSQL = "SELECT a.id, a.schedule_id, a.organization_id, a.exam_id, a.answer_revision, a.submitted_at, COALESCE(a.proctor_status,'active'), COALESCE(a.protocol_version,1) FROM student_attempts a FORCE INDEX (idx_student_attempts_submitted_updated_id) WHERE a.submitted_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id AND t.terminal_generation = a.terminal_generation) ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE OF a"
 
 // RepairMissingReceipts sweeps terminal-without-receipt stragglers and
 // manufactures legacy_unknown receipts (outcome derived from proctor_status),
@@ -1603,7 +1618,7 @@ func RepairMissingReceipts(ctx context.Context, db tx.DB, batchSize int) (int64,
 		if !st.SubmittedAt.IsZero() {
 			effArg = st.SubmittedAt
 		}
-		_, err = sqlTx.ExecContext(ctx, "INSERT INTO attempt_terminalizations (attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id) VALUES (?, ?, ?, ?, ?, 'legacy_unknown', 'system', NULL, COALESCE(?, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6), ?, ?, ?)", st.AttemptID, st.OrganizationID, tid, st.ScheduleID, outcome, effArg, st.AnswerRevision, string(snap), uuid.NewString())
+		_, err = sqlTx.ExecContext(ctx, "INSERT INTO attempt_terminalizations (attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id, terminal_generation) SELECT ?, ?, ?, ?, ?, 'legacy_unknown', 'system', NULL, COALESCE(?, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6), ?, ?, ?, terminal_generation FROM student_attempts WHERE id = ?", st.AttemptID, st.OrganizationID, tid, st.ScheduleID, outcome, effArg, st.AnswerRevision, string(snap), uuid.NewString(), st.AttemptID)
 		if err != nil {
 			if isDupKeyErr(err) {
 				continue
@@ -1631,7 +1646,7 @@ func RepairMissingReceipts(ctx context.Context, db tx.DB, batchSize int) (int64,
 // satGapSweepSQL drives from SAT exams so this locking read only visits SAT
 // attempts. A student_attempts table scan can lock unrelated IELTS inserts and
 // deadlock high-volume candidate admission while the background repair runs.
-const satGapSweepSQL = "SELECT a.id FROM exam_entities e STRAIGHT_JOIN student_attempts a ON a.exam_id = e.id JOIN attempt_terminalizations t ON t.attempt_id = a.id LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat' WHERE e.provider_key = 'sat' AND a.phase = 'post-exam' AND ar.id IS NULL AND NOT (a.sat_start_code_required = 1 AND a.sat_start_code_accepted_at IS NULL) ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE OF a"
+const satGapSweepSQL = "SELECT a.id FROM exam_entities e STRAIGHT_JOIN student_attempts a ON a.exam_id = e.id JOIN attempt_terminalizations t ON t.attempt_id = a.id AND t.terminal_generation = a.terminal_generation LEFT JOIN assessment_results ar ON ar.attempt_id = a.id AND ar.provider_key = 'sat' AND ar.terminal_generation = a.terminal_generation WHERE e.provider_key = 'sat' AND a.phase = 'post-exam' AND ar.id IS NULL AND NOT (a.sat_start_code_required = 1 AND a.sat_start_code_accepted_at IS NULL) ORDER BY a.updated_at ASC, a.id ASC LIMIT ? FOR UPDATE OF a"
 
 // satAttemptNeverStartedTx is the shared never-started predicate: a code-start
 // attempt without acceptance. Acceptance and first-module activation commit
@@ -1694,7 +1709,7 @@ func RepairSATResults(ctx context.Context, db tx.DB, batchSize int) (int64, erro
 // releasable: every module row is scored, as classroomRawScoreTx requires. A
 // row that cannot be released yet must not take a batch slot, or a full batch
 // of them starves every newer result (TestSATClassroomRepairNotStarvedByWithheldMySQL).
-const classroomPendingSQL = "SELECT ar.id, ar.attempt_id FROM assessment_results ar JOIN student_attempts a ON a.id = ar.attempt_id JOIN exam_schedules sch ON sch.id = a.schedule_id WHERE ar.provider_key = 'sat' AND ar.outcome_status = 'pending' AND ar.release_status = 'pending' AND COALESCE(sch.sat_session_mode, 'practice') = 'classroom' AND EXISTS (SELECT 1 FROM exam_entities e WHERE e.id = sch.exam_id AND e.sat_score_report_enabled) AND EXISTS (SELECT 1 FROM assessment_module_attempts ma JOIN assessment_modules m ON m.id = ma.module_id JOIN assessment_sections s ON s.id = m.section_id WHERE ma.attempt_id = ar.attempt_id) AND NOT EXISTS (SELECT 1 FROM assessment_module_attempts ma JOIN assessment_modules m ON m.id = ma.module_id JOIN assessment_sections s ON s.id = m.section_id WHERE ma.attempt_id = ar.attempt_id AND (ma.raw_correct IS NULL OR ma.operational_question_count IS NULL OR ma.operational_question_count <= 0)) ORDER BY ar.updated_at ASC, ar.id ASC LIMIT ? FOR UPDATE OF ar"
+const classroomPendingSQL = "SELECT ar.id, ar.attempt_id FROM assessment_results ar JOIN student_attempts a ON a.id = ar.attempt_id JOIN exam_schedules sch ON sch.id = a.schedule_id WHERE ar.terminal_generation = a.terminal_generation AND a.submitted_at IS NOT NULL AND ar.provider_key = 'sat' AND ar.outcome_status = 'pending' AND ar.release_status = 'pending' AND COALESCE(sch.sat_session_mode, 'practice') = 'classroom' AND EXISTS (SELECT 1 FROM exam_entities e WHERE e.id = sch.exam_id AND e.sat_score_report_enabled) AND EXISTS (SELECT 1 FROM assessment_module_attempts ma JOIN assessment_modules m ON m.id = ma.module_id JOIN assessment_sections s ON s.id = m.section_id WHERE ma.attempt_id = ar.attempt_id) AND NOT EXISTS (SELECT 1 FROM assessment_module_attempts ma JOIN assessment_modules m ON m.id = ma.module_id JOIN assessment_sections s ON s.id = m.section_id WHERE ma.attempt_id = ar.attempt_id AND (ma.raw_correct IS NULL OR ma.operational_question_count IS NULL OR ma.operational_question_count <= 0)) ORDER BY ar.updated_at ASC, ar.id ASC LIMIT ? FOR UPDATE OF ar"
 
 // RepairClassroomResults releases the raw score of classroom attempts that were
 // sealed while a module was still unscored. It only rewrites the result row:

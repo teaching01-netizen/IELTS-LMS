@@ -43,7 +43,7 @@ func timeoutRecoveryFixture(t *testing.T, routeDecided int) error {
 		t.Fatal(txerr)
 	}
 
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat')")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM student_submissions WHERE attempt_id = ? AND provider_key = 'sat' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id))")).
 		WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(0))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT EXISTS(SELECT 1 FROM assessment_module_attempts downstream")).

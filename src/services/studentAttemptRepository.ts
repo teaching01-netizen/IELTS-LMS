@@ -25,6 +25,7 @@ import {
 import type { ModuleType } from "../types";
 import type { ExamSchedule } from "../types/domain";
 import { createTtlLruCache } from "../utils/ttlLruCache";
+import { quarantineAnswerSyncCheckpoint } from "./studentMutationOutbox";
 import {
   emitStudentObservabilityMetric,
   withStudentObservabilityDimensions,
@@ -1661,8 +1662,33 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
   ): Promise<StudentAttempt> {
     const localAttempt =
       (await this.cache.getAllAttempts()).find((candidate) => candidate.id === attempt.id) ?? null;
+    const incomingLease = attempt.leaseEpoch ?? 0;
+    const cachedLease = localAttempt?.leaseEpoch ?? 0;
+    if (incomingLease > cachedLease && localAttempt) {
+      // Accepted state and offline drafts belong to the previous writer era.
+      // Recovery preparation archives its queues before installing credentials.
+      return attempt;
+    }
+    if (cachedLease > incomingLease && localAttempt) return localAttempt;
     const acceptedAttempt = preserveNewerAcceptedLocalState(attempt, localAttempt);
     return replayPendingMutationsOntoAttempt(acceptedAttempt, pendingMutations);
+  }
+
+  async prepareRecoveredWriter(attemptId: string, writerId: string): Promise<void> {
+    await this.withSaveAttemptLock(attemptId, async () => {
+      const cached = (await this.cache.getAllAttempts()).find((attempt) => attempt.id === attemptId);
+      if (cached?.activeClientSessionId === writerId) return;
+      const pending = await this.cache.getPendingMutations(attemptId);
+      if (pending.length > 0) {
+        const archiveKey = `recovery-quarantine:${attemptId}:${writerId}`;
+        const archived = await this.cache.getPendingMutations(archiveKey);
+        const ids = new Set(archived.map((mutation) => mutation.id));
+        await this.cache.savePendingMutations(archiveKey, [...archived, ...pending.filter((mutation) => !ids.has(mutation.id))]);
+      }
+      quarantineAnswerSyncCheckpoint(attemptId, writerId);
+      // Only clear the live queue after the durable archive has succeeded.
+      await this.cache.clearPendingMutations(attemptId);
+    });
   }
 
   private async cacheAttempt(attempt: StudentAttempt): Promise<StudentAttempt> {
@@ -1870,5 +1896,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 }
 
 const studentAttemptCache = new LocalStorageStudentAttemptCache();
-export const studentAttemptRepository: IStudentAttemptRepository =
-  new BackendStudentAttemptRepository(studentAttemptCache);
+const backendStudentAttemptRepository = new BackendStudentAttemptRepository(studentAttemptCache);
+export const studentAttemptRepository: IStudentAttemptRepository = backendStudentAttemptRepository;
+export const prepareRecoveredStudentWriter = (attemptId: string, writerId: string): Promise<void> =>
+  backendStudentAttemptRepository.prepareRecoveredWriter(attemptId, writerId);

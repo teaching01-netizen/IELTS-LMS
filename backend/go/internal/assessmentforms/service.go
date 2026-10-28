@@ -72,6 +72,7 @@ type attemptContext struct {
 	AttemptID, ScheduleID, ExamID, VersionID, UserID string
 	DeliveryStatus, ProctorStatus, ScheduleStatus    string
 	ClosedAt                                         sql.NullTime
+	Recovery                                         *exams.RecoveryControl
 	Forms                                            *definition.Forms
 	Sections                                         map[string]bool
 }
@@ -86,14 +87,22 @@ func (c attemptContext) completed() bool {
 func loadAttemptContext(ctx context.Context, q queryer, attemptID string) (attemptContext, error) {
 	var c attemptContext
 	var config, delivery, proctorStatus sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT a.id, a.schedule_id, a.exam_id, a.published_version_id, COALESCE(a.user_id, ''), a.delivery_status, a.proctor_status, s.status, s.eva_sim_closed_at, CAST(v.config_snapshot AS CHAR)
+	var rawRecovery string
+	err := q.QueryRowContext(ctx, `SELECT a.id, a.schedule_id, a.exam_id, a.published_version_id, COALESCE(a.user_id, ''), a.delivery_status, a.proctor_status, s.status, s.eva_sim_closed_at, CAST(v.config_snapshot AS CHAR), COALESCE(a.recovery_control,'')
 FROM student_attempts a JOIN exam_schedules s ON s.id = a.schedule_id JOIN exam_versions v ON v.id = a.published_version_id WHERE a.id = ?`, attemptID).
-		Scan(&c.AttemptID, &c.ScheduleID, &c.ExamID, &c.VersionID, &c.UserID, &delivery, &proctorStatus, &c.ScheduleStatus, &c.ClosedAt, &config)
+		Scan(&c.AttemptID, &c.ScheduleID, &c.ExamID, &c.VersionID, &c.UserID, &delivery, &proctorStatus, &c.ScheduleStatus, &c.ClosedAt, &config, &rawRecovery)
 	if err == sql.ErrNoRows {
 		return c, apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
 	}
 	if err != nil {
 		return c, err
+	}
+	c.Recovery, err = exams.ParseRecoveryControl([]byte(rawRecovery))
+	if err != nil {
+		return c, err
+	}
+	if c.Recovery != nil && c.Recovery.Phase != exams.RecoveryPhaseWorking {
+		return c, conflict("RECOVERY_HELD", "Staff recovery has stopped this browser.", nil)
 	}
 	c.DeliveryStatus = delivery.String
 	c.ProctorStatus = proctorStatus.String

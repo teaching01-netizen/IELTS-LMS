@@ -464,6 +464,13 @@ type Config struct {
 	SATAccessCodeStart bool
 	SATStartCodeKeys   string
 
+	// StaffDeviceRecoveryEnabled gates NEW staff-assisted recovery issuance
+	// (docs/superpowers/plans/2026-10-28-staff-assisted-exam-recovery.md).
+	// Recovery state persisted by an earlier rollout stays resolvable and
+	// continues to block ordinary admission while the gate is off; turning
+	// it off only stops new grants from being issued.
+	StaffDeviceRecoveryEnabled bool
+
 	// StudentWS selects the plan-C3 student-socket posture (default allow).
 	StudentWS StudentWSMode
 
@@ -923,6 +930,7 @@ func Load() Config {
 		SATTransferRequestTTLSecs:        getenvInt("SAT_TRANSFER_REQUEST_TTL_SECS", 600),
 		SATTransferApprovalTTLSecs:       getenvInt("SAT_TRANSFER_APPROVAL_TTL_SECS", 120),
 		SATAccessCodeStart:               getenvBool("SAT_ACCESS_CODE_START", false),
+		StaffDeviceRecoveryEnabled:       getenvBool("STAFF_DEVICE_RECOVERY_ENABLED", false),
 		SATStartCodeKeys:                 strings.TrimSpace(os.Getenv("SAT_START_CODE_KEYS")),
 		LiveBus:                          parseLiveBusMode(os.Getenv("LIVE_BUS")),
 		StudentWS:                        parseStudentWSMode(os.Getenv("STUDENT_WS")),

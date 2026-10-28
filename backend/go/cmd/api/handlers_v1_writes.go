@@ -53,6 +53,9 @@ func requireV1StudentIdentity(app *App, r *http.Request, attemptID, scheduleID, 
 	if sess.Role != auth.RoleStudent {
 		return v1StudentIdentity{}, apperrors.New(apperrors.CodeForbidden, "Student access is required.")
 	}
+	if sess.Proof.IsRecovery() && (sess.Proof.RecoveryAttemptID != attemptID || sess.Proof.RecoveryScheduleID != scheduleID) {
+		return v1StudentIdentity{}, recoveryScopeError()
+	}
 	clientSessionID := strings.TrimSpace(requestedClientSessionID)
 	if clientSessionID == "" {
 		clientSessionID = sess.ID

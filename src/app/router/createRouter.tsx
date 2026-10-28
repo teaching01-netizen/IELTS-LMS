@@ -88,6 +88,8 @@ const ProctorAnswerHistoryRoute = lazy(() =>
     default: module.ProctorAnswerHistoryRoute,
   }))
 );
+const StudentDeviceRecoveryRoute = lazy(() => import('../../features/student/routes/StudentDeviceRecoveryRoute').then(module => ({ default: module.StudentDeviceRecoveryRoute })));
+
 const StudentSessionRoute = lazy(() =>
   import("../../features/student-delivery/routes/StudentSessionRoute").then((module) => ({
     default: module.StudentSessionRoute,
@@ -575,7 +577,17 @@ const baseRoutes = [
         ),
       },
       {
-        path: "student/:scheduleId",
+        path: "student/recover-original/:scheduleId/:attemptId",
+ errorElement: <RouteErrorBoundary />,
+ element: <Suspense fallback={<RouteLoadingFallback />}><StudentDeviceRecoveryRoute /></Suspense>,
+ },
+ {
+ path: "student/recover/:grantId",
+ errorElement: <RouteErrorBoundary />,
+ element: <Suspense fallback={<RouteLoadingFallback />}><StudentDeviceRecoveryRoute /></Suspense>,
+ },
+ {
+ path: "student/:scheduleId",
         errorElement: <RouteErrorBoundary />,
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>

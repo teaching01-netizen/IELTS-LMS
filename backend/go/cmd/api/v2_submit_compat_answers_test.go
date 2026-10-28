@@ -93,17 +93,13 @@ func TestTerminalSealerSealSubmittedPublishesSealedAnswerMaps(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec(regexp.QuoteMeta("SET time_zone = '+00:00'")).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(regexp.QuoteMeta(
-		"SELECT outcome FROM attempt_terminalizations WHERE attempt_id = ? FOR UPDATE",
+		"SELECT outcome FROM attempt_terminalizations WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = attempt_terminalizations.attempt_id) FOR UPDATE",
 	)).WithArgs("attempt-1").WillReturnRows(sqlmock.NewRows([]string{"outcome"}))
 	mock.ExpectQuery(regexp.QuoteMeta(
-		"SELECT answer_revision, revision, organization_id FROM student_attempts WHERE id = ?",
+		"SELECT answer_revision, revision, organization_id, terminal_generation FROM student_attempts WHERE id = ?",
 	)).WithArgs("attempt-1").WillReturnRows(
-		sqlmock.NewRows([]string{"answer_revision", "revision", "organization_id"}).AddRow(3, 5, nil),
+		sqlmock.NewRows([]string{"answer_revision", "revision", "organization_id", "terminal_generation"}).AddRow(3, 5, nil, 0),
 	)
-	mock.ExpectExec(regexp.QuoteMeta(
-		"INSERT INTO attempt_terminalizations (attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), ?, ?, ?)",
-	)).WithArgs("attempt-1", nil, sqlmock.AnyArg(), "schedule-1", "submitted", "student_submit", "student", "student-1", sqlmock.AnyArg(), 3, sqlmock.AnyArg(), "3f2a1c9e-0000-4000-8000-000000000001").
-		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectQuery(regexp.QuoteMeta(
 		"SELECT COALESCE(protocol_version, 1), answers, writing_answers, flags FROM student_attempts WHERE id = ? FOR UPDATE",
 	)).WithArgs("attempt-1").WillReturnRows(
@@ -125,6 +121,10 @@ func TestTerminalSealerSealSubmittedPublishesSealedAnswerMaps(t *testing.T) {
 		"UPDATE student_attempts SET answers=?, writing_answers=?, flags=? WHERE id=?",
 	)).WithArgs(jsonField(field("reading-q1"), field("match-block")), jsonField(field("task1")), "{}", "attempt-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta(
+		"INSERT INTO attempt_terminalizations (attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id, terminal_generation) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), ?, ?, ?, terminal_generation FROM student_attempts WHERE id = ?",
+	)).WithArgs("attempt-1", nil, sqlmock.AnyArg(), "schedule-1", "submitted", "student_submit", "student", "student-1", sqlmock.AnyArg(), 3, jsonField([]string{"answers", "reading-q1"}, []string{"writingAnswers", "task1"}), "3f2a1c9e-0000-4000-8000-000000000001", "attempt-1").
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec(regexp.QuoteMeta(
 		"UPDATE student_attempts SET phase = 'post-exam', delivery_status = 'submitted', final_submission = ?, submitted_at = COALESCE(submitted_at, ?), updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ? AND ((submitted_at IS NULL AND phase <> 'post-exam') OR (delivery_status = 'submitted' AND phase = 'post-exam' AND final_submission IS NULL)) AND COALESCE(proctor_status, 'active') <> 'terminated'",
 	)).WithArgs(

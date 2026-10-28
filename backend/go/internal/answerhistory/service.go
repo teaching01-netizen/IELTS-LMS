@@ -139,7 +139,7 @@ func (s *Service) ResolveSubmissionIDFromAttempt(ctx context.Context, attemptID 
 		return "", validationError("Attempt id is required.")
 	}
 	var id sql.NullString
-	err := s.db.QueryRowContext(ctx, "SELECT id FROM student_submissions WHERE attempt_id = ? LIMIT 1", attemptID).Scan(&id)
+	err := s.db.QueryRowContext(ctx, "SELECT id FROM student_submissions WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL) LIMIT 1", attemptID).Scan(&id)
 	if err == sql.ErrNoRows || !id.Valid {
 		return "", notFoundError()
 	}
@@ -154,7 +154,7 @@ func (s *Service) loadContext(ctx context.Context, submissionID string) (context
 	if strings.TrimSpace(submissionID) == "" {
 		return zero, validationError("Submission id is required.")
 	}
-	row := s.db.QueryRowContext(ctx, "SELECT submissions.id AS submission_id, submissions.attempt_id AS attempt_id, submissions.schedule_id AS schedule_id, submissions.exam_id AS exam_id, submissions.cohort_name AS exam_title, versions.content_snapshot AS content_snapshot, versions.config_snapshot AS config_snapshot, attempts.answers AS answers, attempts.writing_answers AS writing_answers, attempts.final_submission AS final_submission, attempts.candidate_id AS candidate_id, attempts.candidate_name AS candidate_name, attempts.candidate_email AS candidate_email, attempts.created_at AS started_at, submissions.submitted_at AS submitted_at, COALESCE(attempts.protocol_version, 1) AS protocol_version FROM student_submissions submissions JOIN student_attempts attempts ON attempts.id = submissions.attempt_id JOIN exam_versions versions ON versions.id = submissions.published_version_id WHERE submissions.id = ? LIMIT 1", submissionID)
+	row := s.db.QueryRowContext(ctx, "SELECT submissions.id AS submission_id, submissions.attempt_id AS attempt_id, submissions.schedule_id AS schedule_id, submissions.exam_id AS exam_id, submissions.cohort_name AS exam_title, versions.content_snapshot AS content_snapshot, versions.config_snapshot AS config_snapshot, CASE WHEN submissions.terminal_generation = attempts.terminal_generation THEN attempts.answers ELSE COALESCE(JSON_EXTRACT(receipt.final_snapshot, '$.answers'), JSON_OBJECT()) END AS answers, CASE WHEN submissions.terminal_generation = attempts.terminal_generation THEN attempts.writing_answers ELSE COALESCE(JSON_EXTRACT(receipt.final_snapshot, '$.writingAnswers'), JSON_OBJECT()) END AS writing_answers, CASE WHEN submissions.terminal_generation = attempts.terminal_generation THEN attempts.final_submission ELSE receipt.final_snapshot END AS final_submission, attempts.candidate_id AS candidate_id, attempts.candidate_name AS candidate_name, attempts.candidate_email AS candidate_email, attempts.created_at AS started_at, submissions.submitted_at AS submitted_at, CASE WHEN submissions.terminal_generation = attempts.terminal_generation THEN COALESCE(attempts.protocol_version, 1) ELSE 1 END AS protocol_version FROM student_submissions submissions JOIN student_attempts attempts ON attempts.id = submissions.attempt_id LEFT JOIN attempt_terminalizations receipt ON receipt.attempt_id = submissions.attempt_id AND receipt.terminal_generation = submissions.terminal_generation JOIN exam_versions versions ON versions.id = submissions.published_version_id WHERE submissions.id = ? LIMIT 1", submissionID)
 	c, err := scanContext(row)
 	if err == sql.ErrNoRows {
 		return zero, notFoundError()
@@ -181,8 +181,14 @@ func (s *Service) loadContextByAttempt(ctx context.Context, attemptID string) (c
 	return c, s.resolveRowAnswers(ctx, &c)
 }
 
-func (s *Service) loadMutations(ctx context.Context, attemptID string) ([]mutationRow, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, mutation_type, mutation_seq, payload, client_timestamp, server_received_at, applied_revision FROM student_attempt_mutations WHERE attempt_id = ? ORDER BY server_received_at ASC, mutation_seq ASC, id ASC", attemptID)
+func (s *Service) loadMutations(ctx context.Context, attemptID string, submittedAt sql.NullTime) ([]mutationRow, error) {
+	query := "SELECT id, mutation_type, mutation_seq, payload, client_timestamp, server_received_at, applied_revision FROM student_attempt_mutations WHERE attempt_id = ?"
+	args := []any{attemptID}
+	if submittedAt.Valid {
+		query += " AND server_received_at <= ?"
+		args = append(args, submittedAt.Time)
+	}
+	rows, err := s.db.QueryContext(ctx, query+" ORDER BY server_received_at ASC, mutation_seq ASC, id ASC", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +457,7 @@ func (s *Service) buildOverview(ctx context.Context, c contextRow) (json.RawMess
 		return nil, err
 	}
 	_, index := buildTargetCatalog(c.ContentSnapshot, c.ConfigSnapshot)
-	mutations, err := s.loadMutations(ctx, historyAttemptID)
+	mutations, err := s.loadMutations(ctx, historyAttemptID, c.SubmittedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -579,7 +585,7 @@ func (s *Service) buildTargetDetail(ctx context.Context, c contextRow, targetTyp
 		return nil, err
 	}
 	_, index := buildTargetCatalog(c.ContentSnapshot, c.ConfigSnapshot)
-	mutations, err := s.loadMutations(ctx, historyAttemptID)
+	mutations, err := s.loadMutations(ctx, historyAttemptID, c.SubmittedAt)
 	if err != nil {
 		return nil, err
 	}

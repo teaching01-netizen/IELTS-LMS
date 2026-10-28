@@ -41,7 +41,7 @@ func (e *ResultProjectionCorruptError) Error() string {
 func (s *Service) LatestSubmissionForSchedule(ctx context.Context, scheduleID string) (string, error) {
 	var id string
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id FROM student_submissions WHERE schedule_id = ? ORDER BY created_at DESC LIMIT 1`,
+		`SELECT id FROM student_submissions WHERE schedule_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL) ORDER BY created_at DESC LIMIT 1`,
 		scheduleID).Scan(&id)
 	return id, err
 }

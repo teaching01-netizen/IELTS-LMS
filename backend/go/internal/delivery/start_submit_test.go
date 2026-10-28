@@ -22,7 +22,7 @@ func deliveryReconcileDrained(mock sqlmock.Sqlmock) {
 	deliverySaveBegin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key", "recovery_control"}).AddRow("att-1", "sat", ""))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
@@ -45,7 +45,7 @@ func deliveryReconcileDrainedStranded(mock sqlmock.Sqlmock) {
 	deliverySaveBegin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key"}).AddRow("att-1", "sat"))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "provider_key", "recovery_control"}).AddRow("att-1", "sat", ""))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "timing_model", "active_section_key"}).
@@ -69,8 +69,8 @@ func deliveryReconcileDrainedStranded(mock sqlmock.Sqlmock) {
 func deliveryModuleWorkableTx(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "active_client_session_id", "lease_epoch", "control_epoch"}).
-			AddRow("active", "running", nil, "exam", false, nil, "sess-test", 1, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "active_client_session_id", "lease_epoch", "control_epoch", "recovery_control"}).
+			AddRow("active", "running", nil, "exam", false, nil, "sess-test", 1, 1, ""))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow("live"))
@@ -85,8 +85,8 @@ func deliveryModuleStartWorkableTx(mock sqlmock.Sqlmock, timingModel string, act
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "active_client_session_id", "lease_epoch", "control_epoch"}).
-			AddRow("active", "running", nil, "exam", false, nil, "sess-test", 1, 1))
+		WillReturnRows(sqlmock.NewRows([]string{"proctor_status", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "active_client_session_id", "lease_epoch", "control_epoch", "recovery_control"}).
+			AddRow("active", "running", nil, "exam", false, nil, "sess-test", 1, 1, ""))
 	mock.ExpectQuery(regexp.QuoteMeta(startModuleRuntimeSnapshotQuery)).
 		WithArgs("att-1", "sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -199,8 +199,8 @@ func deliveryBootstrapLoadsForModel(mock sqlmock.Sqlmock, at time.Time, model an
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response", "server_revision", "module_attempt_id", "exam_question_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).
 		WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"candidate_name", "proctor_status", "proctor_note", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at"}).
-			AddRow("Jane", "active", nil, "running", nil, "exam", false, nil))
+		WillReturnRows(sqlmock.NewRows([]string{"candidate_name", "proctor_status", "proctor_note", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "recovery_control"}).
+			AddRow("Jane", "active", nil, "running", nil, "exam", false, nil, ""))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE attempt_id")).
 		WithArgs("att-1").
 		WillReturnError(sql.ErrNoRows)

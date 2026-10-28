@@ -481,14 +481,16 @@ func TestAuthoringFormsDraftLifecycleMySQL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Editable || got.Forms == nil || len(got.Forms.Registration.Fields) != 2 || got.Forms.SchemaVersion != 2 || len(got.Forms.SectionFields("math")) != 1 || got.Forms.EvaSim.Enabled {
-		t.Fatalf("new SAT draft must seed standard registration with Eva disabled: %+v", got)
+	// A new draft is unconfigured; Standard offers the default SAT fields for
+	// the explicit "Add standard SAT fields" action.
+	if !got.Editable || got.Forms != nil || len(got.Standard.Registration.Fields) != 2 || got.Standard.SchemaVersion != 2 || len(got.Standard.SectionFields("math")) != 1 || got.Standard.EvaSim.Enabled {
+		t.Fatalf("new SAT draft must be unconfigured with standard registration offered and Eva disabled: %+v", got)
 	}
 	save := func(rev int, forms definition.Forms) (authoring.ExamForms, error) {
 		raw, _ := json.Marshal(forms)
 		return authors.SaveForms(ctx, exam.ID, authoring.SaveFormsRequest{ExpectedVersionID: got.VersionID, ExpectedRevision: rev, Forms: raw, AppHosts: []string{"app.example.com"}})
 	}
-	edited := *got.Forms
+	edited := got.Standard
 	edited.Registration.Fields[1].Label = "Seat"
 	if _, err := save(got.VersionRevision+5, edited); formReasonOf(err) != "FORM_DRAFT_CHANGED" {
 		t.Fatalf("stale revision must be FORM_DRAFT_CHANGED, got %v", err)

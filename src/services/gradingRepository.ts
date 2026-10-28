@@ -357,6 +357,8 @@ class BackendGradingRepository implements IGradingRepository {
   private mapSubmission(payload: BackendStudentSubmission): StudentSubmission {
     return {
       id: payload.id,
+      ...(payload.terminalGeneration === undefined ? {} : { terminalGeneration: payload.terminalGeneration }),
+      ...(payload.historical === undefined ? {} : { historical: payload.historical }),
       submissionId: payload.id,
       scheduleId: payload.scheduleId,
       examId: payload.examId,

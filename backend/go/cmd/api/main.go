@@ -535,6 +535,10 @@ func BuildRouter(app *App) http.Handler {
 	// one key and no wrapped route ever falls to path-match/404.
 	authorize := func(key string, h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
+			if !recoverySessionRouteAllowed(r, SessionOf(r.Context())) {
+				httpx.WriteError(w, r, recoveryScopeError())
+				return
+			}
 			authz.MiddlewareFor(authz.Table, key, authzSessionOf)(httpx.WithRoute(h, key)).ServeHTTP(w, r)
 		}
 	}
@@ -578,6 +582,11 @@ func BuildRouter(app *App) http.Handler {
 				authzRoute(r, "POST", "/student/entry", studentEntryHandler(app))
 				authzRoute(r, "GET", "/student/schedules/{id}", studentEntryScheduleHandler(app))
 			})
+		})
+		r.With(studentLimit, limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
+			authzRoute(r, "POST", "/student/device-recovery/{grantID}/claim", studentClaimDeviceRecoveryHandler(app))
+			authzRoute(r, "POST", "/student/device-recovery/{grantID}/ready", studentReadyDeviceRecoveryHandler(app))
+			authzRoute(r, "POST", "/student/device-recovery/{grantID}/begin", studentBeginDeviceRecoveryHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierStudentCheckin, ipKey())).Group(func(r chi.Router) {
 			authzRoute(r, "POST", "/public/access-links/{linkID}/resolve-entry", publicLinkResolveEntry(app))
@@ -733,6 +742,9 @@ func BuildRouter(app *App) http.Handler {
 				authzRoute(r, "POST", "/{scheduleID}/heartbeat", v1HeartbeatHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Group(func(r chi.Router) {
+				authzRoute(r, "GET", "/{scheduleID}/audio-checkpoint", studentAudioCheckpointHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/audio-checkpoint", studentAudioCheckpointHandler(app))
+				authzRoute(r, "POST", "/{scheduleID}/attempts/{attemptID}/device-recovery/original-ready", studentPrepareOriginalDeviceHandler(app))
 				authzRoute(r, "POST", "/{scheduleID}/mutations:batch", v1MutationHandler(app))
 				authzRoute(r, "POST", "/{scheduleID}/audit", v1AuditHandler(app))
 				authzRoute(r, "POST", "/{scheduleID}/submit", v1SubmitHandler(app))
@@ -780,6 +792,11 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/rearm", proctorReArmStageHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/terminate", proctorTerminateHandler(app))
 			authzRoute(r, "GET", "/sessions/{scheduleID}/attempts/{attemptID}/late-evidence", proctorLateEvidenceHandler(app))
+			// Staff-assisted device recovery: preview first, then one explicit
+			// issuance that fences the old writer. Both are assignment-scoped.
+			authzRoute(r, "GET", "/sessions/{scheduleID}/attempts/{attemptID}/device-recovery", proctorDeviceRecoveryOptionsHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/device-recovery", proctorIssueDeviceRecoveryHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/device-recovery/restore-original", proctorRestoreOriginalDeviceHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/late-evidence/review", proctorReviewLateEvidenceHandler(app))
 			authzRoute(r, "GET", "/sessions/{scheduleID}/device-transfers", proctorDeviceTransfersHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/device-transfers/{requestID}/decision", proctorDeviceTransferDecisionHandler(app))

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"time"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -76,15 +77,38 @@ func (s *Service) ReadyCohortSection(ctx context.Context, scheduleID, sectionKey
 		if err != nil {
 			return err
 		}
-		if rt.ActiveSectionKey == nil || *rt.ActiveSectionKey != sectionKey || (rt.Status != StatusLive && rt.Status != StatusPaused) {
-			return apperrors.New(apperrors.CodeConflict, "The exam section has changed. Refresh the exam.")
-		}
-		var admitted int
-		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM student_attempts WHERE id = ? AND schedule_id = ? AND COALESCE(user_id, '') = ? AND submitted_at IS NULL AND COALESCE(delivery_status, 'running') NOT IN ('submitted','terminated','locked','cancelled')`, attemptID, scheduleID, actorUserID).Scan(&admitted); err != nil {
+		var rawRecovery, proctorStatus string
+		if err := q.QueryRowContext(ctx, `SELECT COALESCE(recovery_control,''),COALESCE(proctor_status,'active') FROM student_attempts WHERE id = ? AND schedule_id = ? AND COALESCE(user_id, '') = ? AND submitted_at IS NULL AND COALESCE(delivery_status, 'running') NOT IN ('submitted','terminated','locked','cancelled')`, attemptID, scheduleID, actorUserID).Scan(&rawRecovery, &proctorStatus); err != nil {
+			if err == sql.ErrNoRows {
+				return apperrors.New(apperrors.CodeNotFound, "Active student attempt not found.")
+			}
 			return err
 		}
-		if admitted != 1 {
-			return apperrors.New(apperrors.CodeNotFound, "Active student attempt not found.")
+		recovery, err := examdomain.ParseRecoveryControl([]byte(rawRecovery))
+		if err != nil {
+			return err
+		}
+		if recovery != nil {
+			if recovery.Phase != examdomain.RecoveryPhaseWorking {
+				return recoveryRuntimeConflict("RECOVERY_HELD", "Staff recovery has stopped this browser.")
+			}
+			if rt.Status == StatusPaused || proctorStatus == "paused" {
+				return recoveryRuntimeConflict("RECOVERY_PAUSED", "The exam is paused.")
+			}
+			if rt.Status != StatusLive {
+				var reason string
+				if err := q.QueryRowContext(ctx, `SELECT COALESCE(completion_reason,'') FROM exam_session_runtimes WHERE id=?`, rt.ID).Scan(&reason); err != nil {
+					return err
+				}
+				if rt.Status != StatusCompleted || reason != "time_expired" {
+					return recoveryRuntimeConflict("RECOVERY_CONTROLLED_END", "The exam was ended by staff.")
+				}
+			}
+			_, err := AdvanceSnapshotRecoveryInTx(ctx, q, attemptID, examdomain.ProviderIELTS, sectionKey, recovery, &out, &changed)
+			return err
+		}
+		if rt.ActiveSectionKey == nil || *rt.ActiveSectionKey != sectionKey || (rt.Status != StatusLive && rt.Status != StatusPaused) {
+			return apperrors.New(apperrors.CodeConflict, "The exam section has changed. Refresh the exam.")
 		}
 		var status string
 		var start sql.NullTime

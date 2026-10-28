@@ -42,7 +42,7 @@ func (s *Service) CanAttemptReadMedia(ctx context.Context, scheduleID, attemptID
 		   FROM student_attempts a
 		   LEFT JOIN exam_versions v ON v.id = a.published_version_id
 		   LEFT JOIN assessment_access_links l ON l.schedule_id = a.schedule_id
-		  WHERE a.id = ?`, attemptID,
+		  WHERE a.id = ? AND (a.recovery_control IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(a.recovery_control,'$.phase'))='working')`, attemptID,
 	).Scan(&storedSchedule, &publishedVersionID, &codeRequired, &codeAcceptedAt, &revision, &releaseScope, &linkScope)
 	if err == sql.ErrNoRows {
 		return false, nil
@@ -178,7 +178,13 @@ func (s *Service) AttemptOpenedModuleIDs(ctx context.Context, attemptID string) 
 // read content for.
 func (s *Service) attemptModuleIDs(ctx context.Context, attemptID string) (map[string]bool, error) {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ? AND (state <> 'not_started' OR auto_start_at IS NULL)", attemptID)
+		`SELECT module_id FROM assessment_module_attempts WHERE attempt_id = ? AND (state <> 'not_started' OR auto_start_at IS NULL)
+AND EXISTS (SELECT 1 FROM student_attempts a WHERE a.id=assessment_module_attempts.attempt_id AND
+(a.recovery_control IS NULL OR (JSON_UNQUOTE(JSON_EXTRACT(a.recovery_control,'$.phase'))='working' AND
+(module_id=JSON_UNQUOTE(JSON_EXTRACT(a.recovery_control,'$.target.moduleId')) OR
+(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(a.recovery_control,'$.target.moduleId')),'')='' AND module_id IN
+(SELECT m.id FROM assessment_modules m JOIN assessment_sections s ON s.id=m.section_id
+WHERE s.section_key=JSON_UNQUOTE(JSON_EXTRACT(a.recovery_control,'$.target.sectionKey'))))))))`, attemptID)
 	if err != nil {
 		return nil, err
 	}

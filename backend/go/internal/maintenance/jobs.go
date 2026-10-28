@@ -350,17 +350,17 @@ func AuditInvariants(ctx context.Context, db *sql.DB) ([]InvariantIssue, error) 
 		{"terminal_attempt_without_receipt", `
 			SELECT COUNT(*) FROM student_attempts a
 			WHERE a.submitted_at IS NOT NULL
-			  AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id)`},
+			  AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations t WHERE t.attempt_id = a.id AND t.terminal_generation = a.terminal_generation)`},
 		{"scored_sat_on_terminated_attempt", `
 			SELECT COUNT(*) FROM assessment_results ar
-			JOIN student_attempts a ON a.id = ar.attempt_id
+			JOIN student_attempts a ON a.id = ar.attempt_id AND a.terminal_generation = ar.terminal_generation
 			WHERE ar.provider_key = 'sat' AND ar.outcome_status = 'scored'
 			  AND COALESCE(a.proctor_status, 'active') = 'terminated'`},
 		{"submission_without_result_or_receipt", `
 			SELECT COUNT(*) FROM student_submissions ss
 			LEFT JOIN assessment_results ar ON ar.submission_id = ss.id
-			LEFT JOIN attempt_submissions_v2 v2 ON v2.attempt_id = ss.attempt_id
-			WHERE ss.provider_key <> 'ielts'
+			LEFT JOIN attempt_submissions_v2 v2 ON v2.attempt_id = ss.attempt_id AND v2.terminal_generation = ss.terminal_generation
+			WHERE ss.provider_key <> 'ielts' AND ss.terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = ss.attempt_id AND submitted_at IS NOT NULL)
 			  AND ar.id IS NULL AND v2.attempt_id IS NULL`},
 	}
 	var out []InvariantIssue
@@ -607,7 +607,7 @@ func syncProjectionBatch(ctx context.Context, db *sql.DB, scheduleCursor, attemp
 		SELECT a.id, a.schedule_id, a.exam_id, a.published_version_id,
 			a.candidate_id, a.candidate_name, COALESCE(a.candidate_email, ''),
 			s.cohort_name, a.submitted_at, CAST(a.final_submission AS CHAR),
-			CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR)
+			CAST(v.content_snapshot AS CHAR), CAST(v.config_snapshot AS CHAR), a.terminal_generation
 		FROM student_attempts a
 		JOIN exam_schedules s ON s.id = a.schedule_id
 		JOIN exam_entities e ON e.id = a.exam_id
@@ -632,7 +632,7 @@ func syncProjectionBatch(ctx context.Context, db *sql.DB, scheduleCursor, attemp
 		if err := attRows.Scan(
 			&attempt.ID, &attempt.ScheduleID, &attempt.ExamID, &attempt.PublishedVersionID,
 			&attempt.StudentID, &attempt.StudentName, &attempt.StudentEmail, &attempt.CohortName,
-			&submittedAt, &finalSubmission, &contentSnapshot, &configSnapshot,
+			&submittedAt, &finalSubmission, &contentSnapshot, &configSnapshot, &attempt.TerminalGeneration,
 		); err != nil {
 			attRows.Close()
 			return rep, nil, nil, nil, err
@@ -688,7 +688,7 @@ func refreshProjectionCounters(ctx context.Context, db *sql.DB, scheduleID strin
 			COALESCE(SUM(CASE WHEN grading_status IN ('grading_complete', 'ready_to_release', 'released') THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN is_overdue THEN 1 ELSE 0 END), 0)
 		FROM student_submissions
-		WHERE schedule_id = ? AND provider_key = 'ielts'`, scheduleID).
+		WHERE schedule_id = ? AND provider_key = 'ielts' AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = student_submissions.attempt_id AND submitted_at IS NOT NULL)`, scheduleID).
 		Scan(&total, &submitted, &pending, &inProgress, &finalized, &overdue); err != nil {
 		return err
 	}

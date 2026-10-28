@@ -41,9 +41,9 @@ func personalRearmPrologue(mock sqlmock.Sqlmock, timingModel string) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "active_section_key"}).AddRow("rt-1", nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_lifecycle_receipts WHERE scope_kind = ? AND scope_id = ? AND operation_id = ?")).
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running'), COALESCE(recovery_control,'') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"submitted_at", "proctor_status", "delivery_status"}).AddRow(nil, "active", "running"))
+		WillReturnRows(sqlmock.NewRows([]string{"submitted_at", "proctor_status", "delivery_status", "recovery_control"}).AddRow(nil, "active", "running", ""))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT e.provider_key FROM exam_schedules s JOIN exam_entities e ON e.id = s.exam_id WHERE s.id = ?")).
 		WithArgs("sched-1").
 		WillReturnRows(sqlmock.NewRows([]string{"provider_key"}).AddRow("sat"))

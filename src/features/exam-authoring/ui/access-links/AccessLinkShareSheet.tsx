@@ -4,24 +4,8 @@ import { accessLinkSectionStudentCopy, effectiveAccessLinkSections, type Assessm
 import { copyText, describeAccessLinkAudience, formatAccessLinkStatus, roomEntryUrl, studentJoinUrl } from "./accessLinkUi";
 import { useTransientFlag } from "./useTransientValue";
 import { AuthoringDialog } from "../authoringPrimitives";
-export function useQrCodeDataUrl(url: string | null, size = 640) {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    if (!url) {
-      setDataUrl(null);
-      setError(null);
-      return;
-    }
-    void import("qrcode")
-      .then((module) => module.toDataURL(url, { width: size, margin: 2, errorCorrectionLevel: "M" }))
-      .then((next) => { if (!cancelled) { setDataUrl(next); setError(null); } })
-      .catch(() => { if (!cancelled) setError("QR code could not be generated."); });
-    return () => { cancelled = true; };
-  }, [url, size]);
-  return { dataUrl, error };
-}
+import { useQrCodeDataUrl } from '../../../../shared/hooks/useQrCodeDataUrl';
+export { useQrCodeDataUrl } from '../../../../shared/hooks/useQrCodeDataUrl';
 
 export function useAccessLinkQrCode(linkId: string | null, size = 640) {
   return useQrCodeDataUrl(linkId ? studentJoinUrl(linkId) : null, size);

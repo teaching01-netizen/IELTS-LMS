@@ -85,10 +85,14 @@ func migDir(t *testing.T) string {
 // — count/max bumped 93->100. SAT configurable forms and Eva SIM (0101:
 // assessment_form_responses, schedule Eva closure) bumps 100->101. The roster
 // page index (0102), runtime status/timing index (0103), and SAT section-entry
-// forms (0104) bump 101->104. Any other count/max/gap change fails loudly.
+// forms (0104) bump 101->104. Staff-assisted exam recovery landed 0105-0109
+// (attempt recovery control and grants, completion generations, module-run
+// generations, audio checkpoints, scoped recovery sessions) — count/max
+// bumped 104->109. Claim operation identity (0110) bumps 109->110. Any other
+// count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 104
-	pinnedMigrationMax   = 104
+	pinnedMigrationFiles = 110
+	pinnedMigrationMax   = 110
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

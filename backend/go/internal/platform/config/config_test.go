@@ -195,3 +195,19 @@ func TestEffectiveCookieNameKeepsHostPrefixWhenSecure(t *testing.T) {
 		t.Fatal("development must default insecure")
 	}
 }
+
+func TestStaffDeviceRecoveryGateDefaultsOff(t *testing.T) {
+	t.Setenv("STAFF_DEVICE_RECOVERY_ENABLED", "")
+	c := Load()
+	if c.StaffDeviceRecoveryEnabled {
+		t.Fatal("staff-assisted device recovery must default to disabled")
+	}
+	t.Setenv("STAFF_DEVICE_RECOVERY_ENABLED", "true")
+	if c := Load(); !c.StaffDeviceRecoveryEnabled {
+		t.Fatal("STAFF_DEVICE_RECOVERY_ENABLED=true must enable issuance")
+	}
+	t.Setenv("STAFF_DEVICE_RECOVERY_ENABLED", "0")
+	if c := Load(); c.StaffDeviceRecoveryEnabled {
+		t.Fatal("STAFF_DEVICE_RECOVERY_ENABLED=0 must disable issuance")
+	}
+}

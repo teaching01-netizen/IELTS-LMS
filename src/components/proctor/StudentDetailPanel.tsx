@@ -1,3 +1,4 @@
+import { DeviceRecoveryAction } from '../../features/proctor/ui/DeviceRecoveryDialog';
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, History, MessageSquare, Pause, Play, Timer, UserX, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -226,6 +227,7 @@ export function StudentDetailPanel({
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-slate-950">{student.name}</h3>
+ <DeviceRecoveryAction scheduleId={student.scheduleId} attemptId={student.id} />
                 <p className="text-sm text-slate-500">{student.studentId} · {student.email}</p>
               </div>
               <Badge variant={student.status === 'active' ? 'success' : student.status === 'warned' ? 'warning' : student.status === 'paused' ? 'paused' : student.status === 'terminated' ? 'danger' : 'neutral'}>

@@ -719,10 +719,11 @@ func (w *Runner) executeSectionAttemptReconcileEvent(ctx context.Context, event 
 // terminal fact. Load-bearing — pinned by TestExecuteOutboxEventReusesID.
 func (w *Runner) sealAutoSubmitAttempt(ctx context.Context, event outbox.Event, payload autoSubmitEvent, reason, attemptID string) *failureDetail {
 	var providerKey, proctorStatus string
+	var generation uint64
 	if err := w.db.QueryRowContext(ctx, `
-		SELECT e.provider_key, COALESCE(a.proctor_status, 'active')
+		SELECT e.provider_key, COALESCE(a.proctor_status, 'active'), a.terminal_generation
 		FROM student_attempts a JOIN exam_entities e ON e.id = a.exam_id
-		WHERE a.id = ? AND a.schedule_id = ?`, attemptID, payload.ScheduleID).Scan(&providerKey, &proctorStatus); err != nil {
+		WHERE a.id = ? AND a.schedule_id = ?`, attemptID, payload.ScheduleID).Scan(&providerKey, &proctorStatus, &generation); err != nil {
 		return &failureDetail{attemptID: attemptID, err: fmt.Errorf("load auto-submit attempt %s: %w", attemptID, err)}
 	}
 	actorKind := terminalization.ActorSystem
@@ -741,11 +742,16 @@ func (w *Runner) sealAutoSubmitAttempt(ctx context.Context, event outbox.Event, 
 		"completionReason": reason,
 		"proctorStatus":    proctorStatus,
 	})
+	var origin *time.Time
+	if !event.CreatedAt.IsZero() {
+		origin = &event.CreatedAt
+	}
 	if _, err := w.sealerFor().Terminalize(ctx, terminalization.SealCommand{
 		AttemptID: attemptID, ScheduleID: payload.ScheduleID,
 		Outcome: outcome, Reason: reason,
 		ActorKind: actorKind, ActorID: actorID, FinalSubmission: finalSubmission,
-		RequestID: event.ID,
+		RequestID:                  event.ID,
+		ExpectedTerminalGeneration: &generation, OriginRecordedAt: origin,
 	}); err != nil {
 		return &failureDetail{attemptID: attemptID, permanent: isTerminalConflict(err), err: fmt.Errorf("auto-submit attempt %s: %w", attemptID, err)}
 	}

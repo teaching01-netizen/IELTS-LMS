@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '@components/ui/Button';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { useAuthSession } from '../../auth/api/authSession';
@@ -120,12 +121,15 @@ export function StudentSessionRoute() {
   if (ownershipBlocked && scheduleId && candidateId) {
     return (
       <React.Suspense fallback={<SatLoadingSurface kind="initial" label="Loading Digital SAT…" />}>
+ <div>
+ {attemptSnapshot?.id && <Button onClick={() => navigate(`/student/recover-original/${encodeURIComponent(scheduleId)}/${encodeURIComponent(attemptSnapshot.id)}`)}>กลับไปใช้เครื่องเดิมหลังเจ้าหน้าที่อนุญาต</Button>}
         <SatDeviceTransferPanel
           scheduleId={scheduleId}
           candidateId={candidateId}
           onAuthorized={() => void retry()}
           onExit={navigateToStudentCheckIn}
         />
+      </div>
       </React.Suspense>
     );
   }

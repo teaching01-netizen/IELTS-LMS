@@ -40,6 +40,7 @@ import (
 
 	"github.com/google/uuid"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/lifecycle"
 	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -475,9 +476,6 @@ func (s *Service) ExtendAttempt(ctx context.Context, actor Actor, scheduleID, at
 	if minutes <= 0 {
 		return &apperrors.Error{Code: apperrors.CodeBadRequest, Message: "Extension minutes must be greater than zero.", HTTPStatus: 400}
 	}
-	if strings.TrimSpace(cmd.ModuleID) == "" {
-		return apperrors.New(apperrors.CodeValidation, "moduleId is required for an individual time grant.")
-	}
 	hash, err := lifecycle.Hash("extend_attempt", struct {
 		ActorID string
 		Minutes int64
@@ -502,10 +500,10 @@ func (s *Service) ExtendAttempt(ctx context.Context, actor Actor, scheduleID, at
 			return nil
 		}
 		// Provisional extend-attempt: REJECT with Conflict (post-submit cannot resume).
-		const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
+		const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running'), COALESCE(recovery_control,'') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
 		var submittedAny any
-		var proctorStatus, delivery string
-		if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &proctorStatus, &delivery); err != nil {
+		var proctorStatus, delivery, rawRecovery string
+		if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &proctorStatus, &delivery, &rawRecovery); err != nil {
 			if err == sql.ErrNoRows {
 				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
 			}
@@ -514,6 +512,26 @@ func (s *Service) ExtendAttempt(ctx context.Context, actor Actor, scheduleID, at
 		if isNonNullTime(submittedAny) || proctorStatus == "terminated" || delivery == "submitted" || delivery == "terminated" || delivery == "locked" || delivery == "cancelled" {
 			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Post-submit attempts cannot be extended; the attempt is already terminal.", HTTPStatus: 409}
 		}
+		recovery, err := examdomain.ParseRecoveryControl([]byte(rawRecovery))
+		if err != nil {
+			return err
+		}
+		if recovery != nil {
+			if err := extendRecoveryClock(ctx, q, attemptID, scheduleID, cmd.ModuleID, recovery, minutes); err != nil {
+				return err
+			}
+			if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "EXTENSION_GRANTED", &attemptID, map[string]any{"scope": "recovery", "target": recovery.Target, "operationId": cmd.OperationID, "minutes": minutes, "reason": cmd.Reason}); err != nil {
+				return err
+			}
+			if err := s.emitRoster(ctx, q, scheduleID, "extend_attempt", &attemptID, map[string]any{"minutes": minutes}); err != nil {
+				return err
+			}
+			return lifecycle.Store(ctx, q, scope, cmd.OperationID, "extend_attempt", hash, map[string]any{"ok": true})
+		}
+		if strings.TrimSpace(cmd.ModuleID) == "" {
+			return apperrors.New(apperrors.CodeValidation, "moduleId is required for an individual time grant.")
+		}
+
 		pk, err := providerKeyOfSchedule(ctx, q, scheduleID)
 		if err != nil {
 			return err
@@ -593,10 +611,10 @@ func (s *Service) ReArmAttemptStage(ctx context.Context, actor Actor, scheduleID
 		if stored != nil {
 			return nil
 		}
-		const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
+		const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running'), COALESCE(recovery_control,'') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
 		var submittedAny any
-		var proctorStatus, delivery string
-		if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &proctorStatus, &delivery); err != nil {
+		var proctorStatus, delivery, rawRecovery string
+		if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &proctorStatus, &delivery, &rawRecovery); err != nil {
 			if err == sql.ErrNoRows {
 				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
 			}
@@ -605,6 +623,14 @@ func (s *Service) ReArmAttemptStage(ctx context.Context, actor Actor, scheduleID
 		if isNonNullTime(submittedAny) || proctorStatus == "terminated" || delivery == "submitted" || delivery == "terminated" || delivery == "locked" || delivery == "cancelled" {
 			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Post-submit attempts cannot be re-armed; the attempt is already terminal.", HTTPStatus: 409}
 		}
+		recovery, err := examdomain.ParseRecoveryControl([]byte(rawRecovery))
+		if err != nil {
+			return err
+		}
+		if recovery != nil {
+			return recoveryControlConflict("An entry re-arm cannot replace staff recovery. Use the recovery dialog to change its target or time.")
+		}
+
 		pk, err := providerKeyOfSchedule(ctx, q, scheduleID)
 		if err != nil {
 			return err
@@ -1234,10 +1260,10 @@ func (s *Service) updateAttemptStatus(ctx context.Context, actor Actor, schedule
 }
 
 func (s *Service) updateAttemptStatusInTx(ctx context.Context, q tx.Tx, actor Actor, scheduleID, attemptID, proctorStatus string, phase *string, actionType string, cmd AttemptCommand) error {
-	const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
+	const term = "SELECT submitted_at, COALESCE(proctor_status,'active'), COALESCE(delivery_status,'running'), COALESCE(recovery_control,'') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE"
 	var submittedAny any
-	var proctor, delivery string
-	if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &proctor, &delivery); err != nil {
+	var proctor, delivery, rawRecovery string
+	if err := q.QueryRowContext(ctx, term, attemptID, scheduleID).Scan(&submittedAny, &proctor, &delivery, &rawRecovery); err != nil {
 		if err == sql.ErrNoRows {
 			return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Attempt not found.", HTTPStatus: 404}
 		}
@@ -1246,9 +1272,20 @@ func (s *Service) updateAttemptStatusInTx(ctx context.Context, q tx.Tx, actor Ac
 	if isNonNullTime(submittedAny) || proctor == "terminated" || delivery == "submitted" || delivery == "terminated" || delivery == "locked" || delivery == "cancelled" {
 		return &apperrors.Error{Code: apperrors.CodeConflict, Message: "The attempt is already terminal and cannot accept this command.", HTTPStatus: 409}
 	}
+	recovery, err := examdomain.ParseRecoveryControl([]byte(rawRecovery))
+	if err != nil {
+		return err
+	}
+
 	if proctor == proctorStatus {
 		return nil
 	}
+	if recovery != nil && recovery.Phase != examdomain.RecoveryPhaseWorking {
+		if _, err := q.ExecContext(ctx, `UPDATE attempt_device_recovery_grants SET grant_revision=grant_revision+1,updated_at=UTC_TIMESTAMP(6) WHERE id=? AND attempt_id=? AND state IN ('issued','claimed')`, recovery.ActiveGrantID, attemptID); err != nil {
+			return err
+		}
+	}
+
 	const upd = "UPDATE student_attempts SET delivery_status = CASE WHEN COALESCE(protocol_version, 1) <> 2 THEN delivery_status WHEN ? = 'paused' THEN CASE WHEN COALESCE(delivery_status, 'running') IN ('submitted', 'terminated', 'locked', 'cancelled') THEN delivery_status ELSE 'paused' END WHEN ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND COALESCE(delivery_status, 'running') = 'paused' THEN 'running' ELSE delivery_status END, closing_grace_until = CASE WHEN COALESCE(protocol_version, 1) = 2 AND ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND deadline_at IS NOT NULL THEN DATE_ADD(DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6)), 0) SECOND), INTERVAL 30 SECOND) ELSE closing_grace_until END, deadline_at = CASE WHEN COALESCE(protocol_version, 1) = 2 AND ? = 'active' AND COALESCE(proctor_status, 'active') = 'paused' AND deadline_at IS NOT NULL THEN DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(SECOND, COALESCE(proctor_updated_at, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6)), 0) SECOND) ELSE deadline_at END, proctor_status = ?, phase = COALESCE(?, phase), proctor_note = COALESCE(?, proctor_note), proctor_updated_at = UTC_TIMESTAMP(6), proctor_updated_by = ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1, control_epoch = control_epoch + 1 WHERE id = ? AND schedule_id = ?"
 	var reason *string
 	if cmd.Reason != nil {
@@ -1279,7 +1316,7 @@ func (s *Service) updateAttemptStatusInTx(ctx context.Context, q tx.Tx, actor Ac
 				    deadline_at = CASE WHEN deadline_at IS NULL THEN NULL ELSE DATE_ADD(deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) END,
 				    accumulated_paused_seconds = accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, paused_at, UTC_TIMESTAMP(6)), 0),
 				    paused_at = NULL, revision = revision + 1
-				WHERE attempt_id = ? AND state IN ('preparing', 'active') AND paused_at IS NOT NULL`, attemptID); err != nil {
+				WHERE attempt_id = ? AND state IN ('preparing', 'active') AND paused_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM student_attempts sa WHERE sa.id=ielts_attempt_section_timelines.attempt_id AND JSON_SEARCH(sa.recovery_control,'one',ielts_attempt_section_timelines.section_key,NULL,'$.suspended[*].target.sectionKey') IS NOT NULL)`, attemptID); err != nil {
 				return err
 			}
 		}

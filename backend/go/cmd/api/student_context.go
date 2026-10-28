@@ -704,7 +704,7 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 	// Resolve the attempt BEFORE projecting the version: the content fence needs
 	// the attempt's assigned module set, and an unresolved attempt must narrow to
 	// base modules rather than fall back to the whole tree.
-	attemptID, err := resolveStudentAttemptIDForUser(ctx, app.DB, scheduleID, candidateID, sess.UserID)
+	attemptID, err := resolveStudentAttemptForSession(ctx, app.DB, scheduleID, candidateID, sess)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
@@ -747,13 +747,17 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 		return nil, err
 	}
 	context["attempt"] = attempt
+	applyStudentRecoveryContext(context, attempt)
 	clientSessionID = strings.TrimSpace(clientSessionID)
 	if !includeCredential {
-		enforced, _, err := attempts.WriterPolicyOf(ctx, app.DB, attemptID)
+		enforced, owner, err := attempts.WriterPolicyOf(ctx, app.DB, attemptID)
 		if err != nil {
 			return nil, err
 		}
 		if enforced {
+			if owner == "" || owner != clientSessionID {
+				context["version"] = nil
+			}
 			redactWriterIdentity(attempt, clientSessionID)
 		}
 		return context, nil
@@ -792,6 +796,9 @@ type studentBootstrapRequest struct {
 }
 
 func bootstrapStudentAttempt(ctx context.Context, app *App, sess *auth.Session, scheduleID string, req studentBootstrapRequest) (map[string]any, error) {
+	if sess.Proof.IsRecovery() {
+		return studentSessionContext(ctx, app, sess, scheduleID, strings.TrimSpace(req.CandidateID), req.ClientSessionID, true)
+	}
 	candidateID := strings.TrimSpace(req.CandidateID)
 	if candidateID == "" {
 		return nil, apperrors.New(apperrors.CodeValidation, "candidateId is required.")

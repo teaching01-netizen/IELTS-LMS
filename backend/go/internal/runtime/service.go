@@ -657,7 +657,7 @@ func (s *Service) Resume(ctx context.Context, scheduleID string, fence RevisionF
 				    t.accumulated_paused_seconds = t.accumulated_paused_seconds + GREATEST(TIMESTAMPDIFF(SECOND, t.paused_at, UTC_TIMESTAMP(6)), 0),
 				    t.paused_at = NULL, t.revision = t.revision + 1
 				WHERE t.runtime_id = ? AND t.state IN ('preparing', 'active') AND t.paused_at IS NOT NULL
-				  AND COALESCE(a.proctor_status, 'active') <> 'paused'`, rt.ID); err != nil {
+				  AND COALESCE(a.proctor_status, 'active') <> 'paused' AND JSON_SEARCH(a.recovery_control,'one',t.section_key,NULL,'$.suspended[*].target.sectionKey') IS NULL`, rt.ID); err != nil {
 				return err
 			}
 		}
@@ -833,7 +833,7 @@ func syncV2TimingInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, secti
 		" sa.revision = sa.revision + 1," +
 		" sa.updated_at = UTC_TIMESTAMP(6) " +
 		"WHERE sa.schedule_id = ? " +
-		"AND sa.protocol_version = 2 " +
+		"AND sa.protocol_version = 2 AND sa.recovery_control IS NULL " +
 		"AND sa.submitted_at IS NULL " +
 		"AND COALESCE(sa.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')"
 	args := []any{runtimeID, sectionKey, scheduleID}
@@ -892,7 +892,8 @@ func insertControlEvent(ctx context.Context, q tx.Tx, runtimeID, scheduleID, act
 // transitions change clocks; overlapping and repeated controls cannot double
 // credit time. Callers hold the affected attempt(s) and runtime locks first.
 func SyncSATPauseInTx(ctx context.Context, q tx.Tx, scheduleID, attemptID string) error {
-	const effective = "(r.status = 'paused' OR COALESCE(sa.proctor_status, 'active') = 'paused')"
+	const ordinaryPause = "(r.status = 'paused' OR COALESCE(sa.proctor_status, 'active') = 'paused')"
+	const effective = "(" + ordinaryPause + " OR JSON_SEARCH(sa.recovery_control, 'one', ma.id, NULL, '$.suspended[*].target.moduleAttemptId') IS NOT NULL)"
 	scope := "sa.schedule_id = ?"
 	args := []any{scheduleID}
 	if attemptID != "" {
@@ -914,17 +915,21 @@ func SyncSATPauseInTx(ctx context.Context, q tx.Tx, scheduleID, attemptID string
 	// the same lead. A pause during the countdown moves only the deadline.
 	const pausedBeforeStart = "b.starts_at IS NOT NULL AND b.starts_at > b.paused_at"
 	const pauseShift = "INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND"
+	const breakPause = "(" + ordinaryPause + " OR JSON_SEARCH(sa.recovery_control, 'one', b.id, NULL, '$.suspendedBreakIds[*]') IS NOT NULL)"
 	breaks := "UPDATE assessment_attempt_breaks b JOIN student_attempts sa ON sa.id = b.attempt_id JOIN exam_session_runtimes r ON r.schedule_id = sa.schedule_id SET " +
-		"b.entry_starts_at = CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL AND " + pausedBeforeStart + " AND b.entry_starts_at IS NOT NULL THEN DATE_ADD(b.entry_starts_at, " + pauseShift + ") ELSE b.entry_starts_at END, " +
-		"b.starts_at = CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL AND " + pausedBeforeStart + " THEN DATE_ADD(b.starts_at, " + pauseShift + ") ELSE b.starts_at END, " +
-		"b.accumulated_paused_seconds = b.accumulated_paused_seconds + CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) ELSE 0 END, " +
-		"b.deadline_at = CASE WHEN NOT " + effective + " AND b.paused_at IS NOT NULL THEN DATE_ADD(b.deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) ELSE b.deadline_at END, " +
-		"b.paused_at = CASE WHEN " + effective + " THEN COALESCE(b.paused_at, UTC_TIMESTAMP(6)) ELSE NULL END, b.revision = b.revision + 1 WHERE " + scope +
-		" AND b.state = 'active' AND (" + effective + " AND b.paused_at IS NULL OR NOT " + effective + " AND b.paused_at IS NOT NULL)"
+		"b.entry_starts_at = CASE WHEN NOT " + breakPause + " AND b.paused_at IS NOT NULL AND (b.starts_at IS NULL OR " + pausedBeforeStart + ") AND b.entry_starts_at IS NOT NULL THEN DATE_ADD(b.entry_starts_at, " + pauseShift + ") ELSE b.entry_starts_at END, " +
+		"b.starts_at = CASE WHEN NOT " + breakPause + " AND b.paused_at IS NOT NULL AND " + pausedBeforeStart + " THEN DATE_ADD(b.starts_at, " + pauseShift + ") ELSE b.starts_at END, " +
+		"b.accumulated_paused_seconds = b.accumulated_paused_seconds + CASE WHEN NOT " + breakPause + " AND b.paused_at IS NOT NULL THEN GREATEST(TIMESTAMPDIFF(SECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) ELSE 0 END, " +
+		"b.deadline_at = CASE WHEN NOT " + breakPause + " AND b.paused_at IS NOT NULL THEN DATE_ADD(b.deadline_at, INTERVAL GREATEST(TIMESTAMPDIFF(MICROSECOND, b.paused_at, UTC_TIMESTAMP(6)), 0) MICROSECOND) ELSE b.deadline_at END, " +
+		"b.paused_at = CASE WHEN " + breakPause + " THEN COALESCE(b.paused_at, UTC_TIMESTAMP(6)) ELSE NULL END, b.revision = b.revision + 1 WHERE " + scope +
+		" AND b.state IN ('active','armed','pending') AND (" + breakPause + " AND b.paused_at IS NULL OR NOT " + breakPause + " AND b.paused_at IS NOT NULL)"
 	if _, err := q.ExecContext(ctx, breaks, args...); err != nil {
 		return err
 	}
-	return RealignSATRecoveryBoundariesInTx(ctx, q, scheduleID, attemptID)
+	if err := RealignSATRecoveryBoundariesInTx(ctx, q, scheduleID, attemptID); err != nil {
+		return err
+	}
+	return SyncRecoveryClockInTx(ctx, q, scheduleID, attemptID)
 }
 
 // RealignSATRecoveryBoundariesInTx re-derives the deadlines of working SAT
@@ -935,7 +940,7 @@ func SyncSATPauseInTx(ctx context.Context, q tx.Tx, scheduleID, attemptID string
 func RealignSATRecoveryBoundariesInTx(ctx context.Context, q tx.Tx, scheduleID, attemptID string) error {
 	const workDeadline = "TIMESTAMPADD(SECOND, ma.allocated_seconds + ma.extension_seconds + ma.accumulated_paused_seconds, ma.started_at)"
 	stmt := `UPDATE assessment_module_boundaries b
-		JOIN assessment_module_attempts ma ON ma.id = b.module_attempt_id
+		JOIN assessment_module_attempts ma ON ma.id = b.module_attempt_id AND ma.run_generation = b.run_generation
 		JOIN student_attempts sa ON sa.id = ma.attempt_id
 		JOIN exam_schedules s ON s.id = sa.schedule_id
 		SET b.work_deadline_at = ` + workDeadline + `,
@@ -944,6 +949,14 @@ func RealignSATRecoveryBoundariesInTx(ctx context.Context, q tx.Tx, scheduleID, 
 		    b.revision = b.revision + 1
 		WHERE sa.schedule_id = ?`
 	args := []any{scheduleID}
+	if scheduleID == "" {
+		if attemptID == "" {
+			return fmt.Errorf("boundary realignment requires a scope")
+		}
+		stmt = strings.Replace(stmt, "WHERE sa.schedule_id = ?", "WHERE sa.id = ?", 1)
+		args = []any{attemptID}
+		attemptID = ""
+	}
 	if attemptID != "" {
 		stmt += " AND sa.id = ?"
 		args = append(args, attemptID)
@@ -962,7 +975,7 @@ func ExtendSATModulesInTx(ctx context.Context, q tx.Tx, scheduleID string, minut
 }
 
 func extendSATModules(ctx context.Context, q tx.Tx, scheduleID string, minutes int64) error {
-	const stmt = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_entities e ON e.id = sa.exam_id SET ma.extension_seconds = ma.extension_seconds + (? * 60), ma.revision = ma.revision + 1 WHERE sa.schedule_id = ? AND e.provider_key = 'sat' AND ma.state = 'active' AND ma.started_at IS NOT NULL"
+	const stmt = "UPDATE assessment_module_attempts ma JOIN student_attempts sa ON sa.id = ma.attempt_id JOIN exam_entities e ON e.id = sa.exam_id SET ma.extension_seconds = ma.extension_seconds + (? * 60), ma.revision = ma.revision + 1 WHERE sa.schedule_id = ? AND e.provider_key = 'sat' AND sa.recovery_control IS NULL AND ma.state = 'active' AND ma.started_at IS NOT NULL"
 	if _, err := q.ExecContext(ctx, stmt, minutes, scheduleID); err != nil {
 		return err
 	}

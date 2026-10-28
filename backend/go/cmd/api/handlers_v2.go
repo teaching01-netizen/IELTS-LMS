@@ -673,7 +673,7 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 	// already the single authoritative decision rather than a pre-tx guess to be
 	// re-checked.
 	var existing string
-	err := q.QueryRowContext(ctx, `SELECT outcome FROM attempt_terminalizations WHERE attempt_id = ? FOR UPDATE`, attemptID).Scan(&existing)
+	err := q.QueryRowContext(ctx, `SELECT outcome FROM attempt_terminalizations WHERE attempt_id = ? AND terminal_generation = (SELECT terminal_generation FROM student_attempts WHERE id = attempt_terminalizations.attempt_id) FOR UPDATE`, attemptID).Scan(&existing)
 	switch {
 	case err == nil:
 		if existing == terminalization.OutcomeSubmitted {
@@ -685,8 +685,9 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 	}
 	var answerRev int64
 	var revision int64
+	var terminalGeneration uint64
 	var org sql.NullString
-	if err := q.QueryRowContext(ctx, `SELECT answer_revision, revision, organization_id FROM student_attempts WHERE id = ?`, attemptID).Scan(&answerRev, &revision, &org); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT answer_revision, revision, organization_id, terminal_generation FROM student_attempts WHERE id = ?`, attemptID).Scan(&answerRev, &revision, &org, &terminalGeneration); err != nil {
 		return err
 	}
 	eff := effectiveAt.UTC()
@@ -695,7 +696,7 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 	if _, perr := uuid.Parse(reqID); perr != nil {
 		reqID = uuid.NewString()
 	}
-	snapshotFields := map[string]any{"attemptId": attemptID, "scheduleId": scheduleID, "digest": digest, "submissionId": submissionID}
+	snapshotFields := map[string]any{"attemptId": attemptID, "scheduleId": scheduleID, "digest": digest, "submissionId": submissionID, "terminalGeneration": terminalGeneration}
 	// Seal-time answer authority, resolved once: ACT scoring (which needs it
 	// first) and the compatibility projection read the same materialized answers.
 	var storedAnswers, storedWriting, storedFlags sql.NullString
@@ -735,6 +736,19 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 			}
 		}
 	}
+	if !sealed {
+		if storedAnswers, storedWriting, storedFlags, err = sealAnswerBlobs(ctx, q, attemptID); err != nil {
+			return err
+		}
+	}
+	answers, writingAnswers, flags, err := decodeSealAnswerMaps(storedAnswers, storedWriting, storedFlags)
+	if err != nil {
+		return err
+	}
+	snapshotFields["answers"] = answers
+	snapshotFields["writingAnswers"] = writingAnswers
+	snapshotFields["flags"] = flags
+	snapshotFields["providerKey"] = provider
 	snap, _ := json.Marshal(snapshotFields)
 	var orgArg any
 	if org.Valid {
@@ -744,8 +758,8 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 	if actorID != "" {
 		actorArg = actorID
 	}
-	const ins = `INSERT INTO attempt_terminalizations (attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), ?, ?, ?)`
-	if _, err := q.ExecContext(ctx, ins, attemptID, orgArg, tid, scheduleID, terminalization.OutcomeSubmitted, terminalization.ReasonStudentSubmit, terminalization.ActorStudent, actorArg, eff, answerRev, string(snap), reqID); err != nil {
+	const ins = `INSERT INTO attempt_terminalizations (attempt_id, organization_id, terminalization_id, schedule_id, outcome, reason, actor_kind, actor_id, effective_at, recorded_at, answer_revision, final_snapshot, request_id, terminal_generation) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6), ?, ?, ?, terminal_generation FROM student_attempts WHERE id = ?`
+	if _, err := q.ExecContext(ctx, ins, attemptID, orgArg, tid, scheduleID, terminalization.OutcomeSubmitted, terminalization.ReasonStudentSubmit, terminalization.ActorStudent, actorArg, eff, answerRev, string(snap), reqID, attemptID); err != nil {
 		return err
 	}
 	projectionFields := map[string]any{"terminalizationId": tid, "attemptId": attemptID, "scheduleId": scheduleID, "outcome": terminalization.OutcomeSubmitted, "reason": terminalization.ReasonStudentSubmit, "digest": digest, "submissionId": submissionID, "effectiveAt": eff}
@@ -760,15 +774,6 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 	// answer map and a fully answered exam read as "answers were not saved" in
 	// review — for every question type, because the loss was the whole map.
 	// Publish the same sealed answer maps the terminalization seal publishes.
-	if !sealed {
-		if storedAnswers, storedWriting, storedFlags, err = sealAnswerBlobs(ctx, q, attemptID); err != nil {
-			return err
-		}
-	}
-	answers, writingAnswers, flags, err := decodeSealAnswerMaps(storedAnswers, storedWriting, storedFlags)
-	if err != nil {
-		return err
-	}
 	projectionFields["answers"] = answers
 	projectionFields["writingAnswers"] = writingAnswers
 	projectionFields["flags"] = flags
@@ -795,7 +800,7 @@ func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, s
 	if s.outboxExecOnly {
 		return nil
 	}
-	payload, _ := json.Marshal(map[string]any{"terminalizationId": tid, "attemptId": attemptID, "scheduleId": scheduleID, "outcome": terminalization.OutcomeSubmitted, "reason": terminalization.ReasonStudentSubmit, "answerRevision": answerRev})
+	payload, _ := json.Marshal(map[string]any{"terminalizationId": tid, "attemptId": attemptID, "scheduleId": scheduleID, "outcome": terminalization.OutcomeSubmitted, "reason": terminalization.ReasonStudentSubmit, "answerRevision": answerRev, "terminalGeneration": terminalGeneration})
 	return outbox.EnqueueInTx(ctx, q, "attempt_terminalization", attemptID, revision+1, "attempt_terminalized", json.RawMessage(payload))
 }
 
