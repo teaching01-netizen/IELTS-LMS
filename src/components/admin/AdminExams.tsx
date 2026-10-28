@@ -7,6 +7,7 @@ import { lazyLoad } from '../../app/performance/lazyLoad';
 import { ExamEntity, ExamEvent, ExamVersionSummary, BulkOperationResult } from '../../types/domain';
 import { getExamStatsFromExam, ExamFilterOptions, DEFAULT_FILTERS, hasActiveFilters } from '../../utils/examStats';
 import { useExamListUrlState } from './useExamListUrlState';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import type { ExamListProps, ExamVersionHistoryProps } from '../../features/exam-authoring/contracts/examList';
 import type { CreateExamInput } from '../../features/exam-authoring/contracts/provider';
 import { ExamFiltersPanel } from './ExamFiltersPanel';
@@ -268,6 +269,17 @@ export function AdminExams({
   const [showBulkDuplicateModal, setShowBulkDuplicateModal] = useState(false);
   const [pendingDeleteExam, setPendingDeleteExam] = useState<Exam | null>(null);
   const [bulkDuplicateTitlePattern, setBulkDuplicateTitlePattern] = useState('{title} (Copy)');
+  // Each modal keeps keyboard focus inside, closes on Escape, and returns focus.
+  const createModalRef = useFocusTrap<HTMLDivElement>(showCreateModal, () => setShowCreateModal(false));
+  const cloneModalRef = useFocusTrap<HTMLDivElement>(showCloneModal && Boolean(selectedExamForClone), () => setShowCloneModal(false));
+  const bulkResultRef = useFocusTrap<HTMLDivElement>(showBulkResult && Boolean(bulkOperationResult), () => setShowBulkResult(false));
+  const bulkDuplicateRef = useFocusTrap<HTMLDivElement>(showBulkDuplicateModal && Boolean(onBulkDuplicate), () => setShowBulkDuplicateModal(false));
+  const versionHistoryRef = useFocusTrap<HTMLDivElement>(showVersionHistory && Boolean(selectedExamForHistory), () => {
+    setShowVersionHistory(false);
+    setSelectedExamForHistory(null);
+    setExamVersions([]);
+    setExamEvents([]);
+  });
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -874,7 +886,7 @@ export function AdminExams({
 
       {/* Create Exam Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div ref={createModalRef} role="dialog" aria-modal="true" aria-label="Create New Exam" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h2 className="text-xl font-bold text-gray-900">Create New Exam</h2>
@@ -1056,7 +1068,7 @@ export function AdminExams({
 
       {/* Clone/Create from Template Modal */}
       {showCloneModal && selectedExamForClone && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div ref={cloneModalRef} role="dialog" aria-modal="true" aria-label={cloneMode === 'clone' ? 'Clone Exam' : 'Create from Template'} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h2 className="text-xl font-bold text-gray-900">
@@ -1111,7 +1123,7 @@ export function AdminExams({
 
       {/* Bulk Operation Result Modal */}
       {showBulkResult && bulkOperationResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div ref={bulkResultRef} role="dialog" aria-modal="true" aria-label="Bulk Operation Result" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h2 className="text-xl font-bold text-gray-900">
@@ -1190,7 +1202,7 @@ export function AdminExams({
 
       {/* Bulk Duplicate Modal */}
       {showBulkDuplicateModal && onBulkDuplicate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div ref={bulkDuplicateRef} role="dialog" aria-modal="true" aria-label="Duplicate Exams" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
               <h2 className="text-xl font-bold text-gray-900">Duplicate Exams</h2>
@@ -1241,7 +1253,7 @@ export function AdminExams({
 
       {/* Version History Modal */}
       {showVersionHistory && selectedExamForHistory && (
-        <div className="fixed inset-0 z-50 flex justify-center items-center bg-black/40 animate-in fade-in duration-200">
+        <div ref={versionHistoryRef} role="dialog" aria-modal="true" aria-label="Version History" className="fixed inset-0 z-50 flex justify-center items-center bg-black/40 animate-in fade-in duration-200">
           <div className="w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300">
             <div className="h-16 px-6 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-2xl flex-shrink-0">
               <div className="flex items-center gap-3">

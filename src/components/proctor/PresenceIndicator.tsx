@@ -1,6 +1,7 @@
 import React from 'react';
 import { Clock, AlertCircle } from 'lucide-react';
 import { ProctorPresence } from '../../types/domain';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface PresenceIndicatorProps {
   proctorPresence: ProctorPresence[];
@@ -110,8 +111,10 @@ interface CollisionWarningProps {
 }
 
 export function CollisionWarning({ otherProctorName, onProceed, onCancel }: CollisionWarningProps) {
+  // Escape cancels, never proceeds.
+  const dialogRef = useFocusTrap<HTMLDivElement>(true, onCancel);
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div ref={dialogRef} role="alertdialog" aria-modal="true" aria-label="Potential Conflict" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
         <div className="flex items-start gap-4">
           <div className="p-3 bg-amber-100 rounded-full">

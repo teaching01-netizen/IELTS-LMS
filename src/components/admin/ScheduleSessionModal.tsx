@@ -5,6 +5,7 @@ import { Exam } from '../../types';
 import { ExamEntity, ExamSchedule, ExamVersion } from '../../types/domain';
 import { SAT_SESSION_TYPE_LABELS, SAT_SESSION_TYPE_REQUEST, type SatSessionType } from '../../features/exam-authoring/contracts/satSessionType';
 import { examRepository, examDeliveryService } from '../../features/exam-authoring/api/examAuthoringGateway';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface ScheduleSessionModalProps {
   isOpen: boolean;
@@ -32,6 +33,7 @@ export function ScheduleSessionModal({
   onClose,
   onCreateSchedule,
 }: ScheduleSessionModalProps) {
+  const dialogRef = useFocusTrap<HTMLDivElement>(isOpen, onClose);
   const authSession = useOptionalAuthSession();
   const schedulerName = authSession?.session?.user.displayName?.trim() || authSession?.session?.user.email?.trim() || 'Staff';
   const defaultScheduleName = examEntities[0]?.title || exams[0]?.title || '';
@@ -157,7 +159,7 @@ export function ScheduleSessionModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Schedule New Session" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
           <div>

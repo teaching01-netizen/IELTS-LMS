@@ -1,6 +1,7 @@
 import React from 'react';
 import { FileText, MessageSquare, BookOpen, CheckCircle, TrendingUp, AlertCircle, Download, Share2 } from 'lucide-react';
 import { StudentResult, WritingAnnotation, DrawingAnnotation } from '../../types/grading';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface StudentReportPreviewProps {
   result: StudentResult;
@@ -21,6 +22,7 @@ export function StudentReportPreview({
 }: StudentReportPreviewProps) {
   void writingDrawings;
   void onScheduleRelease;
+  const dialogRef = useFocusTrap<HTMLDivElement>(true, onClose);
 
   const renderAnnotatedText = (text: string, annotations: WritingAnnotation[]) => {
     if (annotations.length === 0) {
@@ -95,7 +97,7 @@ export function StudentReportPreview({
   };
   
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Student Report Preview" className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-4">

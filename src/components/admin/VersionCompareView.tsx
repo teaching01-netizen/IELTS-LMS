@@ -2,6 +2,7 @@ import React from 'react';
 import { X, GitCompare, ArrowRight, XCircle, CheckCircle2, Clock, User, FileText, Layers } from 'lucide-react';
 import { VersionDiff } from '../../types/domain';
 import { summarizeChanges, getChangeCount, formatTimestamp, getVersionStatusLabel, getVersionStatusColor } from '../../utils/versionUtils';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 interface VersionCompareViewProps {
   isOpen: boolean;
@@ -11,13 +12,14 @@ interface VersionCompareViewProps {
 }
 
 export function VersionCompareView({ isOpen, onClose, diff, onRestoreAsDraft }: VersionCompareViewProps) {
+  const dialogRef = useFocusTrap<HTMLDivElement>(isOpen && Boolean(diff), onClose);
   if (!isOpen || !diff) return null;
 
   const changes = summarizeChanges(diff);
   const changeCount = getChangeCount(diff);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-center items-center bg-black/40 animate-in fade-in duration-200">
+    <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Compare versions" className="fixed inset-0 z-50 flex justify-center items-center bg-black/40 animate-in fade-in duration-200">
       <div className="w-full max-w-5xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-300">
         {/* Header */}
         <div className="h-16 px-6 border-b border-gray-100 flex items-center justify-between bg-gray-50 rounded-t-2xl flex-shrink-0">

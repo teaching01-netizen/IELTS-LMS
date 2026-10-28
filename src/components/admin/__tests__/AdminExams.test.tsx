@@ -158,6 +158,20 @@ describe('AdminExams', () => {
     expect(onBulkDelete).toHaveBeenCalledWith(['exam-2']);
   });
 
+  it('keeps keyboard focus in the create dialog, closes on Escape, and restores focus', () => {
+    renderInRouter(<AdminExams {...buildProps()} />);
+    const trigger = screen.getByRole('button', { name: 'Create Exam' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: 'Create New Exam' });
+    // The title field's autoFocus is kept; the trap does not move focus to Close.
+    expect(document.activeElement).toBe(screen.getByPlaceholderText('e.g. Academic Practice Test 5'));
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Create New Exam' })).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it('create flow fires onCreateExam with the entered title', () => {
     const onCreateExam = vi.fn();
     renderInRouter(<AdminExams {...buildProps({ onCreateExam })} />);

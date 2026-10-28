@@ -13,12 +13,21 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>(isActive: bool
   // render, which would refocus the first element and lose the return target.
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
+  // Capture the return target in the render that activates the trap: an
+  // autoFocus field inside the dialog takes focus before effects run.
+  const wasActiveRef = useRef(false);
+  const returnTargetRef = useRef<HTMLElement | null>(null);
+  if (isActive && !wasActiveRef.current && typeof document !== 'undefined') {
+    returnTargetRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  wasActiveRef.current = isActive;
 
   useEffect(() => {
     if (!isActive || !containerRef.current) return;
 
     const container = containerRef.current;
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previouslyFocused =
+      returnTargetRef.current ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     // Queried live on every Tab press so async content participates in the
     // trap instead of being skipped by a mount-time snapshot.
     const queryFocusable = (): HTMLElement[] =>
@@ -31,8 +40,9 @@ export function useFocusTrap<T extends HTMLElement = HTMLElement>(isActive: bool
     const lastOf = (): HTMLElement => queryFocusable().slice(-1)[0] ?? container;
     const firstElement = firstOf();
 
-    // Focus the first element when trap activates
-    if (firstElement) {
+    // Focus the first element when the trap activates, unless an autoFocus
+    // field inside the dialog already holds focus.
+    if (firstElement && !container.contains(document.activeElement)) {
       firstElement.focus();
     }
 
