@@ -272,7 +272,7 @@ export function AnswerHistoryPage({
   });
   const detailQuery = overview?.submissionId ? detailBySubmissionQuery : detailByAttemptQuery;
 
-  const checkpoints = detailQuery.data?.checkpoints ?? [];
+  const checkpoints = useMemo(() => detailQuery.data?.checkpoints ?? [], [detailQuery.data?.checkpoints]);
   const technicalLogs = detailQuery.data?.technicalLogs ?? [];
   const currentCheckpoint = checkpoints[Math.min(replayIndex, Math.max(0, checkpoints.length - 1))];
   const previousCheckpoint =
