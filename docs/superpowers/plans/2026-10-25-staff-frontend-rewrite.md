@@ -322,10 +322,10 @@ The 287 passing existing unit/integration tests provide a baseline, not evidence
 | Check | Result |
 |---|---|
 | `bun run typecheck`, `bun run typecheck:staff-tests` | PASS |
-| `bun run lint` | PASS: 0 errors, 1,115 warnings (baseline 1,124). Migrated owners are ratcheted to errors for effect deps and explicit any. |
-| `bun run test:run` | PASS: 837 files, 7,251 tests (2 skipped). |
+| `bun run lint` | PASS: 0 errors, 1,104 warnings (baseline 1,124). `react-hooks/exhaustive-deps` and `no-explicit-any` are errors for every migrated owner: admin, grading, proctor, results and scheduling features; builder api/domain/hooks and `BuilderRoot`; exam-authoring realtime and save routing; `components/proctor`; `AdminExams`, `AdminResults`, `AdminSettings`, `StudentReviewWorkspace`; `SatSessionRoomRoute`; `useFocusTrap`. |
+| `bun run test:run` | PASS: 838 files, 7,254 tests (2 skipped). |
 | `bun run build`, `bun run test:student-bundle` | PASS; student provider bundle isolation verified. |
-| `playwright.staff-parity.config.ts` | PASS: 103/103, references unchanged (no `--update-snapshots`). Includes the network-baseline request counts, so no request-volume regression. |
+| `playwright.staff-parity.config.ts` | PASS: 112/112, references unchanged (no `--update-snapshots`). Includes the network-baseline request counts (no request-volume regression) and a smoke pass over the 9 staff routes with no reference screenshot, so every route in the route matrix is accounted for. |
 | `playwright.sat-staff-ux.config.ts` | PASS: 16/16 (the three planning-time failures are resolved). |
 | `playwright.coedit-live.config.ts` (own Go API, Hocuspocus service, MySQL) | PASS: 2/2. Found and fixed a composer crash on room close and an unbounded token re-mint loop after a clean close. |
 | Go: `internal/exams`, `internal/proctor`, OpenAPI drift, MySQL receipt suites | PASS, including `TestAutoRuleEnforcementIsIdempotentAcrossOperatorsMySQL`. |
@@ -333,7 +333,22 @@ The 287 passing existing unit/integration tests provide a baseline, not evidence
 | `bun run coedit:test` | PASS: 128 tests. |
 | Real-backend journeys on an isolated database (`grading-workflow`, `scheduling-workflow`, `proctor-student-interventions`, `staff-draft-durability`, `sat-authoring-lifecycle`, `ielts-personal-timing`, chromium) | PASS: 22/22, including 500 concurrent IELTS candidates. Found and fixed: a closed IELTS accessibility dialog rendering over the exam, and a malformed forms response crashing the SAT workspace. Publish-then-create SAT tests for the removed release workflow were retired; the current single-operation room creation is covered by unit tests and `sat-staff-room-ux`. |
 
-Interaction profiling (commit duration, long tasks) was not instrumented; the plan permits optimization only for demonstrated regressions, and the parity network baseline shows none in requests per action.
+`playwright.staff-perf.config.ts` profiles the three representative interactions on a production build at 4x CPU throttling with the fixture transport. The same spec ran three times on the Package 0 commit (`7e00687e`) and on HEAD. Medians:
+
+| Interaction | Long tasks (ms) P0 → HEAD | Slowest input event (ms) P0 → HEAD | Requests per action |
+|---|---|---|---|
+| SAT authoring: type 51 characters | 0 → 0 | 64 → 72 | 0 → 0 |
+| Proctor room, 300 students: search and clear | 553 → 521 | 376 → 408 | 0 → 0 |
+| Grading review: type 51 characters of feedback | 0 → 0 | 24 → 24 | 0 → 0 |
+
+Run-to-run ranges overlap (proctor events: 376–400 on P0, 384–456 on HEAD), so there is no demonstrated regression and no optimization was made. Filtering a 300-student room costs about 400 ms per keystroke under throttling on both commits. That is a pre-existing bottleneck, recorded here for future work.
+
+Other Package 7 and 8 gates:
+
+- Overlays: every hand-rolled staff modal now has dialog semantics, `useFocusTrap` focus containment, Escape, and focus return. These are the `AdminExams` create, clone, bulk and version-history dialogs; `ScheduleSessionModal`; `StudentReportPreview`; `VersionCompareView`; and the co-edit `CollisionWarning`. The AdminRoot mobile sidebar backdrop is non-modal and stays as it is.
+- Architecture guard: `feature-internal-boundary` now covers `src/features/proctor` as well as assessment authoring. Every proctor consumer goes through `features/proctor/api`, and the baseline is still empty.
+- Instrumentation: `apiClient` already logs every failed operation with endpoint (entity IDs), request ID and attempt count, and no payload or personal content. Typed `CommandOutcome`s carry the outcome to callers. No new telemetry was needed.
+- Compatibility removal: the unused SAT room path constants and the old authoring-internal layer list were removed after call-site search. Grading list views (`GradingSessionList`, `GradingSessionDetail`, objective panels) and `AdminScheduling` were not named for rewrite. They still read their existing services, which are not unused, so they stay.
 
 ## 9. Reference basis
 

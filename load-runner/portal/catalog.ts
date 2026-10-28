@@ -295,6 +295,19 @@ const SUITES: SuiteDefinition[] = [
     exclusionReason: 'Screenshot references must run on their reference platform.',
   }),
   commandSuite({
+    id: 'browser.specialized.staff-perf',
+    title: 'Staff interaction profile',
+    description: 'Fixture-backed SAT authoring, large-room proctoring, and grading review interaction timing.',
+    family: 'browser-specialized',
+    environments: ISOLATED,
+    controlOwner: 'suite',
+    steps: [PLAYWRIGHT('playwright.staff-perf.config.ts')],
+    requires: ['node', 'bun', 'browsers'],
+    deadlineMinutes: 15,
+    runAll: false,
+    exclusionReason: 'Timing budgets are only meaningful on an idle reference machine.',
+  }),
+  commandSuite({
     id: 'prod.smoke',
     title: 'Production smoke journeys',
     description: 'Read-mostly production smoke Playwright suite for a configured staff profile.',
@@ -780,6 +793,7 @@ export const PLAYWRIGHT_CONFIG_COVERAGE: Readonly<Record<string, EntrypointCover
   'playwright.sat-spectrum.config.ts': { source: 'playwright.sat-spectrum.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-spectrum', note: 'specialized' },
   'playwright.sat-staff-ux.config.ts': { source: 'playwright.sat-staff-ux.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-staff-ux', note: 'specialized' },
   'playwright.staff-parity.config.ts': { source: 'playwright.staff-parity.config.ts', classification: 'executable', suiteId: 'browser.specialized.staff-parity', note: 'fixture-backed visual references' },
+  'playwright.staff-perf.config.ts': { source: 'playwright.staff-perf.config.ts', classification: 'executable', suiteId: 'browser.specialized.staff-perf', note: 'fixture-backed interaction profile' },
   'playwright.sat-transition.config.ts': { source: 'playwright.sat-transition.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-transition', note: 'specialized' },
   'playwright.touch-selection.config.ts': { source: 'playwright.touch-selection.config.ts', classification: 'executable', suiteId: 'browser.specialized.touch-selection', note: 'specialized' },
 });

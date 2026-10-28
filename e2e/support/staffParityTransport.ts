@@ -816,3 +816,17 @@ export async function installStaffParityTransport(page: Page, role: StaffRole = 
 
   return transport;
 }
+
+/** Proctor room detail payloads scaled to `size` students, for the staff perf suite. */
+export function scaledProctorRoom(provider: "ielts" | "sat", size: number): string {
+  const sessions = Array.from({ length: size }, (_, index) => {
+    const number = index + 1;
+    if (provider === "sat") {
+      return { ...SAT_STUDENT, attemptId: `sat-attempt-${number}`, studentId: `sat-student-${number}`, studentName: `Student ${number}`, studentEmail: `sat${number}@example.test` };
+    }
+    return ieltsStudent(number, `Student ${number}`, index % 7 === 0 ? "warned" : "active");
+  });
+  return provider === "sat"
+    ? envelope({ schedule: SAT_SCHEDULE, runtime: SAT_RUNTIME, sessions, alerts: [], auditLogs: [], notes: [], presence: [], violationRules: [], degradedLiveMode: false })
+    : envelope({ schedule: IELTS_SCHEDULE, runtime: IELTS_RUNTIME, sessions, alerts: IELTS_ALERTS, auditLogs: [], notes: [], presence: [], violationRules: [], degradedLiveMode: false });
+}
