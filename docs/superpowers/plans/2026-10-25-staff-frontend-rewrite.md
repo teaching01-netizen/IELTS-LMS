@@ -317,6 +317,24 @@ The fixture run also logged WebSocket proxy `ECONNREFUSED 127.0.0.1:4000`, so it
 
 The 287 passing existing unit/integration tests provide a baseline, not evidence that the newly identified races are fixed. No application source, styling, dependencies, or UI was changed in this planning pass.
 
+## 8a. Implementation verification (2026-10-28)
+
+| Check | Result |
+|---|---|
+| `bun run typecheck`, `bun run typecheck:staff-tests` | PASS |
+| `bun run lint` | PASS: 0 errors, 1,115 warnings (baseline 1,124). Migrated owners are ratcheted to errors for effect deps and explicit any. |
+| `bun run test:run` | PASS: 837 files, 7,251 tests (2 skipped). |
+| `bun run build`, `bun run test:student-bundle` | PASS; student provider bundle isolation verified. |
+| `playwright.staff-parity.config.ts` | PASS: 103/103, references unchanged (no `--update-snapshots`). Includes the network-baseline request counts, so no request-volume regression. |
+| `playwright.sat-staff-ux.config.ts` | PASS: 16/16 (the three planning-time failures are resolved). |
+| `playwright.coedit-live.config.ts` (own Go API, Hocuspocus service, MySQL) | PASS: 2/2. Found and fixed a composer crash on room close and an unbounded token re-mint loop after a clean close. |
+| Go: `internal/exams`, `internal/proctor`, OpenAPI drift, MySQL receipt suites | PASS, including `TestAutoRuleEnforcementIsIdempotentAcrossOperatorsMySQL`. |
+
+| `bun run coedit:test` | PASS: 128 tests. |
+| Real-backend journeys on an isolated database (`grading-workflow`, `scheduling-workflow`, `proctor-student-interventions`, `staff-draft-durability`, `sat-authoring-lifecycle`, `ielts-personal-timing`, chromium) | PASS: 22/22, including 500 concurrent IELTS candidates. Found and fixed: a closed IELTS accessibility dialog rendering over the exam, and a malformed forms response crashing the SAT workspace. Publish-then-create SAT tests for the removed release workflow were retired; the current single-operation room creation is covered by unit tests and `sat-staff-room-ux`. |
+
+Interaction profiling (commit duration, long tasks) was not instrumented; the plan permits optimization only for demonstrated regressions, and the parity network baseline shows none in requests per action.
+
 ## 9. Reference basis
 
 The recommendation follows React's guidance to derive render data and reserve effects for external synchronization: [You Might Not Need an Effect](https://react.dev/learn/you-might-not-need-an-effect). Cache identity and read cancellation follow [TanStack Query keys](https://tanstack.com/query/v5/docs/framework/react/guides/query-keys) and [query cancellation](https://tanstack.com/query/v5/docs/framework/react/guides/query-cancellation). These are architectural references, not a recommendation to upgrade; installed package types/source remain the API reference for implementation.
