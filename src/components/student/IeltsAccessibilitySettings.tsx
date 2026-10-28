@@ -88,7 +88,7 @@ export function IeltsAccessibilitySettings({
     <dialog
       ref={dialogRef}
       onClose={onClose}
-      className="m-auto flex max-h-[min(calc(100dvh_-_2rem),46rem)] w-[min(34rem,calc(100vw_-_2rem))] flex-col overflow-hidden rounded-2xl border-0 bg-gray-100 p-0 text-gray-900 shadow-2xl backdrop:bg-gray-900/40 open:flex"
+      className="m-auto max-h-[min(calc(100dvh_-_2rem),46rem)] w-[min(34rem,calc(100vw_-_2rem))] flex-col overflow-hidden rounded-2xl border-0 bg-gray-100 p-0 text-gray-900 shadow-2xl backdrop:bg-gray-900/40 open:flex"
       aria-labelledby="accessibility-title"
     >
       <header className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3">
