@@ -62,7 +62,12 @@ export function SchedulingRoute() {
       onCreateSchedule={(schedule) => saveScheduleMutation.mutateAsync(schedule)}
       onUpdateSchedule={(schedule) => saveScheduleMutation.mutateAsync(schedule)}
       onDeleteSchedule={(scheduleId) => deleteScheduleMutation.mutateAsync(scheduleId).then(() => undefined)}
-      onStartScheduledSession={(scheduleId) => startScheduleMutation.mutateAsync(scheduleId).then(() => undefined)}
+      onStartScheduledSession={(scheduleId) =>
+        startScheduleMutation.mutateAsync(scheduleId).then((result) => {
+          // A resolved mutation is not a started session: HTTP 200 can carry a rejection.
+          if (!result.success) throw new Error(result.error ?? 'The session could not be started.');
+        })
+      }
       getVersionById={getScheduleVersion}
       resolveScheduleWindow={resolveScheduleWindow}
       getPlannedDuration={getPlannedDuration}
