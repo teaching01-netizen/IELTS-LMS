@@ -1,7 +1,7 @@
 import React from 'react';
 import { ChevronRight, Clock, MessageSquare, Users } from 'lucide-react';
 import { ExamGroup } from '../../types';
-import { examDeliveryService } from '../../features/proctor/infrastructure/proctorGateway';
+import { formatExamGroupScheduledStartTime } from '../../features/proctor/api/proctorRoomApi';
 
 interface ExamGroupCardProps {
   group: ExamGroup;
@@ -23,7 +23,7 @@ export const ExamGroupCard = React.memo(function ExamGroupCard({ group, onClick,
           <h3 className="text-lg font-semibold text-slate-950">{group.examTitle}</h3>
           <p className="mt-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
             <Clock size={12} />
-            {examDeliveryService.formatExamGroupScheduledStartTime(group.scheduledStartTime)}
+            {formatExamGroupScheduledStartTime(group.scheduledStartTime)}
           </p>
           <p className="mt-1 text-sm text-slate-500">Cohort {group.cohortName}</p>
         </div>

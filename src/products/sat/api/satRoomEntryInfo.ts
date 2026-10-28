@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { proctorFacade } from '../../../features/proctor/application/proctorFacade';
+import { proctorFacade } from '../../../features/proctor/api/proctorFacade';
 
 export type SatRoomEntryState = 'not_joined' | 'waiting' | 'working' | 'finished';
 

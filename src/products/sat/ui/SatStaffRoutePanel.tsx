@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { proctorGateway } from '../../../features/proctor/infrastructure/proctorGateway';
+import { assignModuleRoute, fetchRouteQueue } from '../../../features/proctor/api/proctorRoomApi';
 import { SatButton } from './SatPage';
 
 interface Waiting { attemptId: string; studentName: string; sectionKey: string; rawCorrect: number | null; total: number | null }
@@ -30,12 +30,11 @@ export function SatStaffRoutePanel({ scheduleId, blocked, onPendingAssignmentsCh
   const [status, setStatus] = useState<string | null>(null);
   const identity = useRef(scheduleId);
   identity.current = scheduleId;
-  const base = `/v1/proctor/sessions/${encodeURIComponent(scheduleId)}`;
   const load = useCallback(async () => {
     try {
       // This panel owns the retry loop; stacking transport backoff here can
       // keep the room in a loading state longer than the next poll interval.
-      const next = await proctorGateway.backendGet<Queue>(`${base}/route-queue`, { retries: 0 });
+      const next = await fetchRouteQueue<Queue>(scheduleId);
       if (identity.current !== scheduleId) return;
       setQueue(next);
       setLoadError(null);
@@ -47,7 +46,7 @@ export function SatStaffRoutePanel({ scheduleId, blocked, onPendingAssignmentsCh
     } finally {
       if (identity.current === scheduleId) setLoading(false);
     }
-  }, [base, onPendingAssignmentsChange, scheduleId]);
+  }, [onPendingAssignmentsChange, scheduleId]);
   useEffect(() => {
     setQueue(null);
     setLoading(true);
@@ -77,7 +76,7 @@ export function SatStaffRoutePanel({ scheduleId, blocked, onPendingAssignmentsCh
     setError(null);
     setStatus(null);
     try {
-      await proctorGateway.backendPost(`${base}/attempts/${encodeURIComponent(item.attemptId)}/route`, { sectionKey: item.sectionKey, route }, { retries: 0 });
+      await assignModuleRoute(scheduleId, item.attemptId, item.sectionKey, route);
       if (identity.current === scheduleId) setStatus(`Module 2 choice saved for ${item.studentName}.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Module 2 could not be assigned.');

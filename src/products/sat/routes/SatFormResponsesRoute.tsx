@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { ClipboardList } from "lucide-react";
 import { AuthoringDialog } from "@/src/features/exam-authoring/ui/authoringPrimitives";
 import { useProctorSessionSummaries } from "@/src/features/proctor/api/proctorQueries";
-import { proctorFacade } from "@/src/features/proctor/application/proctorFacade";
+import { proctorFacade } from "@/src/features/proctor/api/proctorFacade";
 import { useFormResponseDetail, useFormResponses } from "@/src/features/assessment-forms/api/assessmentForms";
 import type { EvaMode, FormKey, FormResponseFilters, FormResponseRow, ResponseStatus } from "@/src/features/assessment-forms/api/assessmentForms";
 import {

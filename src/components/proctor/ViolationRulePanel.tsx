@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { ViolationRule, ViolationTriggerType, ViolationAutoAction, ViolationSeverity } from '../../types';
 import { Badge } from '../ui/Badge';
-import { isCommandConfirmed, type CommandOutcome } from '../../features/proctor/domain/commandOutcome';
+import { isCommandConfirmed, type CommandOutcome } from '../../features/proctor/api/proctorRoomApi';
 
 interface ViolationRulePanelProps {
   rules: ViolationRule[];

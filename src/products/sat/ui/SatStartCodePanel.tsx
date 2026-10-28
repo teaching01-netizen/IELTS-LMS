@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dialog } from 'radix-ui';
-import { proctorGateway } from '../../../features/proctor/infrastructure/proctorGateway';
+import { fetchStartCode, rotateStartCode } from '../../../features/proctor/api/proctorRoomApi';
 import { copyText } from '../../../features/exam-authoring/ui/access-links/accessLinkUi';
 import { SatRoomSurface } from './room/SatRoomSurface';
 
@@ -28,14 +28,13 @@ export function SatStartCodePanel({ scheduleId, blocked, onCodeChange }: {
   const identity = useRef(scheduleId);
   identity.current = scheduleId;
   const inFlight = useRef(false);
-  const endpoint = `/v1/proctor/sessions/${encodeURIComponent(scheduleId)}/start-code`;
   const reveal = useCallback(async () => {
     if (inFlight.current || blocked) return;
     inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
-      const next = await proctorGateway.backendGet<StartCodeView>(endpoint);
+      const next = await fetchStartCode<StartCodeView>(scheduleId);
       if (identity.current === scheduleId) { setView(next); setCopied(false); onCodeChange?.(next.code); }
     } catch (cause) {
       if (identity.current === scheduleId) { setView(null); onCodeChange?.(null); setError(cause instanceof Error ? cause.message : 'Code could not be revealed.'); }
@@ -43,7 +42,7 @@ export function SatStartCodePanel({ scheduleId, blocked, onCodeChange }: {
       inFlight.current = false;
       if (identity.current === scheduleId) setBusy(false);
     }
-  }, [blocked, endpoint, onCodeChange, scheduleId]);
+  }, [blocked, onCodeChange, scheduleId]);
   useEffect(() => {
     setView(null);
     setPresent(false);
@@ -67,7 +66,7 @@ export function SatStartCodePanel({ scheduleId, blocked, onCodeChange }: {
     setError(null);
     setRotateConfirm(false);
     try {
-      const next = await proctorGateway.backendPost<StartCodeView>(`${endpoint}/rotate`, { expectedGeneration: view.generation }, { retries: 0 });
+      const next = await rotateStartCode<StartCodeView>(scheduleId, view.generation);
       if (identity.current === scheduleId) { setView(next); setCopied(false); onCodeChange?.(next.code); }
     } catch (cause) {
       if (identity.current === scheduleId) { setView(null); onCodeChange?.(null); setPresent(false); setError(cause instanceof Error ? cause.message : 'Rotation could not be confirmed. Reveal the current code before retrying.'); }

@@ -8,7 +8,7 @@ import { satIssueRoute } from '../../../features/exam-authoring/ui/release/satIs
 import { useExamListQuery } from '../../../features/exam-authoring/api/examQueries';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { proctorKeys, useProctorSessionSummaries } from '../../../features/proctor/api/proctorQueries';
-import { proctorFacade } from '../../../features/proctor/application/proctorFacade';
+import { proctorFacade } from '../../../features/proctor/api/proctorFacade';
 import { SatSegmentedControl } from '../ui/SegmentedControl';
 import { useSatListParams, type SatListBucket } from '../ui/useSatListParams';
 import { useSatListReturn } from '../ui/useSatListReturn';

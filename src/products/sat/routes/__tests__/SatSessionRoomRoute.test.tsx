@@ -26,15 +26,19 @@ vi.mock('../../../../features/auth/authSession', () => ({
   useAuthSession: () => ({ session: { user: { displayName: 'SAT Proctor', email: 'p@example.com', role: roleMock.role } } }),
 }));
 vi.mock('qrcode', () => ({ toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,QR') }));
-vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => ({
-  examDeliveryService: {
+vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => {
+  const examDeliveryService = {
     extendCurrentSection: vi.fn(),
     completeRuntime: vi.fn(),
     extendStudentAttempt: vi.fn(), warnStudent: vi.fn(), pauseStudentAttempt: vi.fn(), resumeStudentAttempt: vi.fn(), terminateStudentAttempt: vi.fn(),
-  },
-  // Staff route queue reports disabled, so the panel stays hidden and raises no alert.
-  proctorGateway: { backendGet: (...args: unknown[]) => proctorGetMock(...args), backendPost: async () => undefined },
-}));
+  };
+  return {
+    examDeliveryService,
+    // Staff route queue reports disabled, so the panel stays hidden and raises no alert.
+    // Room commands reach the same delivery mocks through proctorMutations.
+    proctorGateway: { backendGet: (...args: unknown[]) => proctorGetMock(...args), backendPost: async () => undefined, examDeliveryService, examRepository: {} },
+  };
+});
 vi.mock('../../../../features/proctor/api/deviceTransfers', () => ({
   listDeviceTransfers: async () => [],
   decideDeviceTransfer: async () => undefined,
@@ -74,7 +78,7 @@ const runtime = {
 };
 const student = {
   id: 'attempt-1', studentId: 'W2501', name: 'Ananda S.', email: 'a@example.com', scheduleId: 'sched-1', status: 'active',
-  currentSection: 'reading', timeRemaining: 1500, runtimeStatus: 'live', runtimeCurrentSection: 'reading', runtimeTimeRemainingSeconds: 1500,
+  currentSection: 'reading', timeRemaining: 1500, runtimeStatus: 'live', runtimeCurrentSection: 'reading', runtimeCurrentModuleId: 'module-rw-1', runtimeTimeRemainingSeconds: 1500,
   violations: [], warnings: 0, lastActivity: '2026-08-30T02:05:00Z', examId: 'sat-1', examName: 'Practice Test 06',
 };
 

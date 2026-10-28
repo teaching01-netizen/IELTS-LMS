@@ -10,8 +10,8 @@ import { StudentCard } from './StudentCard';
 import { StudentDetailPanel, type StudentDrawerTab } from './StudentDetailPanel';
 import { ExamGroupCard } from './ExamGroupCard';
 import { ViolationRulePanel } from './ViolationRulePanel';
-import { examDeliveryService, backendPost } from '../../features/proctor/infrastructure/proctorGateway';
-import { isCommandConfirmed } from '../../features/proctor/domain/commandOutcome';
+import { isScheduleReadyToStart, updateProctorPresence } from '../../features/proctor/api/proctorRoomApi';
+import { isCommandConfirmed } from '../../features/proctor/api/proctorRoomApi';
 import { useStudentFilters } from './hooks/useStudentFilters';
 import { logger } from '../../utils/logger';
 import type { ProctorScheduleMetrics, ProctorViewCommands } from '../../features/proctor/contracts';
@@ -197,7 +197,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                 : schedule.status === 'cancelled'
                   ? 'cancelled'
                   : 'not_started'),
-          isReadyToStart: examDeliveryService.isScheduleReadyToStart(schedule, runtime, now),
+          isReadyToStart: isScheduleReadyToStart(schedule, runtime, now),
           currentLiveSection: runtime?.currentSectionKey ?? null,
           studentCount,
           activeCount,
@@ -275,7 +275,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
         joined = true;
       }
       try {
-        await backendPost(`/v1/proctor/sessions/${scheduleId}/presence`, { action }, { retries: 0 });
+        await updateProctorPresence(scheduleId, action);
       } catch (error) {
         if (action === 'join') {
           joined = false;
@@ -678,11 +678,9 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                     return;
                   }
 
-                  void backendPost(
-                    `/v1/proctor/sessions/${selectedScheduleId}/presence`,
-                    { action: 'join' },
-                    { retries: 0 },
-                  );
+                  void updateProctorPresence(selectedScheduleId, 'join').catch((error: unknown) => {
+                    logger.warn('Failed to update proctor presence', { action: 'join', error });
+                  });
                 }}
               />
             ) : null}

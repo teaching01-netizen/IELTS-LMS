@@ -69,11 +69,13 @@ const ASSESSMENT_AUTHORING_FEATURE = 'src/features/exam-authoring';
  * not a dependency cleanup. The three layers below are the ones the plan names
  * ("never UI → infrastructure"), and they can be repointed mechanically.
  */
-const ASSESSMENT_AUTHORING_INTERNAL_LAYERS = [
-  `${ASSESSMENT_AUTHORING_FEATURE}/application`,
-  `${ASSESSMENT_AUTHORING_FEATURE}/domain`,
-  `${ASSESSMENT_AUTHORING_FEATURE}/infrastructure`,
-];
+/**
+ * Features whose consumers have been repointed to `api/`/`routes/` and are
+ * therefore enforced. Proctor joined after the staff rewrite moved monitoring
+ * and commands behind `proctorMutations`, `proctorRoomApi`, and `proctorFacade`.
+ */
+const ENFORCED_INTERNAL_BOUNDARY_FEATURES = [ASSESSMENT_AUTHORING_FEATURE, 'src/features/proctor'];
+const INTERNAL_LAYER_NAMES = ['application', 'domain', 'infrastructure'];
 
 /**
  * UI → infrastructure, enforced (plan Phase 10).
@@ -102,13 +104,12 @@ export function collectFeatureInternalBoundaryViolations(
       if (!target) {
         return null;
       }
-      // A feature may always import its own internals.
-      if (isPathUnder(file, ASSESSMENT_AUTHORING_FEATURE)) {
-        return null;
+      for (const feature of ENFORCED_INTERNAL_BOUNDARY_FEATURES) {
+        // A feature may always import its own internals.
+        if (isPathUnder(file, feature)) continue;
+        if (INTERNAL_LAYER_NAMES.some((layer) => isPathUnder(target, `${feature}/${layer}`))) return target;
       }
-      return ASSESSMENT_AUTHORING_INTERNAL_LAYERS.some((layer) => isPathUnder(target, layer))
-        ? target
-        : null;
+      return null;
     },
   );
   return sortViolations(violations);

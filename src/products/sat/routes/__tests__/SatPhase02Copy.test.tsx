@@ -57,15 +57,16 @@ vi.mock('../../../../features/proctor/hooks/useProctorRouteController', () => ({
   // The real controller always reports scheduleMetrics; the fixture lists only what it exercises.
   useProctorRouteController: (...args: unknown[]) => ({ scheduleMetrics: {}, ...controllerMock(...args) }),
 }));
-vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => ({
-  examDeliveryService: {
+vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => {
+  const examDeliveryService = {
     extendStudentAttempt: vi.fn(),
     warnStudent: vi.fn(),
     pauseStudentAttempt: vi.fn(),
     resumeStudentAttempt: vi.fn(),
     terminateStudentAttempt: vi.fn(),
-  },
-}));
+  };
+  return { examDeliveryService, proctorGateway: { examDeliveryService, examRepository: {}, backendPost: vi.fn() } };
+});
 
 vi.mock('../../../../features/auth/authSession', () => ({
   useAuthSession: () => ({

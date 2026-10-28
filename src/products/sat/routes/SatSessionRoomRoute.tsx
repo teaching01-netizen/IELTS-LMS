@@ -8,7 +8,7 @@ import { logError, logInfo } from '../../../shared/observability/errorLogger';
 import { useAuthSession } from '../../../features/auth/authSession';
 import { useAuthoritativeDeadlineClock, useRoomClockMs } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { useProctorRouteController } from '../../../features/proctor/hooks/useProctorRouteController';
-import { examDeliveryService } from '../../../features/proctor/infrastructure/proctorGateway';
+import { proctorMutations } from '../../../features/proctor/api/proctorMutations';
 import { SatStatusPill } from '../ui/SatPage';
 import { SatSessionControls } from '../ui/SatSessionControls';
 import { useScheduleFormState } from '@/src/features/assessment-forms/api/assessmentForms';
@@ -35,7 +35,7 @@ import { SatWaitingRoomPanel } from '../ui/SatWaitingRoomPanel';
 import { SatStartCodePanel } from '../ui/SatStartCodePanel';
 import type { SatStaffRouteAssignment } from '../ui/SatStaffRoutePanel';
 import { useSatRoomEntryInfo } from '../api/satRoomEntryInfo';
-import { deliveryCommandOutcome, isCommandConfirmed, type DeliveryCommandResult } from '../../../features/proctor/domain/commandOutcome';
+import { isCommandConfirmed, type CommandOutcome } from '../../../features/proctor/api/proctorRoomApi';
 import { SatRoomEntryPanel } from '../ui/room/SatRoomEntryPanel';
 import { SatRoomHeader } from '../ui/room/SatRoomHeader';
 import { SatRoomWorkspace } from '../ui/room/SatRoomWorkspace';
@@ -345,8 +345,7 @@ export function SatSessionRoomRoute() {
     }
   }, [controller, isStale, scheduleId, setActionPending]);
 
-  const requireConfirmedAction = (result: DeliveryCommandResult, fallback: string) => {
-    const outcome = deliveryCommandOutcome(result, fallback);
+  const requireConfirmedAction = (outcome: CommandOutcome) => {
     if (outcome.kind === 'uncertain') {
       void controller.reload().catch(() => undefined);
       throw new Error(outcome.error);
@@ -354,8 +353,8 @@ export function SatSessionRoomRoute() {
     if (outcome.kind === 'rejected') throw new Error(outcome.error);
   };
 
-  const runStudentAction = async (key: string, action: () => Promise<DeliveryCommandResult>, success: string, targetStudentId?: string) => run(key, async () => {
-    requireConfirmedAction(await action(), 'The student could not be updated.');
+  const runStudentAction = async (key: string, action: () => Promise<CommandOutcome>, success: string, targetStudentId?: string) => run(key, async () => {
+    requireConfirmedAction(await action());
   }, success, false, targetStudentId);
 
   const confirmCurrentAction = () => {
@@ -372,8 +371,7 @@ export function SatSessionRoomRoute() {
       let completeMessage = 'Room completed.';
       const generation = roomIdentityRef.current.generation;
       void run('complete', async () => {
-        const result = await examDeliveryService.completeRuntime(scheduleId, proctorName);
-        requireConfirmedAction(result, 'The exam could not be ended.');
+        requireConfirmedAction(await proctorMutations.completeRuntime(scheduleId, proctorName));
         try {
           const forms = await formState.refetch();
           const closedAt = forms.data?.closedAt ? new Date(forms.data.closedAt) : null;
@@ -390,7 +388,7 @@ export function SatSessionRoomRoute() {
       return;
     }
     if (action.kind === 'extend-session') {
-      void runStudentAction(`extend-${action.minutes}`, () => examDeliveryService.extendCurrentSection(scheduleId, proctorName, action.minutes, action.sectionKey, action.runtimeRevision), `Added ${action.minutes} minutes to ${action.stage}.`);
+      void runStudentAction(`extend-${action.minutes}`, () => proctorMutations.extendSection(scheduleId, proctorName, action.minutes, action.sectionKey, action.runtimeRevision), `Added ${action.minutes} minutes to ${action.stage}.`);
       return;
     }
     const bound = students.find((student) => student.id === action.studentId);
@@ -406,14 +404,14 @@ export function SatSessionRoomRoute() {
       return;
     }
     if (action.kind === 'warn') {
-      void runStudentAction('student-warn', () => examDeliveryService.warnStudent(bound.id, SAT_SESSION_WARN_MESSAGE, proctorName), `Warning sent to ${bound.name}.`, bound.id);
+      void runStudentAction('student-warn', () => proctorMutations.warnStudent(bound.id, SAT_SESSION_WARN_MESSAGE, proctorName), `Warning sent to ${bound.name}.`, bound.id);
       return;
     }
     if (action.kind === 'extend-student') {
-      void runStudentAction(`student-extend-${action.minutes}`, () => examDeliveryService.extendStudentAttempt(bound.id, proctorName, action.minutes, action.moduleId), `Added ${action.minutes} minutes for ${bound.name}.`, bound.id);
+      void runStudentAction(`student-extend-${action.minutes}`, () => proctorMutations.extendStudent(bound.id, proctorName, action.minutes, action.moduleId), `Added ${action.minutes} minutes for ${bound.name}.`, bound.id);
       return;
     }
-    void runStudentAction('student-terminate', () => examDeliveryService.terminateStudentAttempt(bound.id, proctorName), `${bound.name}’s attempt ended.`, bound.id);
+    void runStudentAction('student-terminate', () => proctorMutations.terminateStudent(bound.id, proctorName), `${bound.name}’s attempt ended.`, bound.id);
   };
 
   const inspectorContent = selectedStudent ? (
@@ -437,8 +435,8 @@ export function SatSessionRoomRoute() {
             });
           }}
           onWarn={() => setConfirm({ kind: 'warn', studentId: selectedStudent.id, studentName: selectedStudent.name })}
-          onPause={() => void runStudentAction('student-pause', () => examDeliveryService.pauseStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`, selectedStudent.id)}
-          onResume={() => void runStudentAction('student-resume', () => examDeliveryService.resumeStudentAttempt(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`, selectedStudent.id)}
+          onPause={() => void runStudentAction('student-pause', () => proctorMutations.pauseStudent(selectedStudent.id, proctorName), `${selectedStudent.name} paused.`, selectedStudent.id)}
+          onResume={() => void runStudentAction('student-resume', () => proctorMutations.resumeStudent(selectedStudent.id, proctorName), `${selectedStudent.name} resumed.`, selectedStudent.id)}
           onTerminate={() => setConfirm({ kind: 'terminate', studentId: selectedStudent.id, studentName: selectedStudent.name })}
           onResolveRecovery={({ resolutionId, reason }) => {
             const moduleAttemptId = selectedStudent.satRecoveryModuleAttemptId;
