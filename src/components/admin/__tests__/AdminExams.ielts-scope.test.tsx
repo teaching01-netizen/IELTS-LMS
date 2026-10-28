@@ -15,6 +15,12 @@ vi.mock('react-virtuoso', () => ({
 }));
 
 import { AdminExams } from '../AdminExams';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
+
+function renderInRouter(ui: ReactElement, initialEntry = '/admin/exams') {
+  return render(<MemoryRouter initialEntries={[initialEntry]}>{ui}</MemoryRouter>);
+}
 
 function makeExam(overrides: Partial<Exam> = {}): Exam {
   return {
@@ -83,14 +89,14 @@ function buildProps(overrides: Partial<ExamListProps> = {}): ExamListProps {
 
 describe('AdminExams IELTS scope (AT-06/AT-09)', () => {
   it('hides SAT rows from the IELTS library but keeps IELTS and ACT', () => {
-    render(<AdminExams {...buildProps()} />);
+    renderInRouter(<AdminExams {...buildProps()} />);
     expect(screen.getByText('IELTS Academic')).toBeInTheDocument();
     expect(screen.getByText('ACT Science Drill')).toBeInTheDocument();
     expect(screen.queryByText('SAT Practice')).not.toBeInTheDocument();
   });
 
   it('offers IELTS and ACT providers only at creation (no SAT)', () => {
-    render(<AdminExams {...buildProps()} />);
+    renderInRouter(<AdminExams {...buildProps()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Create Exam' }));
     expect(screen.getByText('IELTS', { selector: 'span.block' })).toBeInTheDocument();
     expect(screen.getByText('ACT Science', { selector: 'span.block' })).toBeInTheDocument();
@@ -98,7 +104,7 @@ describe('AdminExams IELTS scope (AT-06/AT-09)', () => {
   });
 
   it('does not duplicate ACT Science inside the IELTS preset section', () => {
-    render(<AdminExams {...buildProps()} />);
+    renderInRouter(<AdminExams {...buildProps()} />);
     fireEvent.click(screen.getByRole('button', { name: 'Create Exam' }));
 
     expect(screen.getAllByText('ACT Science')).toHaveLength(1);
@@ -107,7 +113,7 @@ describe('AdminExams IELTS scope (AT-06/AT-09)', () => {
 
   it('maps ACT creation to the ACT provider input', () => {
     const onCreateExam = vi.fn();
-    render(<AdminExams {...buildProps({ onCreateExam })} />);
+    renderInRouter(<AdminExams {...buildProps({ onCreateExam })} />);
     fireEvent.click(screen.getByRole('button', { name: 'Create Exam' }));
     fireEvent.click(screen.getByText('ACT Science', { selector: 'span.block' }));
     fireEvent.change(screen.getByPlaceholderText('e.g. Academic Practice Test 5'), {

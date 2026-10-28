@@ -2,6 +2,12 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ExamListProps } from '../../../features/exam-authoring/contracts/examList';
 import { AdminExams } from '../AdminExams';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
+
+function renderInRouter(ui: ReactElement, initialEntry = '/admin/exams') {
+  return render(<MemoryRouter initialEntries={[initialEntry]}>{ui}</MemoryRouter>);
+}
 
 function buildProps(): ExamListProps {
   return {
@@ -14,7 +20,7 @@ function buildProps(): ExamListProps {
 
 describe('AdminExams empty state', () => {
   it('guides the first exam creation when the library is empty', () => {
-    render(<AdminExams {...buildProps()} />);
+    renderInRouter(<AdminExams {...buildProps()} />);
 
     expect(screen.getByRole('heading', { name: 'No exams yet' })).toBeInTheDocument();
     expect(

@@ -19,6 +19,12 @@ vi.mock('react-virtuoso', () => ({
 }));
 
 import { AdminExams } from '../AdminExams';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactElement } from 'react';
+
+function renderInRouter(ui: ReactElement, initialEntry = '/admin/exams') {
+  return render(<MemoryRouter initialEntries={[initialEntry]}>{ui}</MemoryRouter>);
+}
 
 function makeExam(overrides: Partial<Exam> = {}): Exam {
   const base = {
@@ -74,7 +80,7 @@ function bulkResult(ids: string[]): BulkOperationResult {
 
 describe('AdminExams', () => {
   it('renders the exam list with titles and statuses', () => {
-    render(<AdminExams {...buildProps()} />);
+    renderInRouter(<AdminExams {...buildProps()} />);
 
     expect(screen.getByText('Alpha Academic Mock')).toBeInTheDocument();
     expect(screen.getByText('Beta General Mock')).toBeInTheDocument();
@@ -83,7 +89,7 @@ describe('AdminExams', () => {
   });
 
   it('filters the list via the search box and shows the filtered empty state', () => {
-    render(<AdminExams {...buildProps()} />);
+    renderInRouter(<AdminExams {...buildProps()} />);
     const search = screen.getByPlaceholderText('Search exams...');
 
     fireEvent.change(search, { target: { value: 'Beta' } });
@@ -97,7 +103,7 @@ describe('AdminExams', () => {
   });
 
   it('selecting an exam reveals the bulk action bar', () => {
-    render(<AdminExams {...buildProps()} />);
+    renderInRouter(<AdminExams {...buildProps()} />);
 
     expect(screen.queryByRole('toolbar', { name: /bulk actions/i })).not.toBeInTheDocument();
     // Checkbox order in list view: header select-all first, then one per row.
@@ -110,7 +116,7 @@ describe('AdminExams', () => {
 
   it('bulk delete fires onBulkDelete after inline confirmation', async () => {
     const onBulkDelete = vi.fn().mockResolvedValue(bulkResult(['exam-1', 'exam-2']));
-    render(<AdminExams {...buildProps({ onBulkDelete })} />);
+    renderInRouter(<AdminExams {...buildProps({ onBulkDelete })} />);
 
     fireEvent.click(screen.getAllByRole('checkbox')[0] as HTMLElement); // select all
     expect(screen.getByText('2 exams selected')).toBeInTheDocument();
@@ -125,9 +131,36 @@ describe('AdminExams', () => {
     expect(await screen.findByText('Bulk Operation Result')).toBeInTheDocument();
   });
 
+  it('keeps search and sort in the URL so Back and refresh return to the same view', () => {
+    const first = renderInRouter(<AdminExams {...buildProps()} />, '/admin/exams?q=Beta&sort=title&dir=asc');
+    expect(screen.getByPlaceholderText('Search exams...')).toHaveValue('Beta');
+    expect(screen.queryByText('Alpha Academic Mock')).not.toBeInTheDocument();
+    expect(screen.getByText('Beta General Mock')).toBeInTheDocument();
+    first.unmount();
+
+    // Invalid values fall back to defaults instead of breaking the list.
+    renderInRouter(<AdminExams {...buildProps()} />, '/admin/exams?sort=nonsense&dir=sideways&status=Bogus');
+    expect(screen.getByText('Alpha Academic Mock')).toBeInTheDocument();
+    expect(screen.getByText('Beta General Mock')).toBeInTheDocument();
+  });
+
+  it('never applies a bulk action to a selected exam the current filter hides', async () => {
+    const onBulkDelete = vi.fn().mockResolvedValue(bulkResult(['exam-2']));
+    renderInRouter(<AdminExams {...buildProps({ onBulkDelete })} />);
+
+    fireEvent.click(screen.getAllByRole('checkbox')[0] as HTMLElement); // select both
+    fireEvent.change(screen.getByPlaceholderText('Search exams...'), { target: { value: 'Beta' } });
+
+    expect(screen.getByText('1 exam selected')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /delete 1 selected exam/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm delete selected exams/i }));
+    await vi.waitFor(() => expect(onBulkDelete).toHaveBeenCalledTimes(1));
+    expect(onBulkDelete).toHaveBeenCalledWith(['exam-2']);
+  });
+
   it('create flow fires onCreateExam with the entered title', () => {
     const onCreateExam = vi.fn();
-    render(<AdminExams {...buildProps({ onCreateExam })} />);
+    renderInRouter(<AdminExams {...buildProps({ onCreateExam })} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Create Exam' }));
     fireEvent.change(screen.getByPlaceholderText('e.g. Academic Practice Test 5'), {
@@ -142,7 +175,7 @@ describe('AdminExams', () => {
   });
 
   it('renders the empty state when no exams exist', () => {
-    render(<AdminExams {...buildProps({ exams: [] })} />);
+    renderInRouter(<AdminExams {...buildProps({ exams: [] })} />);
 
     expect(screen.getByRole('heading', { name: 'No exams yet' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Create your first exam' }));

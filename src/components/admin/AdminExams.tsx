@@ -5,7 +5,8 @@ import { StatusBadge } from '../ui/StatusBadge';
 import { Exam, ExamPreset, ExamType } from '../../types';
 import { lazyLoad } from '../../app/performance/lazyLoad';
 import { ExamEntity, ExamEvent, ExamVersionSummary, BulkOperationResult } from '../../types/domain';
-import { getExamStatsFromExam, ExamFilterOptions, ExamSortOptions, DEFAULT_FILTERS, DEFAULT_SORT, hasActiveFilters } from '../../utils/examStats';
+import { getExamStatsFromExam, ExamFilterOptions, DEFAULT_FILTERS, hasActiveFilters } from '../../utils/examStats';
+import { useExamListUrlState } from './useExamListUrlState';
 import type { ExamListProps, ExamVersionHistoryProps } from '../../features/exam-authoring/contracts/examList';
 import type { CreateExamInput } from '../../features/exam-authoring/contracts/provider';
 import { ExamFiltersPanel } from './ExamFiltersPanel';
@@ -259,9 +260,7 @@ export function AdminExams({
   const [examEvents, setExamEvents] = useState<ExamEvent[]>([]);
   
   // Phase 4: Filter, sort, and selection state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filters, setFilters] = useState<ExamFilterOptions>(DEFAULT_FILTERS);
-  const [sort, setSort] = useState<ExamSortOptions>(DEFAULT_SORT);
+  const { searchQuery, setSearchQuery, filters, setFilters, sort, setSort } = useExamListUrlState();
   const [selectedExamIds, setSelectedExamIds] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [bulkOperationResult, setBulkOperationResult] = useState<BulkOperationResult | null>(null);
@@ -388,9 +387,17 @@ export function AdminExams({
     return filtered;
   }, [exams, examEntities, providerScope, searchQuery, filters, sort]);
   
-  // Phase 4: Selection handlers
+  // Phase 4: Selection handlers. Actions and counts use only selected exams
+  // the list currently shows: a filter or a remote delete must never leave a
+  // hidden exam inside a bulk publish/archive/delete.
+  const visibleSelectedIds = useMemo(
+    () => filteredAndSortedExams.filter((exam) => selectedExamIds.has(exam.id)).map((exam) => exam.id),
+    [filteredAndSortedExams, selectedExamIds],
+  );
+  const allVisibleSelected =
+    filteredAndSortedExams.length > 0 && visibleSelectedIds.length === filteredAndSortedExams.length;
   const toggleSelectAll = () => {
-    if (selectedExamIds.size === filteredAndSortedExams.length) {
+    if (allVisibleSelected) {
       setSelectedExamIds(new Set());
     } else {
       setSelectedExamIds(new Set(filteredAndSortedExams.map(e => e.id)));
@@ -428,36 +435,36 @@ export function AdminExams({
   };
 
   const handleBulkPublish = async () => {
-    if (!onBulkPublish || selectedExamIds.size === 0) return;
+    if (!onBulkPublish || visibleSelectedIds.length === 0) return;
 
-    const result = await onBulkPublish(Array.from(selectedExamIds));
+    const result = await onBulkPublish(visibleSelectedIds);
     setBulkOperationResult(result);
     setShowBulkResult(true);
     clearSucceededIds(result);
   };
 
   const handleBulkUnpublish = async () => {
-    if (!onBulkUnpublish || selectedExamIds.size === 0) return;
+    if (!onBulkUnpublish || visibleSelectedIds.length === 0) return;
 
-    const result = await onBulkUnpublish(Array.from(selectedExamIds));
+    const result = await onBulkUnpublish(visibleSelectedIds);
     setBulkOperationResult(result);
     setShowBulkResult(true);
     clearSucceededIds(result);
   };
 
   const handleBulkArchive = async () => {
-    if (!onBulkArchive || selectedExamIds.size === 0) return;
+    if (!onBulkArchive || visibleSelectedIds.length === 0) return;
 
-    const result = await onBulkArchive(Array.from(selectedExamIds));
+    const result = await onBulkArchive(visibleSelectedIds);
     setBulkOperationResult(result);
     setShowBulkResult(true);
     clearSucceededIds(result);
   };
 
   const handleBulkDuplicate = async () => {
-    if (!onBulkDuplicate || selectedExamIds.size === 0) return;
+    if (!onBulkDuplicate || visibleSelectedIds.length === 0) return;
 
-    const result = await onBulkDuplicate(Array.from(selectedExamIds), bulkDuplicateTitlePattern);
+    const result = await onBulkDuplicate(visibleSelectedIds, bulkDuplicateTitlePattern);
     setBulkOperationResult(result);
     setShowBulkResult(true);
     clearSucceededIds(result);
@@ -465,10 +472,10 @@ export function AdminExams({
   };
 
   const openBulkDuplicateModal = () => {
-    if (selectedExamIds.size === 0) return;
+    if (visibleSelectedIds.length === 0) return;
 
-    if (selectedExamIds.size === 1) {
-      const selectedExam = exams.find((exam) => selectedExamIds.has(exam.id));
+    if (visibleSelectedIds.length === 1) {
+      const selectedExam = exams.find((exam) => exam.id === visibleSelectedIds[0]);
       setBulkDuplicateTitlePattern(selectedExam ? `${selectedExam.title} (Copy)` : '{title} (Copy)');
     } else {
       setBulkDuplicateTitlePattern('{title} (Copy)');
@@ -478,9 +485,9 @@ export function AdminExams({
   };
   
   const handleBulkExport = async () => {
-    if (!onBulkExport || selectedExamIds.size === 0) return;
+    if (!onBulkExport || visibleSelectedIds.length === 0) return;
 
-    const selectedIds = Array.from(selectedExamIds);
+    const selectedIds = visibleSelectedIds;
     const result = await onBulkExport(selectedIds);
     setBulkOperationResult(result);
     setShowBulkResult(true);
@@ -507,9 +514,9 @@ export function AdminExams({
   // Bulk delete uses the ExamBulkActionBar inline confirmation (no window.confirm),
   // so the flow stays inside React and remains testable.
   const handleBulkDelete = async () => {
-    if (!onBulkDelete || selectedExamIds.size === 0) return;
+    if (!onBulkDelete || visibleSelectedIds.length === 0) return;
 
-    const result = await onBulkDelete(Array.from(selectedExamIds));
+    const result = await onBulkDelete(visibleSelectedIds);
     setBulkOperationResult(result);
     setShowBulkResult(true);
     clearSucceededIds(result);
@@ -763,9 +770,9 @@ export function AdminExams({
       )}
 
       {/* Phase 4: Bulk Action Bar */}
-      {selectedExamIds.size > 0 && (
+      {visibleSelectedIds.length > 0 && (
         <ExamBulkActionBar
-          selectedCount={selectedExamIds.size}
+          selectedCount={visibleSelectedIds.length}
           onClearSelection={clearSelection}
           onBulkPublish={onBulkPublish ? handleBulkPublish : undefined}
           onBulkUnpublish={onBulkUnpublish ? handleBulkUnpublish : undefined}
@@ -815,7 +822,7 @@ export function AdminExams({
                 <th className="px-6 py-3 font-medium w-8">
                   <input 
                     type="checkbox" 
-                    checked={selectedExamIds.size === filteredAndSortedExams.length && filteredAndSortedExams.length > 0}
+                    checked={allVisibleSelected}
                     onChange={toggleSelectAll}
                     className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
@@ -1193,18 +1200,18 @@ export function AdminExams({
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-gray-600">
-                {selectedExamIds.size} exam{selectedExamIds.size !== 1 ? 's' : ''} selected.
-                {selectedExamIds.size > 1 ? ' Use {title} to include each source exam title.' : ''}
+                {visibleSelectedIds.length} exam{visibleSelectedIds.length !== 1 ? 's' : ''} selected.
+                {visibleSelectedIds.length > 1 ? ' Use {title} to include each source exam title.' : ''}
               </p>
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-1">
-                  {selectedExamIds.size > 1 ? 'New Exam Title Pattern' : 'New Exam Title'}
+                  {visibleSelectedIds.length > 1 ? 'New Exam Title Pattern' : 'New Exam Title'}
                 </label>
                 <input
                   type="text"
                   value={bulkDuplicateTitlePattern}
                   onChange={(e) => setBulkDuplicateTitlePattern(e.target.value)}
-                  placeholder={selectedExamIds.size > 1 ? '{title} (Copy)' : 'Enter title...'}
+                  placeholder={visibleSelectedIds.length > 1 ? '{title} (Copy)' : 'Enter title...'}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   autoFocus
                   required
