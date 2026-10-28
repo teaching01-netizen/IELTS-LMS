@@ -6,6 +6,17 @@ type AxeViolation = { id: string; impact: string | null; targets: Array<{ select
 
 /** Fail browser audits on blocking axe findings; retain minor findings for the manual audit. */
 export async function expectNoSeriousAxeViolations(page: Page, surface: string): Promise<void> {
+  // Audit the settled design: an entry fade or colour transition sampled
+  // mid-flight blends foreground and background and reports false contrast
+  // failures. Infinite animations (spinners, pulses) never finish, so skip them.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  );
   const axeLoaded = await page.evaluate(() => typeof (window as Window & { axe?: { run?: unknown } }).axe?.run === "function");
   if (!axeLoaded) {
     const axePath = resolve(process.cwd(), "node_modules/axe-core/axe.min.js");
