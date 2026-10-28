@@ -370,4 +370,18 @@ describe("AdminResults", () => {
     view.rerender(<MemoryRouter><AdminResults /></MemoryRouter>);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it("moves focus into the report, closes on Escape, and returns focus to its trigger", () => {
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
+    const trigger = screen.getAllByRole("button", { name: "View Report" })[1] as HTMLElement;
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole("dialog", { name: "Ada IELTS" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(trigger);
+  });
 });

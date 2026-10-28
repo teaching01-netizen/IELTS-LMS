@@ -7,8 +7,12 @@ import { useEffect, useRef } from 'react';
  * @param isActive - Whether the focus trap should be active
  * @param onEscape - Optional callback when Escape key is pressed
  */
-export function useFocusTrap(isActive: boolean, onEscape?: () => void) {
-  const containerRef = useRef<HTMLElement>(null);
+export function useFocusTrap<T extends HTMLElement = HTMLElement>(isActive: boolean, onEscape?: () => void) {
+  const containerRef = useRef<T>(null);
+  // Read through a ref: an inline callback must not re-run the trap on every
+  // render, which would refocus the first element and lose the return target.
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
 
   useEffect(() => {
     if (!isActive || !containerRef.current) return;
@@ -53,8 +57,8 @@ export function useFocusTrap(isActive: boolean, onEscape?: () => void) {
     };
 
     const handleEscapeKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented && onEscape) {
-        onEscape();
+      if (e.key === 'Escape' && !e.defaultPrevented && onEscapeRef.current) {
+        onEscapeRef.current();
       }
     };
 
@@ -68,7 +72,7 @@ export function useFocusTrap(isActive: boolean, onEscape?: () => void) {
         previouslyFocused.focus();
       }
     };
-  }, [isActive, onEscape]);
+  }, [isActive]);
 
   return containerRef;
 }

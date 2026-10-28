@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { ErrorSurface } from "../ui/ErrorSurface";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 import { LoadingSurface } from "../ui/LoadingSurface";
 import {
   useActScienceDetailQuery,
@@ -140,6 +141,7 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
   const ieltsSubmissionId = isIelts ? (result.submissionId ?? null) : null;
   const ieltsDetail = useIeltsResultDetailQuery(ieltsSubmissionId, isIelts && tab !== "summary");
   const actDetail = useActScienceDetailQuery(isAct && tab !== "summary" ? result.attemptId : null);
+  const dialogRef = useFocusTrap<HTMLElement>(true, onClose);
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4"
@@ -149,6 +151,7 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
       }}
     >
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="result-detail-title"
