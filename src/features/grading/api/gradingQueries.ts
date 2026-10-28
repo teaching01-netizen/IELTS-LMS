@@ -9,9 +9,7 @@ import {
 import type {
   SessionDetailFilters,
   ReviewDraft,
-  StudentResult,
   StudentSubmission,
-  WritingAnnotation,
 } from '../../../types/grading';
 
 type GradingServiceResult<T> = Readonly<{
@@ -26,7 +24,7 @@ type GradingServiceResult<T> = Readonly<{
 const POLLING_INTERVAL_MS = 30 * 1000;
 const POLLING_JITTER_MS = 5 * 1000;
 
-export function pollingIntervalWithJitter(): number {
+function pollingIntervalWithJitter(): number {
   return POLLING_INTERVAL_MS + Math.floor(Math.random() * POLLING_JITTER_MS);
 }
 
@@ -38,7 +36,6 @@ const liveQueryPolicy = {
 export const gradingKeys = {
   all: ['grading'] as const,
   sessions: () => [...gradingKeys.all, 'sessions'] as const,
-  sessionSummary: () => [...gradingKeys.sessions(), 'summary'] as const,
   submissions: (sessionId: string) => [...gradingKeys.all, sessionId, 'submissions'] as const,
   submission: (submissionId: string) => [...gradingKeys.all, 'submission', submissionId] as const,
   reviewDraft: (submissionId: string) => [...gradingKeys.all, 'review-draft', submissionId] as const,
@@ -66,14 +63,6 @@ export function useGradingSessions() {
     queryKey: gradingKeys.sessions(),
     queryFn: async () => requireResultData(await gradingGateway.service.getSessionQueue(), 'Failed to load grading sessions'),
     staleTime: 2 * 60 * 1000,
-  });
-}
-
-export function useSessionQueueSummary() {
-  return useQuery({
-    queryKey: gradingKeys.sessionSummary(),
-    queryFn: async () => requireResultData(await gradingGateway.service.getSessionQueueSummary(), 'Failed to load grading summary'),
-    staleTime: 60 * 1000,
   });
 }
 
@@ -115,24 +104,6 @@ export async function fetchReviewWritingTasks(submissionId: string) {
   return parseReviewWritingTasks(submissionId, await gradingGateway.repository.getWritingSubmissionsBySubmissionId(submissionId));
 }
 
-export function useSubmission(submissionId: string) {
-  return useQuery({
-    queryKey: gradingKeys.submission(submissionId),
-    queryFn: () => fetchReviewSubmission(submissionId),
-    enabled: submissionId.length > 0,
-    staleTime: 2 * 60 * 1000,
-  });
-}
-
-export function useReviewDraft(submissionId: string) {
-  return useQuery({
-    queryKey: gradingKeys.reviewDraft(submissionId),
-    queryFn: () => fetchReviewDraft(submissionId),
-    enabled: submissionId.length > 0,
-    ...liveQueryPolicy,
-  });
-}
-
 export function useStartReview(
   options?: UseMutationOptions<ReviewDraft, Error, { submissionId: string; teacherId: string; teacherName: string }>,
 ) {
@@ -143,116 +114,6 @@ export function useStartReview(
       gradingGateway.service
         .startReview(submissionId, teacherId, teacherName)
         .then((result) => requireResultData(result, 'Failed to start review')),
-    onSuccess: (...args) => {
-      const variables = args[1];
-      queryClient.invalidateQueries({ queryKey: gradingKeys.reviewDraft(variables.submissionId) });
-      queryClient.invalidateQueries({ queryKey: gradingKeys.submission(variables.submissionId) });
-      options?.onSuccess?.(...args);
-    },
-  });
-}
-
-export function useSaveReviewDraft(
-  options?: UseMutationOptions<ReviewDraft, Error, { draft: ReviewDraft; teacherId: string; teacherName: string }>,
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    ...options,
-    mutationFn: ({ draft, teacherId, teacherName }) =>
-      gradingGateway.service
-        .saveReviewDraft(draft, teacherId, teacherName)
-        .then((result) => requireResultData(result, 'Failed to save review draft')),
-    onSuccess: (...args) => {
-      const data = args[0];
-      const variables = args[1];
-      queryClient.setQueryData(gradingKeys.reviewDraft(variables.draft.submissionId), data);
-      options?.onSuccess?.(...args);
-    },
-  });
-}
-
-export function useFinalizeReview(
-  options?: UseMutationOptions<void, Error, { submissionId: string; teacherId: string; teacherName: string; reason?: string }>,
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    ...options,
-    mutationFn: ({ submissionId, teacherId, teacherName, reason }) =>
-      gradingGateway.service.finalizeReview(submissionId, teacherId, teacherName, reason).then((result) => {
-        if (!result.success) {
-          throwResultError(result.error, 'Failed to finalize review');
-        }
-      }),
-    onSuccess: (...args) => {
-      const variables = args[1];
-      queryClient.invalidateQueries({ queryKey: gradingKeys.reviewDraft(variables.submissionId) });
-      queryClient.invalidateQueries({ queryKey: gradingKeys.submission(variables.submissionId) });
-      options?.onSuccess?.(...args);
-    },
-  });
-}
-
-export function useAddWritingAnnotation(
-  options?: UseMutationOptions<WritingAnnotation, Error, { submissionId: string; annotation: WritingAnnotation; teacherId: string; teacherName: string }>,
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    ...options,
-    mutationFn: ({ submissionId, annotation, teacherId, teacherName }) =>
-      gradingGateway.service
-        .addWritingAnnotation(submissionId, annotation, teacherId, teacherName)
-        .then((result) => requireResultData(result, 'Failed to add writing annotation')),
-    onSuccess: (...args) => {
-      queryClient.invalidateQueries({ queryKey: gradingKeys.reviewDraft(args[1].submissionId) });
-      options?.onSuccess?.(...args);
-    },
-  });
-}
-
-export function useMarkGradingComplete(
-  options?: UseMutationOptions<ReviewDraft, Error, { submissionId: string; teacherId: string; teacherName: string }>,
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    ...options,
-    mutationFn: ({ submissionId, teacherId, teacherName }) =>
-      gradingGateway.service
-        .markGradingComplete(submissionId, teacherId, teacherName)
-        .then((result) => requireResultData(result, 'Failed to mark grading complete')),
-    onSuccess: (...args) => {
-      queryClient.setQueryData(gradingKeys.reviewDraft(args[1].submissionId), args[0]);
-      options?.onSuccess?.(...args);
-    },
-  });
-}
-
-export function useMarkReadyToRelease(
-  options?: UseMutationOptions<ReviewDraft, Error, { submissionId: string; teacherId: string; teacherName: string }>,
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    ...options,
-    mutationFn: ({ submissionId, teacherId, teacherName }) =>
-      gradingGateway.service
-        .markReadyToRelease(submissionId, teacherId, teacherName)
-        .then((result) => requireResultData(result, 'Failed to mark ready to release')),
-    onSuccess: (...args) => {
-      queryClient.setQueryData(gradingKeys.reviewDraft(args[1].submissionId), args[0]);
-      options?.onSuccess?.(...args);
-    },
-  });
-}
-
-export function useReleaseResult(
-  options?: UseMutationOptions<StudentResult, Error, { submissionId: string; teacherId: string; teacherName: string }>,
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    ...options,
-    mutationFn: ({ submissionId, teacherId, teacherName }) =>
-      gradingGateway.service
-        .releaseResult(submissionId, teacherId, teacherName)
-        .then((result) => requireResultData(result, 'Failed to release result')),
     onSuccess: (...args) => {
       const variables = args[1];
       queryClient.invalidateQueries({ queryKey: gradingKeys.reviewDraft(variables.submissionId) });
