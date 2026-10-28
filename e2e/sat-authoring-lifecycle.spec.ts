@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { expectNoSeriousAxeViolations } from "./support/axeAudit";
 import type { CreateAssessmentAccessLinkRequest } from "../src/features/exam-authoring/contracts/accessLinks";
 
@@ -255,6 +255,30 @@ async function installTransport(
       body: JSON.stringify({}),
     });
   });
+
+  // Read by Create room and Settings. Unmocked, it reaches the real API without
+  // a session cookie, and the 401 correctly signs the page out.
+  await page.route("**/api/v1/sat/exam-config/defaults", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        data: {
+          preset: "standard_sat",
+          config: {
+            sections: {
+              "reading-writing": { module1Minutes: 32, module2LowerMinutes: 32, module2HigherMinutes: 32, breakAfterMinutes: 10, minimumCorrectForHigher: 13 },
+              math: { module1Minutes: 35, module2LowerMinutes: 35, module2HigherMinutes: 35, breakAfterMinutes: 0, minimumCorrectForHigher: 11 },
+            },
+            showClassroomScoreReport: false,
+          },
+          limits: { minModuleMinutes: 1, maxModuleMinutes: 600, maxBreakMinutes: 240, operationalQuestions: { "reading-writing": 27, math: 22 } },
+          classroomCreationEnabled: true,
+        },
+      }),
+    }),
+  );
 
   await page.route("**/api/v1/auth/session", (route) =>
     route.fulfill({
@@ -640,187 +664,26 @@ test.describe("SAT authoring shell lifecycle", () => {
     expect(recording.postShell).toBe(0);
   });
 
-  test("release review blocks an incomplete full SAT, then confirms the selected version scope", async ({ page }) => {
+  test("the legacy release route opens the workspace instead of a removed publish screen", async ({ page }) => {
     const recording = await installTransport(page, { readyDraft: true, releaseWorkflow: true });
-
     await page.goto(`/sat/exams/${EXAM_ID}/release`);
 
-    await expect(page.getByRole("heading", { name: "Release checks" })).toBeVisible();
-    expect(recording.readinessScopes).toEqual(["full"]);
-    await expect(page.getByText("Add the required Math module before publishing the full SAT.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Publish version" })).toBeDisabled();
-    await expectNoSeriousAxeViolations(page, "SAT release review with a blocking issue");
-
-    await page.getByRole("radio", { name: "Reading & Writing" }).check();
-    await expect(page.getByText("Ready to publish.")).toBeVisible();
-    const publishButton = page.getByRole("button", { name: "Publish version" });
-    await expect(publishButton).toBeEnabled();
-    // Let the 180ms workspace transition finish before inspecting text contrast.
-    await expect(publishButton).toHaveCSS("color", "rgb(255, 255, 255)");
-    await expectNoSeriousAxeViolations(page, "SAT release review ready for selected scope");
-
-    await page.getByRole("button", { name: "Publish version" }).click();
-    const confirmationDialog = page.getByRole("dialog", { name: "Publish Reading & Writing only?" });
-    await expect(confirmationDialog).toBeVisible();
-    await expect(confirmationDialog).toHaveCSS("opacity", "1");
-    await expect(page.getByText("Release checks passed")).toBeVisible();
-    await expect(page.getByText("Not included")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Publish Reading & Writing", exact: true })).toHaveCSS("color", "rgb(255, 255, 255)");
-    await expectNoSeriousAxeViolations(page, "SAT publish version confirmation");
-
-    await page.getByRole("button", { name: "Publish Reading & Writing", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access`));
-    expect(recording.readinessScopes.slice(0, 2)).toEqual(["full", "reading-writing"]);
-    expect(recording.readinessScopes.every((scope) => ["full", "reading-writing"].includes(scope))).toBe(true);
-    expect(recording.publishRequests).toHaveLength(1);
-    expect(recording.publishRequests[0]).toMatchObject({
-      expectedDraftVersionId: "draft-1",
-      expectedDraftRevision: 1,
-      publishScope: "reading-writing",
-      revision: 1,
-    });
-    expect(recording.consoleErrors).toEqual([]);
+    // Publishing is no longer a separate step: a room uses the latest saved
+    // exam. The old release URL keeps working and lands in the workspace.
+    await expect(page.getByRole("region", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create room", exact: true }).first()).toBeVisible();
+    expect(recording.publishRequests).toHaveLength(0);
     expect(recording.pageErrors).toEqual([]);
   });
 
-  test("publish success survives shell removal, Done, reload, and keeps the exact room target", async ({ page }) => {
-    const recording = await installTransport(page, { readyDraft: true, releaseWorkflow: true });
-    await page.goto(`/sat/exams/${EXAM_ID}`);
-
-    await page.getByRole("button", { name: "Publish version" }).click();
-    await expect(page.getByRole("dialog", { name: "Publish version" })).toBeVisible();
-    await page.getByRole("radio", { name: "Reading & Writing" }).check();
-    await expect(page.getByRole("button", { name: "Publish Reading & Writing" })).toBeEnabled();
-    await page.getByRole("button", { name: "Publish Reading & Writing" }).click();
-
-    await expect(page.getByText("Version 1 published. Create a room to give students access.")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "No editable draft" })).toHaveCount(0);
-    await expectNoSeriousAxeViolations(page, "SAT publish success sheet after draft sealing");
-    expect(recording.publishRequests).toHaveLength(1);
-    expect(recording.postShell).toBe(0);
-
-    await page.getByRole("button", { name: "Done" }).click();
-    await expect(page.getByText("Version 1 is published.")).toBeVisible();
-    const createRoom = page.getByRole("button", { name: "Create room" });
-    await expect(createRoom).toBeFocused();
-
-    // A reload drops the in-memory receipt. The published release read must
-    // still render the usable view without converting a read into a draft POST.
-    await page.reload();
-    await expect(page.getByText("Version 1 is published.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Edit exam" })).toBeVisible();
-    expect(recording.postShell).toBe(0);
-    await expectNoSeriousAxeViolations(page, "SAT published workspace after reload");
-
-    await page.getByRole("button", { name: "Create room" }).click();
-    const room = page.getByRole("dialog", { name: "Create room" });
-    await expect(room).toBeVisible();
-    await expect(room).toContainText("Room uses Version 1");
-    await room.getByLabel("Room name").fill("Published receipt room");
-    await room.getByRole("button", { name: "Create room", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access\\?link=access-link-1`), { timeout: 30_000 });
-    expect(recording.publishRequests).toHaveLength(1);
-    expect(recording.createRequests).toHaveLength(1);
-    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
-    expect(recording.postShell).toBe(0);
-    expect(recording.consoleErrors).toEqual([]);
-    expect(recording.pageErrors).toEqual([]);
-  });
 });
 
-async function openCreateRoom(page: Page) {
-  await page.goto(`/sat/exams/${EXAM_ID}`);
-  const createRoom = page.getByRole("button", { name: "Create room", exact: true }).first();
-  await expect(createRoom).toBeVisible({ timeout: 30_000 });
-  await createRoom.click();
-  const room = page.getByRole("dialog", { name: "Create room" });
-  await expect(room).toBeVisible({ timeout: 30_000 });
-  return room;
-}
-
-async function finishRoomCreation(page: Page, room: Locator, actionName: string) {
-  await room.getByLabel("Room name").fill("Saturday morning mock");
-  await room.getByRole("button", { name: actionName, exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access\\?link=access-link-1`), { timeout: 30_000 });
-}
-
+// The publish-then-create handoff these tests once covered was replaced by one
+// server operation that creates the room from the latest saved exam. Its
+// contract (single request, operation-key resend, lost-response recovery,
+// readiness issues) is covered by SatCreateRoomFlow/RecoveryVerification unit
+// tests and the browser flows in sat-staff-room-ux.spec.ts.
 test.describe("SAT Create room handoff", () => {
-  test("publishes a ready draft and creates the room from one sheet", async ({ page }) => {
-    const recording = await installTransport(page, {
-      readyDraft: true,
-      releaseWorkflow: true,
-      readyFullDraft: true,
-    });
-    const room = await openCreateRoom(page);
-    const fullSat = room.getByRole("radio", { name: "Full SAT" });
-    await expect(fullSat).not.toBeChecked();
-    await fullSat.check();
-    const action = room.getByRole("button", { name: "Publish & create room", exact: true });
-    await expect(action).toBeEnabled({ timeout: 30_000 });
-    await finishRoomCreation(page, room, "Publish & create room");
-
-    expect(recording.postShell).toBe(0);
-    expect(recording.publishRequests).toHaveLength(1);
-    expect(recording.publishRequests[0]?.publishScope).toBe("full");
-    expect(recording.createRequests).toHaveLength(1);
-    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
-  });
-
-  test("blocks an invalid full SAT and requires confirmation of the prepared section", async ({ page }) => {
-    const recording = await installTransport(page, { readyDraft: true, releaseWorkflow: true });
-    const room = await openCreateRoom(page);
-    await room.getByRole("radio", { name: "Full SAT" }).check();
-    await expect(room.getByText("Add the required Math module before publishing the full SAT.")).toBeVisible();
-    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeDisabled();
-
-    const readingWriting = room.getByRole("radio", { name: "Reading & Writing only" });
-    await readingWriting.check();
-    await expect(readingWriting).toBeChecked();
-    await expect(room.getByText("Add the required Math module before publishing the full SAT.")).toHaveCount(0);
-    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
-    await finishRoomCreation(page, room, "Publish & create room");
-
-    expect(recording.readinessScopes).toContain("full");
-    expect(recording.readinessScopes).toContain("reading-writing");
-    expect(recording.publishRequests).toHaveLength(1);
-    expect(recording.publishRequests[0]?.publishScope).toBe("reading-writing");
-    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
-  });
-
-  test("uses unpublished changes instead of the older published version", async ({ page }) => {
-    const recording = await installTransport(page, {
-      readyDraft: true,
-      releaseWorkflow: true,
-      readyFullDraft: true,
-      initiallyPublished: true,
-    });
-    const room = await openCreateRoom(page);
-    await expect(room).toContainText("Version 2 will be checked and published as a new version.");
-    await room.getByRole("radio", { name: "Full SAT" }).check();
-    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
-    await finishRoomCreation(page, room, "Publish & create room");
-
-    expect(recording.publishRequests).toHaveLength(1);
-    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
-    expect(recording.createRequests[0]?.publishedVersionId).not.toBe("published-v1");
-  });
-
-  test("creates from the current published version without requiring publish permission", async ({ page }) => {
-    const recording = await installTransport(page, {
-      releaseWorkflow: true,
-      initiallyPublished: true,
-      canPublish: false,
-    });
-    const room = await openCreateRoom(page);
-    await expect(room).toContainText("Room uses Version 1");
-    await expect(room.getByRole("button", { name: "Create room", exact: true })).toBeEnabled();
-    await finishRoomCreation(page, room, "Create room");
-
-    expect(recording.publishRequests).toHaveLength(0);
-    expect(recording.createRequests).toHaveLength(1);
-    expect(recording.createRequests[0]?.publishedVersionId).toBe("published-v1");
-  });
-
   test("does not offer room creation to a staff member without edit permission", async ({ page }) => {
     await installTransport(page, {
       releaseWorkflow: true,
@@ -831,98 +694,4 @@ test.describe("SAT Create room handoff", () => {
     await expect(page.getByRole("button", { name: "Create room", exact: true })).toHaveCount(0);
   });
 
-  test("adopts the same exact draft and scope if another staff member publishes during setup", async ({ page }) => {
-    const recording = await installTransport(page, {
-      readyDraft: true,
-      releaseWorkflow: true,
-      readyFullDraft: true,
-      concurrentPublish: true,
-    });
-    const room = await openCreateRoom(page);
-    await room.getByRole("radio", { name: "Full SAT" }).check();
-    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
-    await finishRoomCreation(page, room, "Publish & create room");
-
-    expect(recording.publishRequests).toHaveLength(1);
-    expect(recording.createRequests).toHaveLength(1);
-    expect(recording.createRequests[0]?.publishedVersionId).toBe("draft-1");
-  });
-
-  test("does not switch to a different scope published by another staff member", async ({ page }) => {
-    const recording = await installTransport(page, {
-      readyDraft: true,
-      releaseWorkflow: true,
-      readyFullDraft: true,
-      concurrentPublish: true,
-      concurrentPublishScope: "reading-writing",
-    });
-    const room = await openCreateRoom(page);
-    await room.getByRole("radio", { name: "Full SAT" }).check();
-    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
-    await room.getByLabel("Room name").fill("Saturday morning mock");
-    await room.getByRole("button", { name: "Publish & create room", exact: true }).click();
-
-    await expect(room.getByText("This draft was published with a different scope while you were setting up.")).toBeVisible({ timeout: 30_000 });
-    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeDisabled();
-    expect(recording.createRequests).toHaveLength(0);
-  });
-
-  test("reuses the same publish operation key after a transient publish failure", async ({ page }) => {
-    const recording = await installTransport(page, {
-      readyDraft: true,
-      releaseWorkflow: true,
-      readyFullDraft: true,
-      failPublishOnce: true,
-    });
-    const room = await openCreateRoom(page);
-    await room.getByRole("radio", { name: "Full SAT" }).check();
-    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
-    await room.getByLabel("Room name").fill("Saturday morning mock");
-    const action = room.getByRole("button", { name: "Publish & create room", exact: true });
-    await action.click();
-    await expect(room.getByRole("alert").last()).toBeVisible();
-    await action.click();
-    await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access\\?link=access-link-1`), { timeout: 30_000 });
-
-    expect(recording.publishRequests).toHaveLength(2);
-    expect(recording.publishRequests[0]?.operationKey).toBeTruthy();
-    expect(recording.publishRequests[1]?.operationKey).toBe(recording.publishRequests[0]?.operationKey);
-    expect(recording.createRequests).toHaveLength(1);
-  });
-
-  test("reconciles a committed room after a lost response without creating a duplicate", async ({ page }) => {
-    const recording = await installTransport(page, {
-      releaseWorkflow: true,
-      initiallyPublished: true,
-      createOutcome: "commit-then-timeout",
-    });
-    const room = await openCreateRoom(page);
-    await finishRoomCreation(page, room, "Create room");
-
-    expect(recording.createRequests).toHaveLength(1);
-    expect(recording.overviewReads).toBeGreaterThanOrEqual(2);
-    expect(recording.publishRequests).toHaveLength(0);
-  });
-
-  test("retries room creation only after the first uncertain attempt is confirmed absent", async ({ page }) => {
-    const recording = await installTransport(page, {
-      readyDraft: true,
-      releaseWorkflow: true,
-      readyFullDraft: true,
-      createOutcome: "not-committed-once",
-    });
-    const room = await openCreateRoom(page);
-    await room.getByRole("radio", { name: "Full SAT" }).check();
-    await expect(room.getByRole("button", { name: "Publish & create room", exact: true })).toBeEnabled({ timeout: 30_000 });
-    await room.getByLabel("Room name").fill("Saturday morning mock");
-    await room.getByRole("button", { name: "Publish & create room", exact: true }).click();
-    await expect(room.getByText("No room matching this setup was found. You can retry creation.")).toBeVisible({ timeout: 30_000 });
-    await expect(room.getByRole("button", { name: "Create room", exact: true })).toBeEnabled();
-    expect(recording.overviewReads).toBeGreaterThanOrEqual(4);
-    await room.getByRole("button", { name: "Create room", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/sat/exams/${EXAM_ID}/access\\?link=access-link-1`), { timeout: 30_000 });
-
-    expect(recording.publishRequests).toHaveLength(1);
-    expect(recording.createRequests).toHaveLength(2);
-  });
 });

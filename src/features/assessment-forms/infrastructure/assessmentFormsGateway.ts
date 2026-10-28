@@ -9,13 +9,41 @@ import type {
   ScheduleFormState,
 } from "../contracts/forms";
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+const isForms = (value: unknown): boolean => isRecord(value) && isRecord(value["evaSim"]);
+
+/**
+ * The forms editor dereferences `standard.evaSim` and `forms.evaSim`; a
+ * malformed document becomes the panel's load error, not a page crash.
+ */
+function checkExamFormsDocument(value: unknown): ExamFormsDocument {
+  if (
+    !isRecord(value) ||
+    typeof value["versionId"] !== "string" ||
+    typeof value["versionRevision"] !== "number" ||
+    typeof value["editable"] !== "boolean" ||
+    !isForms(value["standard"]) ||
+    !(value["forms"] === null || isForms(value["forms"])) ||
+    !Array.isArray(value["issues"]) ||
+    !isRecord(value["limits"])
+  ) {
+    throw new Error("The form settings response was incomplete. Try again.");
+  }
+  return value as unknown as ExamFormsDocument;
+}
+
 /** Staff-side form APIs: authoring, response list/detail and room state. */
 export const assessmentFormsApi = {
   examForms(examId: string): Promise<ExamFormsDocument> {
-    return backendGet<ExamFormsDocument>(`/v1/assessment-authoring/exams/${encodeURIComponent(examId)}/forms`, { retries: 0 });
+    return backendGet<unknown>(`/v1/assessment-authoring/exams/${encodeURIComponent(examId)}/forms`, { retries: 0 }).then(
+      checkExamFormsDocument,
+    );
   },
   saveExamForms(examId: string, request: SaveExamFormsRequest): Promise<ExamFormsDocument> {
-    return backendPut<ExamFormsDocument>(`/v1/assessment-authoring/exams/${encodeURIComponent(examId)}/forms`, request, { retries: 0 });
+    return backendPut<unknown>(`/v1/assessment-authoring/exams/${encodeURIComponent(examId)}/forms`, request, { retries: 0 }).then(
+      checkExamFormsDocument,
+    );
   },
   responses(filters: FormResponseFilters, cursor: string | null): Promise<FormResponsePage> {
     const params = new URLSearchParams({ formKey: filters.formKey });
