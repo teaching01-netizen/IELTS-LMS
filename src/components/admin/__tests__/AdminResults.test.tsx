@@ -156,7 +156,7 @@ describe("AdminResults", () => {
   });
 
   it("renders provider-backed IELTS and ACT results and opens the real report", () => {
-    render(<AdminResults />);
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
 
     expect(screen.getByText("Ada IELTS")).toBeInTheDocument();
     expect(screen.getByText("Bea ACT")).toBeInTheDocument();
@@ -189,7 +189,7 @@ describe("AdminResults", () => {
       refetch: vi.fn(),
     });
 
-    render(<AdminResults />);
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
     expect(screen.getByText("—")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "View Report" }));
@@ -199,7 +199,7 @@ describe("AdminResults", () => {
   });
 
   it("filters the backend provider selection and local search without fabricating rows", () => {
-    render(<AdminResults />);
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
 
     fireEvent.change(screen.getByLabelText("Filter by provider"), {
       target: { value: "act" },
@@ -223,7 +223,7 @@ describe("AdminResults", () => {
       refetch: vi.fn(),
     });
 
-    render(<AdminResults />);
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
 
     expect(screen.getByRole("heading", { name: "No results yet" })).toBeInTheDocument();
     expect(
@@ -238,7 +238,7 @@ describe("AdminResults", () => {
       error: null,
       refetch: vi.fn(),
     });
-    const { unmount } = render(<AdminResults />);
+    const { unmount } = render(<MemoryRouter><AdminResults /></MemoryRouter>);
     expect(screen.getByRole("status")).toHaveTextContent("Opening results");
     unmount();
 
@@ -249,7 +249,7 @@ describe("AdminResults", () => {
       error: new Error("backend unavailable"),
       refetch,
     });
-    render(<AdminResults />);
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
     expect(screen.getByRole("alert")).toHaveTextContent("backend unavailable");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(refetch).toHaveBeenCalledTimes(1);
@@ -275,7 +275,7 @@ describe("AdminResults", () => {
       isLoading: false,
       error: null,
     });
-    render(<AdminResults />);
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
     fireEvent.click(screen.getAllByRole("button", { name: "View Report" })[1]);
     fireEvent.click(screen.getByRole("tab", { name: "Modules" }));
     expect(screen.getByText("30 / 40")).toBeInTheDocument();
@@ -304,7 +304,7 @@ describe("AdminResults", () => {
       isLoading: false,
       error: null,
     });
-    render(<AdminResults />);
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
     fireEvent.click(screen.getAllByRole("button", { name: "View Report" })[0]);
     fireEvent.click(screen.getByRole("tab", { name: "Questions" }));
     expect(screen.getByText("q1")).toBeInTheDocument();
@@ -318,7 +318,7 @@ describe("AdminResults", () => {
       isLoading: false,
       error: new Error('{"totalScore":40,"secret":"key-material"}'),
     });
-    render(<AdminResults />);
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
     fireEvent.click(screen.getAllByRole("button", { name: "View Report" })[0]);
     // Summary stays authoritative from the dashboard row (32/40), never a zero.
     const dialog = screen.getByRole("dialog");
@@ -333,12 +333,41 @@ describe("AdminResults", () => {
   });
 
   it("keeps the report dialog accessible and closable", () => {
-    render(<AdminResults />);
+    render(<MemoryRouter><AdminResults /></MemoryRouter>);
     fireEvent.click(screen.getAllByRole("button", { name: "View Report" })[1]);
 
     const dialog = screen.getByRole("dialog", { name: "Ada IELTS" });
     expect(within(dialog).getByText("IELTS section bands")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close result report" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("restores provider and search from the URL", () => {
+    render(
+      <MemoryRouter initialEntries={["/admin/results?provider=act&q=Bea"]}>
+        <AdminResults />
+      </MemoryRouter>,
+    );
+    expect(mocks.useAdminResultsQuery).toHaveBeenLastCalledWith("act");
+    expect(screen.getByLabelText("Filter by provider")).toHaveValue("act");
+    expect(screen.getByPlaceholderText("Search results...")).toHaveValue("Bea");
+  });
+
+  it("shows the refreshed server row in an open report and closes it when the row leaves the list", () => {
+    let rows: AdminResultRow[] = [actResult, ieltsResult];
+    mocks.useAdminResultsQuery.mockImplementation(() => ({ data: rows, isLoading: false, error: null, refetch: vi.fn() }));
+    const view = render(<MemoryRouter><AdminResults /></MemoryRouter>);
+    fireEvent.click(screen.getAllByRole("button", { name: "View Report" })[1]);
+    expect(screen.getByRole("dialog", { name: "Ada IELTS" })).toBeInTheDocument();
+
+    // A refetch replaces the row (another staff member corrected the name).
+    rows = [actResult, { ...ieltsResult, studentName: "Ada Lovelace" }];
+    view.rerender(<MemoryRouter><AdminResults /></MemoryRouter>);
+    expect(screen.getByRole("dialog", { name: "Ada Lovelace" })).toBeInTheDocument();
+
+    // The row is gone from the current list: no report for it stays open.
+    rows = [actResult];
+    view.rerender(<MemoryRouter><AdminResults /></MemoryRouter>);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   BarChart2,
   CheckCircle2,
@@ -25,6 +25,10 @@ import { ModuleRawTable } from "../results/ModuleRawTable";
 import { QuestionRawTable } from "../results/QuestionRawTable";
 
 type ProviderFilter = ResultProviderKey | "all";
+
+function isProviderFilter(value: string | null): value is ProviderFilter {
+  return value === "all" || value === "ielts" || value === "sat" || value === "act";
+}
 
 function providerLabel(provider: ResultProviderKey): string {
   return provider === "act" ? "ACT Science" : provider === "sat" ? "Digital SAT" : "IELTS";
@@ -457,9 +461,26 @@ function ResultDetail({ result, onClose }: { result: AdminResultRow; onClose: ()
 }
 
 export function AdminResults() {
-  const [provider, setProvider] = useState<ProviderFilter>("all");
-  const [search, setSearch] = useState("");
-  const [selectedResult, setSelectedResult] = useState<AdminResultRow | null>(null);
+  // Provider and search live in the URL so Back and refresh keep the view.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const providerParam = searchParams.get("provider");
+  const provider: ProviderFilter = isProviderFilter(providerParam) ? providerParam : "all";
+  const search = searchParams.get("q") ?? "";
+  const setParam = (key: string, value: string) =>
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
+    );
+  const setProvider = (value: ProviderFilter) => setParam("provider", value === "all" ? "" : value);
+  const setSearch = (value: string) => setParam("q", value);
+  // The open report follows the current server row by id; it closes when
+  // that row is no longer part of the list.
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
   const [exportingAct, setExportingAct] = useState(false);
   const [actExportError, setActExportError] = useState<string | null>(null);
   const query = useAdminResultsQuery(provider);
@@ -483,6 +504,7 @@ export function AdminResults() {
   }, [query.data, search]);
 
   const visibleResults = query.data ?? [];
+  const selectedResult = visibleResults.find((result) => result.id === selectedResultId) ?? null;
   const releasedCount = visibleResults.filter(
     (result) => result.providerKey !== "sat" && result.releaseStatus === "released"
   ).length;
@@ -691,7 +713,7 @@ export function AdminResults() {
                     <td className="px-5 py-4 text-right">
                       <button
                         type="button"
-                        onClick={() => setSelectedResult(result)}
+                        onClick={() => setSelectedResultId(result.id)}
                         className="font-medium text-blue-600 hover:text-blue-800"
                       >
                         View Report
@@ -719,7 +741,7 @@ export function AdminResults() {
         )}
       </section>
       {selectedResult ? (
-        <ResultDetail result={selectedResult} onClose={() => setSelectedResult(null)} />
+        <ResultDetail result={selectedResult} onClose={() => setSelectedResultId(null)} />
       ) : null}
     </div>
   );
