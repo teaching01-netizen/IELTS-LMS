@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Header } from '@components/Header';
@@ -206,6 +206,8 @@ export function BuilderRoot() {
   // Single-source undo/redo truth: history.present is the builder state (via currentState
   // below); currentStateRef only mirrors it for async callbacks, never a second source.
   const history = useUndoRedo<ExamState | null>(null, { initialLabel: 'Loaded exam', limit: 50 });
+  // The jump-to-field effect is declared before the state commands it uses.
+  const updateBuilderStateRef = useRef<((next: ExamState, label?: string) => void) | null>(null);
   const [initializedExamId, setInitializedExamId] = useState<string | undefined>(undefined);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
   const [isScoringOpen, setIsScoringOpen] = useState(false);
@@ -324,7 +326,7 @@ export function BuilderRoot() {
       }
     }
 
-    updateBuilderState(nextState, 'Jump to validation field');
+    updateBuilderStateRef.current?.(nextState, 'Jump to validation field');
 
     const blockIndex = jumpTarget.blockIndex;
     const nextParams = new URLSearchParams(location.search);
@@ -356,7 +358,7 @@ export function BuilderRoot() {
     handleUpdateExamContentRef.current = handleUpdateExamContent;
   }, [handleUpdateExamContent]);
 
-  const pushToast = (toast: Omit<GlobalToastItem, 'id'>) => {
+  const pushToast = useCallback((toast: Omit<GlobalToastItem, 'id'>) => {
     setToasts((current) => [
       ...current,
       {
@@ -364,7 +366,7 @@ export function BuilderRoot() {
         id: `toast-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       },
     ]);
-  };
+  }, []);
 
   const dismissToast = (id: string) => {
     setToasts((current) => current.filter((toast) => toast.id !== id));
@@ -408,7 +410,7 @@ export function BuilderRoot() {
     },
   });
 
-  const saveDraftNow = async () => {
+  const saveDraftNow = useCallback(async () => {
     // Resolves true only once the newest edit is persisted, so a late earlier
     // save never unlocks navigation for newer unsaved work.
     const saved = await flushLatest(() => currentStateRef.current);
@@ -421,9 +423,9 @@ export function BuilderRoot() {
       });
     }
     return saved;
-  };
+  }, [flushLatest, pushToast]);
 
-  const updateBuilderState = (
+  const updateBuilderState = useCallback((
     nextState: ExamState | ((previous: ExamState) => ExamState),
     label = 'Updated exam',
   ) => {
@@ -437,9 +439,10 @@ export function BuilderRoot() {
     history.setState(recoveredState, label);
     currentStateRef.current = recoveredState;
     scheduleAutosave(recoveredState);
-  };
+  }, [history, scheduleAutosave]);
+  updateBuilderStateRef.current = updateBuilderState;
 
-  const handleUndo = () => {
+  const handleUndo = useCallback(() => {
     if (!history.canUndo || !history.undoState) {
       return;
     }
@@ -453,9 +456,9 @@ export function BuilderRoot() {
       message: history.lastActionLabel,
       timestamp: nowLabel(),
     });
-  };
+  }, [history, pushToast, scheduleAutosave]);
 
-  const handleRedo = () => {
+  const handleRedo = useCallback(() => {
     if (!history.canRedo || !history.redoState) {
       return;
     }
@@ -469,7 +472,7 @@ export function BuilderRoot() {
       message: history.redoStackLabels[0] ?? 'Restored change',
       timestamp: nowLabel(),
     });
-  };
+  }, [history, pushToast, scheduleAutosave]);
 
   const handleOpenPreview = () => {
     if (!examId) {

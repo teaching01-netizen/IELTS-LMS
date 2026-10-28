@@ -207,9 +207,11 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
   const handleDrawingAdd = workspace.addDrawing;
   const handleDrawingDelete = workspace.deleteDrawing;
 
-  const getSectionSubmission = (section: 'listening' | 'reading' | 'writing' | 'speaking' | 'science') => {
-    return sectionSubmissions.find(s => s.section === section);
-  };
+  const getSectionSubmission = useCallback(
+    (section: 'listening' | 'reading' | 'writing' | 'speaking' | 'science') =>
+      sectionSubmissions.find(s => s.section === section),
+    [sectionSubmissions],
+  );
 
   const hasScienceSection = sectionSubmissions.some((section) => section.section === 'science');
   const reviewSections: Array<'listening' | 'reading' | 'writing' | 'speaking' | 'science'> = hasScienceSection
@@ -224,9 +226,10 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     }
   }, [activeSection, hasScienceSection]);
 
-  const getWritingTaskSubmission = (taskId: string) => {
-    return writingSubmissions.find(w => w.taskId === taskId);
-  };
+  const getWritingTaskSubmission = useCallback(
+    (taskId: string) => writingSubmissions.find(w => w.taskId === taskId),
+    [writingSubmissions],
+  );
 
   const writingTasks = useMemo<WritingTaskContent[]>(() => {
     const tasks = examState?.writing?.tasks;
@@ -259,7 +262,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
       return fromSubmission;
     }
     return writingTasks.find((task) => task.taskId === taskId)?.prompt ?? '';
-  }, [writingSubmissions, writingTasks]);
+  }, [getWritingTaskSubmission, writingTasks]);
 
   const getWritingResponseText = useCallback((taskId: string) => {
     const task = getWritingTaskSubmission(taskId);
@@ -283,7 +286,7 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
     }
 
     return '';
-  }, [sectionSubmissions, writingSubmissions]);
+  }, [getSectionSubmission, getWritingTaskSubmission]);
 
   const getReleaseStatusBadge = (status: ReleaseStatus) => {
     const styles = {

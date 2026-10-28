@@ -137,10 +137,10 @@ export function createScopedCaretProvider(
       awareness.setLocalStateField(fieldName === "cursor" ? cursorKey : fieldName, value);
     },
     on(event, listener) {
-      awareness.on(event, listener as (...args: any[]) => any);
+      awareness.on(event, listener as Parameters<typeof awareness.on>[1]);
     },
     off(event, listener) {
-      awareness.off(event, listener as (...args: any[]) => any);
+      awareness.off(event, listener as Parameters<typeof awareness.off>[1]);
     },
   };
 
