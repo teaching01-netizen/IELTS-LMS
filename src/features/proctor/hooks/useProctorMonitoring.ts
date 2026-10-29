@@ -452,6 +452,11 @@ function reconcileDetailCache(oldData: unknown, newData: unknown): ProctorDetail
 
 export interface ProctorRouteControllerOptions {
   providerKey?: "sat" | "ielts" | "act";
+  /**
+   * Provider families whose rooms this view shows, applied to the summary read.
+   * The summary read is shared, so pass a stable (module-level) array.
+   */
+  visibleProviderKeys?: ReadonlyArray<"sat" | "ielts" | "act">;
   initialScheduleId?: string | null;
 }
 
@@ -516,9 +521,12 @@ export function useProctorMonitoring(options: ProctorRouteControllerOptions = {}
     options.initialScheduleId ? 'always' : undefined,
   );
   const summaries = useMemo(() => summariesQuery.data ?? [], [summariesQuery.data]);
+  const visibleProviderKeys = options.visibleProviderKeys;
   const visibleSummaries = useMemo(
-    () => summaries.filter((summary) => !proctorFacade.isPreviewRuntimeCohortName(summary.schedule.cohortName)),
-    [summaries],
+    () => summaries.filter((summary) =>
+      !proctorFacade.isPreviewRuntimeCohortName(summary.schedule.cohortName) &&
+      (!visibleProviderKeys || visibleProviderKeys.includes(summary.schedule.providerKey))),
+    [summaries, visibleProviderKeys],
   );
   const schedules = useMemo(
     () => visibleSummaries.map((summary) => proctorFacade.mapSchedule(summary.schedule)),

@@ -38,6 +38,39 @@ test.describe('Proctor dashboard and session monitoring', () => {
     await expect(page.getByText('Monitor Session').first()).toBeVisible();
   });
 
+  test('keeps SAT rooms off the IELTS proctor overview', async ({ page }) => {
+    const satCohort = 'E2E SAT Hidden Cohort';
+    // offcut: stubs one SAT summary row; the e2e seed creates no SAT schedule, so real SAT rows are not exercised here
+    await page.route('**/api/v1/proctor/sessions', async (route) => {
+      const response = await route.fetch();
+      const rooms = await response.json();
+      const [room] = rooms;
+      const satRoom = {
+        ...room,
+        schedule: {
+          ...room.schedule,
+          id: 'e2e-sat-hidden',
+          examId: 'e2e-sat-hidden-exam',
+          providerKey: 'sat',
+          cohortName: satCohort,
+        },
+        runtime: {
+          ...room.runtime,
+          id: 'e2e-sat-hidden-runtime',
+          scheduleId: 'e2e-sat-hidden',
+          examId: 'e2e-sat-hidden-exam',
+        },
+      };
+      await route.fulfill({ response, json: [...rooms, satRoom] });
+    });
+
+    await page.goto('/proctor');
+    await expect(
+      page.getByRole('button', { name: 'Monitor Student Backend E2E Delivery for cohort Backend E2E Cohort' })
+    ).toBeVisible();
+    await expect(page.getByText(satCohort)).toHaveCount(0);
+  });
+
   test('separates past cohorts and exposes the past status filter', async ({ page }) => {
     await page.goto('/proctor');
 

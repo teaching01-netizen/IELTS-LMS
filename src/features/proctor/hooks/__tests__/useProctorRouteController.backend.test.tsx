@@ -476,6 +476,40 @@ describe("useProctorRouteController backend mode", () => {
     });
   });
 
+  it("hides rooms outside the visible provider families from the shared summary read", async () => {
+    vi.stubEnv("VITE_FEATURE_USE_BACKEND_PROCTORING", "true");
+    const room = (id: string, providerKey: "ielts" | "act" | "sat") => ({
+      schedule: { ...buildSchedule(), id, examId: `exam-${id}`, providerKey },
+      runtime: { ...buildRuntime(), id: `runtime-${id}`, scheduleId: id, examId: `exam-${id}` },
+      studentCount: 1,
+      activeCount: 1,
+      alertCount: 0,
+      violationCount: 0,
+      degradedLiveMode: false,
+    });
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/proctor/sessions") {
+        return jsonResponse([room("ielts-room", "ielts"), room("act-room", "act"), room("sat-room", "sat")]);
+      }
+      return jsonFailure(`Unhandled ${url}`);
+    });
+    global.fetch = fetchMock as typeof fetch;
+
+    const visibleProviderKeys = ["ielts", "act"] as const;
+    const { result } = renderHook(
+      () => useProctorRouteController({ visibleProviderKeys }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.schedules.map((schedule) => schedule.id)).toEqual(["ielts-room", "act-room"]);
+    });
+    expect(result.current.runtimeSnapshots.map((runtime) => runtime.scheduleId)).toEqual(["ielts-room", "act-room"]);
+    expect(result.current.scheduleMetrics).not.toHaveProperty("sat-room");
+  });
+
   it("defaults to all-cohorts view and keeps it when selection is cleared manually", async () => {
     vi.stubEnv("VITE_FEATURE_USE_BACKEND_PROCTORING", "true");
     const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {

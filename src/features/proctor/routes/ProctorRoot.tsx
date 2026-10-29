@@ -4,6 +4,9 @@ import { ProctorApp } from '@components/proctor/ProctorApp';
 import { ErrorSurface, LoadingSurface } from '@components/ui';
 import { useProctorRouteController } from '@proctor/hooks/useProctorRouteController';
 
+/** SAT rooms run in their own portal, so this page monitors only IELTS and ACT rooms. */
+const IELTS_PROCTOR_PROVIDER_KEYS = ['ielts', 'act'] as const;
+
 /**
  * ProctorRoot Route
  *
@@ -36,7 +39,7 @@ export function ProctorRoot() {
     reload,
     commands,
     violationRules,
-  } = useProctorRouteController();
+  } = useProctorRouteController({ visibleProviderKeys: IELTS_PROCTOR_PROVIDER_KEYS });
 
   if (isLoading) {
     return <LoadingSurface label="Loading Proctor..." />;
