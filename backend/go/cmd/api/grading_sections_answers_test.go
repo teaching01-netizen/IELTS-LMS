@@ -53,6 +53,9 @@ func TestGradingSectionsHandlerReturnsPersistedAnswers(t *testing.T) {
 	if len(sections) != 1 {
 		t.Fatalf("expected one section, got %d", len(sections))
 	}
+	if sections[0]["submissionId"] != "submission-1" {
+		t.Errorf("expected submission ID in section response, got %#v", sections[0]["submissionId"])
+	}
 	answers, ok := sections[0]["answers"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected answers object, got %#v", sections[0]["answers"])

@@ -435,6 +435,7 @@ func gradingSectionsHandler(app *App) http.HandlerFunc {
 			}
 			out = append(out, map[string]any{
 				"id": id, "section": section, "gradingStatus": status,
+				"submissionId":       submissionID,
 				"answers":            answersVal,
 				"autoGradingResults": autoVal,
 			})
