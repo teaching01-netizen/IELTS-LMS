@@ -378,6 +378,32 @@ describe("DurableResponseEngine", () => {
     await flushPromise.catch(() => undefined);
   });
 
+  it("retries a paused IELTS save and delivers it after resume", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    transport.sendBatch = vi.fn()
+      .mockRejectedValueOnce({ code: "ATTEMPT_NOT_WRITABLE", status: 422, details: { reason: "SAVE_PAUSED" } })
+      .mockImplementation(async (_attemptId, request: ResponseBatchRequestV2) => ({
+        attemptRevision: 2,
+        serverTime: new Date().toISOString(),
+        acknowledgements: request.commands.map((command) => ({
+          writeId: command.writeId, questionId: command.questionId,
+          clientVersion: command.clientVersion, outcome: "applied",
+          serverRevision: 2, canonicalResponse: command.response, contentHash: "hash",
+        })),
+      }));
+    const engine = new DurableResponseEngine({ scheduleId: "sched-1", attemptId: "att-1", leaseEpoch: 1, controlEpoch: 1, transport });
+    try {
+      await engine.acceptResponse("q-1", { answer: "answer before pause", markedForReview: false, eliminatedOptions: [], annotations: [] });
+      await engine.flush();
+      expect(transport.sendBatch).toHaveBeenCalledTimes(2);
+      const requests = vi.mocked(transport.sendBatch).mock.calls;
+      expect(requests[1]?.[1].commands).toEqual(requests[0]?.[1].commands);
+      expect(engine.getQuarantined()).toHaveLength(0);
+      expect(engine.getStates().get("q-1")?.confirmed?.payload.answer).toBe("answer before pause");
+      expect(engine.getStatus()).toBe("synced");
+    } finally { engine.destroy(); }
+  });
+
   it("keeps answers through 401 auth failures and delivers the same write once the credential recovers", async () => {
     // Exam-day incident class (session cookie / attempt bearer lapse): every
     // auth rejection must stay on the retry path — never quarantine, never a

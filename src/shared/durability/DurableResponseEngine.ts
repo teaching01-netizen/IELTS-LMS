@@ -3077,11 +3077,11 @@ export class DurableResponseEngine {
   }
 
   /**
-   * SECTION_CLOCK_MISSING remains retryable while a cohort start becomes visible.
+   * Missing clocks and temporary pauses retain intent until saving is allowed.
    */
   private isRetryableConflictReason(error: unknown): boolean {
     const reason = this.extractConflictReason(error);
-    return reason === "SECTION_CLOCK_MISSING";
+    return reason === "SECTION_CLOCK_MISSING" || reason === "SAVE_PAUSED";
   }
 
   /**

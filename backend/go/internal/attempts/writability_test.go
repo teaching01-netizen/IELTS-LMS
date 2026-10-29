@@ -421,3 +421,48 @@ func TestSATWritesFailClosedWithoutKnownRuntime(t *testing.T) {
 		}
 	}
 }
+
+func TestEnsureWritableIELTSPauseIsRetryable(t *testing.T) {
+	now := time.Now().UTC()
+	for _, target := range []string{"attempt", "runtime", "section"} {
+		t.Run(target, func(t *testing.T) {
+			a, g := openAttempt(), liveGate(now)
+			a.ProviderKey = "ielts"
+			switch target {
+			case "attempt":
+				a.DeliveryStatus = "paused"
+			case "runtime":
+				g.Status = "paused"
+			case "section":
+				g.SectionPaused = true
+				g.SectionLive = false
+			}
+			appErr, ok := apperrors.As(ensureWritable(a, g, now))
+			if !ok || appErr.Code != apperrors.CodeAttemptNotWritable || appErr.Details["reason"] != "SAVE_PAUSED" {
+				t.Fatalf("temporary pause must preserve retryable intent, got %+v", appErr)
+			}
+		})
+	}
+	// A terminal attempt must never be made retryable by a simultaneous pause.
+	a, g := openAttempt(), liveGate(now)
+	a.DeliveryStatus = "paused"
+	a.Phase = "post-exam"
+	appErr, _ := apperrors.As(ensureWritable(a, g, now))
+	if appErr.Details["reason"] == "SAVE_PAUSED" {
+		t.Fatal("terminal attempt must remain terminal")
+	}
+}
+
+func TestEnsureIELTSPersonalTimelinePauseIsRetryable(t *testing.T) {
+	now := time.Now().UTC()
+	started, deadline, paused := now.Add(-time.Minute), now.Add(time.Minute), now.Add(-time.Second)
+	owner := QuestionOwner{ModuleID: "listening", SectionKey: "listening", ModuleState: "active", TimingModel: "ielts_personal_v1", SectionTimelineState: "active", SectionTimelineStartedAt: &started, SectionTimelineDeadlineAt: &deadline, SectionTimelinePausedAt: &paused}
+	appErr, ok := apperrors.As(ensureQuestionAdmittedForProvider(owner, liveGate(now), "q1", "ielts"))
+	if !ok || appErr.Details["reason"] != "SAVE_PAUSED" {
+		t.Fatalf("paused personal timeline must retain draft for resume, got %+v", appErr)
+	}
+	owner.SectionTimelinePausedAt = nil
+	if err := ensureQuestionAdmittedForProvider(owner, liveGate(now), "q1", "ielts"); err != nil {
+		t.Fatalf("resumed section must accept draft: %v", err)
+	}
+}

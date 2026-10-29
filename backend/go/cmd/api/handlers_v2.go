@@ -7,6 +7,7 @@ import (
 	"example.com/ielts-proctoring/internal/assessmentforms"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -558,9 +559,31 @@ func snapshotResponseIDs(node map[string]any, visit func(string)) {
 			visit(id)
 		}
 	}
+	// Legacy writing is hydrated from these fields without stored task IDs.
+	for _, taskID := range [...]string{"task1", "task2"} {
+		if _, ok := node[taskID+"Prompt"].(string); ok {
+			visit(taskID)
+		}
+	}
 	id, _ := node["id"].(string)
 	if id == "" {
 		return
+	}
+	// Match normalizeSingleMcqBlock's deterministic IDs for older snapshots.
+	if node["type"] == "SINGLE_MCQ" {
+		questions, _ := node["questions"].([]any)
+		for index, raw := range questions {
+			question, _ := raw.(map[string]any)
+			questionID, _ := question["id"].(string)
+			questionID = strings.TrimSpace(questionID)
+			if questionID == "" {
+				questionID = id
+				if index > 0 {
+					questionID += ":q" + strconv.Itoa(index+1)
+				}
+			}
+			visit(questionID)
+		}
 	}
 	field := "blanks" // Sentence/note questions store slots under their own ID.
 	switch node["type"] {

@@ -197,3 +197,21 @@ func TestSnapshotOwnersRecognizeIELTSResponseSlots(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotOwnersRecognizeHydratedLegacyIELTSIDs(t *testing.T) {
+	root := decodeSnapshotFixture(t, `{"writing":{"task1Prompt":"Describe the chart.","task2Prompt":"Discuss both views.","tasks":[]},"reading":{"passages":[{"blocks":[{"id":"mcq","type":"SINGLE_MCQ","questions":[{"stem":"First"},{"stem":"Second"},{"id":"explicit","stem":"Third"}]}]}]}}`)
+	cases := map[string]string{"task1": "writing", "task2": "writing", "mcq": "reading", "mcq:q2": "reading", "explicit": "reading"}
+	ids := []string{"task1", "task2", "mcq", "mcq:q2", "explicit", "task3", "mcq:q3", "mcq:q4"}
+	batch := snapshotOwnersFor(root, ids)
+	for _, id := range ids {
+		owner, ok := snapshotOwnerFor(root, id)
+		section, wanted := cases[id]
+		if ok != wanted || owner.SectionKey != section {
+			t.Errorf("%q: owner=%+v found=%v; want section=%q found=%v", id, owner, ok, section, wanted)
+		}
+		batchOwner, batchOK := batch[id]
+		if batchOK != wanted || batchOwner.SectionKey != section {
+			t.Errorf("batch %q: owner=%+v found=%v; want section=%q found=%v", id, batchOwner, batchOK, section, wanted)
+		}
+	}
+}

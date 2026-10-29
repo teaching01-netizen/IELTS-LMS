@@ -748,8 +748,11 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 		}
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Attempt is closed.", HTTPStatus: 422}
 	}
-	if a.DeliveryStatus == "paused" || a.Phase == "post-exam" || a.SubmittedAt != nil {
+	if a.Phase == "post-exam" || a.SubmittedAt != nil {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Attempt is not writable.", HTTPStatus: 422}
+	}
+	if a.DeliveryStatus == "paused" {
+		return savePaused("Attempt is paused.")
 	}
 	if a.ProctorStatus == "terminated" || a.ProctorStatus == "paused" {
 		return &apperrors.Error{Code: apperrors.CodeAttemptProctorBlocked, Message: "Attempt is blocked by proctor state.", HTTPStatus: 403}
@@ -758,6 +761,9 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 		return ensureRecoveryWritable(a, gate, now)
 	}
 	ieltsNaturalRoomEnd := personalIELTS && gate.Status == "completed" && gate.CompletionReason == "time_expired"
+	if gate.Status == "paused" {
+		return savePaused("Exam runtime is paused.")
+	}
 	if gate.Status != "" && gate.Status != "live" && !(satClosing && gate.Status == "completed") && !ieltsNaturalRoomEnd {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam runtime is not live.", HTTPStatus: 422}
 	}
@@ -779,7 +785,7 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section has not started.", HTTPStatus: 422}
 	}
 	if !personalSAT && !personalIELTS && gate.SectionPaused {
-		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is paused.", HTTPStatus: 422}
+		return savePaused("Exam section is paused.")
 	}
 	if !personalSAT && !personalIELTS && !gate.SectionLive && !closingGraceActive && !satClosing {
 		return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Exam section is not live.", HTTPStatus: 422}
@@ -792,6 +798,11 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 		return &apperrors.Error{Code: apperrors.CodeDeadlineExpired, Message: "Response deadline has passed.", HTTPStatus: 422}
 	}
 	return nil
+}
+
+// A pause rejects the write now but preserves the same intent for resume.
+func savePaused(message string) error {
+	return &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: message, HTTPStatus: 422, Details: map[string]any{"reason": "SAVE_PAUSED"}}
 }
 
 // ensureQuestionAdmitted enforces module ownership for one write: unassigned
@@ -840,8 +851,11 @@ func ensureQuestionAdmittedForProvider(owner QuestionOwner, gate RuntimeGate, qu
 			gate.Now.Before(owner.SectionTimelineDeadlineAt.Add(ResponseSaveGrace))
 		timelineWritable := owner.SectionTimelineState == "active" || (owner.SectionTimelineState == "completed" && inResponseSaveGrace)
 		if !timelineWritable || owner.SectionTimelineStartedAt == nil || owner.SectionTimelineDeadlineAt == nil ||
-			owner.SectionTimelinePausedAt != nil || gate.Now.Before(*owner.SectionTimelineStartedAt) {
+			gate.Now.Before(*owner.SectionTimelineStartedAt) {
 			return moduleRejection(apperrors.CodeAttemptNotWritable, "This IELTS section is not active for your attempt.", ReasonModuleNotStarted, questionID, owner.ModuleID)
+		}
+		if owner.SectionTimelinePausedAt != nil {
+			return savePaused("This IELTS section is paused.")
 		}
 		if !gate.Now.Before(*owner.SectionTimelineDeadlineAt) && !inResponseSaveGrace {
 			return moduleRejection(apperrors.CodeDeadlineExpired, "Response deadline has passed.", ReasonModuleDeadlineExpired, questionID, owner.ModuleID)
