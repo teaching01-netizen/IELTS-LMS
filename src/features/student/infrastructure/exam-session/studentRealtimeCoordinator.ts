@@ -38,6 +38,7 @@ export interface StudentPollingContext {
    * gets a runtime row and is already in its exam.
    */
   readonly attemptPhase?: StudentExamPhase | null;
+  readonly providerKey?: 'ielts' | 'sat' | 'act' | 'unknown';
 }
 
 export type RuntimeSnapshotResult = 'applied' | 'ignored';
@@ -129,23 +130,35 @@ export function createStudentRealtimeCoordinator(
       if (runtimeStatus === 'cancelled') {
         return { intervalMs: 15_000, maxIntervalMs: 25_000 };
       }
-      if (socketConnected) {
-        // The socket carries every transition; the poll is only recovery.
-        return runtimeStatus === 'live'
-          ? { intervalMs: 20_000, maxIntervalMs: 30_000 }
-          : { intervalMs: 15_000, maxIntervalMs: 25_000 };
-      }
-      // No socket and no runtime row: before Start a runtime-backed cohort
-      // looks exactly like this too, so `null` alone cannot decide. A
+      // No runtime row: before Start a runtime-backed cohort looks exactly
+      // like this too, so `null` alone cannot decide. A
       // self-paced attempt already in (or past) its exam never gets a runtime
       // row, and polling it every 1.5s for a three-hour paper would buy
       // nothing — rest lazily there and only there.
       if (runtimeStatus === null && isSelfPacedPastWaiting(context?.attemptPhase)) {
         return { intervalMs: 15_000, maxIntervalMs: 25_000 };
       }
-      // Without a socket, IELTS/ACT completion must be observed quickly so the
+      // A lobby phase or runtime row identifies a proctored IELTS session.
+      // Bound its recovery poll even while the socket appears connected: a
+      // connected socket can still miss one transition frame. The loop adds
+      // up to 20% jitter, leaving request and render margin within 5s.
+      if (
+        context?.providerKey === 'ielts' &&
+        (runtimeStatus !== null || context.attemptPhase === STUDENT_EXAM_PHASE.LOBBY)
+      ) {
+        return { intervalMs: 1_500, maxIntervalMs: 3_500 };
+      }
+      if (socketConnected) {
+        // Other providers use the socket as primary and a deliberately lazy
+        // poll only for recovery.
+        return runtimeStatus === 'live'
+          ? { intervalMs: 20_000, maxIntervalMs: 30_000 }
+          : { intervalMs: 15_000, maxIntervalMs: 25_000 };
+      }
+      // Without a socket, ACT completion must be observed quickly so the
       // student does not sit on a stale exam surface after an authoritative
-      // runtime command or timeout.
+      // runtime command or timeout. Proctored IELTS already uses its tighter
+      // cap above.
       if (runtimeStatus === 'completed') {
         return { intervalMs: 1_500, maxIntervalMs: 3_000 };
       }

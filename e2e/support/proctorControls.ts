@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Browser, BrowserContext } from '@playwright/test';
 import { ADMIN_STORAGE_STATE_PATH } from './backendE2e';
 import { queryDb } from './db';
@@ -82,7 +83,9 @@ export async function proctorEndSection(
   description: string,
 ) {
   const url = `/api/v1/proctor/sessions/${scheduleId}/control/end-section-now`;
+  let operationId = `e2e-end-section:${randomUUID()}`;
   let { status, body } = await postProctorApi(adminContext, url, {
+    operationId,
     reason: `e2e ${description}`,
     expectedActiveSectionKey,
   });
@@ -91,7 +94,9 @@ export async function proctorEndSection(
     if (current === null || current === expectedActiveSectionKey) {
       throw new Error(`end-section-now conflict without section change: ${body.slice(0, 300)}`);
     }
+    operationId = `e2e-end-section:${randomUUID()}`;
     ({ status, body } = await postProctorApi(adminContext, url, {
+      operationId,
       reason: `e2e ${description}`,
       expectedActiveSectionKey: current,
     }));

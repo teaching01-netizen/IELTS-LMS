@@ -179,6 +179,7 @@ export function useStudentSessionRouteData(
   const attemptSnapshotRef = useRef<StudentAttempt | null>(null);
   const realtimeCoordinatorRef = useRef<StudentRealtimeCoordinator | null>(null);
   const satRefreshFlightRef = useRef<StudentSatRefreshFlight | null>(null);
+  const providerKeyRef = useRef(providerKey);
   // Realtime rollout telemetry (Phase 3): whether THIS mount ever opened the
   // socket (so a disconnect can be told apart from "never connected"), the
   // runtime revision held at connect time (the gap a reconnect snapshot
@@ -227,6 +228,10 @@ export function useStudentSessionRouteData(
   useEffect(() => {
     attemptSnapshotRef.current = attemptSnapshot;
   }, [attemptSnapshot]);
+
+  useEffect(() => {
+    providerKeyRef.current = providerKey;
+  }, [providerKey]);
 
   useEffect(() => {
     scheduleRef.current = schedule;
@@ -1125,14 +1130,14 @@ export function useStudentSessionRouteData(
     loadStudentDataRef.current("load").catch(() => {});
   }, [authStatus, candidateId, scheduleId]);
 
-  // The runtime poll loop is the student RECOVERY channel: pollAfterSecs from
-  // the server drives cadence adaptively (2s fast-lane within 60s of a control
-  // command, a wake just past each section deadline, 25s steady). A revision change triggers exactly one debounced
-  // refresh; 304 = steady, no work. The coordinator's policy depends on
-  // whether the socket is connected, so a healthy socket polls lazily and a
-  // missing one polls tightly.
+  // The runtime poll loop is the student recovery channel: server hints set its
+  // cadence, bounded by the coordinator's provider policy. Proctored IELTS
+  // keeps a 3.5s base poll cap even with a connected socket; other sessions
+  // retain their existing recovery cadence while WebSocket events remain the
+  // fast path. A revision change triggers one immediate refresh; 304 is steady.
   const pollingPolicy = realtimeCoordinator?.getPollingPolicy(runtimeSnapshot?.status ?? null, {
     attemptPhase: attemptSnapshot?.phase ?? null,
+    providerKey,
   }) ?? {
     intervalMs: 15_000,
     maxIntervalMs: 25_000,
@@ -1150,7 +1155,7 @@ export function useStudentSessionRouteData(
   // Runtime-poll interop: the loop only starts once the initial snapshot has
   // loaded AND the backend serves the versioned poll route. The route is
   // treated as AVAILABLE until a poll proves otherwise (one 404 per session),
-  // so older backends keep today's refresh cadence after a single failed poll.
+  // so older backends fall back to the live-session snapshot refresh.
   //
   // This flag used to start false and be set true only INSIDE the tick branch
   // it gates, which made the tick branch unreachable: the versioned
@@ -1186,15 +1191,16 @@ export function useStudentSessionRouteData(
       onRevision: () => {
         refreshOnRuntimeTransitionRef.current();
       },
-      // Phase 6: the loop owns the delay; the coordinator owns how tight the
-      // transport may be (socket connected: 20-30s; not: a 5s ceiling while
-      // waiting, the server's cadence once live). The
-      // server's pollAfterSecs is clamped between those bounds, so the two
-      // policies cannot disagree about who decides when the next poll runs.
+      // The loop owns the delay; the coordinator owns provider-specific bounds.
+      // The server's pollAfterSecs is clamped within those bounds, keeping the
+      // server hint and the client's recovery target in one cadence policy.
       cadence: () => {
         const policy = realtimeCoordinatorRef.current?.getPollingPolicy(
           runtimeSnapshotRef.current?.status ?? null,
-          { attemptPhase: attemptSnapshotRef.current?.phase ?? null }
+          {
+            attemptPhase: attemptSnapshotRef.current?.phase ?? null,
+            providerKey: providerKeyRef.current,
+          }
         );
         return policy
           ? { floorMs: policy.intervalMs, ceilingMs: policy.maxIntervalMs }
@@ -1289,8 +1295,16 @@ export function useStudentSessionRouteData(
       maxIntervalMs: pollingPolicy.maxIntervalMs,
       // Phase 6: after each run the timer asks the loop for the next delay
       // instead of applying a second, independent cadence of its own.
-      resolveIntervalMs: () =>
-        runtimePollLoopRef.current?.nextDelayMs() ?? pollingPolicy.intervalMs,
+      resolveIntervalMs: () => {
+        const loopDelay = runtimePollLoopRef.current?.nextDelayMs() ?? pollingPolicy.intervalMs;
+        // When an older backend lacks the runtime poll endpoint, the live
+        // snapshot refresh becomes the recovery channel. Keep its cadence
+        // inside the current provider policy instead of leaving the loop's
+        // initial 25s delay in place.
+        return runtimePollAvailableRef.current
+          ? loopDelay
+          : Math.min(loopDelay, pollingPolicy.maxIntervalMs);
+      },
     }
   );
 
