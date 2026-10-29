@@ -3,43 +3,25 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { StudentHeader } from "../StudentHeader";
 import { CompactStudentHeader } from "../layout/CompactStudentHeader";
+import type { StudentAutoSaveStatus } from "../saveStatusPresentation";
 
-describe("autosave error visibility", () => {
-  it("surfaces a recoverable autosave error in the desktop header", () => {
-    render(<StudentHeader autoSaveStatus="error" />);
+const statuses: StudentAutoSaveStatus[] = [
+  "saved", "saved_locally", "saving", "syncing", "offline", "needs_recovery", "error",
+];
 
-    const label = screen.getByText("Not saved · retrying");
-    expect(label).toBeInTheDocument();
-    expect(label).toHaveClass("text-red-700");
+describe("exam headers omit autosave status", () => {
+  it.each(statuses)("omits %s from the desktop header", (status) => {
+    render(<StudentHeader autoSaveStatus={status} timeRemaining={955} />);
+
+    expect(screen.queryByTestId("student-auto-save-status")).not.toBeInTheDocument();
+    expect(screen.getByRole("timer")).toHaveTextContent("15:55");
   });
 
-  it("surfaces offline status in the desktop header", () => {
-    render(<StudentHeader autoSaveStatus="offline" />);
-    expect(screen.getByText("Offline · saving paused")).toHaveClass("text-amber-800");
-  });
+  it.each(statuses)("omits %s from the compact header", (status) => {
+    render(<CompactStudentHeader moduleLabel="Reading" autoSaveStatus={status} timeRemaining={955} />);
 
-  it("distinguishes saving from a confirmed saved state in the desktop header", () => {
-    const { rerender } = render(<StudentHeader autoSaveStatus="saving" />);
-    expect(screen.getByText("Saving…")).toBeInTheDocument();
-    rerender(<StudentHeader autoSaveStatus="saved" />);
-    expect(screen.queryByText("Saving…")).not.toBeInTheDocument();
-    expect(screen.getByText("Saved")).toBeInTheDocument();
-  });
-
-  it("surfaces a recoverable autosave error in the compact header", () => {
-    render(<CompactStudentHeader moduleLabel="Reading" autoSaveStatus="error" />);
-    const status = screen.getByTestId("student-auto-save-status");
-    expect(status).toHaveTextContent("Not saved");
-    expect(status).toHaveClass("text-red-700");
-    expect(status).toHaveAttribute("aria-live", "polite");
-  });
-
-  it("surfaces offline and saved states in the compact header", () => {
-    const { rerender } = render(
-      <CompactStudentHeader moduleLabel="Listening" autoSaveStatus="offline" />
-    );
-    expect(screen.getByTestId("student-auto-save-status")).toHaveTextContent("Offline");
-    rerender(<CompactStudentHeader moduleLabel="Listening" autoSaveStatus="saved" />);
-    expect(screen.getByTestId("student-auto-save-status")).toHaveTextContent("Saved");
+    expect(screen.queryByTestId("student-auto-save-status")).not.toBeInTheDocument();
+    expect(screen.getByRole("timer")).toHaveTextContent("15:55");
+    expect(screen.getByRole("button", { name: "Open exam tools" })).toBeInTheDocument();
   });
 });

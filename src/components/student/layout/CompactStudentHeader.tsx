@@ -19,10 +19,7 @@ import { useStudentTimerAnnouncement } from "@shared/hooks/useStudentTimerAnnoun
 import { StudentToolsSheet } from "./StudentToolsSheet";
 import { isIeltsExamType } from "./studentExamTypeContext";
 import { WarwickInstituteLogo } from "../../ui/WarwickInstituteLogo";
-import {
-  getStudentSaveStatusPresentation,
-  type StudentAutoSaveStatus,
-} from "../saveStatusPresentation";
+import type { StudentAutoSaveStatus } from "../saveStatusPresentation";
 
 interface CompactStudentHeaderProps {
   readonly examType?: ExamType | undefined;
@@ -60,7 +57,6 @@ export function CompactStudentHeader({
   moduleLabel,
   testTakerId,
   timeRemaining,
-  autoSaveStatus,
   highlightEnabled = false,
   highlightToolMode = "off",
   highlightColor = "yellow",
@@ -73,7 +69,6 @@ export function CompactStudentHeader({
   onOpenAccessibility,
   onOpenNavigator,
 }: CompactStudentHeaderProps) {
-  const saveStatus = autoSaveStatus ? getStudentSaveStatusPresentation(autoSaveStatus) : null;
   const [toolsOpen, setToolsOpen] = useState(false);
   const toolsTriggerRef = useRef<HTMLButtonElement>(null);
   const closeTools = useCallback(() => {
@@ -134,25 +129,6 @@ export function CompactStudentHeader({
             {timerAnnouncement}
           </span>
         </div>
-      ) : null}
-
-      {saveStatus ? (
-        <span
-          className={`flex min-h-8 max-w-32 flex-shrink-0 items-center justify-center rounded-sm px-1.5 text-[length:var(--student-meta-font-size)] font-semibold whitespace-nowrap ${
-            {
-              success: "text-green-900",
-              neutral: "text-gray-700",
-              warning: "text-amber-800",
-              danger: "text-red-700",
-            }[saveStatus.tone]
-          }`}
-          role="status"
-          aria-live="polite"
-          data-testid="student-auto-save-status"
-        >
-          {saveStatus.shortLabel}
-          <span className="sr-only">{saveStatus.label.slice(saveStatus.shortLabel.length)}</span>
-        </span>
       ) : null}
 
       <button

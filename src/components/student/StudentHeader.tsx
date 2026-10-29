@@ -2,24 +2,20 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Check,
-  CheckCircle,
   ChevronDown,
   Clock,
   Contrast,
   LayoutGrid,
   Eraser,
-  HardDrive,
   Highlighter,
   Minus,
   Plus,
   RefreshCw,
   TriangleAlert,
   Wifi,
-  WifiOff,
   X,
 } from 'lucide-react';
-import { LoadingMark } from '../ui/LoadingMark';
-import { getStudentSaveStatusPresentation, type StudentAutoSaveStatus } from './saveStatusPresentation';
+import type { StudentAutoSaveStatus } from './saveStatusPresentation';
 import { useStudentTimerAnnouncement } from '@shared/hooks/useStudentTimerAnnouncement';
 import { getStudentHighlightPaletteEntry, studentHighlightPalette, type StudentHighlightColor } from './highlightPalette';
 import type { StudentHighlightToolMode } from './providers/StudentUIProvider';
@@ -59,7 +55,6 @@ export function StudentHeader({
   examType = 'Academic',
   testTakerId,
   timeRemaining,
-  autoSaveStatus,
   highlightEnabled = false,
   highlightToolMode = 'off',
   highlightColor = 'yellow',
@@ -79,7 +74,6 @@ export function StudentHeader({
   onZoomReset,
   isExamActive = false,
 }: StudentHeaderProps) {
-  const saveStatus = autoSaveStatus ? getStudentSaveStatusPresentation(autoSaveStatus) : null;
   void onClearHighlights;
   const examLabel = examType === 'ACT' ? 'ACT' : 'IELTS';
   const isIelts = isIeltsExamType(examType);
@@ -476,40 +470,6 @@ export function StudentHeader({
             <span className={isIelts ? 'hidden xl:inline' : 'hidden md:inline'}>Erase</span>
           </button>
         ) : null}
-        {autoSaveStatus && (
-          <div
-            className="flex items-center gap-1 md:gap-1.5 whitespace-nowrap text-[length:var(--student-meta-font-size)] font-semibold"
-            role="status"
-            aria-live="polite"
-            data-testid="student-auto-save-status"
-          >
-            {autoSaveStatus === 'saving' || autoSaveStatus === 'syncing' ? (
-              <LoadingMark size="xs" className="bg-gray-300" />
-            ) : autoSaveStatus === 'saved_locally' ? (
-              <HardDrive size={12} aria-hidden="true" className="text-amber-700" />
-            ) : autoSaveStatus === 'needs_recovery' ? (
-              <TriangleAlert size={12} aria-hidden="true" className="text-red-700" />
-            ) : autoSaveStatus === 'offline' ? (
-              <WifiOff size={12} aria-hidden="true" className="text-amber-700" />
-            ) : autoSaveStatus === 'error' ? (
-              <RefreshCw size={12} aria-hidden="true" className="text-red-700" />
-            ) : (
-              <CheckCircle size={12} aria-hidden="true" className="text-green-700" />
-            )}
-            <span
-              className={
-                {
-                  success: 'text-green-900',
-                  neutral: 'text-gray-700',
-                  warning: 'text-amber-800',
-                  danger: 'text-red-700',
-                }[saveStatus?.tone ?? 'neutral']
-              }
-            >
-              {saveStatus?.label}
-            </span>
-          </div>
-        )}
         {tabletMode ? (
           <>
             {showZoomControls ? (
