@@ -163,3 +163,37 @@ func TestSnapshotOwnersForRandomTreesMatchOracle(t *testing.T) {
 		assertSnapshotOwnersMatchOracle(t, root, ids)
 	}
 }
+
+func TestSnapshotOwnersRecognizeIELTSResponseSlots(t *testing.T) {
+	root := decodeSnapshotFixture(t, `{"listening":{"parts":[{"blocks":[
+ {"id":"notes","type":"NOTE_COMPLETION","questions":[{"id":"q39","blanks":[{"id":"b39"},{"id":"b40"}]}]},
+ {"id":"sentence","type":"SENTENCE_COMPLETION","questions":[{"id":"q1","blanks":[{"id":"blank"}]}]},
+ {"id":"classify","type":"CLASSIFICATION","items":[{"id":"item"}]},
+ {"id":"matching","type":"MATCHING_FEATURES","features":[{"id":"feature"}]},
+ {"id":"table","type":"TABLE_COMPLETION","cells":[{"id":"cell"}]},
+ {"id":"diagram","type":"DIAGRAM_LABELING","labels":[{"id":"label"}]},
+ {"id":"flow","type":"FLOW_CHART","steps":[{"id":"step"}]},
+ {"id":"tree","type":"SHORT_ANSWER","subAnswerModeEnabled":true,"answerTree":[{"id":"root","children":[{"id":"branch","children":[{"id":"leaf"}]}]}]}
+ ]}]},"reading":{"blocks":[{"id":"other","type":"CLASSIFICATION","items":[{"id":"other-item"}]}]}}`)
+	valid := []string{"q39", "q39:b39", "q39:b40", "q1:blank", "classify:item", "matching:feature", "table:cell", "diagram:label", "flow:step", "tree::tree::root::leaf"}
+	invalid := []string{"q39:unknown", "q39:blank", "classify:other-item", "matching:item", "q39:b39:extra", "tree::tree::root::branch", "tree::tree::branch::leaf"}
+	ids := append(append([]string{}, valid...), invalid...)
+	batch := snapshotOwnersFor(root, ids)
+	for _, id := range valid {
+		owner, ok := snapshotOwnerFor(root, id)
+		if !ok || owner.SectionKey != "listening" {
+			t.Errorf("valid response slot %q must resolve to listening, got %+v, %v", id, owner, ok)
+		}
+		if batch[id] != owner || batch[id].SectionKey != "listening" {
+			t.Errorf("batch must resolve valid response slot %q: %+v", id, batch[id])
+		}
+	}
+	for _, id := range invalid {
+		if _, ok := snapshotOwnerFor(root, id); ok {
+			t.Errorf("unknown response slot %q must be rejected", id)
+		}
+		if _, ok := batch[id]; ok {
+			t.Errorf("batch must reject unknown response slot %q", id)
+		}
+	}
+}

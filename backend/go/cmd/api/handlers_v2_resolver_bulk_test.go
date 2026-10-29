@@ -213,3 +213,31 @@ func TestV2ResolverResolveManyPersonalIELTSSnapshotBatch(t *testing.T) {
 		t.Fatalf("absent question must stay NOT_FOUND, got %+v", verdicts["absent"])
 	}
 }
+
+func TestV2ResolverResolveManySnapshotAnswersAndFlags(t *testing.T) {
+	const snapshot = `{"listening":{"parts":[{"blocks":[{"id":"notes","type":"NOTE_COMPLETION","questions":[{"id":"q39","blanks":[{"id":"b39"},{"id":"b40"}]}]}]}]}}`
+	// The answer array is keyed by q39; individual review flags use slot IDs.
+	ids := []string{"q39", "q39:b39", "q39:b40", "q39:foreign"}
+	verdicts := resolveManyWithMockDB(t, func(mock sqlmock.Sqlmock) {
+		args := []driver.Value{"att-1", "att-1"}
+		for i := 0; i < 2; i++ {
+			for _, id := range ids {
+				args = append(args, id)
+			}
+		}
+		mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_exam_questions eq")).WithArgs(args...).WillReturnRows(bulkNormalizedRows())
+		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts sa JOIN exam_schedules")).WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"provider_key"}).AddRow("ielts"))
+		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts a JOIN exam_versions v")).WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"content_snapshot"}).AddRow(snapshot))
+		mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(rt.timing_model, '')")).WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"timing_model"}).AddRow(""))
+	}, ids)
+	for _, id := range ids[:3] {
+		got := verdicts[id]
+		if got.Err != nil || got.Owner.SectionKey != "listening" || got.Owner.ModuleState != "active" {
+			t.Errorf("answer/flag %q must resolve, got %+v", id, got)
+		}
+	}
+	appErr, ok := apperrors.As(verdicts["q39:foreign"].Err)
+	if !ok || appErr.Code != apperrors.CodeNotFound {
+		t.Fatalf("foreign slot must remain NOT_FOUND: %+v", verdicts["q39:foreign"])
+	}
+}

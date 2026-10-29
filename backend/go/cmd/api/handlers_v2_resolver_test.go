@@ -174,3 +174,13 @@ func TestV2ResolverUnknownQuestionNotFound(t *testing.T) {
 		t.Fatalf("unknown question must map to a typed error, got %v", err)
 	}
 }
+
+func TestV2ResolverSnapshotCompletionFlagSlot(t *testing.T) {
+	const snapshot = `{"listening":{"parts":[{"blocks":[{"id":"notes","type":"NOTE_COMPLETION","questions":[{"id":"q39","blanks":[{"id":"b39"}]}]}]}]}}`
+	got, err := resolveWithMockDB(t, func(mock sqlmock.Sqlmock) {
+		resolverSnapshotExpectations(mock, "att-1", "q39:b39", snapshot, "ielts")
+	}, "att-1", "q39:b39")
+	if err != nil || got != "active" {
+		t.Fatalf("completion flag slot must resolve for saving, state=%q err=%v", got, err)
+	}
+}
