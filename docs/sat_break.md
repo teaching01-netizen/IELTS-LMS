@@ -118,3 +118,48 @@ Run targeted Vitest tests, `bun run typecheck`, relevant Go delivery/runtime tes
 **Evidence so far:** the existing 28 frontend tests and targeted Go break tests pass. Database/browser verification remains unexecuted; the current shell has no `TEST_DATABASE_URL`.
 
 Deploy frontend and backend together between exam sessions. Existing active breaks retain their deadlines. After a confirmed start, connection loss does not rewind time. Different configured durations and additional timer consumers must use the same derivation, without adding caller-specific arithmetic.
+
+## 6. Section-boundary break projection
+
+Full plan: `docs/plans/2026-10-29-sat-break-boundary-low-level.md`.
+
+**Contract.** `POST /modules/close` answers with the attempt's full break projection:
+
+```json
+{
+  "closed": true,
+  "moduleAttempts": [],
+  "nextModuleId": "…",
+  "personalBreaks": [
+    { "id": "…", "afterSectionId": "…", "durationSeconds": 600, "state": "pending", "revision": 0 }
+  ]
+}
+```
+
+- The list is always a JSON array, never `null`, and is read inside the same transaction that creates the boundary's break.
+- The read is **non-fatal**: if it fails, the ack still returns (with an empty list) and a `slog.WarnContext` line records the failure. The module is already committed; a refused close would cost the student more than a missing projection.
+- The close ack uses the same builder for a first close and an `alreadyClosed` replay, so both carry the row.
+
+**Client merge.** `applyCloseAck` replaces `attempt.personalBreaks` when the field is an array and preserves the previous rows when it is absent or `null` (older servers). The close ack is the boundary's single routing decision: the break can be armed from it with no follow-up lifecycle read.
+
+**Preparing vs ending.** `satBreakWindow` owns the phase:
+
+| Server state at the boundary | Window | Surface |
+|---|---|---|
+| Authored `breakAfterSeconds > 0`, no break row yet | `preparing` | "Preparing your break…" |
+| Break row `pending` / `armed` / `active` before its start | `preparing` (+ `leadSeconds` for a confirmed future start) | "Preparing your break…" |
+| Break row `active` with a running deadline | `active` | countdown |
+| Break row `completed`, or `active` past its deadline | `ending` | "Preparing Math…" |
+
+`preparing` deliberately blocks next-module entry, matching the server, which does not make Math available until the break completes. A completed row suppresses the authored fallback, so a spent break can never re-enter `preparing`.
+
+**Fallback pull.** If the ack is lost, the server is older than the field, or its break projection read failed, the controller reads the authoritative projection at most five times (immediate, then every 2 s) while the break surface is mounted. The loop stops the moment a row for the authored boundary appears and never runs when nothing is authored, when a row already exists, or when the runtime is not live. A failed acknowledgement therefore costs a few seconds of `preparing`, not the "Preparing Math…" stall.
+
+**Telemetry (client).**
+
+- `sat_break_boundary_ready` — emitted at the close-ack commit when the ack carried a break row the browser did not hold before; `latencyMs` is measured from the start of the close to the commit.
+- `sat_break_boundary_pull` — `reason: "hit"` when the fallback row arrived, `"exhausted"` after the five-read budget.
+
+A server-side counter for the non-fatal break read is intentionally deferred; the warning log is the first-ship signal.
+
+**Compatibility.** Server first, client second. A new client against an old server keeps its previous rows (`undefined` field) and recovers through the bounded pull; an old client ignores the extra JSON field. Shared cohort schedules keep their existing derivation — the new inputs are inert outside `sat_personal_v1`.

@@ -68,3 +68,42 @@ describe("module-close ack merge", () => {
     })).toBeNull();
   });
 });
+
+describe("module-close ack break projection", () => {
+  const pendingBreak = {
+    id: "break-rw", afterSectionId: "rw", durationSeconds: 600, state: "pending",
+    startsAt: null, deadlineAt: null, enteredAt: null, pausedAt: null, accumulatedPausedSeconds: 0,
+    entryGeneration: 0, entryStartsAt: null, entryConfirmedAt: null, entryEnteredAt: null,
+    remainingSeconds: 0, revision: 0,
+  } as const;
+
+  const closeRow = row("ma-1", "rw-m1", "locked", { completionReason: "time_expired" });
+
+  function ack(patch: Partial<AssessmentModuleCloseAck> = {}): AssessmentModuleCloseAck {
+    return {
+      scheduleId: "s", attemptId: "a", moduleId: "rw-m1", moduleAttemptId: "ma-1",
+      alreadyClosed: false, moduleAttempts: [closeRow], nextModuleId: null,
+      serverNow: "2026-10-04T10:00:01Z", ...patch,
+    };
+  }
+
+  it("replaces the previous projection with the ack's full break list", () => {
+    const merged = applyCloseAck(base(), ack({ personalBreaks: [pendingBreak] }));
+    expect(merged?.attempt.personalBreaks).toEqual([pendingBreak]);
+  });
+
+  it("preserves the rows it already has when the server omits the field", () => {
+    const previous = { ...pendingBreak, id: "break-old", state: "completed" as const, revision: 4 };
+    const stale = { ...base(), attempt: { ...base().attempt, personalBreaks: [previous] } };
+    expect(applyCloseAck(stale, ack())?.attempt.personalBreaks).toEqual([previous]);
+    // A literal null is treated as absent, not as "the attempt has no breaks".
+    const explicitNull = { ...ack(), personalBreaks: null } as unknown as AssessmentModuleCloseAck;
+    expect(applyCloseAck(stale, explicitNull)?.attempt.personalBreaks).toEqual([previous]);
+  });
+
+  it("accepts an empty array as an authoritative projection", () => {
+    const previous = { ...pendingBreak, id: "break-old" };
+    const stale = { ...base(), attempt: { ...base().attempt, personalBreaks: [previous] } };
+    expect(applyCloseAck(stale, ack({ personalBreaks: [] }))?.attempt.personalBreaks).toEqual([]);
+  });
+});

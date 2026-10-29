@@ -299,9 +299,20 @@ export interface SatBreakWindow {
   /** Whole seconds left while `active`; null in every other phase. */
   readonly seconds: number | null;
   readonly blocksEntry: boolean;
+  /**
+   * Whole seconds until the confirmed future start while `preparing`; null in
+   * every other phase, and null for a `preparing` that has no scheduled start
+   * yet (an armed offer, or a break the payload has not delivered).
+   */
+  readonly leadSeconds: number | null;
 }
 
-const NO_BREAK: SatBreakWindow = { phase: "none", seconds: null, blocksEntry: false };
+const NO_BREAK: SatBreakWindow = {
+  phase: "none",
+  seconds: null,
+  blocksEntry: false,
+  leadSeconds: null,
+};
 
 type SatBreakWindowBreak = Pick<
   AssessmentPersonalBreakSnapshot,
@@ -325,16 +336,38 @@ export function satBreakWindow(input: {
   serverNowMs: number;
   /** Shared (cohort/legacy) break countdown; ignored by the personal model. */
   sharedSeconds: number;
+  /**
+   * The break authored before the pending module while this attempt has no row
+   * for it yet (satPendingAuthoredBreakSeconds). Personal model only: it turns
+   * the terminal `none` phase into `preparing` at the boundary, so the student
+   * never sees "Preparing Math…" for a break that has not started.
+   */
+  authoredBreakSeconds?: number;
 }): SatBreakWindow {
   if (!isSatPersonalTimingModel(input.timingModel)) {
     return input.sharedSeconds > 0
-      ? { phase: "active", seconds: input.sharedSeconds, blocksEntry: true }
+      ? { phase: "active", seconds: input.sharedSeconds, blocksEntry: true, leadSeconds: null }
       : NO_BREAK;
   }
   const brk = input.personalBreak;
-  if (!brk || brk.state === "completed") return NO_BREAK;
-  const preparing: SatBreakWindow = { phase: "preparing", seconds: null, blocksEntry: true };
-  const ending: SatBreakWindow = { phase: "ending", seconds: null, blocksEntry: true };
+  if (!brk) {
+    return (input.authoredBreakSeconds ?? 0) > 0
+      ? { phase: "preparing", seconds: null, blocksEntry: true, leadSeconds: null }
+      : NO_BREAK;
+  }
+  if (brk.state === "completed") return NO_BREAK;
+  const preparing: SatBreakWindow = {
+    phase: "preparing",
+    seconds: null,
+    blocksEntry: true,
+    leadSeconds: null,
+  };
+  const ending: SatBreakWindow = {
+    phase: "ending",
+    seconds: null,
+    blocksEntry: true,
+    leadSeconds: null,
+  };
   const startsAt = brk.startsAt ? Date.parse(brk.startsAt) : Number.NaN;
   const deadline = brk.deadlineAt ? Date.parse(brk.deadlineAt) : Number.NaN;
   if (brk.state !== "active" || !Number.isFinite(startsAt) || !Number.isFinite(deadline)) return preparing;
@@ -342,10 +375,22 @@ export function satBreakWindow(input: {
     const pausedAt = Date.parse(brk.pausedAt);
     if (Number.isFinite(pausedAt) && startsAt > pausedAt) return preparing;
     return brk.remainingSeconds > 0
-      ? { phase: "active", seconds: brk.remainingSeconds, blocksEntry: true }
+      ? { phase: "active", seconds: brk.remainingSeconds, blocksEntry: true, leadSeconds: null }
       : ending;
   }
-  if (startsAt > input.serverNowMs) return preparing;
+  if (startsAt > input.serverNowMs) {
+    // The confirmed 3 s lead: the candidate has pressed into the break and the
+    // clock starts at a known instant, so count into it rather than showing an
+    // empty timer slot that reads as frozen.
+    return {
+      phase: "preparing",
+      seconds: null,
+      blocksEntry: true,
+      leadSeconds: Math.ceil((startsAt - input.serverNowMs) / 1_000),
+    };
+  }
   const seconds = Math.ceil((deadline - input.serverNowMs) / 1_000);
-  return seconds > 0 ? { phase: "active", seconds, blocksEntry: true } : ending;
+  return seconds > 0
+    ? { phase: "active", seconds, blocksEntry: true, leadSeconds: null }
+    : ending;
 }

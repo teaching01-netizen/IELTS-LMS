@@ -200,8 +200,8 @@ export function deriveSatStudentStage({
   moduleQuestionResolved,
   pendingBreakSeconds,
   breakWindow = pendingBreakSeconds > 0
-    ? { phase: "active", seconds: pendingBreakSeconds, blocksEntry: true }
-    : { phase: "none", seconds: null, blocksEntry: false },
+    ? { phase: "active", seconds: pendingBreakSeconds, blocksEntry: true, leadSeconds: null }
+    : { phase: "none", seconds: null, blocksEntry: false, leadSeconds: null },
   pendingSectionWaitSeconds,
   attemptKey,
 }: DeriveSatStudentStageInput): SatStudentStage {

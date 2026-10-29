@@ -71,8 +71,10 @@ export function applyEntryAck(
 /**
  * Apply a module-close ack: the attempt's module rows after the close are
  * authoritative and replace the list (the routed follow-up row is new to the
- * browser), and the follow-up module's section is merged — metadata only while
- * the follow-up waits for this browser to start it.
+ * browser), the follow-up module's section is merged — metadata only while the
+ * follow-up waits for this browser to start it — and the ack's break rows
+ * replace the previous projection so the break surface can arm immediately
+ * instead of waiting for the next poll or socket frame.
  */
 export function applyCloseAck(
   base: AssessmentDeliveryBootstrap,
@@ -84,7 +86,15 @@ export function applyCloseAck(
     ...base,
     serverNow: ack.serverNow,
     timing: { ...base.timing, serverNow: ack.serverNow },
-    attempt: { ...base.attempt, moduleAttempts: ack.moduleAttempts },
+    attempt: {
+      ...base.attempt,
+      moduleAttempts: ack.moduleAttempts,
+      // The server returns every break row for the attempt, so an array is a
+      // complete projection and replaces the previous one. `undefined`/`null`
+      // (an older server, or a replay that predates the field) preserves
+      // whatever the client already had instead of clearing it.
+      ...(Array.isArray(ack.personalBreaks) ? { personalBreaks: ack.personalBreaks } : {}),
+    },
     sections,
   };
 }

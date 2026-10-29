@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +38,13 @@ func TestRecoveryCloseAckLoadsOnlySelectedModuleMetadata(t *testing.T) {
 				0, 0, nil, nil, nil, "{}", 1, 1, nil, nil, nil, nil, 4,
 				"client_confirmed", 0, "higher", now),
 	)
+	mock.ExpectQuery("FROM assessment_attempt_breaks").WithArgs("attempt-1").WillReturnRows(
+		sqlmock.NewRows([]string{
+			"id", "after_section_id", "duration_seconds", "state", "starts_at", "deadline_at",
+			"entered_at", "paused_at", "accumulated_paused_seconds", "entry_generation",
+			"entry_starts_at", "entry_confirmed_at", "entry_entered_at", "revision",
+		}).AddRow("break-1", "section-rw", 600, "pending", nil, nil, nil, nil, 0, 0, nil, nil, nil, 0),
+	)
 	mock.ExpectQuery("SELECT sec.id, sec.section_key").WithArgs("version-1", "m2", "schedule-1", "attempt-1").WillReturnRows(
 		sqlmock.NewRows([]string{
 			"section_id", "section_key", "section_title", "section_order", "section_duration",
@@ -53,6 +62,13 @@ func TestRecoveryCloseAckLoadsOnlySelectedModuleMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("closeAck: %v", err)
 	}
+	if len(ack.PersonalBreaks) != 1 {
+		t.Fatalf("expected the commit-time break projection, got %#v", ack.PersonalBreaks)
+	}
+	if brk := ack.PersonalBreaks[0]; brk.ID != "break-1" || brk.AfterSectionID != "section-rw" ||
+		brk.DurationSeconds != 600 || brk.State != "pending" || brk.Revision != 0 {
+		t.Fatalf("break projection changed: %#v", brk)
+	}
 	if ack.SelectedSection == nil || len(ack.SelectedSection.Modules) != 1 {
 		t.Fatalf("expected one selected module stub, got %#v", ack.SelectedSection)
 	}
@@ -65,6 +81,156 @@ func TestRecoveryCloseAckLoadsOnlySelectedModuleMetadata(t *testing.T) {
 	}
 	if ack.ModuleAttempts[1].DeadlineAt != nil || ack.ModuleAttempts[1].RemainingSeconds == nil || *ack.ModuleAttempts[1].RemainingSeconds != 600 {
 		t.Fatalf("unstarted module timing projection changed: %#v", ack.ModuleAttempts[1])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A break projection read failure must not turn a committed close into a
+// refused one: the module rows are already durable and the client's bounded
+// boundary pull is the recovery path.
+func TestCloseAckBreakProjectionFailureIsNonFatal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("SELECT ma.id, ma.module_id, ma.state").WithArgs("m1", "attempt-1").WillReturnRows(
+		sqlmock.NewRows([]string{
+			"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at",
+			"accumulated_paused_seconds", "extension_seconds", "completion_reason", "raw_correct",
+			"operational_question_count", "tool_state", "revision", "entry_generation", "entry_starts_at",
+			"entry_confirmed_at", "entry_entered_at", "auto_start_at", "control_epoch", "route_basis",
+			"late_answer_count", "selected_route", "server_now",
+		}).
+			AddRow("attempt-m1", "m1", "locked", 600, now.Add(-time.Minute), now.Add(-11*time.Minute), nil,
+				0, 0, "time_expired", 25, 27, "{}", 3, 0, nil, nil, nil, nil, 4,
+				"client_confirmed", 0, "higher", now),
+	)
+	mock.ExpectQuery("FROM assessment_attempt_breaks").WithArgs("attempt-1").
+		WillReturnError(errors.New("breaks unavailable"))
+
+	ack, err := NewService(db, tx.NewRunner(db)).closeAck(
+		context.Background(), "schedule-1", "attempt-1", "version-1", "m1", "", false, true,
+	)
+	if err != nil {
+		t.Fatalf("a committed close must still answer: %v", err)
+	}
+	if ack == nil {
+		t.Fatal("closeAck returned a nil ack")
+	}
+	if ack.PersonalBreaks == nil || len(ack.PersonalBreaks) != 0 {
+		t.Fatalf("failed projection must answer with an empty, non-nil list: %#v", ack.PersonalBreaks)
+	}
+	body, err := json.Marshal(ack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"personalBreaks":[]`) {
+		t.Fatalf("wire contract must stay an array: %s", body)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The read is unconditional: a close that crosses no boundary (or one whose
+// break is already finished) still returns every row the attempt owns, so a
+// merge can never resurrect an advanced break.
+func TestCloseAckReturnsEveryBreakRow(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("SELECT ma.id, ma.module_id, ma.state").WithArgs("m2", "attempt-1").WillReturnRows(
+		sqlmock.NewRows([]string{
+			"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at",
+			"accumulated_paused_seconds", "extension_seconds", "completion_reason", "raw_correct",
+			"operational_question_count", "tool_state", "revision", "entry_generation", "entry_starts_at",
+			"entry_confirmed_at", "entry_entered_at", "auto_start_at", "control_epoch", "route_basis",
+			"late_answer_count", "selected_route", "server_now",
+		}).
+			AddRow("attempt-m2", "m2", "locked", 600, now, nil, nil,
+				0, 0, "time_expired", 20, 27, "{}", 2, 0, nil, nil, nil, nil, 4,
+				"client_confirmed", 0, "higher", now),
+	)
+	mock.ExpectQuery("FROM assessment_attempt_breaks").WithArgs("attempt-1").WillReturnRows(
+		sqlmock.NewRows([]string{
+			"id", "after_section_id", "duration_seconds", "state", "starts_at", "deadline_at",
+			"entered_at", "paused_at", "accumulated_paused_seconds", "entry_generation",
+			"entry_starts_at", "entry_confirmed_at", "entry_entered_at", "revision",
+		}).
+			AddRow("break-rw", "section-rw", 600, "completed", now.Add(-20*time.Minute), now.Add(-10*time.Minute),
+				now.Add(-19*time.Minute), nil, 0, 2, nil, nil, nil, 3),
+	)
+
+	ack, err := NewService(db, tx.NewRunner(db)).closeAck(
+		context.Background(), "schedule-1", "attempt-1", "version-1", "m2", "", false, true,
+	)
+	if err != nil {
+		t.Fatalf("closeAck: %v", err)
+	}
+	if len(ack.PersonalBreaks) != 1 || ack.PersonalBreaks[0].State != "completed" ||
+		ack.PersonalBreaks[0].Revision != 3 {
+		t.Fatalf("expected the full break projection, got %#v", ack.PersonalBreaks)
+	}
+	if ack.NextModuleID != nil || ack.SelectedSection != nil {
+		t.Fatalf("a same-section close must not invent a follow-up: %#v", ack)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The reconciler can win the close race: the browser's retry then sees
+// alreadyClosed, and the ack is rebuilt by the same closeAck builder. It must
+// still carry the break the first close created.
+func TestAlreadyClosedAckReusesTheBreakProjection(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 10, 22, 12, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("SELECT ma.id, ma.module_id, ma.state").WithArgs("m1", "attempt-1").WillReturnRows(
+		sqlmock.NewRows([]string{
+			"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at",
+			"accumulated_paused_seconds", "extension_seconds", "completion_reason", "raw_correct",
+			"operational_question_count", "tool_state", "revision", "entry_generation", "entry_starts_at",
+			"entry_confirmed_at", "entry_entered_at", "auto_start_at", "control_epoch", "route_basis",
+			"late_answer_count", "selected_route", "server_now",
+		}).
+			AddRow("attempt-m1", "m1", "locked", 600, now.Add(-time.Minute), now.Add(-11*time.Minute), nil,
+				0, 0, "time_expired", 25, 27, "{}", 3, 0, nil, nil, nil, nil, 4,
+				"client_confirmed", 0, "higher", now),
+	)
+	mock.ExpectQuery("FROM assessment_attempt_breaks").WithArgs("attempt-1").WillReturnRows(
+		sqlmock.NewRows([]string{
+			"id", "after_section_id", "duration_seconds", "state", "starts_at", "deadline_at",
+			"entered_at", "paused_at", "accumulated_paused_seconds", "entry_generation",
+			"entry_starts_at", "entry_confirmed_at", "entry_entered_at", "revision",
+		}).AddRow("break-rw", "section-rw", 600, "pending", nil, nil, nil, nil, 0, 0, nil, nil, nil, 0),
+	)
+
+	ack, err := NewService(db, tx.NewRunner(db)).closeAck(
+		context.Background(), "schedule-1", "attempt-1", "version-1", "m1", "", true, true,
+	)
+	if err != nil {
+		t.Fatalf("closeAck: %v", err)
+	}
+	if !ack.AlreadyClosed {
+		t.Fatal("expected an alreadyClosed ack")
+	}
+	if len(ack.PersonalBreaks) != 1 || ack.PersonalBreaks[0].ID != "break-rw" ||
+		ack.PersonalBreaks[0].State != "pending" {
+		t.Fatalf("alreadyClosed must project the existing break: %#v", ack.PersonalBreaks)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

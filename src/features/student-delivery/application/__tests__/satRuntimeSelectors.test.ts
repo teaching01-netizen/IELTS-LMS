@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
-import { moduleStartsNewSection, previousModuleInExamOrder } from "../satRuntimeSelectors";
+import type {
+  AssessmentDeliveryBootstrap,
+  AssessmentPersonalBreakSnapshot,
+} from "../../contracts/assessmentDelivery";
+import {
+  moduleStartsNewSection,
+  previousModuleInExamOrder,
+  satPendingAuthoredBreak,
+  satPendingAuthoredBreakSeconds,
+} from "../satRuntimeSelectors";
 
 /**
  * Exam order, not any single display-order number, decides a section boundary.
@@ -155,5 +163,75 @@ describe("moduleStartsNewSection", () => {
     expect(previousModuleInExamOrder(shuffled, "rw-m1")).toBeNull();
     expect(moduleStartsNewSection(shuffled, "math-m1")).toBe(true);
     expect(moduleStartsNewSection(shuffled, "math-m2")).toBe(false);
+  });
+});
+
+function breakRow(
+  afterSectionId: string,
+  state: AssessmentPersonalBreakSnapshot["state"],
+): AssessmentPersonalBreakSnapshot {
+  return {
+    id: `break-${afterSectionId}`,
+    afterSectionId,
+    durationSeconds: 600,
+    state,
+    startsAt: null,
+    deadlineAt: null,
+    enteredAt: null,
+    pausedAt: null,
+    accumulatedPausedSeconds: 0,
+    entryGeneration: 0,
+    entryStartsAt: null,
+    entryConfirmedAt: null,
+    entryEnteredAt: null,
+    remainingSeconds: 0,
+    revision: 0,
+  };
+}
+
+function withAuthoredBreak(
+  data: AssessmentDeliveryBootstrap,
+  sectionId: string,
+  seconds: number,
+  breaks: AssessmentPersonalBreakSnapshot[] = [],
+): AssessmentDeliveryBootstrap {
+  return {
+    ...data,
+    sections: data.sections.map((section) =>
+      section.id === sectionId ? { ...section, breakAfterSeconds: seconds } : section,
+    ),
+    attempt: { ...data.attempt, personalBreaks: breaks },
+  } as AssessmentDeliveryBootstrap;
+}
+
+describe("satPendingAuthoredBreak", () => {
+  it("reports the authored break of the section that precedes the pending module", () => {
+    const data = withAuthoredBreak(TWO_SECTIONS, "sec-rw", 600);
+    expect(satPendingAuthoredBreak(data, "math-m1")).toEqual({ sectionId: "sec-rw", seconds: 600 });
+    expect(satPendingAuthoredBreakSeconds(data, "math-m1")).toBe(600);
+  });
+
+  it("is silent once any row exists for that boundary, whatever its state", () => {
+    // A completed break must not re-enter `preparing` and block the next module.
+    for (const state of ["pending", "armed", "active", "completed"] as const) {
+      const data = withAuthoredBreak(TWO_SECTIONS, "sec-rw", 600, [breakRow("sec-rw", state)]);
+      expect(satPendingAuthoredBreak(data, "math-m1")).toBeNull();
+    }
+  });
+
+  it("ignores a row recorded for a different boundary", () => {
+    const data = withAuthoredBreak(TWO_SECTIONS, "sec-rw", 600, [breakRow("sec-math", "pending")]);
+    expect(satPendingAuthoredBreak(data, "math-m1")?.seconds).toBe(600);
+  });
+
+  it("is null inside a section, at the first module, and when nothing is authored", () => {
+    expect(satPendingAuthoredBreak(withAuthoredBreak(TWO_SECTIONS, "sec-rw", 600), "rw-m2")).toBeNull();
+    expect(satPendingAuthoredBreak(withAuthoredBreak(TWO_SECTIONS, "sec-rw", 600), "rw-m1")).toBeNull();
+    expect(satPendingAuthoredBreak(TWO_SECTIONS, "math-m1")).toBeNull();
+    expect(satPendingAuthoredBreakSeconds(TWO_SECTIONS, "math-m1")).toBe(0);
+  });
+
+  it("is null for an unknown module", () => {
+    expect(satPendingAuthoredBreak(withAuthoredBreak(TWO_SECTIONS, "sec-rw", 600), "not-in-payload")).toBeNull();
   });
 });

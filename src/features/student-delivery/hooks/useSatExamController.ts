@@ -93,6 +93,7 @@ import {
   findPendingAttempt,
   matchesFinalModuleState,
   moduleForAttempt,
+  satPendingAuthoredBreak,
   sectionForModule,
 } from "../application/satRuntimeSelectors";
 import {
@@ -130,6 +131,16 @@ const SAT_BREAK_END_PULL_WINDOW_MS = 2_000;
  */
 const SAT_BREAK_END_MAX_READS = 8;
 const SAT_BREAK_END_MAX_MS = 20_000;
+/**
+ * Section-boundary break recovery (docs/plans/2026-10-29-sat-break-boundary-
+ * low-level.md): the close ack already carries the break this boundary creates,
+ * so this loop only covers a lost response, an older server, or a failed
+ * projection read. One bounded loop per boundary, strictly shorter than the
+ * offline recovery cadence (20 s ± jitter) so it cannot duplicate the steady
+ * poll's work: first read immediately, then at the pull window.
+ */
+const SAT_BOUNDARY_PULL_INTERVAL_MS = 2_000;
+const SAT_BOUNDARY_PULL_MAX_READS = 5;
 
 /**
  * Module close at expiry (docs/sat-m1-m2-handoff-plan.md, Phase 3): how long
@@ -681,6 +692,7 @@ export function useSatExamController({
    */
   const closeTimedOutModule = useCallback(
     async (generation: number, moduleId: string, moduleAttemptId: string): Promise<void> => {
+      const boundaryStartedAt = Date.now();
       const live = () => identityGenerationRef.current === generation;
       const pause = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
       const closeModule = satDeliveryGateway.closeModule;
@@ -821,6 +833,23 @@ export function useSatExamController({
             alreadyClosed: ack.alreadyClosed,
             retries,
           });
+          // The close transaction creates this boundary's break; when the ack
+          // carries a row the browser did not hold before, this is the true
+          // "break is ready to arm" latency, measured from the boundary.
+          const priorBreakIds = new Set(
+            (initialSnapshot?.attempt.personalBreaks ?? []).map((row) => row.id),
+          );
+          const projectedBreak = ack.personalBreaks?.find(
+            (row) => row.state !== "completed" && !priorBreakIds.has(row.id),
+          );
+          if (projectedBreak) {
+            emitStudentObservabilityMetric("sat_break_boundary_ready", {
+              scheduleId,
+              attemptId,
+              moduleId,
+              latencyMs: Date.now() - boundaryStartedAt,
+            });
+          }
           return;
         } catch (closeError) {
           if (!live()) return;
@@ -1210,10 +1239,21 @@ export function useSatExamController({
     nowMs: now,
   });
   const personalBreak = satOpenPersonalBreak(effectiveTiming?.timingModel, data?.attempt.personalBreaks);
+  const personalBreakId = personalBreak?.id ?? null;
+  // The authored break at this boundary, while the payload still has no row for
+  // it. Memoized: a fresh object every render would retrigger the boundary
+  // pull's cleanup and cancel its in-flight loop (see the effect below).
+  const authoredBreak = useMemo(
+    () => (data && pendingModule ? satPendingAuthoredBreak(data, pendingModule.id) : null),
+    [data, pendingModule],
+  );
+  const authoredBreakSeconds = authoredBreak?.seconds ?? 0;
+  const authoredSectionId = authoredBreak?.sectionId ?? null;
   const breakWindow = satBreakWindow({
     timingModel: effectiveTiming?.timingModel,
     personalBreak,
     serverNowMs: now + serverClockOffsetMs,
+    authoredBreakSeconds,
     sharedSeconds: data
       ? satBreakCountdownSeconds({
           timingModel: effectiveTiming?.timingModel,
@@ -1546,6 +1586,69 @@ export function useSatExamController({
     refresh: refreshBreakState,
   });
 
+  // Boundary break recovery: when a section boundary has an authored break and
+  // this payload still has no row for it, read the authoritative projection
+  // instead of waiting out the steady cadence (20 s offline, 60 s live). The
+  // close ack normally delivers the row, so this is a no-op on the happy path;
+  // it exists for a lost response, an older server, and a failed projection
+  // read. One bounded loop per boundary, keyed by the module being entered.
+  const boundaryPullRef = useRef<string | null>(null);
+  const boundaryModuleId = pendingModule?.id ?? null;
+  useEffect(() => {
+    const key = boundaryModuleId ? `${attemptId}:${boundaryModuleId}` : null;
+    if (
+      !key ||
+      !breakSurfaceMounted ||
+      data?.scheduleRuntimeStatus !== "live" ||
+      personalBreakId !== null ||          // row known: its state is the truth
+      authoredSectionId === null ||        // nothing authored: nothing will appear
+      pendingAttempt?.state !== "not_started" ||
+      boundaryPullRef.current === key      // one loop per boundary
+    ) return;
+    boundaryPullRef.current = key;
+    const generation = identityGenerationRef.current;
+    let cancelled = false;
+    let reads = 0;
+    let timer = 0;
+    const tick = async () => {
+      if (cancelled || identityGenerationRef.current !== generation) return;
+      reads += 1;
+      await refresh(false);
+      if (cancelled || identityGenerationRef.current !== generation) return;
+      const landed = dataRef.current?.attempt.personalBreaks?.some(
+        (candidate) => candidate.afterSectionId === authoredSectionId,
+      ) ?? false;
+      if (landed) {
+        // The row arrived: report how the fallback path ended. `hit` means the
+        // pull did its job; `exhausted` (below) means the student stayed on an
+        // honest `preparing` while the steady poll continues.
+        emitStudentObservabilityMetric("sat_break_boundary_pull", {
+          scheduleId,
+          attemptId,
+          reason: "hit",
+        });
+        return;
+      }
+      if (reads >= SAT_BOUNDARY_PULL_MAX_READS) {
+        emitStudentObservabilityMetric("sat_break_boundary_pull", {
+          scheduleId,
+          attemptId,
+          reason: "exhausted",
+        });
+        return;
+      }
+      timer = window.setTimeout(() => void tick(), SAT_BOUNDARY_PULL_INTERVAL_MS);
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // The authored-section id, not the selector object: object identity would
+    // re-run this cleanup on every payload and cancel the loop mid-budget.
+  }, [attemptId, authoredSectionId, boundaryModuleId, breakSurfaceMounted, data?.scheduleRuntimeStatus,
+      identityKey, pendingAttempt?.state, personalBreakId, refresh, scheduleId]);
+
   // Phase 3 (client-forced break end): once the authoritative break has run
   // out, pull the advanced projection ourselves instead of waiting out the
   // parent's steady cadence. Throttled to the window above and to one pull per
@@ -1861,6 +1964,7 @@ export function useSatExamController({
       stateSectionKey,
       pendingAttempt,
       pendingSectionKey,
+      authoredBreakSeconds,
     }),
     [
       data,
@@ -1871,6 +1975,7 @@ export function useSatExamController({
       stateSectionKey,
       pendingAttempt,
       pendingSectionKey,
+      authoredBreakSeconds,
     ],
   );
   const temporalModelRef = useRef(temporalModel);

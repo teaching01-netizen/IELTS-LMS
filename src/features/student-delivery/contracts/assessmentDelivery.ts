@@ -418,6 +418,14 @@ export interface AssessmentModuleCloseAck {
   finalAcks?: ResponseAcknowledgementV2[];
   responseRevision?: number;
   boundaryPhase?: string;
+  /**
+   * Every break row the attempt owns, projected at commit time. The close
+   * transaction creates a past section's scheduled break, so the same response
+   * that routes the next module also carries the break it must arm. Absent
+   * (`undefined`) on servers that predate the field: a merge must then keep the
+   * rows it already has rather than clear them.
+   */
+  personalBreaks?: AssessmentPersonalBreakSnapshot[];
 }
 
 /** Answers kept on the device after their module closed (review evidence only). */

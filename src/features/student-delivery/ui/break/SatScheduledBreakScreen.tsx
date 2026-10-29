@@ -36,18 +36,26 @@ export function SatScheduledBreakScreen({
   const temporal = useSatTemporalSnapshot();
   let livePhase = phase;
   let liveSeconds = remainingSeconds;
+  let leadSeconds: number | null = null;
   if (temporal && phase === "waiting") {
     liveSeconds = temporal.pendingSectionWaitSeconds;
   } else if (temporal) {
     const window = temporal.breakWindow;
     livePhase = window.phase === "preparing" ? "preparing" : window.phase === "active" ? "active" : "ending";
     liveSeconds = window.seconds;
+    // The confirmed future start: count into the break instead of leaving the
+    // slot blank for the 3 s between confirmation and the clock starting.
+    leadSeconds = window.phase === "preparing" ? window.leadSeconds : null;
   }
   const nextSection = nextSectionKey === "math" ? "Math" : "Reading and Writing";
   // The countdown slot NEVER unmounts while the break is on screen, and only a
-  // positive countdown is shown: preparing and ending keep the slot's space
-  // but render no time, so 0:00 is never shown or read as remaining time.
-  const displayedTime = liveSeconds !== null && liveSeconds > 0 ? formatSatTime(liveSeconds) : null;
+  // positive countdown is shown: preparing without a confirmed start, and
+  // ending, keep the slot's space but render no time, so 0:00 is never shown or
+  // read as remaining time. The lead countdown is visual only — it is not the
+  // candidate's remaining time, so it is never exposed as the timer.
+  const liveCountdown = liveSeconds !== null && liveSeconds > 0 ? formatSatTime(liveSeconds) : null;
+  const leadCountdown = leadSeconds !== null && leadSeconds > 0 ? formatSatTime(leadSeconds) : null;
+  const timerText = liveCountdown ?? leadCountdown;
   const contextLabel = livePhase === "waiting" ? "Section complete" : "Scheduled break";
   const headline =
     livePhase === "waiting"
@@ -82,13 +90,13 @@ export function SatScheduledBreakScreen({
         </p>
         <p
           className="sat-tabular mt-4 text-5xl font-semibold"
-          role={displayedTime ? "timer" : undefined}
-          aria-label={displayedTime ? `Time remaining ${displayedTime}` : undefined}
-          data-sat-break-timer={displayedTime ? "live" : "reserved"}
-          aria-hidden={displayedTime ? undefined : true}
-          style={displayedTime ? undefined : { visibility: "hidden" }}
+          role={liveCountdown ? "timer" : undefined}
+          aria-label={liveCountdown ? `Time remaining ${liveCountdown}` : undefined}
+          data-sat-break-timer={liveCountdown ? "live" : leadCountdown ? "lead" : "reserved"}
+          aria-hidden={liveCountdown ? undefined : true}
+          style={timerText ? undefined : { visibility: "hidden" }}
         >
-          {displayedTime ?? " "}
+          {timerText ?? " "}
         </p>
         <h1
           data-sat-stage-heading="true"

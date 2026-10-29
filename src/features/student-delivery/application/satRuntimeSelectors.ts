@@ -1,6 +1,7 @@
 import type {
   AssessmentDeliveryBootstrap,
   AssessmentDeliveryModule,
+  AssessmentDeliverySection,
   AssessmentModuleAttemptSnapshot,
 } from '../contracts/assessmentDelivery';
 
@@ -122,10 +123,56 @@ export function moduleStartsNewSection(
   data: AssessmentDeliveryBootstrap,
   moduleId: string,
 ): boolean {
+  return sectionBoundaryBefore(data, moduleId) !== null;
+}
+
+/** The two sections a module boundary joins, or null when there is none. */
+function sectionBoundaryBefore(
+  data: AssessmentDeliveryBootstrap,
+  moduleId: string,
+): { previousSection: AssessmentDeliverySection; section: AssessmentDeliverySection } | null {
   const previous = previousModuleInExamOrder(data, moduleId);
-  if (!previous) return false;
+  if (!previous) return null;
   const previousSection = sectionForModule(data, previous.id);
   const section = sectionForModule(data, moduleId);
-  return Boolean(previousSection && section && previousSection.id !== section.id);
+  if (!previousSection || !section || previousSection.id === section.id) return null;
+  return { previousSection, section };
+}
+
+export interface SatPendingAuthoredBreak {
+  /** The section whose authored break precedes `moduleId`. */
+  readonly sectionId: string;
+  readonly seconds: number;
+}
+
+/**
+ * The scheduled break authored between the module before `moduleId` and
+ * `moduleId`, but only while this attempt has no break row for that boundary.
+ *
+ * Null for a same-section handoff, for a first or last module, and once the row
+ * exists — at that point the row's own state is the truth and re-deriving from
+ * authored metadata would let a completed break re-enter `preparing` and block
+ * the next module forever.
+ */
+export function satPendingAuthoredBreak(
+  data: AssessmentDeliveryBootstrap,
+  moduleId: string,
+): SatPendingAuthoredBreak | null {
+  const boundary = sectionBoundaryBefore(data, moduleId);
+  if (!boundary) return null;
+  const { previousSection } = boundary;
+  if (!(previousSection.breakAfterSeconds > 0)) return null;
+  const hasRow = data.attempt.personalBreaks?.some(
+    (candidate) => candidate.afterSectionId === previousSection.id,
+  ) ?? false;
+  return hasRow ? null : { sectionId: previousSection.id, seconds: previousSection.breakAfterSeconds };
+}
+
+/** Convenience for the break-window input; 0 when there is nothing authored. */
+export function satPendingAuthoredBreakSeconds(
+  data: AssessmentDeliveryBootstrap,
+  moduleId: string,
+): number {
+  return satPendingAuthoredBreak(data, moduleId)?.seconds ?? 0;
 }
 

@@ -37,27 +37,29 @@ describe("satBreakWindow", () => {
     satBreakWindow({ timingModel: "sat_personal_v1", personalBreak: b, serverNowMs: now, sharedSeconds: 0 });
 
   it("prepares, counts down from the full duration, then ends — blocking entry throughout", () => {
-    expect(personal(brk())).toEqual({ phase: "preparing", seconds: null, blocksEntry: true });
-    expect(personal(armed(NOW + 3_000))).toEqual({ phase: "preparing", seconds: null, blocksEntry: true });
-    expect(personal(active(NOW + 1))).toEqual({ phase: "preparing", seconds: null, blocksEntry: true });
-    expect(personal(active(NOW))).toEqual({ phase: "active", seconds: 600, blocksEntry: true });
-    expect(personal(active(NOW - 599_500))).toEqual({ phase: "active", seconds: 1, blocksEntry: true });
-    expect(personal(active(NOW - 600_000))).toEqual({ phase: "ending", seconds: null, blocksEntry: true });
-    expect(personal(active(NOW - 900_000, { state: "completed" }))).toEqual({ phase: "none", seconds: null, blocksEntry: false });
+    expect(personal(brk())).toEqual({ phase: "preparing", seconds: null, blocksEntry: true, leadSeconds: null });
+    expect(personal(armed(NOW + 3_000))).toEqual({ phase: "preparing", seconds: null, blocksEntry: true, leadSeconds: null });
+    // A confirmed future start counts into the break instead of showing a
+    // blank slot that reads as frozen.
+    expect(personal(active(NOW + 1))).toEqual({ phase: "preparing", seconds: null, blocksEntry: true, leadSeconds: 1 });
+    expect(personal(active(NOW))).toEqual({ phase: "active", seconds: 600, blocksEntry: true, leadSeconds: null });
+    expect(personal(active(NOW - 599_500))).toEqual({ phase: "active", seconds: 1, blocksEntry: true, leadSeconds: null });
+    expect(personal(active(NOW - 600_000))).toEqual({ phase: "ending", seconds: null, blocksEntry: true, leadSeconds: null });
+    expect(personal(active(NOW - 900_000, { state: "completed" }))).toEqual({ phase: "none", seconds: null, blocksEntry: false, leadSeconds: null });
     expect(personal(null).blocksEntry).toBe(false);
   });
 
   it("keeps a pause before the start in preparation and freezes a running countdown", () => {
     expect(personal(active(NOW + 2_000, { pausedAt: iso(NOW) }), NOW + 60_000).phase).toBe("preparing");
     expect(personal(active(NOW - 60_000, { pausedAt: iso(NOW), remainingSeconds: 540 }), NOW + 60_000))
-      .toEqual({ phase: "active", seconds: 540, blocksEntry: true });
+      .toEqual({ phase: "active", seconds: 540, blocksEntry: true, leadSeconds: null });
   });
 
   it("derives a shared cohort break from its countdown alone", () => {
     const shared = (seconds: number) =>
       satBreakWindow({ timingModel: "cohort_section_v3", personalBreak: null, serverNowMs: NOW, sharedSeconds: seconds });
-    expect(shared(120)).toEqual({ phase: "active", seconds: 120, blocksEntry: true });
-    expect(shared(0)).toEqual({ phase: "none", seconds: null, blocksEntry: false });
+    expect(shared(120)).toEqual({ phase: "active", seconds: 120, blocksEntry: true, leadSeconds: null });
+    expect(shared(0)).toEqual({ phase: "none", seconds: null, blocksEntry: false, leadSeconds: null });
   });
 });
 

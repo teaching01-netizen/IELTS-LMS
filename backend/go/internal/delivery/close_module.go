@@ -62,8 +62,13 @@ type SatModuleCloseAck struct {
 	FinalAcks        []attempts.Ack   `json:"finalAcks,omitempty"`
 	ResponseRevision uint64           `json:"responseRevision,omitempty"`
 	BoundaryPhase    string           `json:"boundaryPhase,omitempty"`
-	selectedRoute    string
-	lateAnswerCount  int
+	// PersonalBreaks is the attempt's full break projection at commit time
+	// (pending/armed/active/completed). The close transaction creates this
+	// boundary's break, so the browser can render and arm the break without a
+	// follow-up read. Always a JSON array, never null.
+	PersonalBreaks  []PersonalBreak `json:"personalBreaks"`
+	selectedRoute   string
+	lateAnswerCount int
 }
 
 // Close outcomes (telemetry label vocabulary).
@@ -564,8 +569,22 @@ func (s *Service) closeAck(ctx context.Context, scheduleID, attemptID, versionID
 		ServerNow:       projection.serverNow,
 		ControlEpoch:    projection.controlEpoch,
 		RouteBasis:      projection.routeBasis.String,
+		PersonalBreaks:  []PersonalBreak{},
 		lateAnswerCount: projection.lateAnswerCount,
 		selectedRoute:   projection.selectedRoute.String,
+	}
+	// The close transaction creates a past section's scheduled break before this
+	// projection is built, so the same read the bootstrap uses returns it here —
+	// no follow-up poll, no socket frame, no second source of truth. A read
+	// failure is deliberately non-fatal: the module is already committed, and a
+	// refused close would cost the student far more than a missing projection
+	// that the client's bounded boundary pull recovers.
+	breaks, breakErr := s.loadPersonalBreaks(ctx, attemptID, projection.serverNow)
+	if breakErr != nil {
+		slog.WarnContext(ctx, "SAT close ack: break projection failed",
+			"attempt_id", attemptID, "error", breakErr)
+	} else if breaks != nil {
+		ack.PersonalBreaks = breaks
 	}
 	for _, attempt := range projection.moduleAttempts {
 		if attempt.ModuleID == moduleID {

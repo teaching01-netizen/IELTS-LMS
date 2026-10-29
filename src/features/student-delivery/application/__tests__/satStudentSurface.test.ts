@@ -157,6 +157,32 @@ describe("deriveSatStudentStage — the scheduled break is only a section bounda
       expect(stage.phase).not.toBe("opening-next-section");
     }
   });
+
+  it("prepares the authored break on the same mounted surface as the spent one", () => {
+    const boundary = pending("Module 1", "math", true);
+    const preparing = derive({
+      pendingModule: boundary,
+      breakWindow: { phase: "preparing", seconds: null, blocksEntry: true, leadSeconds: null },
+    });
+    expect(preparing).toMatchObject({
+      kind: "scheduled-break",
+      phase: "preparing",
+      remainingSeconds: null,
+      nextSectionKey: "math",
+    });
+    // The presence key ignores the phase, so arming the break cannot remount
+    // (and refocus) the surface the candidate is already looking at.
+    expect(preparing.key).toBe(derive({ pendingModule: boundary, pendingBreakSeconds: 0 }).key);
+  });
+
+  it("reads a completed break as the terminal ending phase", () => {
+    expect(
+      derive({
+        pendingModule: pending("Module 1", "math", true),
+        breakWindow: { phase: "none", seconds: null, blocksEntry: false, leadSeconds: null },
+      }),
+    ).toMatchObject({ kind: "scheduled-break", phase: "ending" });
+  });
 });
 
 describe("deriveSatStudentStage — a module handoff never leaves the exam", () => {

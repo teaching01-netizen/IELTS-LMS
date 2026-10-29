@@ -1,7 +1,12 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
+import type {
+  AssessmentDeliveryBootstrap,
+  AssessmentPersonalBreakSnapshot,
+} from "../../contracts/assessmentDelivery";
+import { satPendingAuthoredBreakSeconds } from "../../application/satRuntimeSelectors";
+import { satBreakWindow, satOpenPersonalBreak } from "../../application/satTimingPolicy";
 import { SatStudentSessionRoute } from "../SatStudentSessionRoute";
 
 // Route-level between-sections coverage. The break screen and the controller's
@@ -259,6 +264,53 @@ function branchPendingData(timedOut: boolean): AssessmentDeliveryBootstrap {
   };
 }
 
+/**
+ * The personal model at the Reading & Writing → Math boundary: Module 1 is
+ * final, Math is routed but not started, and the section authors a 10-minute
+ * break. `breaks` is the break projection the payload carries — empty before
+ * the close ack merges the row, and present afterwards.
+ */
+function personalBoundaryData(breaks: AssessmentPersonalBreakSnapshot[]): AssessmentDeliveryBootstrap {
+  const data = mathData();
+  return {
+    ...data,
+    timing: {
+      ...data.timing,
+      timingModel: "sat_personal_v1",
+    },
+    sections: data.sections.map((section) =>
+      section.id === "sec-rw" ? { ...section, breakAfterSeconds: 600 } : section,
+    ) as unknown as AssessmentDeliveryBootstrap["sections"],
+    attempt: {
+      ...data.attempt,
+      personalBreaks: breaks,
+    },
+  } as AssessmentDeliveryBootstrap;
+}
+
+function personalBreakRow(
+  patch: Partial<AssessmentPersonalBreakSnapshot> = {},
+): AssessmentPersonalBreakSnapshot {
+  return {
+    id: "break-rw",
+    afterSectionId: "sec-rw",
+    durationSeconds: 600,
+    state: "pending",
+    startsAt: null,
+    deadlineAt: null,
+    enteredAt: null,
+    pausedAt: null,
+    accumulatedPausedSeconds: 0,
+    entryGeneration: 0,
+    entryStartsAt: null,
+    entryConfirmedAt: null,
+    entryEnteredAt: null,
+    remainingSeconds: 0,
+    revision: 0,
+    ...patch,
+  };
+}
+
 function baseCommands() {
   return {
     startPendingModule: vi.fn(),
@@ -333,6 +385,15 @@ function seed(
 ) {
   const state = { ...directionsState(), phase: entry.phase ?? "directions" };
   const module = data ? pendingModuleOf(data) : null;
+  // The controller's own derivation, not a hand-written literal: these cases
+  // exercise the boundary between the authored/personal window and the surface.
+  const breakWindow = satBreakWindow({
+    timingModel: data?.timing.timingModel,
+    personalBreak: satOpenPersonalBreak(data?.timing.timingModel, data?.attempt.personalBreaks),
+    serverNowMs: data ? Date.parse(data.serverNow) : 0,
+    authoredBreakSeconds: data && module ? satPendingAuthoredBreakSeconds(data, module.id) : 0,
+    sharedSeconds: pending.breakSeconds,
+  });
   controllerMock.current = {
     state,
     data,
@@ -346,9 +407,7 @@ function seed(
     retryModuleEntry: vi.fn(),
     pendingModule: module,
     pendingBreakSeconds: pending.breakSeconds,
-    breakWindow: pending.breakSeconds > 0
-      ? { phase: "active", seconds: pending.breakSeconds, blocksEntry: true }
-      : { phase: "none", seconds: null, blocksEntry: false },
+    breakWindow,
     breakEntry: { retrying: false, blocked: null },
     pendingSectionWaitSeconds: pending.waitSeconds,
     pendingStageReady: true,
@@ -452,6 +511,33 @@ describe("SatStudentSessionRoute between-sections window", () => {
     seed(data, { breakSeconds: 0, waitSeconds: 0 }, { phase: "break" });
     view.rerender(<SatStudentSessionRoute {...(routeProps() as never)} />);
     expect(screen.getByTestId("sat-scheduled-break")).toBe(surface);
+  });
+
+  // The reported defect: the authored break existed but the payload had no row
+  // yet, so the window fell through to `none` and the surface read "Preparing
+  // Math…" for as long as the next poll or socket frame took.
+  it("prepares the authored personal break instead of opening Math", () => {
+    renderRoute(personalBoundaryData([]), { breakSeconds: 0, waitSeconds: 0 });
+
+    const surface = screen.getByTestId("sat-scheduled-break");
+    expect(surface).toHaveAttribute("data-sat-break-phase", "preparing");
+    expect(screen.getByRole("heading", { name: "Preparing your break…" })).toBeInTheDocument();
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+    expect(screen.queryByText("0:00")).toBeNull();
+    expect(screen.queryByText(/Preparing Math/)).toBeNull();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("keeps reading the spent break as the terminal preparing-Math phase", () => {
+    renderRoute(
+      personalBoundaryData([personalBreakRow({ state: "completed", revision: 3 })]),
+      { breakSeconds: 0, waitSeconds: 0 },
+    );
+
+    expect(screen.getByTestId("sat-scheduled-break")).toHaveAttribute("data-sat-break-phase", "ending");
+    expect(screen.getByRole("heading", { name: "Preparing Math…" })).toBeInTheDocument();
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });
 

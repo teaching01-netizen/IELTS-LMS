@@ -25,6 +25,12 @@ export interface SatTemporalModel {
   stateSectionKey: string | null;
   pendingAttempt: AssessmentModuleAttemptSnapshot | undefined;
   pendingSectionKey: string | null;
+  /**
+   * The break authored before the pending module while no break row exists yet
+   * (satPendingAuthoredBreakSeconds). A primitive so the memo that builds this
+   * model stays referentially stable when `data` does not change.
+   */
+  authoredBreakSeconds: number;
 }
 
 export function deriveSatTemporalSnapshot(model: SatTemporalModel, now: number) {
@@ -76,6 +82,7 @@ export function deriveSatTemporalSnapshot(model: SatTemporalModel, now: number) 
     timingModel: effectiveTiming?.timingModel,
     personalBreak: satOpenPersonalBreak(effectiveTiming?.timingModel, data?.attempt.personalBreaks),
     serverNowMs: now + offset,
+    authoredBreakSeconds: model.authoredBreakSeconds,
     sharedSeconds: data
       ? satBreakCountdownSeconds({
           timingModel: effectiveTiming?.timingModel,
