@@ -1,3 +1,5 @@
+import { peekClientSessionIdForStudentKey, satWriterStudentKey } from '@services/studentAttemptRepository';
+
 // Student runtime poll client (plan C1/C3): the versioned poll that replaces
 // student WebSockets. GET /api/v1/student/sessions/{scheduleId}/runtime with
 // ?sinceRevision=: 304 (or same-revision 200) means steady state — no refresh
@@ -16,6 +18,7 @@ export interface StudentRuntimePollView {
 export interface StudentRuntimePollError extends Error {
   terminal?: boolean;
   status?: number;
+  code?: string;
 }
 
 interface FetchJsonResult {
@@ -25,6 +28,7 @@ interface FetchJsonResult {
 
 export interface StudentRuntimePollInput {
   readonly scheduleId: string;
+  readonly candidateId?: string | undefined;
   readonly fetchJson: (path: string) => Promise<FetchJsonResult>;
 }
 
@@ -47,9 +51,17 @@ export interface StudentRuntimePoll {
 export function createStudentRuntimePoll(input: StudentRuntimePollInput): StudentRuntimePoll {
   return {
     async poll(sinceRevision: number): Promise<StudentRuntimePollView> {
+      const query = new URLSearchParams({ sinceRevision: String(sinceRevision) });
+      if (input.candidateId) {
+        query.set('candidateId', input.candidateId);
+        const sessionId = peekClientSessionIdForStudentKey(
+          input.scheduleId, satWriterStudentKey(input.scheduleId, input.candidateId),
+        );
+        if (sessionId) query.set('clientSessionId', sessionId);
+      }
       const path =
         `/api/v1/student/sessions/${encodeURIComponent(input.scheduleId)}` +
-        `/runtime?sinceRevision=${encodeURIComponent(String(sinceRevision))}`;
+        `/runtime?${query.toString()}`;
       const res = await input.fetchJson(path);
       if (res.status === 304) {
         return {
@@ -69,6 +81,8 @@ export function createStudentRuntimePoll(input: StudentRuntimePollInput): Studen
       if (res.status < 200 || res.status >= 300) {
         const err = new Error(`Runtime poll failed with status ${res.status}.`) as StudentRuntimePollError;
         err.status = res.status;
+        const failure = asRecord(asRecord(res.json)?.['error']);
+        if (typeof failure?.['code'] === 'string') err.code = failure['code'];
         throw err;
       }
       const body = asRecord(res.json) ?? {};

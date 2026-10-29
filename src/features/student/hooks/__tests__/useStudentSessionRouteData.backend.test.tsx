@@ -353,6 +353,38 @@ describe("useStudentSessionRouteData backend mode", () => {
     global.fetch = originalFetch;
   });
 
+  it.each(["ielts", "sat", "act"] as const)("blocks an already mounted %s exam when its background poll reports a device transfer", async (providerKey) => {
+    vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
+    vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());
+    let transferred = false;
+    global.fetch = vi.fn((url: string) => {
+      if (url.includes("/runtime?")) {
+        return Promise.resolve(
+          transferred
+            ? new Response(JSON.stringify({
+                success: false,
+                error: { code: "SESSION_ALREADY_ACTIVE", message: "Active on another device." },
+              }), { status: 409 })
+            : new Response(null, { status: 304 })
+        );
+      }
+      if (url.includes("/static?")) {
+        const context = buildStaticSessionContext();
+        (context.version.contentSnapshot as Record<string, unknown>).providerKey = providerKey;
+        return Promise.resolve(jsonResponse(context));
+      }
+      return Promise.resolve(jsonResponse(buildLiveSessionContext(buildAttempt())));
+    }) as typeof fetch;
+    const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.providerKey).toBe(providerKey);
+    expect(result.current.ownershipBlocked).toBe(false);
+    transferred = true;
+    await waitFor(() => expect(result.current.ownershipBlocked).toBe(true), { timeout: 35_000 });
+  }, 38_000);
+
   it("hydrates static exam payload once, then uses live session payload for runtime and attempt", async () => {
     vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
     vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());

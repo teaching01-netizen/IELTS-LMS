@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/auth"
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -80,6 +81,24 @@ func runtimePollInner(app *App, w http.ResponseWriter, r *http.Request) {
 	since, ok := parseSinceRevision(w, r)
 	if !ok {
 		return
+	}
+	// Check browser ownership before conditional reads: a transfer does not
+	// change the shared room revision, so a 304 must not hide a revoked writer.
+	if sess := SessionOf(r.Context()); sess != nil && sess.Role == auth.RoleStudent && r.URL.Query().Has("candidateId") {
+		attemptID, err := resolveStudentAttemptForSession(r.Context(), app.DB, scheduleID, r.URL.Query().Get("candidateId"), sess)
+		if err != nil {
+			httpx.WriteError(w, r, MapDBError(err))
+			return
+		}
+		enforced, owner, err := attempts.WriterPolicyOf(r.Context(), app.DB, attemptID)
+		if err != nil {
+			httpx.WriteError(w, r, MapDBError(err))
+			return
+		}
+		if enforced && (owner == "" || owner != strings.TrimSpace(r.URL.Query().Get("clientSessionId"))) {
+			httpx.WriteError(w, r, transferBlockedError())
+			return
+		}
 	}
 	// The scoped session identifies exactly one sitting. Its attempt revision
 	// participates in conditional reads so a staff transfer cannot be hidden

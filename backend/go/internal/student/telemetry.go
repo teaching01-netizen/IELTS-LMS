@@ -257,6 +257,11 @@ func (s *Service) RecordAudit(ctx context.Context, req AuditRequest) error {
 	if err := authorizeTelemetryAttempt(ctx, tx, &attempt, "", req.ActorUserID); err != nil {
 		return err
 	}
+	// Authentication may predate a device transfer; recheck the writer under
+	// this lock before an old browser can add violations to the recovered sitting.
+	if err := authorizeTelemetryRecovery(attempt, req.ClientSessionID); err != nil {
+		return err
+	}
 	payload := telemetryObject(string(req.Payload))
 	if req.ClientTimestamp != nil {
 		payload["clientTimestamp"] = req.ClientTimestamp.UTC().Format(time.RFC3339Nano)
@@ -370,7 +375,7 @@ func authorizeTelemetryAttempt(ctx context.Context, q interface {
 	return nil
 }
 
-// authorizeTelemetryRecovery keeps precheck/heartbeat owner claims inside the
+// authorizeTelemetryRecovery keeps telemetry writes inside the
 // staff recovery authority. While held no client session may recreate an
 // owner; while working only the browser bound at Begin may report telemetry.
 // The check is provider-independent and runs under the attempt row lock.

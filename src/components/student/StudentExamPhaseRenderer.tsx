@@ -5,7 +5,7 @@ import { Lobby } from './Lobby';
 import { PreCheck } from './PreCheck';
 import { StudentPostExamView } from './StudentPostExamView';
 import { useStudentAttempt } from './providers/StudentAttemptProvider';
-import { useStudentRuntime, useStudentRuntimeSession } from './providers/StudentRuntimeProvider';
+import { useStudentRuntimeLiveRef, useStudentRuntimeSession } from './providers/StudentRuntimeProvider';
 import { isVerifiedTerminalStudentState } from './providers/verifiedTerminalState';
 
 interface StudentExamPhaseRendererProps {
@@ -31,6 +31,7 @@ export function StudentExamPhaseRenderer({
 }: StudentExamPhaseRendererProps) {
   const { state: attemptState, actions: attemptActions } = useStudentAttempt();
   const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
+  const runtimeLiveRef = useStudentRuntimeLiveRef();
   const [preCheckError, setPreCheckError] = useState<string | null>(null);
   // S1-C13: move focus into the new phase on every phase change (WCAG 2.4.3)
   // and announce it via the sr-only live region so SR users know the exam
@@ -72,7 +73,11 @@ export function StudentExamPhaseRenderer({
                 );
                 return;
               }
-              runtimeActions.setPhase('lobby');
+              // Start may already have happened, including while pre-check was saving.
+              const currentRuntime = runtimeLiveRef.current;
+              const examStarted = currentRuntime.runtimeBacked &&
+                (currentRuntime.runtimeStatus === 'live' || currentRuntime.runtimeStatus === 'paused');
+              runtimeActions.setPhase(examStarted ? 'exam' : 'lobby');
             }}
           />
           {preCheckError ? (

@@ -116,7 +116,7 @@ export function StudentSessionRoute() {
     return <LoadingSurface label="Loading Exam…" />;
   }
 
-  // Another browser/device owns this SAT attempt: no exam content here, only
+  // Another browser/device owns this attempt: no exam content here, only
   // the device-change request flow. A committed transfer reloads the route.
   if (ownershipBlocked && scheduleId && candidateId) {
     return (

@@ -31,6 +31,10 @@ vi.mock("../../../student-delivery/routes/SatStudentSessionRoute", () => ({
   SatStudentSessionRoute: (props: any) => SatStudentSessionRouteMock(props),
 }));
 
+vi.mock("../../../student-delivery/ui/entry/SatDeviceTransferPanel", () => ({
+  SatDeviceTransferPanel: () => <div>Exam active on another device</div>,
+}));
+
 function renderRoute(path: string) {
   render(
     <MemoryRouter initialEntries={[path]}>
@@ -50,6 +54,28 @@ describe("StudentSessionRoute", () => {
     StudentAppWrapperMock.mockReset();
     SatStudentSessionRouteMock.mockReset();
     vi.restoreAllMocks();
+  });
+
+  it.each(["ielts", "sat", "act"] as const)("removes %s exam content when browser ownership is blocked", async (providerKey) => {
+    vi.spyOn(authService, "getSession").mockResolvedValue(null);
+    StudentAppWrapperMock.mockReturnValue(<input aria-label="Answer" />);
+    useStudentSessionRouteDataMock.mockReturnValue({
+      attemptSnapshot: { id: "attempt-1" },
+      candidateId: "alice",
+      error: null,
+      isLoading: false,
+      ownershipBlocked: true,
+      providerKey,
+      state: {},
+      retry: vi.fn(),
+      refreshRuntime: vi.fn(),
+      runtimeSnapshot: null,
+    });
+    renderRoute("/student/sched-1/alice");
+    expect(await screen.findByText("Exam active on another device")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Answer")).not.toBeInTheDocument();
+    expect(StudentAppWrapperMock).not.toHaveBeenCalled();
+    expect(SatStudentSessionRouteMock).not.toHaveBeenCalled();
   });
 
   it.each(["", "?touchSelectionDebug=1"])(

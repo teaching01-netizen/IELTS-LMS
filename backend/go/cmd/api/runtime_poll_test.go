@@ -111,3 +111,38 @@ func containsStr(haystack, needle string) bool {
 	}
 	return false
 }
+
+// A transfer changes the writer even when the shared room revision is steady.
+func TestRuntimePollWriterFenceBeforeNotModified(t *testing.T) {
+	for _, tc := range []struct {
+		name, policy, owner string
+		want                int
+	}{
+		{"original writer", "sat_single_writer_v1", "browser-old", http.StatusNotModified},
+		{"transferred writer", "sat_single_writer_v1", "browser-new", http.StatusConflict},
+		{"recovery held", "sat_single_writer_v1", "", http.StatusConflict},
+		{"legacy multi device", "", "browser-new", http.StatusNotModified},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, mock := pollTestApp(9, "live")
+			defer app.DB.Close()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/student/sessions/sched-1/runtime?sinceRevision=9&candidateId=W123&clientSessionId=browser-old", nil)
+			req.Header.Set("If-None-Match", runtimePollETag("sched-1", 9))
+			req = pollAuthed(req, mock)
+			mock.ExpectQuery("SELECT id, COALESCE\\(user_id").WithArgs("sched-1", "W123", "W123", "W123").WillReturnRows(sqlmock.NewRows([]string{"id", "user_id"}).AddRow("att-1", "u1"))
+			mock.ExpectQuery("SELECT 1 FROM schedule_registrations").WithArgs("sched-1", "u1", "u1").WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
+			mock.ExpectQuery("SELECT CASE WHEN recovery_control").WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"writer_policy", "active_client_session_id"}).AddRow(tc.policy, tc.owner))
+			rec := httptest.NewRecorder()
+			runtimePollHandler(app)(rec, reqWithSchedule(req, "sched-1"))
+			if rec.Code != tc.want {
+				t.Fatalf("want %d, got %d: %s", tc.want, rec.Code, rec.Body.String())
+			}
+			if tc.want == http.StatusConflict && !containsStr(rec.Body.String(), "SESSION_ALREADY_ACTIVE") {
+				t.Fatalf("missing ownership signal: %s", rec.Body.String())
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

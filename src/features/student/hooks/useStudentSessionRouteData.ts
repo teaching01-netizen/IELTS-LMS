@@ -70,7 +70,7 @@ interface StudentSessionRouteData {
   error: string | null;
   /**
    * The server refused this browser because another browser/device owns the
-   * SAT attempt (SESSION_ALREADY_ACTIVE). The route renders the device
+   * attempt (SESSION_ALREADY_ACTIVE). The route renders the device
    * transfer surface instead of a generic load error.
    */
   ownershipBlocked: boolean;
@@ -614,6 +614,10 @@ export function useStudentSessionRouteData(
     } catch (refreshError) {
       inFlightRefreshCountRef.current = Math.max(0, inFlightRefreshCountRef.current - 1);
       if (applyEpoch !== refreshEpochRef.current || !mountedRef.current) {
+        return;
+      }
+      if ((refreshError as { code?: unknown } | null)?.code === "SESSION_ALREADY_ACTIVE") {
+        setOwnershipBlocked(true);
         return;
       }
       if (import.meta.env.DEV) {
@@ -1167,6 +1171,7 @@ export function useStudentSessionRouteData(
   if (scheduleId && !runtimePollLoopRef.current) {
     const pollClient = createStudentRuntimePoll({
       scheduleId,
+      ...(candidateId ? { candidateId } : {}),
       fetchJson: async (path) => {
         const res = await fetch(path, { credentials: "include" });
         if (res.status === 304) {
@@ -1218,6 +1223,10 @@ export function useStudentSessionRouteData(
           try {
             view = await loop.tick();
           } catch (pollError) {
+            if ((pollError as { code?: unknown } | null)?.code === "SESSION_ALREADY_ACTIVE") {
+              setOwnershipBlocked(true);
+              return;
+            }
             // No runtime-poll route in this deployment (404/HTML shell):
             // park the loop for the session and fall back to the snapshot
             // refresh so older backends keep today's cadence (dual-serve
@@ -1290,7 +1299,7 @@ export function useStudentSessionRouteData(
       }
     },
     {
-      enabled: Boolean(scheduleId && state && !error && !isLoading),
+      enabled: Boolean(scheduleId && state && !error && !isLoading && !ownershipBlocked),
       intervalMs: pollingPolicy.intervalMs,
       maxIntervalMs: pollingPolicy.maxIntervalMs,
       // Phase 6: after each run the timer asks the loop for the next delay
