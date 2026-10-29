@@ -40,6 +40,7 @@ paths:
               properties:
                 email: { type: string, format: email }
                 password: { type: string, format: password }
+                rememberMe: { type: boolean, default: false, description: Explicit remembered staff-device choice; ignored for students and emergency login. }
       responses:
         "200":
           description: Session issued
@@ -48,11 +49,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  user: { $ref: "#/components/schemas/Actor" }
+                $ref: "#/components/schemas/AuthSession"
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /auth/student/entry:
     post:
       security: []
@@ -136,14 +136,15 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  user: { $ref: "#/components/schemas/Actor" }
+                $ref: "#/components/schemas/AuthSession"
         "401": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /auth/logout:
     post:
+      security: []
       tags: [auth]
-      summary: Revoke the current session
+      summary: Revoke the supplied current cookie, including an expired session
+      description: Requires exact same-origin proof and CSRF when the cookie still names a live session. Unknown or absent cookies succeed; store failure returns 503.
       parameters:
         - $ref: "#/components/parameters/RequestId"
       responses:
@@ -152,6 +153,8 @@ paths:
           headers:
             X-Request-Id: { $ref: "#/components/headers/RequestId" }
         "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /api/v2/student/attempts/{attemptId}/responses:batch:
     servers:
       - url: /
@@ -4322,6 +4325,41 @@ paths:
             application/json:
               schema: { type: object }
         "403": { $ref: "#/components/responses/Error" }
+  /auth/reauthenticate:
+    post:
+      tags: [auth]
+      operationId: reauthenticateStaffSession
+      summary: Confirm the current staff account password and rotate its session
+      description: |-
+        Requires a live account-origin staff session, exact same-origin proof,
+        and CSRF. Rotation retains the remembered-device preference and revokes
+        the previous session atomically. Wrong password is 401 without signing
+        out other requests, except when the account reaches its lockout limit.
+        Do not automatically replay a rejected sensitive action after confirming.
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [password]
+              properties:
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Replacement session committed; old session revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthSession" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/Error" }
   /auth/logout-all:
     post:
       tags: [auth]
@@ -5419,6 +5457,16 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    AuthSession:
+      type: object
+      required: [user, csrfToken, expiresAt, idleTimeoutAt, remembered, credentialAuthenticatedAt]
+      properties:
+        user: { $ref: "#/components/schemas/Actor" }
+        csrfToken: { type: string, description: CSRF proof; the session bearer is only in the HttpOnly cookie. }
+        expiresAt: { type: string, format: date-time }
+        idleTimeoutAt: { type: string, format: date-time }
+        remembered: { type: boolean }
+        credentialAuthenticatedAt: { type: string, format: date-time, nullable: true }
     SATFormAnswers:
       type: object
       additionalProperties:
@@ -5641,6 +5689,7 @@ components:
               CSRF_FAILED,
               CSRF_REJECTED,
               SESSION_EXPIRED,
+              REAUTH_REQUIRED,
               ATTEMPT_TOKEN_INVALID,
               ATTEMPT_TOKEN_EXPIRED,
               LEASE_FENCED,

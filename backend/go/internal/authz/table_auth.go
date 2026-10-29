@@ -5,9 +5,16 @@ package authz
 // table_staff.go and table_fullpath.go.
 func init() {
 	for k, v := range map[string]Policy{
-		"GET /session":     {MinRoles: []string{}},
-		"POST /logout":     {MinRoles: []string{}},
-		"POST /logout-all": {MinRoles: []string{}},
+		"GET /session": {MinRoles: []string{}},
+		// Logout only revokes the exact cookie presented (and clears cookies):
+		// public so an expired/revoked cookie can still be cleared. It grants
+		// no account authority; the origin guard and, for live sessions,
+		// CSRF still apply.
+		"POST /logout": {Public: true},
+		// Password confirmation is staff-only; the handler further restricts
+		// it to account-origin sessions (never practice/recovery principals).
+		"POST /reauthenticate":                          {MinRoles: []string{RoleAdmin, RoleAdminObserver, RoleBuilder, RoleProctor, RoleGrader}},
+		"POST /logout-all":                              {MinRoles: []string{}},
 		"POST /student/device-recovery/{grantID}/begin": {Public: true},
 		"POST /student/device-recovery/{grantID}/claim": {Public: true},
 		"POST /student/device-recovery/{grantID}/ready": {Public: true},

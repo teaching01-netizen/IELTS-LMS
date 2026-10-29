@@ -1,8 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { apiClient } from "../../../shared/api/apiClient";
 import { prepareAnsweredExamPdf } from "./answeredExamPdf";
 
-vi.mock("../../../shared/api/apiClient", () => ({ apiClient: { getCsrfToken: () => "csrf" } }));
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  vi.spyOn(apiClient, "getCsrfToken").mockReturnValue("csrf");
+});
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  apiClient.setReauthenticationRequiredHandler(null);
+  apiClient.setUnauthorizedHandler(null);
+});
 const ready = () => ({
   downloadUrl: "/api/v1/sat-answered-pdf/downloads/0123456789abcdef0123456789abcdef",
   filename: "มินา - Answered exam.pdf",
@@ -41,10 +49,30 @@ describe("native PDF preparation", () => {
     expect(blob).not.toHaveBeenCalled();
   });
   it.each([401, 429, 503])("retains status %s for credential refresh and retry", async (status) => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status })));
     await expect(
       prepareAnsweredExamPdf("/prepare", { view: null }, new AbortController().signal)
     ).rejects.toMatchObject({ statusCode: status });
+  });
+  it("routes staff REAUTH_REQUIRED to password confirmation, never for an attempt bearer", async () => {
+    const onReauth = vi.fn();
+    apiClient.setReauthenticationRequiredHandler(onReauth);
+    const reauthResponse = () =>
+      new Response(JSON.stringify({ code: "REAUTH_REQUIRED", message: "confirm" }), {
+        status: 403,
+        headers: { "content-type": "application/json" },
+      });
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => reauthResponse()));
+    await expect(
+      prepareAnsweredExamPdf("/prepare", { view: null }, new AbortController().signal)
+    ).rejects.toMatchObject({ code: "REAUTH_REQUIRED", statusCode: 403 });
+    expect(onReauth).toHaveBeenCalledTimes(1);
+    await expect(
+      prepareAnsweredExamPdf("/prepare", { view: null }, new AbortController().signal, {
+        Authorization: "Bearer attempt",
+      })
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(onReauth).toHaveBeenCalledTimes(1);
   });
   it.each(["external", "expired", "missing", "bad-size", "bad-types"])(
     "rejects an unusable %s grant",

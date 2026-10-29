@@ -181,10 +181,18 @@ if (typeof document !== "undefined") {
 }
 
 // jsdom has no Web Locks. The SAT one-writer-tab gate requires them (and
-// fails closed without them), so give jsdom a minimal in-memory exclusive
-// lock manager with `ifAvailable` semantics. Real browsers use the native API.
+// fails closed without them), and auth mutations queue on one exclusive lock,
+// so give jsdom a minimal in-memory exclusive lock manager: `ifAvailable`
+// requests get null when held, other requests wait in FIFO order. Real
+// browsers use the native API.
 if (typeof navigator !== "undefined" && !("locks" in navigator)) {
   const held = new Set<string>();
+  const waiters = new Map<string, Array<() => void>>();
+  const release = (name: string) => {
+    const next = waiters.get(name)?.shift();
+    if (next) next();
+    else held.delete(name);
+  };
   Object.defineProperty(navigator, "locks", {
     configurable: true,
     value: {
@@ -195,13 +203,19 @@ if (typeof navigator !== "undefined" && !("locks" in navigator)) {
       ) {
         if (held.has(name)) {
           if (options.ifAvailable) return callback(null);
-          throw new Error("jsdom Web Locks stub supports ifAvailable requests only.");
+          // Ownership passes directly to this waiter on release.
+          await new Promise<void>((resolve) => {
+            const queue = waiters.get(name) ?? [];
+            queue.push(resolve);
+            waiters.set(name, queue);
+          });
+        } else {
+          held.add(name);
         }
-        held.add(name);
         try {
           return await callback({ name });
         } finally {
-          held.delete(name);
+          release(name);
         }
       },
     },

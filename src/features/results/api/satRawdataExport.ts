@@ -1,3 +1,4 @@
+import { apiClient } from '../../../shared/api/apiClient';
 import { downloadBlob } from '../../../utils/downloadBlob';
 
 function slugify(value: string): string {
@@ -15,36 +16,33 @@ export function satRawdataExportFilename(examTitle: string | undefined, date: Da
   return slug ? `sat-rawdata-${slug}-${stamp}.xlsx` : `sat-rawdata-${stamp}.xlsx`;
 }
 
-async function responseErrorMessage(response: Response): Promise<string> {
-  try {
-    const payload: unknown = await response.json();
-    if (
-      payload !== null &&
-      typeof payload === 'object' &&
-      'message' in payload &&
-      typeof payload.message === 'string' &&
-      payload.message.trim()
-    ) {
-      return payload.message;
-    }
-  } catch {
-    // Fall through to a status-based error for non-JSON responses.
-  }
-  return `SAT RAWDATA export could not be downloaded (${response.status}).`;
-}
-
 /** Fetches and downloads the section-specific SAT RAWDATA workbook. */
 export async function downloadSatRawdataXlsx(
   examId: string,
   scheduleId: string,
   examTitle?: string,
 ): Promise<void> {
-  const response = await fetch(
-    `/api/v1/results/sat/export/rawdata?examId=${encodeURIComponent(examId)}&scheduleId=${encodeURIComponent(scheduleId)}&format=xlsx`,
-    { credentials: 'same-origin' },
-  );
+  const endpoint = `/api/v1/results/sat/export/rawdata?examId=${encodeURIComponent(examId)}&scheduleId=${encodeURIComponent(scheduleId)}&format=xlsx`;
+  const generation = apiClient.captureAuthGeneration();
+  const response = await fetch(endpoint, { credentials: 'same-origin' });
   if (!response.ok) {
-    throw new Error(await responseErrorMessage(response));
+    const error = await apiClient.errorFromResponse(response);
+    // Shared auth owners first (sign-in check / password confirmation), so the
+    // structured code is not lost to the message-only error below.
+    await apiClient.reportAuthFailure(error, {
+      endpoint,
+      method: 'GET',
+      requestId: error.requestId ?? '',
+      generation,
+      bearer: false,
+    });
+    if (!error.message || error.message === response.statusText) {
+      error.message = `SAT RAWDATA export could not be downloaded (${response.status}).`;
+    }
+    throw error;
   }
-  downloadBlob(satRawdataExportFilename(examTitle, new Date()), await response.blob());
+  const blob = await response.blob();
+  // Never hand a previous actor's workbook to the next signed-in user.
+  apiClient.assertAuthGeneration(generation);
+  downloadBlob(satRawdataExportFilename(examTitle, new Date()), blob);
 }

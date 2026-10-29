@@ -42,9 +42,21 @@ export function StudentCheckInGuidance() {
 }
 
 export function LoginPage() {
-  const { login, session, status } = useAuthSession();
+  const {
+    login,
+    session,
+    status,
+    pendingLogout,
+    logoutAllUnconfirmed,
+    rememberMeAvailable,
+    dismissLogoutNotice,
+    refresh,
+  } = useAuthSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // Default on for the agreed personal staff device policy; the copy below
+  // tells shared-device users to clear it.
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [studentGuidance, setStudentGuidance] = useState(false);
@@ -87,7 +99,7 @@ export function LoginPage() {
     if (isSubmitting || inFlightRef.current) {
       return;
     }
-    const parsed = loginFormSchema.safeParse({ email, password });
+    const parsed = loginFormSchema.safeParse({ email, password, rememberMe });
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Enter a valid email and password.');
       return;
@@ -97,7 +109,11 @@ export function LoginPage() {
     setError(null);
 
     try {
-      const nextSession = await login(parsed.data.email, parsed.data.password);
+      const nextSession = await login(
+        parsed.data.email,
+        parsed.data.password,
+        rememberMeAvailable ? parsed.data.rememberMe : undefined,
+      );
       if (!isMountedRef.current) {
         return;
       }
@@ -143,6 +159,34 @@ export function LoginPage() {
             <p className="text-sm text-gray-500">Sign in to access your dashboard</p>
           </div>
 
+          {status === 'logoutPending' ? (
+            <div role="status" className="mb-5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {pendingLogout?.failed
+                ? pendingLogout.scope === 'all'
+                  ? 'Signing out everywhere isn’t confirmed yet. We’ll keep retrying.'
+                  : 'Signing out isn’t confirmed yet. We’ll keep retrying.'
+                : 'Signing out…'}
+              {pendingLogout?.failed ? (
+                <button type="button" onClick={() => void refresh()} className="ml-2 font-medium underline">
+                  Retry now
+                </button>
+              ) : null}
+            </div>
+          ) : status === 'unavailable' ? (
+            <div role="status" className="mb-5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              We couldn’t check whether you’re already signed in. We’ll retry automatically.
+            </div>
+          ) : null}
+          {logoutAllUnconfirmed ? (
+            <div role="status" className="mb-5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              This browser is signed out, but signing out of your other devices wasn’t confirmed.
+              Sign in and choose “Sign out everywhere” again.
+              <button type="button" onClick={dismissLogoutNotice} className="ml-2 font-medium underline">
+                Dismiss
+              </button>
+            </div>
+          ) : null}
+
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1.5">
@@ -173,6 +217,27 @@ export function LoginPage() {
                 className="w-full px-3 py-2 border border-gray-200 rounded-md shadow-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-600/25 focus:border-blue-600"
               />
             </div>
+
+            {rememberMeAvailable ? (
+              <div className="flex items-start gap-2">
+                <input
+                  id="remember-me"
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  aria-describedby="remember-me-hint"
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-600/40"
+                />
+                <div>
+                  <label htmlFor="remember-me" className="text-sm font-medium text-gray-700">
+                    Keep me signed in on this device
+                  </label>
+                  <p id="remember-me-hint" className="text-xs text-gray-500">
+                    Clear this on a shared or public computer.
+                  </p>
+                </div>
+              </div>
+            ) : null}
 
             {error ? (
               <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

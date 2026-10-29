@@ -75,7 +75,7 @@ func TestActivityPrecedesAuthenticationAndProbesBypassAuth(t *testing.T) {
 	var resumes, lookups atomic.Int32
 	l := background.NewLifecycle(context.Background(), 20*time.Millisecond, background.LifecycleHooks{Resume: func(context.Context) error { resumes.Add(1); return nil }})
 	defer l.Close()
-	app := &App{DB: pool, Config: config.Config{SessionCookieName: "session"}, Background: l, SessionResolver: func(_ context.Context, _ *sql.DB, _ *auth.SessionCache, _ config.Config, _ string, _ time.Time) (*auth.Session, error) {
+	app := &App{DB: pool, Config: config.Config{SessionCookieName: "session"}, Background: l, SessionResolver: func(_ context.Context, _ *sql.DB, _ *auth.SessionCache, _ config.Config, _ string) (*auth.Session, error) {
 		if l.State() != "active" {
 			t.Error("authentication reached DB before activation")
 		}

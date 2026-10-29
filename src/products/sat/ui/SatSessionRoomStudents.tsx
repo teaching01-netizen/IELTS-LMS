@@ -1,5 +1,5 @@
-import { DeviceRecoveryAction } from '../../../features/proctor/ui/DeviceRecoveryDialog';
-import { AlertTriangle, ChevronRight, MessageSquareWarning, Pause, Play, Timer } from 'lucide-react';
+import { DeviceRecoveryDialog } from '../../../features/proctor/ui/DeviceRecoveryDialog';
+import { AlertTriangle, ChevronRight, MessageSquareWarning, MonitorSmartphone, Pause, Play, Timer } from 'lucide-react';
 import { useRef, useState } from 'react';
 import type { StudentSession } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
@@ -224,6 +224,7 @@ export function StudentDetail({
   const sectionLabel = sectionLabelFor(runtime, student.runtimeCurrentSection);
   const moduleSlot = satModuleSlotLabel(moduleRoleFor(student));
   const actionDisabled = anyStudentPending || recoveryPending || blocked;
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const hasAttention = student.warnings > 0 || student.violations.length > 0;
   const attentionCount = student.warnings + student.violations.length;
   const attentionFirst = variant === 'review' && hasAttention;
@@ -272,8 +273,6 @@ export function StudentDetail({
           {student.studentId}{student.email ? ` · ${student.email}` : ''}
         </p>
       </div>
-
-      <DeviceRecoveryAction scheduleId={student.scheduleId} attemptId={student.id} disabled={blocked} />
 
       {attentionFirst ? <StudentAttention student={student} count={attentionCount} /> : null}
 
@@ -374,7 +373,10 @@ export function StudentDetail({
           </button>
           <button type="button" onClick={() => onAddTime(5)} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press"><Timer size={16} aria-hidden="true" />Add 5 minutes…</button>
           <button type="button" onClick={onWarn} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press"><MessageSquareWarning size={16} aria-hidden="true" />Send warning…</button>
+          {/* Recovery works on ended or stalled sittings too, so only a stale room disables it. */}
+          <button type="button" onClick={() => setRecoveryOpen(true)} disabled={blocked} className="sat-btn sat-btn--secondary sat-press"><MonitorSmartphone size={16} aria-hidden="true" />ย้ายเครื่อง / ให้ทำต่อ</button>
         </div>
+        <DeviceRecoveryDialog scheduleId={student.scheduleId} attemptId={student.id} isOpen={recoveryOpen} onClose={() => setRecoveryOpen(false)} />
         <div className="mt-3 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-3">
           <button type="button" onClick={onTerminate} disabled={actionDisabled} className="sat-btn sat-btn--danger-secondary sat-press">End attempt…</button>
         </div>

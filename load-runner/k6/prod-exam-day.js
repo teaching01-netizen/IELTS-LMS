@@ -187,7 +187,7 @@ export function controlFlow() {
     jar.clear(baseUrl);
     const loginResp = http.post(`${baseUrl}/api/v1/auth/login`, JSON.stringify(staff), {
       jar,
-      headers: jsonHeaders(),
+      headers: jsonHeaders({ origin: baseUrl }),
     });
     if (loginResp.status !== 200) continue;
 
@@ -371,7 +371,7 @@ export function controlFlow() {
     const adminLogin = http.post(
       `${baseUrl}/api/v1/auth/login`,
       JSON.stringify({ email: creds.editor.email, password: creds.editor.password }),
-      { jar: adminJar, headers: jsonHeaders() },
+      { jar: adminJar, headers: jsonHeaders({ origin: baseUrl }) },
     );
     check(adminLogin, { 'admin login 200': (r) => r.status === 200 }) ||
       fail(`Admin login failed: status=${adminLogin.status} body=${adminLogin.body.slice(0, 200)}`);

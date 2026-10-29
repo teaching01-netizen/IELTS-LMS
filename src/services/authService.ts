@@ -25,6 +25,10 @@ export interface AuthSession {
   csrfToken: string;
   expiresAt: string;
   idleTimeoutAt?: string | undefined;
+  /** The browser holds a persistent (remembered-device) cookie. */
+  remembered?: boolean | undefined;
+  /** Last password confirmation for this session; null for legacy/non-password sessions. */
+  credentialAuthenticatedAt?: string | null | undefined;
 }
 
 export interface StudentQueuedAdmission {
@@ -56,6 +60,8 @@ export type StudentEntryResult = StudentEntrySuccess | StudentQueuedAdmission;
 interface LoginPayload {
   email: string;
   password: string;
+  /** Omitted means not remembered; older backends reject the unknown field. */
+  rememberMe?: boolean | undefined;
 }
 
 interface PasswordResetRequestPayload {
@@ -115,35 +121,103 @@ function extractEnvelopeData<T>(response: { data?: BackendEnvelope<T> | T | unde
   return payload as T;
 }
 
-class AuthService {
-  private inflightSession: Promise<AuthSession | null> | null = null;
+function isAuthSession(value: unknown): value is AuthSession {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  const user = record['user'] as Record<string, unknown> | null | undefined;
+  return (
+    typeof record['csrfToken'] === 'string' &&
+    typeof record['expiresAt'] === 'string' &&
+    !!user &&
+    typeof user === 'object' &&
+    typeof user['id'] === 'string' &&
+    typeof user['role'] === 'string'
+  );
+}
 
-  async getSession(): Promise<AuthSession | null> {
-    // Single-flight: concurrent refresh() callers (StrictMode double-mount,
-    // multiple guards) share one in-flight request instead of stamping the
-    // auth-critical tier once per caller.
-    if (this.inflightSession) {
-      return this.inflightSession;
+function abortError(): Error {
+  return Object.assign(new Error('Request cancelled'), { name: 'AbortError' });
+}
+
+/** Resolve `pending` unless this caller's own signal aborts first. */
+function joinWithSignal<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return pending;
+  if (signal.aborted) return Promise.reject(abortError());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener('abort', onAbort, { once: true });
+    pending.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+interface SessionFlight {
+  generation: number;
+  controller: AbortController;
+  promise: Promise<AuthSession | null>;
+}
+
+class AuthService {
+  private sessionFlight: SessionFlight | null = null;
+
+  /**
+   * Authoritative session check. Concurrent callers of the same auth
+   * generation share one request (StrictMode double-mount, several guards);
+   * a newer generation never joins an older actor's flight. A caller's
+   * `signal` cancels only that caller's wait, never the shared request.
+   *
+   * Resolves null only for a definitive "no session" (401).
+   * Transport failures and malformed payloads reject: they are not logout.
+   */
+  async getSession(generation = 0, signal?: AbortSignal): Promise<AuthSession | null> {
+    const current = this.sessionFlight;
+    if (current && current.generation === generation) {
+      return joinWithSignal(current.promise, signal);
     }
-    const pending = this.fetchSession();
-    this.inflightSession = pending;
-    try {
-      return await pending;
-    } finally {
-      this.inflightSession = null;
-    }
+    if (current) current.controller.abort();
+    const controller = new AbortController();
+    const flight: SessionFlight = {
+      generation,
+      controller,
+      promise: this.fetchSession(controller.signal).finally(() => {
+        // Clear only our own flight; a newer one may already have replaced it.
+        if (this.sessionFlight === flight) this.sessionFlight = null;
+      }),
+    };
+    this.sessionFlight = flight;
+    return joinWithSignal(flight.promise, signal);
   }
 
-  private async fetchSession(): Promise<AuthSession | null> {
+  /** Abort any in-flight session check (identity changed). */
+  invalidateSessionRequest(): void {
+    this.sessionFlight?.controller.abort();
+    this.sessionFlight = null;
+  }
+
+  private async fetchSession(signal: AbortSignal): Promise<AuthSession | null> {
     try {
       const response = await get<BackendEnvelope<AuthSession> | AuthSession>('/v1/auth/session', {
         retries: 0,
+        signal,
+        // The session check owns the cookie verdict; it must not re-enter the
+        // global 401 handler that itself calls the session check.
+        skipUnauthorizedHandler: true,
       });
-      // A 204/empty body means "no session" rather than an error.
-      if (response?.data === null || response?.data === undefined) {
-        return null;
+      const session = response?.data == null ? null : extractEnvelopeData<AuthSession>(response);
+      if (!isAuthSession(session)) {
+        throw Object.assign(new Error('Session response was malformed'), {
+          code: 'SESSION_PROTOCOL_ERROR',
+        });
       }
-      return extractEnvelopeData<AuthSession>(response);
+      return session;
     } catch (error) {
       if (
         typeof error === 'object' &&
@@ -161,19 +235,36 @@ class AuthService {
   async login(payload: LoginPayload): Promise<AuthSession> {
     const response = await post<BackendEnvelope<AuthSession>>('/v1/auth/login', payload, {
       retries: 0,
+      skipUnauthorizedHandler: true,
     });
+    return extractEnvelopeData<AuthSession>(response);
+  }
+
+  /**
+   * Confirm the current staff user's password for sensitive actions. The
+   * server rotates the session; a wrong password is this form's error, not a
+   * global sign-out.
+   */
+  async reauthenticate(password: string): Promise<AuthSession> {
+    const response = await post<BackendEnvelope<AuthSession>>(
+      '/v1/auth/reauthenticate',
+      { password },
+      { retries: 0, skipUnauthorizedHandler: true },
+    );
     return extractEnvelopeData<AuthSession>(response);
   }
 
   async logout(): Promise<void> {
     await post<BackendEnvelope<void>>('/v1/auth/logout', undefined, {
       retries: 0,
+      skipUnauthorizedHandler: true,
     });
   }
 
   async logoutAll(): Promise<void> {
     await post<BackendEnvelope<void>>('/v1/auth/logout-all', undefined, {
       retries: 0,
+      skipUnauthorizedHandler: true,
     });
   }
 
@@ -187,7 +278,7 @@ class AuthService {
     const response = await post<BackendEnvelope<AuthSession>>(
       '/v1/auth/password/reset-complete',
       payload,
-      { retries: 0 },
+      { retries: 0, skipUnauthorizedHandler: true },
     );
     return extractEnvelopeData<AuthSession>(response);
   }
@@ -195,6 +286,7 @@ class AuthService {
   async activateAccount(payload: AccountActivationPayload): Promise<AuthSession> {
     const response = await post<BackendEnvelope<AuthSession>>('/v1/auth/activate', payload, {
       retries: 0,
+      skipUnauthorizedHandler: true,
     });
     return extractEnvelopeData<AuthSession>(response);
   }

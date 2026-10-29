@@ -77,6 +77,16 @@ func NewSessionCache(cfg SessionCacheConfig) *SessionCache {
 	}
 }
 
+// Enabled reports whether the cache serves lookups at all.
+func (c *SessionCache) Enabled() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.enabled
+}
+
 // Get returns the cached session when present and unexpired at now.
 // Expiry is evaluated on every call against caller time: absolute
 // (ExpiresAt) and idle (IdleTimeoutAt) deadlines both fail closed to miss.

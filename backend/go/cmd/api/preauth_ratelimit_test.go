@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/config"
@@ -37,7 +36,7 @@ func TestPreAuthBackstopRejectsBeforeSessionLookup(t *testing.T) {
 	app := &App{
 		Config: cfg,
 		DB:     db,
-		SessionResolver: func(context.Context, *sql.DB, *auth.SessionCache, config.Config, string, time.Time) (*auth.Session, error) {
+		SessionResolver: func(context.Context, *sql.DB, *auth.SessionCache, config.Config, string) (*auth.Session, error) {
 			lookupCalls++
 			return nil, nil
 		},

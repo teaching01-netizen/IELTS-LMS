@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { MonitorSmartphone } from "lucide-react";
 import { Dialog } from "../../../components/ui/Dialog";
 import { Button } from "../../../components/ui/Button";
 import { Input } from "../../../components/ui/Input";
@@ -463,7 +464,13 @@ export function DeviceRecoveryAction({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button disabled={disabled} onClick={() => setOpen(true)}>
+      <Button
+        variant="secondary"
+        size="sm"
+        leftIcon={<MonitorSmartphone size={14} aria-hidden="true" />}
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
         {DIALOG_TITLE}
       </Button>
       <DeviceRecoveryDialog

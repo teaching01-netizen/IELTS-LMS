@@ -19,6 +19,10 @@ export async function prepareAnsweredExamPdf(
   headers?: Record<string, string>
 ): Promise<PreparedAnsweredExamPdf> {
   const csrfToken = apiClient.getCsrfToken();
+  const generation = apiClient.captureAuthGeneration();
+  // Student callers pass their attempt bearer; its failures are not the
+  // staff cookie's and must not open staff password confirmation.
+  const bearer = Object.keys(headers ?? {}).some((name) => name.toLowerCase() === "authorization");
   const response = await fetch(endpoint, {
     method: "POST",
     credentials: "same-origin",
@@ -30,11 +34,20 @@ export async function prepareAnsweredExamPdf(
     },
     body: JSON.stringify(body),
   });
-  if (!response.ok)
-    throw Object.assign(new Error(`PDF preparation failed (${response.status}).`), {
-      statusCode: response.status,
+  if (!response.ok) {
+    const error = await apiClient.errorFromResponse(response);
+    await apiClient.reportAuthFailure(error, {
+      endpoint,
+      method: "POST",
+      requestId: error.requestId ?? "",
+      generation,
+      bearer,
     });
+    error.message = `PDF preparation failed (${response.status}).`;
+    throw error;
+  }
   const pdf = (await response.json()) as PreparedAnsweredExamPdf | null;
+  apiClient.assertAuthGeneration(generation);
   if (
     !pdf ||
     typeof pdf.downloadUrl !== "string" ||

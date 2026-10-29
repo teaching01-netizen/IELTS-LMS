@@ -71,6 +71,8 @@
   "exclude": [
     "node_modules",
     "dist",
+    "test-results",
+    "playwright-report",
     "src/stories",
     "e2e",
     "**/__tests__",

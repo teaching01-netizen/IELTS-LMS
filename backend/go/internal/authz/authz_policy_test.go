@@ -51,7 +51,7 @@ func serve(t *testing.T, table map[string]Policy, template, method, path, role s
 
 // expectedAnnotated lists every route() annotation key (main.go 360-600).
 var expectedAnnotated = []string{
-	"GET /session", "POST /logout", "POST /logout-all",
+	"GET /session", "POST /logout", "POST /logout-all", "POST /reauthenticate",
 	"POST /student/device-recovery/{grantID}/claim",
 	"POST /student/device-recovery/{grantID}/ready",
 	"POST /student/device-recovery/{grantID}/begin",

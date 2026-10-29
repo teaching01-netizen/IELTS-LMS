@@ -416,6 +416,25 @@ type Config struct {
 	SessionAbsoluteHours   int
 	AttemptTokenTTLMins    int
 
+	// Persistent staff login (docs/plans/2026-10-29-persistent-login-low-level.md).
+	// PersistentLoginEnabled gates NEW remembered issuance only; rows issued
+	// while it was on keep their stored policy until revoked or expired.
+	PersistentLoginEnabled bool
+	// Remembered staff (builder/proctor/grader) and admin idle/absolute
+	// windows, in hours. Validated positive, idle <= absolute, <= 720h.
+	SessionRememberStaffIdleHours     int
+	SessionRememberStaffAbsoluteHours int
+	SessionRememberAdminIdleHours     int
+	SessionRememberAdminAbsoluteHours int
+	// SessionCredentialFreshMins bounds how long a password verification
+	// authorizes sensitive actions (1..60 minutes).
+	SessionCredentialFreshMins int
+	// AuthPublicOrigin is the exact browser origin (scheme://host[:port]) that
+	// credential and logout requests must come from. Required (https) for
+	// production-like API startup; empty in development derives it from the
+	// request itself.
+	AuthPublicOrigin string
+
 	MaxMutationsPerBatch  int
 	MaxWritingAnswerChars int
 	MaxTextAnswerChars    int
@@ -908,6 +927,14 @@ func Load() Config {
 		SessionAbsoluteHours:   getenvInt("SESSION_ABSOLUTE_HOURS", 12),
 		AttemptTokenTTLMins:    getenvInt("ATTEMPT_TOKEN_TTL_MINUTES", 15),
 
+		PersistentLoginEnabled:            getenvBool("PERSISTENT_LOGIN_ENABLED", false),
+		SessionRememberStaffIdleHours:     getenvInt("SESSION_REMEMBER_STAFF_IDLE_HOURS", 168),
+		SessionRememberStaffAbsoluteHours: getenvInt("SESSION_REMEMBER_STAFF_ABSOLUTE_HOURS", 720),
+		SessionRememberAdminIdleHours:     getenvInt("SESSION_REMEMBER_ADMIN_IDLE_HOURS", 24),
+		SessionRememberAdminAbsoluteHours: getenvInt("SESSION_REMEMBER_ADMIN_ABSOLUTE_HOURS", 168),
+		SessionCredentialFreshMins:        getenvInt("SESSION_CREDENTIAL_FRESH_MINS", 15),
+		AuthPublicOrigin:                  strings.TrimRight(strings.TrimSpace(os.Getenv("AUTH_PUBLIC_ORIGIN")), "/"),
+
 		MaxMutationsPerBatch:  getenvInt("MAX_MUTATIONS_PER_BATCH", 200),
 		MaxWritingAnswerChars: getenvInt("MAX_WRITING_ANSWER_CHARS", 50000),
 		MaxTextAnswerChars:    getenvInt("MAX_TEXT_ANSWER_CHARS", 512),
@@ -1182,7 +1209,115 @@ func (c Config) ValidateForRuntime() error {
 	if c.DBPoolMaxAPI <= 0 || c.DBPoolMaxWorker <= 0 || c.WorkerClaimPartitions <= 0 {
 		return fmt.Errorf("pool/partition tunables must be positive (api=%d worker=%d partitions=%d)", c.DBPoolMaxAPI, c.DBPoolMaxWorker, c.WorkerClaimPartitions)
 	}
+	if err := c.validateSessionPolicy(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// MaxRememberedSessionHours caps every remembered idle/absolute window.
+const MaxRememberedSessionHours = 720
+
+// MaxCredentialFreshMins caps the sensitive-action password window.
+const MaxCredentialFreshMins = 60
+
+// validateSessionPolicy rejects remembered/freshness windows that are not
+// positive, exceed the caps, or put the idle window beyond the hard maximum.
+// Bounds are checked on the integer hours before any duration multiplication.
+func (c Config) validateSessionPolicy() error {
+	for _, pair := range []struct {
+		name        string
+		idle, total int
+	}{
+		{"SESSION_REMEMBER_STAFF", c.SessionRememberStaffIdleHours, c.SessionRememberStaffAbsoluteHours},
+		{"SESSION_REMEMBER_ADMIN", c.SessionRememberAdminIdleHours, c.SessionRememberAdminAbsoluteHours},
+	} {
+		if pair.idle <= 0 || pair.total <= 0 || pair.idle > MaxRememberedSessionHours || pair.total > MaxRememberedSessionHours {
+			return fmt.Errorf("%s_IDLE_HOURS and %s_ABSOLUTE_HOURS must be between 1 and %d", pair.name, pair.name, MaxRememberedSessionHours)
+		}
+		if pair.idle > pair.total {
+			return fmt.Errorf("%s_IDLE_HOURS must not exceed %s_ABSOLUTE_HOURS", pair.name, pair.name)
+		}
+	}
+	if c.SessionCredentialFreshMins <= 0 || c.SessionCredentialFreshMins > MaxCredentialFreshMins {
+		return fmt.Errorf("SESSION_CREDENTIAL_FRESH_MINS must be between 1 and %d", MaxCredentialFreshMins)
+	}
+	if c.AuthPublicOrigin != "" {
+		if _, err := ParseAuthOrigin(c.AuthPublicOrigin); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateForAPI adds the serving-API checks for the session lifecycle on top
+// of ValidateForRuntime. The process-local session cache cannot observe
+// revocation on other instances, so remembered rows must never be served
+// from it: the API refuses SESSION_CACHE=on regardless of the issuance flag
+// (turning issuance off does not retire already-issued remembered rows).
+// Production-like deployments must use Secure cookies and declare the exact
+// HTTPS browser origin for credential and logout requests.
+func (c Config) ValidateForAPI() error {
+	if err := c.ValidateForRuntime(); err != nil {
+		return err
+	}
+	if c.SessionCacheEnabled {
+		return fmt.Errorf("SESSION_CACHE must be off: the API authorizes every session against the primary database")
+	}
+	if productionLike(c.Environment) {
+		if !c.CookieSecure {
+			return fmt.Errorf("COOKIE_SECURE must be true in %s", c.Environment)
+		}
+		origin, err := ParseAuthOrigin(c.AuthPublicOrigin)
+		if err != nil {
+			return fmt.Errorf("AUTH_PUBLIC_ORIGIN is required in %s: %w", c.Environment, err)
+		}
+		if origin.Scheme != "https" {
+			return fmt.Errorf("AUTH_PUBLIC_ORIGIN must use https in %s", c.Environment)
+		}
+	}
+	return nil
+}
+
+// AuthOrigin is a normalized browser origin: lower-case scheme and host plus
+// the effective port (default ports made explicit).
+type AuthOrigin struct {
+	Scheme string
+	Host   string
+	Port   string
+}
+
+// String renders the origin in its canonical scheme://host:port form.
+func (o AuthOrigin) String() string {
+	return o.Scheme + "://" + net.JoinHostPort(o.Host, o.Port)
+}
+
+// ParseAuthOrigin parses an exact origin. It rejects anything other than
+// http/https, user-info, paths, queries and fragments.
+func ParseAuthOrigin(raw string) (AuthOrigin, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return AuthOrigin{}, fmt.Errorf("origin is empty")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return AuthOrigin{}, fmt.Errorf("origin %q is invalid: %w", raw, err)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return AuthOrigin{}, fmt.Errorf("origin %q must use http or https", raw)
+	}
+	if u.User != nil || u.Hostname() == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+		return AuthOrigin{}, fmt.Errorf("origin %q must be scheme://host[:port] only", raw)
+	}
+	port := u.Port()
+	if port == "" {
+		port = "443"
+		if scheme == "http" {
+			port = "80"
+		}
+	}
+	return AuthOrigin{Scheme: scheme, Host: strings.ToLower(u.Hostname()), Port: port}, nil
 }
 
 // Addr returns host:port.

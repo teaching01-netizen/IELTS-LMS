@@ -61,12 +61,14 @@ import (
 )
 
 // SessionResolver loads a session actor from the request's session cookie.
-// The concrete auth helper accepts a broader auth.Querier surface, so the
-// composition root adapts it to the API's *sql.DB dependency for test seams.
-type SessionResolver func(context.Context, *sql.DB, *auth.SessionCache, config.Config, string, time.Time) (*auth.Session, error)
+// Admission decisions use database time read after the session row lock, so
+// no request-start timestamp is passed in. Tests inject fakes here.
+type SessionResolver func(context.Context, *sql.DB, *auth.SessionCache, config.Config, string) (*auth.Session, error)
 
-func defaultSessionResolver(ctx context.Context, db *sql.DB, cache *auth.SessionCache, cfg config.Config, token string, now time.Time) (*auth.Session, error) {
-	return auth.LookupSessionWithCache(ctx, db, cache, cfg, token, now)
+func defaultSessionResolver(ctx context.Context, db *sql.DB, cache *auth.SessionCache, cfg config.Config, token string) (*auth.Session, error) {
+	// The wall clock only drives the (serving-disabled) cache; the database
+	// lookup takes its own post-lock time.
+	return auth.LookupSessionWithCache(ctx, db, cache, cfg, token, time.Now())
 }
 
 // App is the interface-free composition root. Domain services hang off
@@ -373,7 +375,7 @@ func main() {
 	httpx.SetUnknownHook(func(r *http.Request, err error) {
 		log.Printf(`{"level":"error","msg":"unknown error masked as 500","route":%q,"err":%q}`, r.URL.Path, err.Error())
 	})
-	if err := cfg.ValidateForRuntime(); err != nil {
+	if err := cfg.ValidateForAPI(); err != nil {
 		log.Fatalf("api: invalid config: %v", err)
 	}
 	if err := httpx.SetTrustedProxies(cfg.TrustedProxyCIDRs); err != nil {
@@ -513,6 +515,9 @@ func BuildRouter(app *App) http.Handler {
 	r.Use(httpx.RequestID)
 	r.Use(httpx.Trace)
 	r.Use(httpx.SecurityHeaders)
+	// Auth responses (session identity, CSRF token) are never cacheable,
+	// including the early 413/429/403 errors rendered by later layers.
+	r.Use(noStoreMiddleware)
 	// Global ceiling is the largest tier (workbook 64MiB); tighter tiers
 	// re-wrap per group below (a smaller inner cap always wins).
 	r.Use(httpx.BodyLimit(httpx.MaxWorkbookBodyBytes))
@@ -566,17 +571,28 @@ func BuildRouter(app *App) http.Handler {
 		// stay on a strict per-IP quota (abuse surface). Student check-in is
 		// per IP too but on its own room-sized budget: a whole exam room can
 		// share one NAT address, and check-in guards no password.
+		// Credential-establishing and logout POSTs additionally require the
+		// exact browser origin (login CSRF / forced logout), even when no
+		// session exists yet.
+		originGuard := authOriginGuard(app)
 		r.With(adminLimit).Route("/auth", func(r chi.Router) {
 			r.With(limitTier(app, httpx.TierAuthCritical, sessionCookieKey(app))).Group(func(r chi.Router) {
 				authzRoute(r, "GET", "/session", sessionHandler(app))
-				authzRoute(r, "POST", "/logout", logoutHandler(app))
-				authzRoute(r, "POST", "/logout-all", logoutAllHandler(app))
+				r.With(originGuard).Group(func(r chi.Router) {
+					authzRoute(r, "POST", "/logout", logoutHandler(app))
+					authzRoute(r, "POST", "/logout-all", logoutAllHandler(app))
+				})
 			})
 			r.With(limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
-				authzRoute(r, "POST", "/login", loginHandler(app))
-				authzRoute(r, "POST", "/activate", activateHandler(app))
+				r.With(originGuard).Group(func(r chi.Router) {
+					authzRoute(r, "POST", "/login", loginHandler(app))
+					authzRoute(r, "POST", "/activate", activateHandler(app))
+					authzRoute(r, "POST", "/password/reset-complete", passwordResetCompleteHandler(app))
+					// Password confirmation spends the strict credential-attempt
+					// budget, never the generous session-read one.
+					authzRoute(r, "POST", "/reauthenticate", reauthenticateHandler(app))
+				})
 				authzRoute(r, "POST", "/password/reset-request", passwordResetRequestHandler(app))
-				authzRoute(r, "POST", "/password/reset-complete", passwordResetCompleteHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierStudentCheckin, ipKey())).Group(func(r chi.Router) {
 				authzRoute(r, "POST", "/student/entry", studentEntryHandler(app))
@@ -596,7 +612,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "POST", "/", examsCreateHandler(app))
 			authzRoute(r, "GET", "/{id}", examsGetHandler(app))
 			authzRoute(r, "PATCH", "/{id}", examsUpdateHandler(app))
-			authzRoute(r, "DELETE", "/{id}", examsDeleteHandler(app))
+			authzRoute(r, "DELETE", "/{id}", withFreshPassword(app, examsDeleteHandler(app)))
 			authzRoute(r, "PATCH", "/{id}/draft", coeditScopeCloseGuard(app, authoringcoedit.CloseDraftReplaced, "id", examsDraftHandler(app)))
 			authzRoute(r, "POST", "/{id}/draft/reopen", examsDraftReopenHandler(app))
 			authzRoute(r, "POST", "/{id}/publish", coeditPublishGuard(app, examsPublishHandler(app)))
@@ -847,14 +863,14 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/submissions/{submissionID}/sections", gradingSectionsHandler(app))
 			authzRoute(r, "PUT", "/submissions/{submissionID}/sections/{section}/questions/{questionID}/override", gradingOverrideQuestionHandler(app))
 			authzRoute(r, "GET", "/submissions/{submissionID}/writing-tasks", gradingWritingTasksHandler(app))
-			authzRoute(r, "POST", "/export", gradingProfileExportHandler(app))
+			authzRoute(r, "POST", "/export", withFreshPassword(app, gradingProfileExportHandler(app)))
 			authzRoute(r, "POST", "/submissions/{submissionID}/start-review", gradingStartReviewHandler(app))
 			authzRoute(r, "GET", "/submissions/{submissionID}/review-draft", gradingReviewDraftGetHandler(app))
 			authzRoute(r, "PUT", "/submissions/{submissionID}/review-draft", gradingReviewDraftPutHandler(app))
 			authzRoute(r, "POST", "/submissions/{submissionID}/mark-grading-complete", gradingMarkCompleteHandler(app))
 			authzRoute(r, "POST", "/submissions/{submissionID}/mark-ready-to-release", gradingMarkReadyHandler(app))
-			authzRoute(r, "POST", "/submissions/{submissionID}/release-now", gradingReleaseNowHandler(app))
-			authzRoute(r, "POST", "/submissions/{submissionID}/schedule-release", gradingScheduleReleaseHandler(app))
+			authzRoute(r, "POST", "/submissions/{submissionID}/release-now", withFreshPassword(app, gradingReleaseNowHandler(app)))
+			authzRoute(r, "POST", "/submissions/{submissionID}/schedule-release", withFreshPassword(app, gradingScheduleReleaseHandler(app)))
 			authzRoute(r, "POST", "/submissions/{submissionID}/reopen-review", gradingReopenHandler(app))
 			authzRoute(r, "GET", "/results/{resultID}/events", gradingResultEventsHandler(app))
 		})
@@ -862,25 +878,25 @@ func BuildRouter(app *App) http.Handler {
 		// retain their larger body cap for older clients' inline figures.
 		r.With(httpx.BodyLimit(answeredPDFMaxBodyBytes)).Route("/sat-answered-pdf", func(r chi.Router) {
 			r.With(httpx.BodyLimit(128<<10), limitTier(app, httpx.TierWrites, attemptKey())).Post("/schedules/{scheduleID}/prepare", authorize("POST /api/v1/sat-answered-pdf/schedules/{scheduleID}/prepare", prepareAnsweredPDFHandler(app, true)))
-			r.With(httpx.BodyLimit(128<<10), limitTier(app, httpx.TierWrites, userKey())).Post("/attempts/{attemptID}/prepare", authorize("POST /api/v1/sat-answered-pdf/attempts/{attemptID}/prepare", prepareAnsweredPDFHandler(app, false)))
+			r.With(httpx.BodyLimit(128<<10), limitTier(app, httpx.TierWrites, userKey())).Post("/attempts/{attemptID}/prepare", authorize("POST /api/v1/sat-answered-pdf/attempts/{attemptID}/prepare", withFreshPassword(app, prepareAnsweredPDFHandler(app, false))))
 			r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Get("/downloads/{exportID}", authorize("GET /api/v1/sat-answered-pdf/downloads/{exportID}", downloadAnsweredPDFHandler(app)))
 			r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Head("/downloads/{exportID}", authorize("HEAD /api/v1/sat-answered-pdf/downloads/{exportID}", downloadAnsweredPDFHandler(app)))
 			r.With(limitTier(app, httpx.TierWrites, attemptKey())).Post("/schedules/{scheduleID}", authorize("POST /api/v1/sat-answered-pdf/schedules/{scheduleID}", deliveryAnsweredPDFHandler(app)))
-			r.With(limitTier(app, httpx.TierWrites, userKey())).Post("/attempts/{attemptID}", authorize("POST /api/v1/sat-answered-pdf/attempts/{attemptID}", resultsSATAnsweredPDFHandler(app)))
+			r.With(limitTier(app, httpx.TierWrites, userKey())).Post("/attempts/{attemptID}", authorize("POST /api/v1/sat-answered-pdf/attempts/{attemptID}", withFreshPassword(app, resultsSATAnsweredPDFHandler(app))))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/results", func(r chi.Router) {
 			authzRoute(r, "GET", "/", resultsListHandler(app))
 			authzRoute(r, "GET", "/dashboard", resultsDashboardHandler(app))
 			authzRoute(r, "GET", "/analytics", resultsAnalyticsHandler(app))
-			authzRoute(r, "POST", "/export", resultsExportHandler(app))
+			authzRoute(r, "POST", "/export", withFreshPassword(app, resultsExportHandler(app)))
 			// Deprecated compatibility alias for pre-parity Go profile clients.
-			authzRoute(r, "POST", "/export-profile", gradingProfileExportHandler(app))
+			authzRoute(r, "POST", "/export-profile", withFreshPassword(app, gradingProfileExportHandler(app)))
 			authzRoute(r, "GET", "/sat", resultsSATListHandler(app))
 			authzRoute(r, "GET", "/sat/access-groups", resultsSATAccessGroupsHandler(app))
 			authzRoute(r, "GET", "/sat/attempts", resultsSATAttemptsHandler(app))
 			authzRoute(r, "GET", "/sat/attempts/{attemptID}/answers", resultsSATAttemptAnswersHandler(app))
 			authzRoute(r, "GET", "/sat/attempts/{attemptID}/answered-exam", resultsSATAnsweredExamHandler(app))
-			authzRoute(r, "GET", "/sat/export/rawdata", resultsSATRawdataExportHandler(app))
+			authzRoute(r, "GET", "/sat/export/rawdata", withFreshPassword(app, resultsSATRawdataExportHandler(app)))
 			authzRoute(r, "GET", "/sat/{resultID}", resultsSATGetHandler(app))
 			authzRoute(r, "GET", "/act-science", resultsACTScienceHandler(app))
 			authzRoute(r, "GET", "/act-science/{attemptID}", resultsACTScienceDetailHandler(app))
@@ -918,7 +934,7 @@ func BuildRouter(app *App) http.Handler {
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/answer-history", func(r chi.Router) {
 			authzRoute(r, "GET", "/submissions/{submissionID}/overview", answerHistoryOverviewHandler(app))
 			authzRoute(r, "GET", "/submissions/{submissionID}/targets/{targetID}", answerHistoryTargetDetailHandler(app))
-			authzRoute(r, "GET", "/submissions/{submissionID}/export", answerHistoryExportHandler(app))
+			authzRoute(r, "GET", "/submissions/{submissionID}/export", withFreshPassword(app, answerHistoryExportHandler(app)))
 			authzRoute(r, "GET", "/attempts/{attemptID}/overview", answerHistoryOverviewByAttemptHandler(app))
 			authzRoute(r, "GET", "/attempts/{attemptID}/targets/{targetID}", answerHistoryTargetDetailByAttemptHandler(app))
 		})
@@ -1255,8 +1271,7 @@ func authMiddleware(app *App) func(http.Handler) http.Handler {
 			if resolver == nil {
 				resolver = defaultSessionResolver
 			}
-			now := time.Now().UTC()
-			sess, err := resolver(ctx, app.DB, app.SessionCache, app.Config, cookie.Value, now)
+			sess, err := resolver(ctx, app.DB, app.SessionCache, app.Config, cookie.Value)
 			if err != nil {
 				// DB failure must not authenticate nor masquerade as
 				// anonymous (which downstream maps to 401): report 503
@@ -1278,7 +1293,7 @@ func authMiddleware(app *App) func(http.Handler) http.Handler {
 			// that rotate or clear cookies (entry, logout) write afterwards,
 			// and the browser applies the last Set-Cookie.
 			if sess.Role == auth.RoleStudent {
-				setCreatedSessionCookies(w, app, sess.Role, cookie.Value, sess.CSRFToken, sess.ExpiresAt, now)
+				setCreatedSessionCookies(w, app, sess.Role, cookie.Value, sess.CSRFToken, sess.ExpiresAt, time.Now().UTC())
 			}
 			ctx = context.WithValue(ctx, httpx.CtxActorClass, sess.Role)
 			ctx = context.WithValue(ctx, sessionCtxKey, sess)

@@ -122,7 +122,7 @@ function staffJar() {
   const candidates = [].concat(creds.editor ? [creds.editor] : [], Array.isArray(creds.proctors) ? creds.proctors : []);
   for (const staff of candidates) {
     jar.clear(baseUrl);
-    const login = http.post(`${baseUrl}/api/v1/auth/login`, JSON.stringify(staff), { jar, headers: jsonHeaders() });
+    const login = http.post(`${baseUrl}/api/v1/auth/login`, JSON.stringify(staff), { jar, headers: jsonHeaders({ origin: baseUrl }) });
     if (login.status === 200) return jar;
   }
   fail('No staff credential could log in.');

@@ -317,6 +317,12 @@ export function StudentAccessLinkEntryRoute() {
       return;
     }
     if (authStatus === "loading") return;
+    if (authStatus === "unavailable") {
+      // The session check failed transiently: the student may still be
+      // resumable. Show the reconnect surface, never "not resumable".
+      setResumeState({ kind: "offline", reason: "server_error" });
+      return;
+    }
     if (authStatus !== "authenticated" || session?.user.role !== "student") {
       setResumeState({ kind: "not-resumable" });
       return;

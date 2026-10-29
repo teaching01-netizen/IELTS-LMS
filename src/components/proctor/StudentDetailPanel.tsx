@@ -227,7 +227,6 @@ export function StudentDetailPanel({
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-slate-950">{student.name}</h3>
- <DeviceRecoveryAction scheduleId={student.scheduleId} attemptId={student.id} />
                 <p className="text-sm text-slate-500">{student.studentId} · {student.email}</p>
               </div>
               <Badge variant={student.status === 'active' ? 'success' : student.status === 'warned' ? 'warning' : student.status === 'paused' ? 'paused' : student.status === 'terminated' ? 'danger' : 'neutral'}>
@@ -461,6 +460,11 @@ export function StudentDetailPanel({
             >
               Terminate
             </Button>
+            <DeviceRecoveryAction
+              scheduleId={student.scheduleId}
+              attemptId={student.id}
+              disabled={student.status === 'terminated'}
+            />
           </div>
           <div className="text-xs text-slate-400">Activity system scoped to {cohort.cohortName}</div>
         </div>

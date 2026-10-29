@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -76,20 +78,33 @@ func buildSessionResponse(ctx context.Context, app *App, userID, role, csrfToken
 		}
 		email = contact.String
 	}
-	return map[string]any{
-		"user": map[string]any{
-			"id":          userID,
-			"email":       email,
-			"displayName": displayName,
-			"role":        role,
-			"state":       state,
-		},
-		"csrfToken":     csrfToken,
-		"expiresAt":     expiresAt.UTC(),
-		"idleTimeoutAt": idleTimeoutAt.UTC(),
-	}, nil
+	return sessionPayload(auth.SessionUser{ID: userID, Email: email, DisplayName: displayName, Role: role, State: state}, csrfToken, expiresAt, idleTimeoutAt, false, nil), nil
 }
 
+// sessionPayload is the pure JSON projection of a session. remembered and
+// credentialAuthenticatedAt are additive fields older clients ignore.
+func sessionPayload(user auth.SessionUser, csrfToken string, expiresAt, idleTimeoutAt time.Time, remembered bool, credentialAt *time.Time) map[string]any {
+	var credential any
+	if credentialAt != nil {
+		credential = credentialAt.UTC()
+	}
+	return map[string]any{
+		"user": map[string]any{
+			"id":          user.ID,
+			"email":       user.Email,
+			"displayName": user.DisplayName,
+			"role":        user.Role,
+			"state":       user.State,
+		},
+		"csrfToken":                 csrfToken,
+		"expiresAt":                 expiresAt.UTC(),
+		"idleTimeoutAt":             idleTimeoutAt.UTC(),
+		"remembered":                remembered,
+		"credentialAuthenticatedAt": credential,
+	}
+}
+
+// writeCreatedSession answers a legacy CreateSession issuance (master key).
 func writeCreatedSession(w http.ResponseWriter, r *http.Request, app *App, userID, role, sessionToken, csrfToken string, now time.Time) {
 	expiresAt, idleTimeoutAt := auth.SessionExpiry(app.Config, role, now)
 	payload, err := buildSessionResponse(r.Context(), app, userID, role, csrfToken, expiresAt, idleTimeoutAt)
@@ -101,10 +116,55 @@ func writeCreatedSession(w http.ResponseWriter, r *http.Request, app *App, userI
 	httpx.WriteJSON(w, http.StatusOK, payload)
 }
 
-// loginRequest is the staff/user login payload.
+// writeAccountSession answers a committed password workflow. Deadlines and
+// the remembered choice come from the persisted row, never recomputed here,
+// and cookies are only written after the workflow's commit was acknowledged.
+func writeAccountSession(w http.ResponseWriter, r *http.Request, app *App, created auth.CreatedSession) {
+	s := created.Session
+	var payload map[string]any
+	if s.Role == auth.RoleStudent {
+		// Students keep the practice-identity projection and cookie policy.
+		p, err := buildSessionResponse(r.Context(), app, s.UserID, s.Role, s.CSRFToken, s.ExpiresAt, s.IdleTimeoutAt)
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		payload = p
+		setCreatedSessionCookies(w, app, s.Role, created.Token, s.CSRFToken, s.ExpiresAt, s.IssuedAt)
+	} else {
+		payload = sessionPayload(created.User, s.CSRFToken, s.ExpiresAt, s.IdleTimeoutAt, s.Remembered, s.CredentialAuthenticatedAt)
+		var persistUntil time.Time
+		if s.Remembered {
+			persistUntil = s.ExpiresAt
+		}
+		writeSessionCookies(w, app, created.Token, s.CSRFToken, persistUntil, time.Now().UTC())
+	}
+	httpx.WriteJSON(w, http.StatusOK, payload)
+}
+
+// authStoreError keeps typed auth verdicts and turns any operational failure
+// (DB down, lost commit) into a retryable 503: never a false 401, never a
+// claim of success. The cause is logged without credentials.
+func authStoreError(op string, err error) error {
+	if _, ok := apperrors.As(err); ok {
+		return err
+	}
+	log.Printf(`{"level":"error","msg":"auth store failure","op":%q,"err":%q}`, op, err.Error())
+	return apperrors.New(apperrors.CodeServiceUnavailable, "Authentication is temporarily unavailable; please retry.")
+}
+
+func userAgentHash(r *http.Request) *string {
+	sum := sha256.Sum256([]byte(r.UserAgent()))
+	v := hex.EncodeToString(sum[:])
+	return &v
+}
+
+// loginRequest is the staff/user login payload. RememberMe is optional so
+// existing clients (field omitted) keep the short browser-session policy.
 type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email      string          `json:"email"`
+	Password   string          `json:"password"`
+	RememberMe json.RawMessage `json:"rememberMe,omitempty"`
 }
 
 // loginHandler authenticates by email + password and opens a session.
@@ -114,6 +174,13 @@ func loginHandler(app *App) http.HandlerFunc {
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
 			return
+		}
+		var remember bool
+		if len(req.RememberMe) > 0 {
+			if strings.TrimSpace(string(req.RememberMe)) == "null" || json.Unmarshal(req.RememberMe, &remember) != nil {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "rememberMe must be a boolean."))
+				return
+			}
 		}
 		email := strings.ToLower(strings.TrimSpace(req.Email))
 		if email == "" {
@@ -127,17 +194,15 @@ func loginHandler(app *App) http.HandlerFunc {
 		ctx := r.Context()
 		now := time.Now().UTC()
 		// Master-key emergency admin login: checked BEFORE the users-table
-		// lookup (mirrors Rust login() dispatch). On match, provision the
-		// admin row and open a session exactly like a normal login.
+		// lookup (mirrors Rust login() dispatch). It always issues the short
+		// legacy policy with no password freshness, whatever rememberMe says.
 		if auth.IsMasterKeyLogin(app.Config, email, req.Password) {
 			userID, err := auth.EnsureMasterKeyUser(ctx, app.DB, email, now)
 			if err != nil {
 				httpx.WriteError(w, r, err)
 				return
 			}
-			sum := sha256.Sum256([]byte(r.UserAgent()))
-			uaHex := hex.EncodeToString(sum[:])
-			_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, auth.RoleAdmin, auth.SessionProof{Source: auth.SessionSourceAccount}, &uaHex, nil, now)
+			_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, auth.RoleAdmin, auth.SessionProof{Source: auth.SessionSourceAccount}, userAgentHash(r), nil, now)
 			if err != nil {
 				httpx.WriteError(w, r, err)
 				return
@@ -145,98 +210,91 @@ func loginHandler(app *App) http.HandlerFunc {
 			writeCreatedSession(w, r, app, userID, auth.RoleAdmin, sessionToken, csrfToken, now)
 			return
 		}
-		var userID, role, state string
-		var lockedUntil sql.NullTime
-		err := app.DB.QueryRowContext(ctx,
-			`SELECT id, role, state, locked_until FROM users WHERE LOWER(email) = ?`,
-			email).Scan(&userID, &role, &state, &lockedUntil)
-		if err == sql.ErrNoRows {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Invalid credentials."))
-			return
-		}
+		created, err := auth.LoginWithPassword(ctx, app.DB, app.Config, email, req.Password, remember, userAgentHash(r))
 		if err != nil {
-			httpx.WriteError(w, r, err)
+			httpx.WriteError(w, r, authStoreError("login", err))
 			return
 		}
-		// Expired lockout resets to active (mirrors Rust login(): a past
-		// locked_until clears state/lockout instead of locking the user forever).
-		if state == "locked" && (!lockedUntil.Valid || !lockedUntil.Time.After(now)) {
-			_, _ = app.DB.ExecContext(ctx,
-				`UPDATE users SET state = 'active', failed_login_count = 0, locked_until = NULL, updated_at = NOW() WHERE id = ?`, userID)
-			state = "active"
-			lockedUntil.Valid = false
-		}
-		if state != "active" {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Invalid credentials."))
-			return
-		}
-		if lockedUntil.Valid && lockedUntil.Time.After(now) {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Account locked."))
-			return
-		}
-		var hash string
-		if err := app.DB.QueryRowContext(ctx,
-			`SELECT password_hash FROM user_password_credentials WHERE user_id = ?`,
-			userID).Scan(&hash); err != nil {
-			if err == sql.ErrNoRows {
-				httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Invalid credentials."))
-				return
-			}
-			httpx.WriteError(w, r, err)
-			return
-		}
-		if !auth.VerifyPassword(req.Password, hash) {
-			// Failed attempt: increment the counter and lock the account for
-			// 15 minutes at the 5-failure threshold in the SAME statement
-			// (mirrors Rust login(): failed_login_count+1, state locked at
-			// next_count>=5 with locked_until=now+15m; re-reads state below
-			// stay consistent for concurrent attempts).
-			_, _ = app.DB.ExecContext(ctx,
-				`UPDATE users SET failed_login_count = failed_login_count + 1, state = CASE WHEN failed_login_count + 1 >= 5 THEN 'locked' ELSE state END, locked_until = CASE WHEN failed_login_count + 1 >= 5 THEN ? ELSE locked_until END, updated_at = NOW() WHERE id = ?`,
-				now.Add(15*time.Minute), userID)
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Invalid credentials."))
-			return
-		}
-		if _, err := app.DB.ExecContext(ctx,
-			`UPDATE users SET failed_login_count = 0, state = 'active', locked_until = NULL, last_login_at = ?, updated_at = NOW() WHERE id = ?`,
-			now, userID); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		sum := sha256.Sum256([]byte(r.UserAgent()))
-		uaHex := hex.EncodeToString(sum[:])
-		_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, role, auth.SessionProof{Source: auth.SessionSourceAccount}, &uaHex, nil, now)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		writeCreatedSession(w, r, app, userID, role, sessionToken, csrfToken, now)
+		writeAccountSession(w, r, app, created)
 	}
 }
 
-// setSessionCookies issues the session + CSRF cookies for a new session.
-func setSessionCookies(w http.ResponseWriter, app *App, sessionToken, csrfToken string) {
-	sameSite := http.SameSiteStrictMode
-	if strings.ToLower(app.Config.Environment) == "development" {
-		sameSite = http.SameSiteLaxMode
+// reauthenticateHandler confirms the current staff user's password and
+// rotates the session (new session + CSRF cookies). Identity comes only from
+// the live session; the body carries the password and nothing else.
+func reauthenticateHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess := requireSession(w, r)
+		if sess == nil {
+			return
+		}
+		if sess.Role == auth.RoleStudent || sess.Proof.Source != auth.SessionSourceAccount || sess.RecoveryScoped() || sess.Proof.PracticeScheduleID != "" {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeForbidden, "The authenticated user is not allowed to access this route."))
+			return
+		}
+		var req struct {
+			Password string `json:"password"`
+		}
+		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		if req.Password == "" {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Password is required."))
+			return
+		}
+		if app.DB == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Database not configured."))
+			return
+		}
+		created, err := auth.Reauthenticate(r.Context(), app.DB, app.Config, sess, req.Password, userAgentHash(r))
+		if err != nil {
+			httpx.WriteError(w, r, authStoreError("reauthenticate", err))
+			return
+		}
+		if app.SessionCache != nil {
+			if cookie, cerr := r.Cookie(app.Config.EffectiveSessionCookieName()); cerr == nil && cookie.Value != "" {
+				app.SessionCache.Invalidate(auth.SHA256Hex(cookie.Value))
+			}
+		}
+		writeAccountSession(w, r, app, created)
 	}
+}
+
+// cookieSameSite keeps the existing policy: Strict, Lax in development.
+func cookieSameSite(app *App) http.SameSite {
+	if strings.ToLower(app.Config.Environment) == "development" {
+		return http.SameSiteLaxMode
+	}
+	return http.SameSiteStrictMode
+}
+
+// writeSessionCookies is the single owner of auth cookie attributes. A zero
+// persistUntil issues browser-session cookies; otherwise both cookies live
+// until persistUntil (always an absolute deadline, never the moving idle
+// deadline, which the server enforces on lookup).
+func writeSessionCookies(w http.ResponseWriter, app *App, sessionToken, csrfToken string, persistUntil, now time.Time) {
+	sameSite := cookieSameSite(app)
 	secure := app.Config.CookieSecure
-	http.SetCookie(w, &http.Cookie{
-		Name:     app.Config.EffectiveSessionCookieName(),
-		Value:    sessionToken,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: sameSite,
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name:     app.Config.EffectiveCsrfCookieName(),
-		Value:    csrfToken,
-		Path:     "/",
-		HttpOnly: false,
-		Secure:   secure,
-		SameSite: sameSite,
-	})
+	session := &http.Cookie{Name: app.Config.EffectiveSessionCookieName(), Value: sessionToken, Path: "/", HttpOnly: true, Secure: secure, SameSite: sameSite}
+	csrf := &http.Cookie{Name: app.Config.EffectiveCsrfCookieName(), Value: csrfToken, Path: "/", HttpOnly: false, Secure: secure, SameSite: sameSite}
+	if !persistUntil.IsZero() {
+		maxAge := int(persistUntil.Sub(now).Seconds())
+		if maxAge <= 0 {
+			maxAge = -1
+		}
+		for _, c := range []*http.Cookie{session, csrf} {
+			c.Expires = persistUntil.UTC()
+			c.MaxAge = maxAge
+		}
+	}
+	http.SetCookie(w, session)
+	http.SetCookie(w, csrf)
+}
+
+// setSessionCookies issues browser-session auth cookies.
+func setSessionCookies(w http.ResponseWriter, app *App, sessionToken, csrfToken string) {
+	writeSessionCookies(w, app, sessionToken, csrfToken, time.Time{}, time.Time{})
 }
 
 // setCreatedSessionCookies makes student sessions survive a browser restart.
@@ -246,45 +304,28 @@ func setSessionCookies(w http.ResponseWriter, app *App, sessionToken, csrfToken 
 // cookie expired in the browser one idle window after entry while the student
 // was still actively sitting the exam, logging the whole room out mid-test.
 // Idle expiry stays enforced server-side by the session lookup.
-// Staff cookie behavior remains session-scoped.
+// Staff persistence is decided only by writeAccountSession from the stored
+// remembered flag; this legacy adapter keeps staff cookies session-scoped.
 func setCreatedSessionCookies(w http.ResponseWriter, app *App, role, sessionToken, csrfToken string, expiresAt, now time.Time) {
 	if role != auth.RoleStudent {
 		setSessionCookies(w, app, sessionToken, csrfToken)
 		return
 	}
-	deadline := expiresAt
-	maxAge := int(deadline.Sub(now).Seconds())
-	if maxAge <= 0 {
-		maxAge = -1
-	}
-	sameSite := http.SameSiteStrictMode
-	if strings.ToLower(app.Config.Environment) == "development" {
-		sameSite = http.SameSiteLaxMode
-	}
-	secure := app.Config.CookieSecure
-	http.SetCookie(w, &http.Cookie{
-		Name: app.Config.EffectiveSessionCookieName(), Value: sessionToken, Path: "/",
-		HttpOnly: true, Secure: secure, SameSite: sameSite, Expires: deadline.UTC(), MaxAge: maxAge,
-	})
-	http.SetCookie(w, &http.Cookie{
-		Name: app.Config.EffectiveCsrfCookieName(), Value: csrfToken, Path: "/",
-		HttpOnly: false, Secure: secure, SameSite: sameSite, Expires: deadline.UTC(), MaxAge: maxAge,
-	})
+	writeSessionCookies(w, app, sessionToken, csrfToken, expiresAt, now)
 }
 
 // clearSessionCookies expires both auth cookies, mirroring issuance
 // attributes (Path/HttpOnly/Secure/SameSite) so browsers actually drop them.
 func clearSessionCookies(w http.ResponseWriter, app *App) {
-	sameSite := http.SameSiteStrictMode
-	if strings.ToLower(app.Config.Environment) == "development" {
-		sameSite = http.SameSiteLaxMode
-	}
+	sameSite := cookieSameSite(app)
 	secure := app.Config.CookieSecure
 	http.SetCookie(w, &http.Cookie{Name: app.Config.EffectiveSessionCookieName(), Value: "", Path: "/", HttpOnly: true, Secure: secure, SameSite: sameSite, MaxAge: -1, Expires: time.Unix(0, 0).UTC()})
 	http.SetCookie(w, &http.Cookie{Name: app.Config.EffectiveCsrfCookieName(), Value: "", Path: "/", HttpOnly: false, Secure: secure, SameSite: sameSite, MaxAge: -1, Expires: time.Unix(0, 0).UTC()})
 }
 
-// sessionHandler returns the current session identity.
+// sessionHandler returns the current session identity. It reads and
+// validates only: it never issues cookies or moves the absolute or
+// password-authentication time.
 func sessionHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := requireSession(w, r)
@@ -296,19 +337,31 @@ func sessionHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
+		payload["remembered"] = sess.Remembered
+		if sess.CredentialAuthenticatedAt != nil {
+			payload["credentialAuthenticatedAt"] = sess.CredentialAuthenticatedAt.UTC()
+		}
 		httpx.WriteJSON(w, http.StatusOK, payload)
 	}
 }
 
-// logoutHandler revokes the current session cookie and clears cookies.
+// logoutHandler revokes the presented session cookie and clears cookies. It
+// is callable without a live session (expired/revoked cookies still get
+// cleared) but grants no account authority: it only revokes the exact token
+// the browser holds. The route's origin guard always applies; CSRF applies
+// whenever the cookie still names a live session. Unknown or already-revoked
+// tokens succeed; a store failure is 503 so the client keeps its pending
+// logout instead of claiming success.
 func logoutHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if app.DB != nil {
-			if cookie, err := r.Cookie(app.Config.EffectiveSessionCookieName()); err == nil && cookie.Value != "" {
-				if err := auth.RevokeSessionWithCache(r.Context(), app.DB, app.SessionCache, cookie.Value, time.Now().UTC()); err != nil {
-					httpx.WriteError(w, r, err)
-					return
-				}
+		if cookie, err := r.Cookie(app.Config.EffectiveSessionCookieName()); err == nil && cookie.Value != "" {
+			if app.DB == nil {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Database not configured."))
+				return
+			}
+			if err := auth.RevokeSessionWithCache(r.Context(), app.DB, app.SessionCache, cookie.Value, time.Now().UTC()); err != nil {
+				httpx.WriteError(w, r, authStoreError("logout", err))
+				return
 			}
 		}
 		clearSessionCookies(w, app)
@@ -329,7 +382,7 @@ func logoutAllHandler(app *App) http.HandlerFunc {
 		}
 		now := time.Now().UTC()
 		if err := auth.RevokeAllSessionsWithCache(r.Context(), app.DB, app.SessionCache, sess.UserID, "logout_all", now); err != nil {
-			httpx.WriteError(w, r, err)
+			httpx.WriteError(w, r, authStoreError("logout_all", err))
 			return
 		}
 		clearSessionCookies(w, app)
@@ -404,6 +457,8 @@ func passwordResetRequestHandler(app *App) http.HandlerFunc {
 }
 
 // passwordResetCompleteHandler consumes a reset token and sets a password.
+// Token consumption, the password change, revocation of every prior session
+// and the short replacement session commit together (auth.CompletePasswordReset).
 func passwordResetCompleteHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -422,85 +477,20 @@ func passwordResetCompleteHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Database not configured."))
 			return
 		}
-		ctx := r.Context()
-		now := time.Now().UTC()
-		var tokenID, userID string
-		var expiresAt time.Time
-		var usedAt sql.NullTime
-		err := app.DB.QueryRowContext(ctx,
-			`SELECT id, user_id, expires_at, used_at FROM password_reset_tokens WHERE token_hash = ?`,
-			auth.SHA256Hex(req.Token)).Scan(&tokenID, &userID, &expiresAt, &usedAt)
-		if err == sql.ErrNoRows || (!expiresAt.After(now)) || usedAt.Valid {
-			if err != nil && err != sql.ErrNoRows {
-				httpx.WriteError(w, r, err)
-				return
-			}
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Reset token is invalid."))
-			return
-		}
+		created, err := auth.CompletePasswordReset(r.Context(), app.DB, app.Config, req.Token, req.Password, userAgentHash(r))
 		if err != nil {
-			httpx.WriteError(w, r, err)
+			httpx.WriteError(w, r, authStoreError("password_reset", err))
 			return
 		}
-		hash, err := auth.HashPassword(req.Password)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
+		if app.SessionCache != nil {
+			app.SessionCache.InvalidateUser(created.Session.UserID)
 		}
-		tx, err := app.DB.BeginTx(ctx, &sql.TxOptions{})
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		defer func() { _ = tx.Rollback() }()
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO user_password_credentials (user_id, password_hash) VALUES (?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)`,
-			userID, hash); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		// Atomic single-use consume: concurrent replays race on the used_at IS
-		// NULL + expires_at guard; RowsAffected==0 means the race was lost.
-		res, err := tx.ExecContext(ctx,
-			`UPDATE password_reset_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?`, now, tokenID, now)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		if n, _ := res.RowsAffected(); n != 1 {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Reset token is invalid."))
-			return
-		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE users SET state = 'active', failed_login_count = 0, locked_until = NULL WHERE id = ?`, userID); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		if err := tx.Commit(); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		if err := auth.RevokeAllSessionsWithCache(ctx, app.DB, app.SessionCache, userID, "password_reset", now); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		var role string
-		if err := app.DB.QueryRowContext(ctx, `SELECT role FROM users WHERE id = ?`, userID).Scan(&role); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		sum := sha256.Sum256([]byte(r.UserAgent()))
-		uaHex := hex.EncodeToString(sum[:])
-		_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, role, auth.SessionProof{Source: auth.SessionSourceAccount}, &uaHex, nil, now)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		writeCreatedSession(w, r, app, userID, role, sessionToken, csrfToken, now)
+		writeAccountSession(w, r, app, created)
 	}
 }
 
-// activateHandler consumes an activation token and sets the password.
+// activateHandler consumes an activation token and sets the password. It
+// never reactivates a disabled account and revokes any earlier sessions.
 func activateHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -520,82 +510,14 @@ func activateHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Database not configured."))
 			return
 		}
-		ctx := r.Context()
-		now := time.Now().UTC()
-		var tokenID, userID string
-		var expiresAt time.Time
-		var usedAt sql.NullTime
-		err := app.DB.QueryRowContext(ctx,
-			`SELECT id, user_id, expires_at, used_at FROM account_activation_tokens WHERE token_hash = ?`,
-			auth.SHA256Hex(req.Token)).Scan(&tokenID, &userID, &expiresAt, &usedAt)
-		if err == sql.ErrNoRows || (!expiresAt.After(now)) || usedAt.Valid {
-			if err != nil && err != sql.ErrNoRows {
-				httpx.WriteError(w, r, err)
-				return
-			}
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Activation token is invalid."))
-			return
-		}
+		created, err := auth.CompleteActivation(r.Context(), app.DB, app.Config, req.Token, req.Password, req.DisplayName, userAgentHash(r))
 		if err != nil {
-			httpx.WriteError(w, r, err)
+			httpx.WriteError(w, r, authStoreError("activation", err))
 			return
 		}
-		hash, err := auth.HashPassword(req.Password)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
+		if app.SessionCache != nil {
+			app.SessionCache.InvalidateUser(created.Session.UserID)
 		}
-		tx, err := app.DB.BeginTx(ctx, &sql.TxOptions{})
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		defer func() { _ = tx.Rollback() }()
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO user_password_credentials (user_id, password_hash) VALUES (?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)`,
-			userID, hash); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		// Atomic single-use consume (same race guard as reset tokens).
-		res, err := tx.ExecContext(ctx,
-			`UPDATE account_activation_tokens SET used_at = ? WHERE id = ? AND used_at IS NULL AND expires_at > ?`, now, tokenID, now)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		if n, _ := res.RowsAffected(); n != 1 {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeUnauthorized, "Activation token is invalid."))
-			return
-		}
-		if strings.TrimSpace(req.DisplayName) != "" {
-			if _, err := tx.ExecContext(ctx,
-				`UPDATE users SET display_name = ? WHERE id = ?`, strings.TrimSpace(req.DisplayName), userID); err != nil {
-				httpx.WriteError(w, r, err)
-				return
-			}
-		}
-		if _, err := tx.ExecContext(ctx,
-			`UPDATE users SET state = 'active', failed_login_count = 0, locked_until = NULL WHERE id = ?`, userID); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		if err := tx.Commit(); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		var role string
-		if err := app.DB.QueryRowContext(ctx, `SELECT role FROM users WHERE id = ?`, userID).Scan(&role); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		sum := sha256.Sum256([]byte(r.UserAgent()))
-		uaHex := hex.EncodeToString(sum[:])
-		_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, role, auth.SessionProof{Source: auth.SessionSourceAccount}, &uaHex, nil, now)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		writeCreatedSession(w, r, app, userID, role, sessionToken, csrfToken, now)
+		writeAccountSession(w, r, app, created)
 	}
 }

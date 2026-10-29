@@ -18,6 +18,7 @@ const nonEmptyStringSchema = z.string().min(1, 'This field is required');
 export const loginFormSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, 'Password is required'),
+  rememberMe: z.boolean().optional(),
 });
 
 export type LoginFormInput = z.infer<typeof loginFormSchema>;

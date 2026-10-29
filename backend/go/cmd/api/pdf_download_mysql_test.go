@@ -54,7 +54,10 @@ func TestPreparedPDFRoutesMySQL(t *testing.T) {
 	router.Post("/api/v1/sat-answered-pdf/attempts/{attemptID}/prepare", prepareAnsweredPDFHandler(app, false))
 	router.Get("/api/v1/sat-answered-pdf/downloads/{exportID}", downloadAnsweredPDFHandler(app))
 	router.Head("/api/v1/sat-answered-pdf/downloads/{exportID}", downloadAnsweredPDFHandler(app))
-	staff := &auth.Session{ID: "staff-session", UserID: "staff-user", Role: auth.RoleAdmin}
+	credentialAt := time.Now().UTC()
+	staff := &auth.Session{ID: "staff-session", UserID: "staff-user", Role: auth.RoleAdmin,
+		Proof: auth.SessionProof{Source: auth.SessionSourceAccount}, ExpiresAt: credentialAt.Add(time.Hour),
+		CredentialAuthenticatedAt: &credentialAt, ValidatedAt: credentialAt}
 	request := func(method, path, body string, cookie *http.Cookie, staffSession bool, status int) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))

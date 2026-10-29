@@ -596,6 +596,7 @@ test.describe("IELTS individual section timing", () => {
       const loginResponse = await adminContext.request.post(
         "http://127.0.0.1:4000/api/v1/auth/login",
         {
+          headers: { origin: "http://127.0.0.1:4000" },
           data: { email: "e2e.admin.operator@example.com", password: "Password123!" },
         }
       );

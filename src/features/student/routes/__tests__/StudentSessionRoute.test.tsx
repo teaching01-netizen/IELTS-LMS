@@ -155,7 +155,7 @@ describe("StudentSessionRoute", () => {
     expect(navigateMock).toHaveBeenCalledWith("/student/sched-1");
   });
 
-  it("navigates to check-in without waiting for a slow logout request", () => {
+  it("navigates to check-in without waiting for a slow logout request", async () => {
     vi.spyOn(authService, "getSession").mockResolvedValue({
       user: {
         id: "student-1",
@@ -167,7 +167,10 @@ describe("StudentSessionRoute", () => {
       csrfToken: "csrf-student",
       expiresAt: "2026-01-01T12:00:00.000Z",
     });
-    vi.spyOn(authService, "logoutAll").mockImplementation(() => new Promise(() => {}));
+    let finishLogout!: () => void;
+    const logoutAllMock = vi
+      .spyOn(authService, "logoutAll")
+      .mockImplementation(() => new Promise<void>((resolve) => { finishLogout = resolve; }));
 
     StudentAppWrapperMock.mockImplementation((props: any) => (
       <button onClick={props.onExit}>Exit</button>
@@ -186,6 +189,11 @@ describe("StudentSessionRoute", () => {
     fireEvent.click(screen.getByRole("button", { name: /exit/i }));
 
     expect(navigateMock).toHaveBeenCalledWith("/student/sched-1");
+    // Let the logout settle so its mutation lock and intent do not leak into
+    // the next test.
+    await waitFor(() => expect(logoutAllMock).toHaveBeenCalled());
+    finishLogout();
+    await waitFor(() => expect(window.localStorage.getItem("ielts-auth:logout-intent:v1")).toBeNull());
   });
 
   it("keeps a completed ACT session on the completion screen after Exit", async () => {

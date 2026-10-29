@@ -58,10 +58,12 @@ describe('LoginPage', () => {
   });
 
   it('submits credentials to the auth API and routes admin users to the admin workspace', async () => {
+    let signedIn: unknown = null;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === '/api/v1/auth/session' && signedIn) return jsonResponse(signedIn);
       if (url === '/api/v1/auth/login') {
-        return jsonResponse({
+        return jsonResponse(signedIn = {
           user: {
             id: 'user-1',
             email: 'admin@example.com',
@@ -113,6 +115,7 @@ describe('LoginPage', () => {
           body: JSON.stringify({
             email: 'admin@example.com',
             password: 'Password123!',
+            rememberMe: true,
           }),
         }),
       );
@@ -124,10 +127,12 @@ describe('LoginPage', () => {
   });
 
   it('shows student check-in guidance instead of navigating back to /login', async () => {
+    let signedIn: unknown = null;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url === '/api/v1/auth/session' && signedIn) return jsonResponse(signedIn);
       if (url === '/api/v1/auth/login') {
-        return jsonResponse({
+        return jsonResponse(signedIn = {
           user: {
             id: 'student-1',
             email: 'student@example.com',

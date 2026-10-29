@@ -2,6 +2,7 @@ import React, { type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { LoadingSurface } from '@components/ui';
 import { resolveRoleLandingPath, useAuthSession } from './authSession';
+import { AuthUnavailableSurface } from './AuthUnavailableSurface';
 import type { AuthUserRole } from './api/authGateway';
 
 interface RequireAuthProps {
@@ -68,6 +69,12 @@ export function RequireAuth({ allowedRoles, children }: RequireAuthProps) {
 
   if (!session) {
     const studentPath = parseStudentPath(location.pathname);
+    // An unchecked or still-ending session is not proof of logout: never
+    // redirect staff to login for it. Student entry routes keep their own
+    // reconnect handling below.
+    if (!studentPath && (status === 'unavailable' || status === 'logoutPending')) {
+      return <AuthUnavailableSurface />;
+    }
     if (studentPath) {
       // Allow student access when the route carries any non-empty access
       // code (e.g. `/student/:scheduleId/alice`). Anonymous renders of

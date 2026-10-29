@@ -32,7 +32,7 @@ func TestAuthMiddlewareRefreshesLiveStudentCookieToAbsoluteDeadline(t *testing.T
 
 	for _, role := range []string{auth.RoleStudent, auth.RoleAdmin} {
 		t.Run(role, func(t *testing.T) {
-			app := &App{Config: cfg, DB: db, SessionResolver: func(context.Context, *sql.DB, *auth.SessionCache, config.Config, string, time.Time) (*auth.Session, error) {
+			app := &App{Config: cfg, DB: db, SessionResolver: func(context.Context, *sql.DB, *auth.SessionCache, config.Config, string) (*auth.Session, error) {
 				return &auth.Session{ID: "s-1", UserID: "u-1", Role: role, CSRFToken: "csrf-1", ExpiresAt: expiresAt, IdleTimeoutAt: time.Now().UTC().Add(time.Hour)}, nil
 			}}
 			handler := authMiddleware(app)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

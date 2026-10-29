@@ -606,7 +606,14 @@ func startIELTSStaffSweepers(t *testing.T, f ieltsLoadFixture, baseURL string, n
 			t.Fatal(err)
 		}
 		body, _ := json.Marshal(map[string]string{"email": email, "password": password})
-		resp, err := client.Post(baseURL+"/api/v1/auth/login", "application/json", bytes.NewReader(body))
+		req, err := http.NewRequest(http.MethodPost, baseURL+"/api/v1/auth/login", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		// Credential routes require the exact browser origin.
+		req.Header.Set("Origin", baseURL)
+		resp, err := client.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}

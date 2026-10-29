@@ -5,6 +5,7 @@ const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../../utils/downloadBlob', () => ({ downloadBlob }));
 
+import { apiClient } from '../../../../shared/api/apiClient';
 import { downloadSatRawdataXlsx, satRawdataExportFilename } from '../satRawdataExport';
 
 beforeEach(() => {
@@ -50,16 +51,48 @@ describe('downloadSatRawdataXlsx', () => {
   });
 
   it('surfaces the backend message when the download request fails', async () => {
-    fetchMock.mockResolvedValue({
-      ok: false,
-      status: 429,
-      json: vi.fn().mockResolvedValue({ code: 'RATE_LIMITED', message: 'Export rate limited. Try again shortly.' }),
-    });
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ code: 'RATE_LIMITED', message: 'Export rate limited. Try again shortly.' }), {
+        status: 429,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
 
     await expect(downloadSatRawdataXlsx('exam-1', 'schedule-1')).rejects.toThrow(
       'Export rate limited. Try again shortly.',
     );
     expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it('keeps the structured code and routes REAUTH_REQUIRED to the confirmation owner', async () => {
+    const onReauth = vi.fn();
+    apiClient.setReauthenticationRequiredHandler(onReauth);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ code: 'REAUTH_REQUIRED', message: 'Confirm your password.' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    await expect(downloadSatRawdataXlsx('exam-1', 'schedule-1')).rejects.toMatchObject({
+      code: 'REAUTH_REQUIRED',
+      status: 403,
+    });
+    expect(onReauth).toHaveBeenCalledTimes(1);
+    apiClient.setReauthenticationRequiredHandler(null);
+  });
+
+  it('does not download a workbook once the signed-in account changed', async () => {
+    let generation = 1;
+    apiClient.setAuthGenerationReader(() => generation);
+    fetchMock.mockImplementation(async () => {
+      generation = 2;
+      return { ok: true, blob: vi.fn().mockResolvedValue(new Blob(['x'])) };
+    });
+
+    await expect(downloadSatRawdataXlsx('exam-1', 'schedule-1')).rejects.toMatchObject({ name: 'AbortError' });
+    expect(downloadBlob).not.toHaveBeenCalled();
+    apiClient.setAuthGenerationReader(null);
   });
 });
 

@@ -7,6 +7,7 @@ import { ErrorSurface } from "../../components/ui/ErrorSurface";
 import { LoadingSurface } from "../../components/ui/LoadingSurface";
 import { ActivateAccountPage } from "../../features/auth/ActivateAccountPage";
 import { LoginPage } from "../../features/auth/LoginPage";
+import { AuthUnavailableSurface } from "../../features/auth/AuthUnavailableSurface";
 import { PasswordResetCompletePage } from "../../features/auth/PasswordResetCompletePage";
 import { PasswordResetRequestPage } from "../../features/auth/PasswordResetRequestPage";
 import { RequireAuth } from "../../features/auth/RequireAuth";
@@ -196,6 +197,7 @@ function AdminIndexRedirect() {
   if (status === "loading") {
     return <LoadingSurface label="Loading Session..." />;
   }
+  if (status === "unavailable" || status === "logoutPending") return <AuthUnavailableSurface />;
   if (!session) {
     return <Navigate to="/login" replace />;
   }
@@ -212,6 +214,7 @@ function SatIndexRedirect() {
   const { session, status } = useAuthSession();
   const [searchParams] = useSearchParams();
   if (status === "loading") return <LoadingSurface label="Loading Session..." />;
+  if (status === "unavailable" || status === "logoutPending") return <AuthUnavailableSurface />;
   if (!session) return <Navigate to="/login" replace />;
   // S3-M3: preserve ?next= when the role allows it; otherwise keep the
   // existing SAT workspace defaults (not the generic role landing path).

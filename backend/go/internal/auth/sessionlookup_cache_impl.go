@@ -3,16 +3,19 @@
 // Semantics (must match LookupSession exactly):
 //   - (nil, nil) for unknown / revoked / expired sessions (401-shaped).
 //   - non-nil error only on DB failure (503-shaped, fail closed).
-//   - idle extension equals idleTimeoutFor(role, cfg) from lookup time.
 //
-// Cache behavior:
-//   - Hit + unexpired -> return copy, zero SQL (touch coalesced: the DB
-//     UPDATE fires only when TouchDue, i.e. at most once per window).
-//   - Miss -> today's SELECT; on live row, conditional touch UPDATE (only
-//     when TouchDue, which a fresh Put suppresses for one window after a
-//     touch just happened), then Put. Revoked/expired rows are never
-//     cached, so revocation is visible on the very next lookup.
-//   - Disabled or nil cache -> byte-identical behavior to LookupSession.
+// Disabled or nil cache -> exactly LookupSession, the single authoritative
+// admission owner. The serving API refuses SESSION_CACHE=on
+// (config.ValidateForAPI): a process-local cache cannot observe a revocation
+// committed on another instance, so remembered sessions must never be served
+// from it. The cache path is kept for isolated single-process benchmarks.
+//
+// Cache behavior when enabled:
+//   - Hit + unexpired -> return copy; the coalesced touch (at most one per
+//     window) is a monotonic conditional UPDATE that can never revive a
+//     revoked row or move a deadline backwards.
+//   - Miss -> LookupSession (locked admission + touch), then Put. Revoked or
+//     expired rows are never cached.
 package auth
 
 import (
@@ -25,105 +28,38 @@ import (
 )
 
 // LookupSessionWithCache loads a live session, serving from cache when hot.
-func LookupSessionWithCache(ctx context.Context, db Querier, cache *SessionCache, cfg config.Config, sessionToken string, now time.Time) (*Session, error) {
+func LookupSessionWithCache(ctx context.Context, db *sql.DB, cache *SessionCache, cfg config.Config, sessionToken string, now time.Time) (*Session, error) {
+	if cache == nil || !cache.Enabled() {
+		return LookupSession(ctx, db, cfg, sessionToken)
+	}
 	now = now.UTC()
 	tokenHash := SHA256Hex(sessionToken)
-	if cache != nil {
-		if s, ok := cache.Get(tokenHash, now); ok {
-			// Hit: the cached copy already carries extended idle state.
-			// Coalesced write-behind is owned by the flusher (Phase A2 ships
-			// the read path; the periodic flusher lands with the middleware
-			// wiring in the same change). Opportunistic due-touch here keeps
-			// single-process idle deadlines advancing even before the flusher
-			// interval elapses, bounded to one UPDATE per window.
-			if cache.TouchDue(tokenHash, now) {
-				newIdle := now.Add(idleTimeoutFor(s.Role, cfg))
-				if querier, ok := db.(interface {
-					ExecContext(context.Context, string, ...any) (sql.Result, error)
-				}); ok {
-					if _, err := querier.ExecContext(ctx,
-						`UPDATE user_sessions SET last_seen_at = ?, idle_timeout_at = ? WHERE id = ?`,
-						now, newIdle, s.ID); err != nil {
-						return nil, fmt.Errorf("auth: touch session: %w", err)
-					}
-					cache.MarkFlushed(tokenHash, now)
-					s.IdleTimeoutAt = newIdle
-				}
+	if s, ok := cache.Get(tokenHash, now); ok {
+		if cache.TouchDue(tokenHash, now) {
+			newIdle := now.Add(s.effectiveIdleWindow(cfg))
+			if newIdle.After(s.ExpiresAt) {
+				newIdle = s.ExpiresAt
 			}
-			hit := s
-			out := hit
-			return &out, nil
-		}
-	}
-	var s Session
-	var revokedAt sql.NullTime
-	var orgID, source, practiceScope, recoveryAttempt, recoverySchedule sql.NullString
-	var currentRole, currentState string
-	err := db.QueryRowContext(ctx,
-		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at, s.authentication_source, s.practice_schedule_id, s.recovery_attempt_id, a.schedule_id, u.role, u.state
-		 FROM user_sessions s
-		 JOIN users u ON u.id = s.user_id
-		 LEFT JOIN student_attempts a ON a.id = s.recovery_attempt_id
-		 WHERE s.session_token_hash = ?`, tokenHash).Scan(
-		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt, &source, &practiceScope, &recoveryAttempt, &recoverySchedule, &currentRole, &currentState)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("auth: lookup session: %w", err)
-	}
-	s.Proof = SessionProof{
-		Source:             source.String,
-		PracticeScheduleID: practiceScope.String,
-		RecoveryAttemptID:  recoveryAttempt.String,
-		RecoveryScheduleID: recoverySchedule.String,
-	}
-	if s.Proof.validateStored(s.Role) != nil || currentRole != s.Role || currentState != "active" {
-		return nil, nil
-	}
-	if orgID.Valid {
-		v := orgID.String
-		s.OrganizationID = &v
-	}
-	if revokedAt.Valid || !s.ExpiresAt.After(now) || !s.IdleTimeoutAt.After(now) {
-		return nil, nil
-	}
-	// Conditional touch: a fresh Put suppresses the UPDATE for one window
-	// after a touch just happened (Put marks flushedAt=now). First-ever
-	// load has no entry -> TouchDue false -> touch fires (today's behavior).
-	if cache != nil {
-		if _, present := cache.peek(tokenHash); present {
-			if !cache.TouchDue(tokenHash, now) {
-				cache.Put(tokenHash, withIdle(s, now.Add(idleTimeoutFor(s.Role, cfg))), now)
-				out := s
-				out.IdleTimeoutAt = now.Add(idleTimeoutFor(s.Role, cfg))
-				return &out, nil
+			if _, err := db.ExecContext(ctx,
+				`UPDATE user_sessions SET last_seen_at = GREATEST(last_seen_at, ?), idle_timeout_at = LEAST(expires_at, GREATEST(idle_timeout_at, ?)) WHERE id = ? AND revoked_at IS NULL AND expires_at > ? AND idle_timeout_at > ?`,
+				now, newIdle, s.ID, now, now); err != nil {
+				return nil, fmt.Errorf("auth: touch session: %w", err)
+			}
+			cache.MarkFlushed(tokenHash, now)
+			if newIdle.After(s.IdleTimeoutAt) {
+				s.IdleTimeoutAt = newIdle
 			}
 		}
+		s.ValidatedAt = now
+		out := s
+		return &out, nil
 	}
-	newIdle := now.Add(idleTimeoutFor(s.Role, cfg))
-	if querier, ok := db.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	}); ok {
-		if _, err := querier.ExecContext(ctx,
-			`UPDATE user_sessions SET last_seen_at = ?, idle_timeout_at = ? WHERE id = ?`,
-			now, newIdle, s.ID); err != nil {
-			return nil, fmt.Errorf("auth: touch session: %w", err)
-		}
-	} else {
-		return nil, fmt.Errorf("auth: touch session: db handle cannot exec")
+	s, err := LookupSession(ctx, db, cfg, sessionToken)
+	if err != nil || s == nil {
+		return s, err
 	}
-	s.IdleTimeoutAt = newIdle
-	if cache != nil {
-		cache.Put(tokenHash, s, now)
-	}
-	out := s
-	return &out, nil
-}
-
-func withIdle(s Session, idle time.Time) Session {
-	s.IdleTimeoutAt = idle
-	return s
+	cache.Put(tokenHash, *s, now)
+	return s, nil
 }
 
 // RevokeSessionWithCache revokes one session and drops its cache entry

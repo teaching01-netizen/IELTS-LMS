@@ -77,6 +77,8 @@ export async function createGradingVerifier(config: GradingVerifyConfig): Promis
   });
 
   const loginRes = await api.post('/api/v1/auth/login', {
+    // Credential routes require the exact browser origin.
+    headers: { origin: new URL(config.origin).origin },
     data: { email: config.adminEmail, password: config.adminPassword },
   });
   if (!loginRes.ok()) {

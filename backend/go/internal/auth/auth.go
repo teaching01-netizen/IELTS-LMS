@@ -4,7 +4,8 @@
 // Identity model mirrors backend/crates/domain/src/auth.rs and
 // backend/crates/application/src/auth.rs:
 //   - sessions live in user_sessions (+ user_session_events audit rows)
-//   - staff sessions idle out after 30m, students after 60m, absolute 12h
+//   - staff sessions idle out after 30m, students after 60m, absolute 12h,
+//     unless a staff password login chose a remembered policy (session_policy.go)
 //   - attempt bearer tokens are HMAC-SHA256 payload.signature (see platform/crypto)
 //     with server rows in attempt_sessions (TTL 15m, touch 60s, refresh at <=5m)
 //   - ActorContext is re-checked at the data boundary; there is no DB RLS.
@@ -29,6 +30,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/crypto"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
@@ -240,9 +242,40 @@ type Session struct {
 	Role           string
 	CSRFToken      string
 	OrganizationID *string
+	IssuedAt       time.Time
 	ExpiresAt      time.Time
 	IdleTimeoutAt  time.Time
 	Proof          SessionProof
+	// Remembered is the staff "keep me signed in" choice made at password
+	// issuance; it decides only cookie persistence, never authority.
+	Remembered bool
+	// IdleWindowSeconds is the stored idle policy snapshot (nil = legacy).
+	IdleWindowSeconds *int64
+	// CredentialAuthenticatedAt is the last accepted real password
+	// verification for this session (nil = never; sensitive actions need it).
+	CredentialAuthenticatedAt *time.Time
+	// ValidatedAt is the database time at which lookup admitted this request.
+	// It is derived, never stored; freshness checks use it so API hosts never
+	// need synchronized clocks. Zero (fake resolvers) fails freshness closed.
+	ValidatedAt time.Time
+}
+
+// SessionUser is the minimal identity summary a created session returns.
+type SessionUser struct {
+	ID          string
+	Email       string
+	DisplayName string
+	Role        string
+	State       string
+}
+
+// CreatedSession is the result of a committed issuance. Token is the raw
+// bearer: it may only cross the HTTP cookie boundary and is never logged or
+// JSON-encoded.
+type CreatedSession struct {
+	Session Session
+	Token   string
+	User    SessionUser
 }
 
 // RecoveryScoped reports whether this session exists only to continue one
@@ -292,23 +325,35 @@ func absoluteLifetime(cfg config.Config) time.Duration {
 	return time.Duration(h) * time.Hour
 }
 
-// SessionExpiry returns the deadlines that CreateSession persists. Keeping
-// this calculation at the auth boundary lets entry flows return the same
-// timestamps the browser session will actually enforce.
+// SessionExpiry returns the deadlines that legacy CreateSession persists.
+// Keeping this calculation at the auth boundary lets student/recovery entry
+// flows return the same timestamps the browser session will enforce.
 func SessionExpiry(cfg config.Config, role string, now time.Time) (expiresAt, idleTimeoutAt time.Time) {
+	return policyDeadlines(legacyPolicy(cfg, role), now)
+}
+
+// policyDeadlines applies a policy at now. The idle deadline never exceeds
+// the absolute deadline.
+func policyDeadlines(p SessionPolicy, now time.Time) (expiresAt, idleTimeoutAt time.Time) {
 	now = now.UTC()
-	return now.Add(absoluteLifetime(cfg)), now.Add(idleTimeoutFor(role, cfg))
+	expiresAt = now.Add(p.AbsoluteLifetime)
+	idleTimeoutAt = now.Add(p.IdleWindow)
+	if idleTimeoutAt.After(expiresAt) {
+		idleTimeoutAt = expiresAt
+	}
+	return expiresAt, idleTimeoutAt
 }
 
 // CreateSession inserts a user_sessions row + a created audit event and
 // returns the session id, the raw bearer session token (only copy) and the
 // csrf token. now should be UTC (callers may pass DB time).
 //
-// It remains the public entry point for flows that own no transaction. The
-// recovery Begin path calls CreateSessionInTx instead so the scoped session
-// and the attempt credential commit exactly once.
+// It remains the public entry point for flows that own no transaction and
+// issue legacy (non-remembered, no password freshness) sessions: student
+// entry, practice, master key, and bootstrap paths. Password workflows use
+// LoginWithPassword / Reauthenticate instead.
 func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, role string, proof SessionProof, userAgentHash *string, ipMetadata *string, now time.Time) (sessionID, sessionToken, csrfToken string, err error) {
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	sqlTx, err := tx.Begin(ctx, db, &sql.TxOptions{})
 	if err != nil {
 		// Round 152: same client-gone honesty as the issuance re-read —
 		// a canceled begin is a gone client, not an INTERNAL.
@@ -317,12 +362,12 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 		}
 		return "", "", "", fmt.Errorf("auth: create session begin: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	sessionID, sessionToken, csrfToken, err = CreateSessionInTx(ctx, tx, cfg, userID, role, proof, userAgentHash, ipMetadata, now)
+	defer func() { _ = sqlTx.Rollback() }()
+	sessionID, sessionToken, csrfToken, err = CreateSessionInTx(ctx, sqlTx, cfg, userID, role, proof, userAgentHash, ipMetadata, now)
 	if err != nil {
 		return "", "", "", err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := sqlTx.Commit(); err != nil {
 		// Round 158: a commit racing a gone client is retryable 503.
 		if isClientGone(err) {
 			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
@@ -332,52 +377,83 @@ func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, r
 	return sessionID, sessionToken, csrfToken, nil
 }
 
-// CreateSessionInTx inserts a user_sessions row + a created audit event into
-// the caller's transaction and returns the uncommitted credentials. The
-// caller commits; on any error the whole transaction (including a recovery
-// attempt credential) rolls back.
+// CreateSessionInTx inserts a legacy user_sessions row + a created audit
+// event into the caller's transaction and returns the uncommitted
+// credentials. The caller commits; on any error the whole transaction
+// (including a recovery attempt credential) rolls back.
 func CreateSessionInTx(ctx context.Context, q tx.Tx, cfg config.Config, userID, role string, proof SessionProof, userAgentHash *string, ipMetadata *string, now time.Time) (sessionID, sessionToken, csrfToken string, err error) {
-	if err := proof.validate(role); err != nil {
+	created, err := insertSessionInTx(ctx, q, userID, role, proof, legacyPolicy(cfg, role), nil, userAgentHash, ipMetadata, now)
+	if err != nil {
 		return "", "", "", err
+	}
+	return created.Session.ID, created.Token, created.Session.CSRFToken, nil
+}
+
+// insertSessionInTx is the single session insertion owner. It takes a shared
+// lock on the user row (so revoke-all, which holds it exclusively, serializes
+// against issuance), rechecks the account, and writes the row plus its
+// created audit event. credentialAt is set only by real password workflows.
+func insertSessionInTx(ctx context.Context, q tx.Tx, userID, role string, proof SessionProof, policy SessionPolicy, credentialAt *time.Time, userAgentHash, ipMetadata *string, now time.Time) (CreatedSession, error) {
+	if err := proof.validate(role); err != nil {
+		return CreatedSession{}, err
+	}
+	if policy.IdleWindow <= 0 || policy.AbsoluteLifetime <= 0 {
+		return CreatedSession{}, fmt.Errorf("auth: create session: invalid policy")
+	}
+	if policy.Remembered && (proof.Source != SessionSourceAccount || !rememberableRole(role) || credentialAt == nil || !policy.snapshot) {
+		return CreatedSession{}, fmt.Errorf("auth: create session: remembered policy requires a password-authenticated staff account")
 	}
 	now = now.UTC()
-	sessionID = uuid.NewString()
-	sessionToken, err = RandomToken(32)
+	sessionID := uuid.NewString()
+	sessionToken, err := RandomToken(32)
 	if err != nil {
-		return "", "", "", fmt.Errorf("auth: create session token: %w", err)
+		return CreatedSession{}, fmt.Errorf("auth: create session token: %w", err)
 	}
-	csrfToken, err = RandomToken(24)
+	csrfToken, err := RandomToken(24)
 	if err != nil {
-		return "", "", "", fmt.Errorf("auth: create csrf token: %w", err)
+		return CreatedSession{}, fmt.Errorf("auth: create csrf token: %w", err)
 	}
-	expiresAt, idleAt := SessionExpiry(cfg, role, now)
-	tokenHash := SHA256Hex(sessionToken)
+	expiresAt, idleAt := policyDeadlines(policy, now)
 
-	var currentRole, currentState string
-	if err := q.QueryRowContext(ctx, "SELECT role, state FROM users WHERE id = ? FOR SHARE", userID).Scan(&currentRole, &currentState); err != nil {
-		return "", "", "", err
+	user := SessionUser{ID: userID}
+	if err := q.QueryRowContext(ctx, "SELECT role, state, email, COALESCE(display_name, '') FROM users WHERE id = ? FOR SHARE", userID).Scan(&user.Role, &user.State, &user.Email, &user.DisplayName); err != nil {
+		if isClientGone(err) {
+			return CreatedSession{}, apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+		}
+		return CreatedSession{}, err
 	}
-	if currentRole != role || currentState != "active" {
-		return "", "", "", apperrors.New(apperrors.CodeUnauthorized, "Account authentication changed; please authenticate again.")
+	if user.Role != role || user.State != "active" {
+		return CreatedSession{}, apperrors.New(apperrors.CodeUnauthorized, "Account authentication changed; please authenticate again.")
 	}
 
-	var ua any
+	var ua, ipMeta, idleSnapshot, credAt any
 	if userAgentHash != nil {
 		ua = *userAgentHash
 	}
-	var ipMeta any
 	if ipMetadata != nil {
 		ipMeta = *ipMetadata
 	}
+	var idleSeconds *int64
+	if policy.snapshot {
+		v := int64(policy.IdleWindow / time.Second)
+		idleSeconds = &v
+		idleSnapshot = v
+	}
+	var credentialAtUTC *time.Time
+	if credentialAt != nil {
+		v := credentialAt.UTC()
+		credentialAtUTC = &v
+		credAt = v
+	}
 	if _, err := q.ExecContext(ctx,
-		`INSERT INTO user_sessions (id, user_id, session_token_hash, csrf_token, role_snapshot, issued_at, last_seen_at, expires_at, idle_timeout_at, user_agent_hash, ip_metadata, authentication_source, practice_schedule_id, recovery_attempt_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
-		sessionID, userID, tokenHash, csrfToken, role, now, now, expiresAt, idleAt, ua, ipMeta, proof.Source, proof.PracticeScheduleID, proof.RecoveryAttemptID); err != nil {
+		`INSERT INTO user_sessions (id, user_id, session_token_hash, csrf_token, role_snapshot, issued_at, last_seen_at, expires_at, idle_timeout_at, user_agent_hash, ip_metadata, authentication_source, practice_schedule_id, recovery_attempt_id, remembered, idle_window_seconds, credential_authenticated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
+		sessionID, userID, SHA256Hex(sessionToken), csrfToken, role, now, now, expiresAt, idleAt, ua, ipMeta, proof.Source, proof.PracticeScheduleID, proof.RecoveryAttemptID, policy.Remembered, idleSnapshot, credAt); err != nil {
 		// Round 157: same client-gone honesty (r156: 5 masked 500s) —
 		// a client gone mid-session-row insert is retryable 503.
 		if isClientGone(err) {
-			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+			return CreatedSession{}, apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
 		}
-		return "", "", "", fmt.Errorf("auth: insert user_sessions: %w", err)
+		return CreatedSession{}, fmt.Errorf("auth: insert user_sessions: %w", err)
 	}
 	if _, err := q.ExecContext(ctx,
 		`INSERT INTO user_session_events (id, session_id, user_id, event_type, created_at) VALUES (?, ?, ?, 'created', ?)`,
@@ -385,64 +461,202 @@ func CreateSessionInTx(ctx context.Context, q tx.Tx, cfg config.Config, userID, 
 		// Round 158: same client-gone honesty (r157: 1 masked 500) —
 		// a client gone mid-events insert is retryable 503.
 		if isClientGone(err) {
-			return "", "", "", apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
+			return CreatedSession{}, apperrors.New(apperrors.CodeServiceUnavailable, "Client went away; please retry.")
 		}
-		return "", "", "", fmt.Errorf("auth: insert user_session_events: %w", err)
+		return CreatedSession{}, fmt.Errorf("auth: insert user_session_events: %w", err)
 	}
-	return sessionID, sessionToken, csrfToken, nil
+	return CreatedSession{
+		Session: Session{
+			ID:                        sessionID,
+			UserID:                    userID,
+			Role:                      role,
+			CSRFToken:                 csrfToken,
+			IssuedAt:                  now,
+			ExpiresAt:                 expiresAt,
+			IdleTimeoutAt:             idleAt,
+			Proof:                     proof,
+			Remembered:                policy.Remembered,
+			IdleWindowSeconds:         idleSeconds,
+			CredentialAuthenticatedAt: credentialAtUTC,
+			ValidatedAt:               now,
+		},
+		Token: sessionToken,
+		User:  user,
+	}, nil
 }
 
-// LookupSession loads a live session by raw token and touches idle state.
-// It returns (nil, nil) when the session is unknown, revoked or expired —
-// callers map that to 401 UNAUTHORIZED/SESSION_EXPIRED without leaking why.
-func LookupSession(ctx context.Context, db Querier, cfg config.Config, sessionToken string, now time.Time) (*Session, error) {
-	now = now.UTC()
+// dbNow reads the database clock inside q. Decisions that must hold after a
+// lock wait use this instead of a request-start timestamp.
+func dbNow(ctx context.Context, q tx.Tx) (time.Time, error) {
+	var now time.Time
+	if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP()").Scan(&now); err != nil {
+		return time.Time{}, fmt.Errorf("auth: read database time: %w", err)
+	}
+	return now.UTC(), nil
+}
+
+const sessionColumns = `id, user_id, role_snapshot, csrf_token, issued_at, last_seen_at, expires_at, idle_timeout_at, revoked_at, authentication_source, practice_schedule_id, recovery_attempt_id, remembered, idle_window_seconds, credential_authenticated_at`
+
+// lockedSession is one user_sessions row read under FOR UPDATE.
+type lockedSession struct {
+	Session
+	lastSeenAt time.Time
+	revoked    bool
+}
+
+func scanLockedSession(row *sql.Row) (lockedSession, error) {
+	var s lockedSession
+	var revokedAt, credentialAt sql.NullTime
+	var source, practiceScope, recoveryAttempt sql.NullString
+	var idleWindow sql.NullInt64
+	if err := row.Scan(&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &s.IssuedAt, &s.lastSeenAt, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt, &source, &practiceScope, &recoveryAttempt, &s.Remembered, &idleWindow, &credentialAt); err != nil {
+		return lockedSession{}, err
+	}
+	s.revoked = revokedAt.Valid
+	s.Proof = SessionProof{Source: source.String, PracticeScheduleID: practiceScope.String, RecoveryAttemptID: recoveryAttempt.String}
+	if idleWindow.Valid {
+		v := idleWindow.Int64
+		s.IdleWindowSeconds = &v
+	}
+	if credentialAt.Valid {
+		v := credentialAt.Time.UTC()
+		s.CredentialAuthenticatedAt = &v
+	}
+	s.IssuedAt, s.lastSeenAt = s.IssuedAt.UTC(), s.lastSeenAt.UTC()
+	s.ExpiresAt, s.IdleTimeoutAt = s.ExpiresAt.UTC(), s.IdleTimeoutAt.UTC()
+	return s, nil
+}
+
+// effectiveIdleWindow is the stored snapshot when present, else legacy.
+func (s *Session) effectiveIdleWindow(cfg config.Config) time.Duration {
+	if s.IdleWindowSeconds != nil && *s.IdleWindowSeconds > 0 {
+		return time.Duration(*s.IdleWindowSeconds) * time.Second
+	}
+	return idleTimeoutFor(s.Role, cfg)
+}
+
+// liveAt reports whether the locked row may authorize a request at now.
+// Deadlines are strict: a deadline equal to now is expired.
+func (s *lockedSession) liveAt(now time.Time) bool {
+	if s.revoked || !s.ExpiresAt.After(now) || !s.IdleTimeoutAt.After(now) {
+		return false
+	}
+	// Remembered rows must carry the metadata the CHECK constraint demands;
+	// anything else fails closed rather than inheriting staff persistence.
+	if s.Remembered && (s.IdleWindowSeconds == nil || s.CredentialAuthenticatedAt == nil || !rememberableRole(s.Role) || s.Proof.Source != SessionSourceAccount) {
+		return false
+	}
+	return true
+}
+
+// LookupSession is the authoritative session admission. It returns
+// (nil, nil) when the session is unknown, revoked, expired or no longer
+// matches its account — callers map that to 401 without leaking why — and
+// an error only for operational failures (503, never a false 401).
+//
+// The token hash first locates the owning user without locks. Then, in one
+// READ COMMITTED transaction: user FOR SHARE -> session FOR UPDATE -> database
+// time read AFTER the locks were granted -> validation -> monotonic touch ->
+// commit. Reading the clock after the lock wait means a request that queued
+// behind a revocation or across a deadline can never extend the session.
+// The touch only advances last_seen_at and the idle deadline, capped by the
+// absolute deadline; it never moves expires_at or the password time.
+func LookupSession(ctx context.Context, db *sql.DB, cfg config.Config, sessionToken string) (result *Session, lookupErr error) {
+	started := time.Now()
+	defer func() {
+		outcome := "restored"
+		if lookupErr != nil {
+			outcome = "transient"
+		} else if result == nil {
+			outcome = "absent"
+		}
+		telemetry.IncCounter(telemetry.MAuthSessionLookupTotal, "outcome", outcome)
+		telemetry.ObserveSeconds(telemetry.MAuthSessionLookupSeconds, time.Since(started).Seconds(), "outcome", outcome)
+	}()
 	tokenHash := SHA256Hex(sessionToken)
-	var s Session
-	var revokedAt sql.NullTime
-	var orgID sql.NullString
-	var source, practiceScope, recoveryAttempt, recoverySchedule sql.NullString
-	var currentRole, currentState string
-	err := db.QueryRowContext(ctx,
-		`SELECT s.id, s.user_id, s.role_snapshot, s.csrf_token, u.organization_id, s.expires_at, s.idle_timeout_at, s.revoked_at, s.authentication_source, s.practice_schedule_id, s.recovery_attempt_id, a.schedule_id, u.role, u.state
-		 FROM user_sessions s
-		 JOIN users u ON u.id = s.user_id
-		 LEFT JOIN student_attempts a ON a.id = s.recovery_attempt_id
-		 WHERE s.session_token_hash = ?`, tokenHash).Scan(
-		&s.ID, &s.UserID, &s.Role, &s.CSRFToken, &orgID, &s.ExpiresAt, &s.IdleTimeoutAt, &revokedAt, &source, &practiceScope, &recoveryAttempt, &recoverySchedule, &currentRole, &currentState)
-	if err == sql.ErrNoRows {
+	var ownerID string
+	err := db.QueryRowContext(ctx, `SELECT user_id FROM user_sessions WHERE session_token_hash = ?`, tokenHash).Scan(&ownerID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("auth: lookup session: %w", err)
 	}
-	s.Proof = SessionProof{
-		Source:             source.String,
-		PracticeScheduleID: practiceScope.String,
-		RecoveryAttemptID:  recoveryAttempt.String,
-		RecoveryScheduleID: recoverySchedule.String,
+	sqlTx, err := tx.Begin(ctx, db, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return nil, fmt.Errorf("auth: lookup session begin: %w", err)
 	}
-	if s.Proof.validateStored(s.Role) != nil || currentRole != s.Role || currentState != "active" {
+	defer func() { _ = sqlTx.Rollback() }()
+
+	var currentRole, currentState string
+	var orgID sql.NullString
+	err = sqlTx.QueryRowContext(ctx, `SELECT role, state, organization_id FROM users WHERE id = ? FOR SHARE`, ownerID).Scan(&currentRole, &currentState, &orgID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("auth: lookup session user: %w", err)
+	}
+	locked, err := scanLockedSession(sqlTx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM user_sessions WHERE session_token_hash = ? FOR UPDATE`, tokenHash))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("auth: lookup session row: %w", err)
+	}
+	if locked.UserID != ownerID {
+		return nil, nil
+	}
+	now, err := dbNow(ctx, sqlTx)
+	if err != nil {
+		return nil, err
+	}
+	if locked.Proof.RecoveryAttemptID != "" {
+		// Non-locking consistent read: lookup never joins attempt locks.
+		var scheduleID string
+		err := sqlTx.QueryRowContext(ctx, `SELECT schedule_id FROM student_attempts WHERE id = ?`, locked.Proof.RecoveryAttemptID).Scan(&scheduleID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("auth: lookup recovery scope: %w", err)
+		}
+		locked.Proof.RecoveryScheduleID = scheduleID
+	}
+	if locked.Proof.validateStored(locked.Role) != nil || currentRole != locked.Role || currentState != "active" || !locked.liveAt(now) {
 		return nil, nil
 	}
 	if orgID.Valid {
 		v := orgID.String
-		s.OrganizationID = &v
+		locked.OrganizationID = &v
 	}
-	if revokedAt.Valid || !s.ExpiresAt.After(now) || !s.IdleTimeoutAt.After(now) {
-		return nil, nil
+
+	newLastSeen := locked.lastSeenAt
+	if now.After(newLastSeen) {
+		newLastSeen = now
 	}
-	newIdle := now.Add(idleTimeoutFor(s.Role, cfg))
-	if _, err := db.ExecContext(ctx,
-		`UPDATE user_sessions SET last_seen_at = ?, idle_timeout_at = ? WHERE id = ?`,
-		now, newIdle, s.ID); err != nil {
-		return nil, fmt.Errorf("auth: touch session: %w", err)
+	newIdle := now.Add(locked.effectiveIdleWindow(cfg))
+	if locked.IdleTimeoutAt.After(newIdle) {
+		newIdle = locked.IdleTimeoutAt
 	}
+	if newIdle.After(locked.ExpiresAt) {
+		newIdle = locked.ExpiresAt
+	}
+	if !newLastSeen.Equal(locked.lastSeenAt) || !newIdle.Equal(locked.IdleTimeoutAt) {
+		if _, err := sqlTx.ExecContext(ctx,
+			`UPDATE user_sessions SET last_seen_at = ?, idle_timeout_at = ? WHERE id = ?`,
+			newLastSeen, newIdle, locked.ID); err != nil {
+			return nil, fmt.Errorf("auth: touch session: %w", err)
+		}
+	}
+	if err := sqlTx.Commit(); err != nil {
+		return nil, fmt.Errorf("auth: touch session commit: %w", err)
+	}
+	s := locked.Session
 	s.IdleTimeoutAt = newIdle
+	s.ValidatedAt = now
 	return &s, nil
 }
 
-// RevokeSession revokes one session by raw token (logout).
+// RevokeSession revokes one session by raw token (logout). Unknown or
+// already-revoked tokens are a successful no-op.
 func RevokeSession(ctx context.Context, db Execer, sessionToken string, now time.Time) error {
 	now = now.UTC()
 	if _, err := db.ExecContext(ctx,
@@ -453,57 +667,72 @@ func RevokeSession(ctx context.Context, db Execer, sessionToken string, now time
 	return nil
 }
 
-// RevokeAllSessions revokes every live session for a user (logout-all).
+// revokeUserSessionsInTx revokes every live session of userID and writes one
+// audit row per revoked session, all inside q. The caller must already hold
+// the user row FOR UPDATE: issuance takes it FOR SHARE, so the live set
+// captured here is exactly the set revoked (no session can slip in between),
+// and the audit names precisely those IDs instead of inferring them from a
+// timestamp range that could include earlier revocations.
+func revokeUserSessionsInTx(ctx context.Context, q tx.Tx, userID, reason string, now time.Time) ([]string, error) {
+	rows, err := q.QueryContext(ctx,
+		`SELECT id FROM user_sessions WHERE user_id = ? AND revoked_at IS NULL ORDER BY id FOR UPDATE`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("auth: revoke all list: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("auth: revoke all scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("auth: revoke all close: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("auth: revoke all rows: %w", err)
+	}
+	for _, id := range ids {
+		if _, err := q.ExecContext(ctx,
+			`UPDATE user_sessions SET revoked_at = ?, revocation_reason = ? WHERE id = ? AND revoked_at IS NULL`,
+			now, reason, id); err != nil {
+			return nil, fmt.Errorf("auth: revoke all sessions: %w", err)
+		}
+		if _, err := q.ExecContext(ctx,
+			`INSERT INTO user_session_events (id, session_id, user_id, event_type, metadata, created_at) VALUES (?, ?, ?, 'revoked_all', JSON_OBJECT('reason', ?), ?)`,
+			uuid.NewString(), id, userID, reason, now); err != nil {
+			return nil, fmt.Errorf("auth: revoke all audit: %w", err)
+		}
+	}
+	return ids, nil
+}
+
+// RevokeAllSessions revokes every live session for a user (logout-all) in
+// one transaction serialized against issuance by the user row lock.
 func RevokeAllSessions(ctx context.Context, db *sql.DB, userID, reason string, now time.Time) error {
 	now = now.UTC()
 	if reason == "" {
 		reason = "logout_all"
 	}
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	sqlTx, err := tx.Begin(ctx, db, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return fmt.Errorf("auth: revoke all begin: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE user_sessions SET revoked_at = ?, revocation_reason = ? WHERE user_id = ? AND revoked_at IS NULL`,
-		now, reason, userID); err != nil {
-		return fmt.Errorf("auth: revoke all sessions: %w", err)
+	defer func() { _ = sqlTx.Rollback() }()
+	var lockedID string
+	err = sqlTx.QueryRowContext(ctx, `SELECT id FROM users WHERE id = ? FOR UPDATE`, userID).Scan(&lockedID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
 	}
-	// Audit fan-out: capture the revoked session IDs first, then write one
-	// event row per revoked session. The timestamp-range predicate covers
-	// rows whose revoked_at was just set above without relying on exact
-	// timestamp equality (fractional-second truncation makes `= now`
-	// miss). Audit failures are logged, never swallowed silently, and never
-	// fail logout-all itself.
-	rows, err := tx.QueryContext(ctx,
-		`SELECT id FROM user_sessions WHERE user_id = ? AND revoked_at IS NOT NULL AND revoked_at >= ?`,
-		userID, now)
 	if err != nil {
-		fmt.Printf("auth: revoke-all audit list: %v\n", err)
-	} else {
-		var ids []string
-		for rows.Next() {
-			var sid string
-			if serr := rows.Scan(&sid); serr != nil {
-				fmt.Printf("auth: revoke-all audit scan: %v\n", serr)
-				break
-			}
-			ids = append(ids, sid)
-		}
-		rows.Close()
-		if rerr := rows.Err(); rerr != nil {
-			fmt.Printf("auth: revoke-all audit rows: %v\n", rerr)
-		} else {
-			for _, sid := range ids {
-				if _, aerr := tx.ExecContext(ctx,
-					`INSERT INTO user_session_events (id, session_id, user_id, event_type, created_at) VALUES (?, ?, ?, 'revoked_all', ?)`,
-					uuid.NewString(), sid, userID, now); aerr != nil {
-					fmt.Printf("auth: revoke-all audit insert session %s: %v\n", sid, aerr)
-				}
-			}
-		}
+		return fmt.Errorf("auth: revoke all lock user: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
+	if _, err := revokeUserSessionsInTx(ctx, sqlTx, userID, reason, now); err != nil {
+		return err
+	}
+	if err := sqlTx.Commit(); err != nil {
 		return fmt.Errorf("auth: revoke all commit: %w", err)
 	}
 	return nil

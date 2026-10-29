@@ -115,6 +115,22 @@ jobs:
       - name: Migration validation
         run: go run ./cmd/migrate --validate-only
 
+      - name: Persistent login contracts (real MySQL, no skipped tests)
+        env:
+          TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"
+        run: |
+          set -euo pipefail
+          : "${TEST_MYSQL_DSN:?Persistent-login qualification requires isolated MySQL}"
+          log="$RUNNER_TEMP/persistent-login-contracts.log"
+          go test -race -count=1 -v ./internal/auth ./cmd/migrate \
+            -run 'TestLogin|TestLookupLockedAdmission|TestReauthenticate|TestPasswordResetAtomicity|TestActivationMySQL|TestRevokeAllSerializes|TestPersistentSessionMigration' | tee "$log"
+          go test -race -count=1 -v ./cmd/api \
+            -run 'TestPersistentLogin|TestLoginRemember|TestRememberedStaff|TestAuthResponsesAreNoStore|TestCredentialRoutes|TestAnonymousLogout|TestSensitiveRouteManifest|TestReauthenticateRejects|TestStaffPolling' | tee -a "$log"
+          if grep -q -- '--- SKIP' "$log"; then
+            echo "Persistent-login DB/process tests must execute; skipped tests fail qualification."
+            exit 1
+          fi
+
       - name: Capacity race and idempotency regressions (real MySQL)
         env:
           TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/ielts?parseTime=true&multiStatements=true&charset=utf8mb4"

@@ -182,7 +182,7 @@ function staffLogin(jar) {
     jar.clear(baseUrl);
     const loginResp = http.post(`${baseUrl}/api/v1/auth/login`, JSON.stringify(staff), {
       jar,
-      headers: jsonHeaders(),
+      headers: jsonHeaders({ origin: baseUrl }),
     });
     if (loginResp.status !== 200) continue;
     const probe = http.get(`${baseUrl}/api/v1/proctor/sessions/${scheduleId}`, {

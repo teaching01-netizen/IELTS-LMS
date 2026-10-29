@@ -30,10 +30,17 @@ func TestAuthMiddlewareRejectsPersistentCookieForExpiredOrRevokedDatabaseSession
 			}
 			defer db.Close()
 
-			rows := sqlmock.NewRows([]string{
-				"id", "user_id", "role_snapshot", "csrf_token", "organization_id", "expires_at", "idle_timeout_at", "revoked_at", "authentication_source", "practice_schedule_id", "recovery_attempt_id", "schedule_id", "role", "state",
-			}).AddRow("session-1", "student-1", auth.RoleStudent, "csrf-1", nil, tc.expiresAt, now.Add(time.Hour), tc.revokedAt, "account", nil, nil, nil, auth.RoleStudent, "active")
-			mock.ExpectQuery("SELECT s.id").WillReturnRows(rows)
+			mock.ExpectQuery("SELECT user_id FROM user_sessions").
+				WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow("student-1"))
+			mock.ExpectBegin()
+			mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectQuery("SELECT role, state, organization_id FROM users").
+				WillReturnRows(sqlmock.NewRows([]string{"role", "state", "organization_id"}).AddRow(auth.RoleStudent, "active", nil))
+			mock.ExpectQuery("FOR UPDATE").WillReturnRows(sqlmock.NewRows([]string{
+				"id", "user_id", "role_snapshot", "csrf_token", "issued_at", "last_seen_at", "expires_at", "idle_timeout_at", "revoked_at", "authentication_source", "practice_schedule_id", "recovery_attempt_id", "remembered", "idle_window_seconds", "credential_authenticated_at",
+			}).AddRow("session-1", "student-1", auth.RoleStudent, "csrf-1", now.Add(-time.Hour), now.Add(-time.Minute), tc.expiresAt, now.Add(time.Hour), tc.revokedAt, "account", nil, nil, false, nil, nil))
+			mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(now))
+			mock.ExpectRollback()
 
 			cfg := config.Load()
 			cfg.RateLimitMode = config.RateLimitModeLocal

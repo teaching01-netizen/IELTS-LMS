@@ -140,6 +140,7 @@ func TestOpenAPIRateLimitedResponseContract(t *testing.T) {
 	}
 
 	rateLimitedPaths := []string{
+		"/auth/reauthenticate",
 		"/auth/student/entry",
 		"/grading/export",
 		"/results/export",
@@ -173,7 +174,7 @@ func TestRateLimitRuntimeValidationPrecedesRouterConstruction(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(src)
-	validate := strings.Index(body, "cfg.ValidateForRuntime()")
+	validate := strings.Index(body, "cfg.ValidateForAPI()")
 	buildRouter := strings.Index(body, "BuildRouter(app)")
 	if validate < 0 || buildRouter < 0 {
 		t.Fatalf("startup must contain both runtime validation and router construction")

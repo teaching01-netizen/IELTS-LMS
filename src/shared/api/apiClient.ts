@@ -88,6 +88,33 @@ export interface ApiResponse<T = unknown> {
 
 type StatusError = Error & { statusCode?: number };
 
+/**
+ * What the auth owner learns about a failed request. Carries no credential
+ * material: the provider decides the cookie verdict with its own session check.
+ */
+export interface AuthRequestContext {
+  endpoint: string;
+  method: string;
+  requestId: string;
+  /** Auth generation captured when the request was dispatched. */
+  generation: number | undefined;
+  /** The request carried its own bearer (student attempt), not the cookie. */
+  bearer: boolean;
+  error: ApiError;
+}
+
+type UnauthorizedHandler = (context: AuthRequestContext) => void | Promise<void>;
+
+export const REAUTH_REQUIRED_CODE = "REAUTH_REQUIRED";
+
+/** A response that belongs to a previous signed-in actor. Callers already treat
+ * AbortError as cancellation, so stale work stops without error UI. */
+function staleGenerationError(): Error {
+  return Object.assign(new Error("Request cancelled: the signed-in account changed"), {
+    name: "AbortError",
+  });
+}
+
 function readCookie(name: string): string | null {
   if (typeof document === "undefined") {
     return null;
@@ -124,9 +151,9 @@ class ApiClient {
   private baseURL: string;
   private defaultHeaders: Record<string, string>;
   private defaultTimeout: number;
-  private unauthorizedHandler:
-    | ((context: { endpoint: string; method: string; requestId: string }) => void | Promise<void>)
-    | null;
+  private unauthorizedHandler: UnauthorizedHandler | null;
+  private reauthenticationRequiredHandler: ((error: ApiError) => void) | null = null;
+  private authGenerationReader: (() => number) | null = null;
 
   constructor(baseURL: string = "/api", defaultTimeout: number = 30000) {
     this.baseURL = baseURL;
@@ -141,12 +168,66 @@ class ApiClient {
    * Register a global handler for 401 Unauthorized responses.
    * Useful to immediately clear local auth/session state and redirect to /login.
    */
-  setUnauthorizedHandler(
-    handler:
-      | ((context: { endpoint: string; method: string; requestId: string }) => void | Promise<void>)
-      | null
-  ): void {
+  setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
     this.unauthorizedHandler = handler;
+  }
+
+  /** Register the 403 REAUTH_REQUIRED owner (the password confirmation UI). */
+  setReauthenticationRequiredHandler(handler: ((error: ApiError) => void) | null): void {
+    this.reauthenticationRequiredHandler = handler;
+  }
+
+  /**
+   * Register the auth generation source. The generation changes whenever the
+   * signed-in actor changes; responses dispatched under an older generation
+   * are discarded instead of rendering the previous actor's data.
+   */
+  setAuthGenerationReader(reader: (() => number) | null): void {
+    this.authGenerationReader = reader;
+  }
+
+  captureAuthGeneration(): number | undefined {
+    return this.authGenerationReader?.();
+  }
+
+  /** Throws an AbortError-shaped cancellation when the actor changed since capture. */
+  assertAuthGeneration(captured: number | undefined): void {
+    if (captured === undefined || !this.authGenerationReader) return;
+    if (this.authGenerationReader() !== captured) throw staleGenerationError();
+  }
+
+  /**
+   * Route an auth failure to its owner. Exact 401 goes to the unauthorized
+   * handler; 403 REAUTH_REQUIRED to the confirmation handler. Never replays the
+   * failed operation. Raw-fetch adapters call this with their parsed error.
+   */
+  async reportAuthFailure(
+    error: ApiError,
+    context: Omit<AuthRequestContext, "error"> & { skipUnauthorizedHandler?: boolean | undefined }
+  ): Promise<void> {
+    this.assertAuthGeneration(context.generation);
+    if (error.status === 401) {
+      if (!this.unauthorizedHandler || context.skipUnauthorizedHandler) return;
+      const { skipUnauthorizedHandler: _skip, ...handlerContext } = context;
+      try {
+        await this.unauthorizedHandler({ ...handlerContext, error });
+      } catch (handlerError) {
+        logError(
+          handlerError instanceof Error ? handlerError : new Error("Unauthorized handler failed"),
+          { scope: "apiClient.unauthorizedHandler" }
+        );
+      }
+      return;
+    }
+    if (error.status === 403 && error.code === REAUTH_REQUIRED_CODE && !context.bearer) {
+      this.reauthenticationRequiredHandler?.(error);
+    }
+  }
+
+  /** Build the shared typed error from a raw `fetch` response. */
+  async errorFromResponse(response: Response): Promise<ApiError> {
+    const errorData = await this.parseErrorResponse(response);
+    return this.createErrorFromResponse(response, errorData) as ApiError;
   }
 
   /**
@@ -217,6 +298,7 @@ class ApiClient {
 
     const url = endpoint.startsWith("/api/") ? endpoint : `${this.baseURL}${endpoint}`;
     const requestId = this.generateRequestId();
+    const generation = this.captureAuthGeneration();
 
     const retries =
       method === "GET" || config.retrySafe === true
@@ -235,6 +317,11 @@ class ApiClient {
     let completedAttempts = 0;
 
     for (let attempt = 0; attempt <= retries; attempt++) {
+      if (attempt > 0 && this.isStaleGeneration(generation)) {
+        lastError = staleGenerationError();
+        transient = false;
+        break;
+      }
       if (signal?.aborted) {
         lastError = new DOMException("Request cancelled", "AbortError");
         transient = false;
@@ -318,24 +405,23 @@ class ApiClient {
         });
 
         if (!response.ok) {
-          if (response.status === 401 && this.unauthorizedHandler && !skipUnauthorizedHandler) {
-            try {
-              await this.unauthorizedHandler({ endpoint, method, requestId });
-            } catch (handlerError) {
-              logError(
-                handlerError instanceof Error
-                  ? handlerError
-                  : new Error("Unauthorized handler failed"),
-                { scope: "apiClient.unauthorizedHandler" }
-              );
-            }
-          }
-
-          const errorData = await this.parseErrorResponse(response);
-          throw this.createErrorFromResponse(response, errorData);
+          const responseError = await this.errorFromResponse(response);
+          // Parse first so the auth owner sees the structured code; a stale
+          // generation throws here instead of reaching any credential UI.
+          await this.reportAuthFailure(responseError, {
+            endpoint,
+            method,
+            requestId,
+            generation,
+            bearer: Boolean(config.token),
+            skipUnauthorizedHandler,
+          });
+          throw responseError;
         }
 
         const data = await this.parseResponseBody<T>(response);
+        // A completed 200 for a previous actor is as stale as a late 401.
+        this.assertAuthGeneration(generation);
 
         const apiResponse: ApiResponse<T> = {
           success: true,
@@ -353,7 +439,10 @@ class ApiClient {
         return apiResponse;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Request failed");
-        const cancelled = signal?.aborted || (lastError.name === "AbortError" && !timedOut);
+        const cancelled =
+          signal?.aborted ||
+          (lastError.name === "AbortError" && !timedOut) ||
+          this.isStaleGeneration(generation);
         if (cancelled) {
           // Callers detect cancellation as `instanceof Error` named AbortError.
           lastError = Object.assign(new Error("Request cancelled"), { name: "AbortError" });
@@ -443,6 +532,14 @@ class ApiClient {
     throw networkError;
   }
 
+  private isStaleGeneration(captured: number | undefined): boolean {
+    return (
+      captured !== undefined &&
+      this.authGenerationReader !== null &&
+      this.authGenerationReader() !== captured
+    );
+  }
+
   /**
    * Parse a successful response body.
    * 204/205 or empty responses resolve to undefined instead of throwing.
@@ -499,10 +596,16 @@ class ApiClient {
     // clients tight-retry the storm the gate absorbed. Header wins only when
     // details lack either the canonical or legacy field.
     let details = parsed.details;
-    if (status === 429) {
+    if (status === 429 || status === 503) {
       const headerRetry =
         response.headers.get("Retry-After") ?? response.headers.get("retry-after");
-      const retrySecs = headerRetry !== null ? Number(headerRetry) : NaN;
+      // delta-seconds or HTTP-date (RFC 9110 §10.2.3).
+      const retrySecs =
+        headerRetry === null
+          ? NaN
+          : /^\s*\d+\s*$/.test(headerRetry)
+            ? Number(headerRetry)
+            : Math.ceil((Date.parse(headerRetry) - Date.now()) / 1000);
       if (Number.isFinite(retrySecs) && retrySecs > 0) {
         const merged: Record<string, unknown> = { ...(details ?? {}) };
         if (merged["retryAfterSeconds"] === undefined && merged["retryAfterSecs"] === undefined) {
