@@ -21,7 +21,7 @@ export async function prepareAnsweredExamPdf(
   const csrfToken = apiClient.getCsrfToken();
   const generation = apiClient.captureAuthGeneration();
   // Student callers pass their attempt bearer; its failures are not the
-  // staff cookie's and must not open staff password confirmation.
+  // staff cookie's and must not run the staff session check.
   const bearer = Object.keys(headers ?? {}).some((name) => name.toLowerCase() === "authorization");
   const response = await fetch(endpoint, {
     method: "POST",

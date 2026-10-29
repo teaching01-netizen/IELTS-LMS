@@ -8,7 +8,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  apiClient.setReauthenticationRequiredHandler(null);
   apiClient.setUnauthorizedHandler(null);
 });
 const ready = () => ({
@@ -53,28 +52,7 @@ describe("native PDF preparation", () => {
     await expect(
       prepareAnsweredExamPdf("/prepare", { view: null }, new AbortController().signal)
     ).rejects.toMatchObject({ statusCode: status });
-  });
-  it("routes staff REAUTH_REQUIRED to password confirmation, never for an attempt bearer", async () => {
-    const onReauth = vi.fn();
-    apiClient.setReauthenticationRequiredHandler(onReauth);
-    const reauthResponse = () =>
-      new Response(JSON.stringify({ code: "REAUTH_REQUIRED", message: "confirm" }), {
-        status: 403,
-        headers: { "content-type": "application/json" },
-      });
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => reauthResponse()));
-    await expect(
-      prepareAnsweredExamPdf("/prepare", { view: null }, new AbortController().signal)
-    ).rejects.toMatchObject({ code: "REAUTH_REQUIRED", statusCode: 403 });
-    expect(onReauth).toHaveBeenCalledTimes(1);
-    await expect(
-      prepareAnsweredExamPdf("/prepare", { view: null }, new AbortController().signal, {
-        Authorization: "Bearer attempt",
-      })
-    ).rejects.toMatchObject({ statusCode: 403 });
-    expect(onReauth).toHaveBeenCalledTimes(1);
-  });
-  it.each(["external", "expired", "missing", "bad-size", "bad-types"])(
+  });  it.each(["external", "expired", "missing", "bad-size", "bad-types"])(
     "rejects an unusable %s grant",
     async (kind) => {
       const pdf: Record<string, unknown> = ready();

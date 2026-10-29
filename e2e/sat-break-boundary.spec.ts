@@ -622,10 +622,8 @@ test.describe("SAT section-boundary break handoff", () => {
           await removeStartedStudentArtifacts(scheduleId);
           deleted = await writeApi(page, "DELETE", `/api/v1/exams/${examId}`);
         }
-        // The exam delete is a fresh-password route; the seeded staff session
-        // carries no credential verification, so a local run may answer 403
-        // REAUTH_REQUIRED. The room artifacts above are already removed and the
-        // E2E database is disposable, so cleanup must not mask the flow's result.
+        // The room artifacts above are already removed and the E2E database is
+        // disposable, so cleanup must not mask the flow's result.
         if (deleted.status !== 200) {
           console.warn(
             `[sat-break-boundary] exam cleanup skipped: ${deleted.status} ${JSON.stringify(deleted.payload)}`
@@ -741,10 +739,8 @@ test.describe("SAT section-boundary break handoff", () => {
           await removeStartedStudentArtifacts(scheduleId);
           deleted = await writeApi(page, "DELETE", `/api/v1/exams/${examId}`);
         }
-        // The exam delete is a fresh-password route; the seeded staff session
-        // carries no credential verification, so a local run may answer 403
-        // REAUTH_REQUIRED. The room artifacts above are already removed and the
-        // E2E database is disposable, so cleanup must not mask the flow's result.
+        // The room artifacts above are already removed and the E2E database is
+        // disposable, so cleanup must not mask the flow's result.
         if (deleted.status !== 200) {
           console.warn(
             `[sat-break-boundary] exam cleanup skipped: ${deleted.status} ${JSON.stringify(deleted.payload)}`

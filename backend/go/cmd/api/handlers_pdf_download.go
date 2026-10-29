@@ -74,13 +74,8 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 				return
 			}
 			binding.OwnerID, binding.SessionID = sess.UserID, sess.ID
-			// Staff exports live no longer than the session's hard deadline
-			// or its password freshness, whichever ends first. The route's
-			// freshness guard already proved the password is fresh now.
+			// Staff exports live no longer than the session's hard deadline.
 			expiryLimit = sess.ExpiresAt
-			if fresh := auth.FreshUntil(sess, auth.CredentialFreshWindow(app.Config)); !fresh.IsZero() && fresh.Before(expiryLimit) {
-				expiryLimit = fresh
-			}
 		}
 		var request struct {
 			View json.RawMessage `json:"view"`
@@ -140,9 +135,9 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 			return
 		}
 		if !student && !time.Now().Before(expiryLimit) {
-			// Rendering outlived the password freshness: publishing would
-			// hand out a link the freshness policy no longer covers.
-			httpx.WriteError(w, r, auth.ReauthRequiredError())
+			// Rendering outlived the session: publishing would hand out a link
+			// the session no longer covers.
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeSessionExpired, "Session expired."))
 			return
 		}
 		prepared, err := app.PDFExports.Publish(ctx, record, pdf, filename, expiryLimit)

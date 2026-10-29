@@ -105,8 +105,6 @@ export interface AuthRequestContext {
 
 type UnauthorizedHandler = (context: AuthRequestContext) => void | Promise<void>;
 
-export const REAUTH_REQUIRED_CODE = "REAUTH_REQUIRED";
-
 /** A response that belongs to a previous signed-in actor. Callers already treat
  * AbortError as cancellation, so stale work stops without error UI. */
 function staleGenerationError(): Error {
@@ -152,7 +150,6 @@ class ApiClient {
   private defaultHeaders: Record<string, string>;
   private defaultTimeout: number;
   private unauthorizedHandler: UnauthorizedHandler | null;
-  private reauthenticationRequiredHandler: ((error: ApiError) => void) | null = null;
   private authGenerationReader: (() => number) | null = null;
 
   constructor(baseURL: string = "/api", defaultTimeout: number = 30000) {
@@ -170,11 +167,6 @@ class ApiClient {
    */
   setUnauthorizedHandler(handler: UnauthorizedHandler | null): void {
     this.unauthorizedHandler = handler;
-  }
-
-  /** Register the 403 REAUTH_REQUIRED owner (the password confirmation UI). */
-  setReauthenticationRequiredHandler(handler: ((error: ApiError) => void) | null): void {
-    this.reauthenticationRequiredHandler = handler;
   }
 
   /**
@@ -198,8 +190,8 @@ class ApiClient {
 
   /**
    * Route an auth failure to its owner. Exact 401 goes to the unauthorized
-   * handler; 403 REAUTH_REQUIRED to the confirmation handler. Never replays the
-   * failed operation. Raw-fetch adapters call this with their parsed error.
+   * handler. Never replays the failed operation. Raw-fetch adapters call this
+   * with their parsed error.
    */
   async reportAuthFailure(
     error: ApiError,
@@ -218,9 +210,6 @@ class ApiClient {
         );
       }
       return;
-    }
-    if (error.status === 403 && error.code === REAUTH_REQUIRED_CODE && !context.bearer) {
-      this.reauthenticationRequiredHandler?.(error);
     }
   }
 

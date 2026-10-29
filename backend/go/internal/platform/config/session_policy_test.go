@@ -15,7 +15,7 @@ func validRuntimeConfig() Config {
 }
 
 func TestPersistentLoginDefaults(t *testing.T) {
-	for _, key := range []string{"PERSISTENT_LOGIN_ENABLED", "SESSION_REMEMBER_STAFF_IDLE_HOURS", "SESSION_REMEMBER_STAFF_ABSOLUTE_HOURS", "SESSION_REMEMBER_ADMIN_IDLE_HOURS", "SESSION_REMEMBER_ADMIN_ABSOLUTE_HOURS", "SESSION_CREDENTIAL_FRESH_MINS", "AUTH_PUBLIC_ORIGIN"} {
+	for _, key := range []string{"PERSISTENT_LOGIN_ENABLED", "SESSION_REMEMBER_STAFF_IDLE_HOURS", "SESSION_REMEMBER_STAFF_ABSOLUTE_HOURS", "SESSION_REMEMBER_ADMIN_IDLE_HOURS", "SESSION_REMEMBER_ADMIN_ABSOLUTE_HOURS", "AUTH_PUBLIC_ORIGIN"} {
 		t.Setenv(key, "")
 	}
 	cfg := Load()
@@ -23,8 +23,7 @@ func TestPersistentLoginDefaults(t *testing.T) {
 		t.Fatal("remembered issuance must ship off")
 	}
 	if cfg.SessionRememberStaffIdleHours != 168 || cfg.SessionRememberStaffAbsoluteHours != 720 ||
-		cfg.SessionRememberAdminIdleHours != 24 || cfg.SessionRememberAdminAbsoluteHours != 168 ||
-		cfg.SessionCredentialFreshMins != 15 {
+		cfg.SessionRememberAdminIdleHours != 24 || cfg.SessionRememberAdminAbsoluteHours != 168 {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
 }
@@ -36,8 +35,6 @@ func TestSessionPolicyValidation(t *testing.T) {
 		"absolute above cap":     func(c *Config) { c.SessionRememberStaffAbsoluteHours = MaxRememberedSessionHours + 1 },
 		"admin idle above cap":   func(c *Config) { c.SessionRememberAdminIdleHours = 10000 },
 		"negative admin":         func(c *Config) { c.SessionRememberAdminAbsoluteHours = -1 },
-		"zero freshness":         func(c *Config) { c.SessionCredentialFreshMins = 0 },
-		"freshness above cap":    func(c *Config) { c.SessionCredentialFreshMins = MaxCredentialFreshMins + 1 },
 		"origin with path":       func(c *Config) { c.AuthPublicOrigin = "https://exams.example.com/app" },
 		"origin with user info":  func(c *Config) { c.AuthPublicOrigin = "https://u:p@exams.example.com" },
 		"origin non-http scheme": func(c *Config) { c.AuthPublicOrigin = "ftp://exams.example.com" },

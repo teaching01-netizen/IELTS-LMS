@@ -27,7 +27,6 @@ func TestStatusForMapsEveryCode(t *testing.T) {
 		{CodePayloadTooLarge, http.StatusRequestEntityTooLarge},
 		{CodeServiceUnavailable, http.StatusServiceUnavailable},
 		{CodeSATClassroomDisabled, http.StatusServiceUnavailable},
-		{CodeReauthRequired, http.StatusForbidden},
 		{CodeInternal, http.StatusInternalServerError},
 		{CodeCSRF, http.StatusForbidden},
 		{CodeSessionExpired, http.StatusUnauthorized},

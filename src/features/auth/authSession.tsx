@@ -44,7 +44,6 @@ import {
   type AuthState,
   type AuthStatus,
 } from './authSessionState';
-import { ReauthenticateDialog } from './ReauthenticateDialog';
 
 export type { StudentQueuedAdmission } from './api/authGateway';
 export type { AuthStatus } from './authSessionState';
@@ -65,7 +64,6 @@ interface AuthSessionContextValue {
   logout: () => Promise<void>;
   logoutAll: () => Promise<void>;
   refresh: () => Promise<AuthSession | null>;
-  reauthenticate: (password: string) => Promise<AuthSession>;
   dismissLogoutNotice: () => void;
   requestPasswordReset: (email: string) => Promise<void>;
   completePasswordReset: (token: string, password: string) => Promise<AuthSession>;
@@ -96,13 +94,6 @@ function statusOf(error: unknown): number | undefined {
   const record = error as Record<string, unknown>;
   const value = record['status'] ?? record['statusCode'];
   return typeof value === 'number' ? value : undefined;
-}
-
-function codeOf(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null) return undefined;
-  const record = error as Record<string, unknown>;
-  const value = record['code'] ?? record['backendCode'];
-  return typeof value === 'string' ? value : undefined;
 }
 
 export function resolveRoleLandingPath(role: AuthUserRole): string {
@@ -187,7 +178,6 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   // In-memory copy of this tab's logout intent for browsers without storage.
   const memoryIntentRef = useRef<{ intent: LogoutIntent; persisted: boolean } | null>(null);
   const refreshRef = useRef<() => Promise<AuthSession | null>>(async () => null);
-  const [reauthOpen, setReauthOpen] = useState(false);
 
   const transition = useCallback((event: AuthEvent): AuthState => {
     const next = reduceAuthState(stateRef.current, event);
@@ -363,12 +353,8 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       // One deduped session check decides; a single 401 is not a logout.
       await refreshRef.current();
     });
-    apiClient.setReauthenticationRequiredHandler(() => {
-      if (stateRef.current.session) setReauthOpen(true);
-    });
     return () => {
       apiClient.setUnauthorizedHandler(null);
-      apiClient.setReauthenticationRequiredHandler(null);
       apiClient.setAuthGenerationReader(null);
     };
   }, []);
@@ -482,7 +468,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   // through reconciliation, and leave any newer logout intent to revoke the
   // resulting cookie before private UI can return.
   const establishCredentials = useCallback(
-    async (operation: () => Promise<AuthSession>, supersedeLogout: boolean): Promise<AuthSession> => {
+    async (operation: () => Promise<AuthSession>): Promise<AuthSession> => {
       generationRef.current += 1;
       const generation = generationRef.current;
       authService.invalidateSessionRequest();
@@ -494,11 +480,9 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
         if (generation !== generationRef.current) {
           throw new DOMException('Sign-in was superseded.', 'AbortError');
         }
-        if (supersedeLogout) {
-          const intent = currentIntent();
-          if (intent) clearLogoutIntent(intent.id);
-          memoryIntentRef.current = null;
-        }
+        const intent = currentIntent();
+        if (intent) clearLogoutIntent(intent.id);
+        memoryIntentRef.current = null;
         return await reconcileEstablished(created);
       } catch (error) {
         if (!acknowledged && generation === generationRef.current && !isCancellation(error) && statusOf(error) !== 401) {
@@ -521,27 +505,11 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
           email,
           password,
           ...(rememberMe !== undefined && rememberMeAvailable ? { rememberMe } : {}),
-        }), true);
+        }));
         setLogoutAllUnconfirmed(false);
         return created;
       }),
     [establishCredentials, rememberMeAvailable],
-  );
-
-  const reauthenticate = useCallback(
-    (password: string) =>
-      withAuthMutationLock(async () => {
-        try {
-          return await establishCredentials(() => authService.reauthenticate(password), false);
-        } catch (error) {
-          if (statusOf(error) === 401 && codeOf(error) === 'SESSION_EXPIRED') {
-            // The session itself is gone; let the session check decide.
-            void refreshRef.current();
-          }
-          throw error;
-        }
-      }),
-    [establishCredentials],
   );
 
   const studentEntry = useCallback(async (payload: Omit<StudentEntryPayload, "entrySession">) => {
@@ -574,7 +542,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const completePasswordReset = useCallback(
     (token: string, password: string) =>
       withAuthMutationLock(async () => {
-        return establishCredentials(() => authService.completePasswordReset({ token, password }), true);
+        return establishCredentials(() => authService.completePasswordReset({ token, password }));
       }),
     [establishCredentials],
   );
@@ -582,7 +550,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const activateAccount = useCallback(
     (token: string, password: string, displayName?: string | undefined) =>
       withAuthMutationLock(async () => {
-        return establishCredentials(() => authService.activateAccount({ token, password, displayName }), true);
+        return establishCredentials(() => authService.activateAccount({ token, password, displayName }));
       }),
     [establishCredentials],
   );
@@ -600,7 +568,6 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       logout,
       logoutAll,
       refresh,
-      reauthenticate,
       dismissLogoutNotice,
       requestPasswordReset,
       completePasswordReset,
@@ -613,7 +580,6 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       logoutAll,
-      reauthenticate,
       refresh,
       rememberMeAvailable,
       requestPasswordReset,
@@ -625,12 +591,6 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
   return (
     <AuthSessionContext.Provider value={value}>
       {children}
-      <ReauthenticateDialog
-        isOpen={reauthOpen && state.status === 'authenticated'}
-        email={state.session?.user.email ?? ''}
-        onConfirm={reauthenticate}
-        onClose={() => setReauthOpen(false)}
-      />
     </AuthSessionContext.Provider>
   );
 }

@@ -27,7 +27,7 @@ export interface AuthSession {
   idleTimeoutAt?: string | undefined;
   /** The browser holds a persistent (remembered-device) cookie. */
   remembered?: boolean | undefined;
-  /** Last password confirmation for this session; null for legacy/non-password sessions. */
+  /** Last real password verification for this session; null for legacy/non-password sessions. */
   credentialAuthenticatedAt?: string | null | undefined;
 }
 
@@ -237,20 +237,6 @@ class AuthService {
       retries: 0,
       skipUnauthorizedHandler: true,
     });
-    return extractEnvelopeData<AuthSession>(response);
-  }
-
-  /**
-   * Confirm the current staff user's password for sensitive actions. The
-   * server rotates the session; a wrong password is this form's error, not a
-   * global sign-out.
-   */
-  async reauthenticate(password: string): Promise<AuthSession> {
-    const response = await post<BackendEnvelope<AuthSession>>(
-      '/v1/auth/reauthenticate',
-      { password },
-      { retries: 0, skipUnauthorizedHandler: true },
-    );
     return extractEnvelopeData<AuthSession>(response);
   }
 

@@ -1,8 +1,7 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { apiClient } from '../../../shared/api/apiClient';
 import { authService } from '../../../services/authService';
 import { AuthSessionProvider, useAuthSession } from '../authSession';
 import { RequireAuth } from '../RequireAuth';
@@ -234,54 +233,5 @@ describe('AuthSessionProvider logout intent', () => {
 
     expect(auth?.status).toBe('logoutPending');
     expect(screen.queryByText('admin content')).not.toBeInTheDocument();
-  });
-});
-
-function TriggerSensitive() {
-  useEffect(() => {
-    void apiClient.post('/v1/results/export', {}).catch(() => undefined);
-  }, []);
-  return null;
-}
-
-describe('AuthSessionProvider password confirmation', () => {
-  const originalFetch = global.fetch;
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  it('opens one dialog for REAUTH_REQUIRED and keeps the session on a wrong password', async () => {
-    const getSession = vi.spyOn(authService, 'getSession').mockResolvedValue(admin);
-    global.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ code: 'REAUTH_REQUIRED', message: 'confirm' }), {
-        status: 403,
-        headers: { 'content-type': 'application/json' },
-      }),
-    ) as unknown as typeof fetch;
-    const reauth = vi
-      .spyOn(authService, 'reauthenticate')
-      .mockRejectedValueOnce(Object.assign(new Error('Invalid credentials.'), { status: 401, code: 'UNAUTHORIZED' }))
-      .mockResolvedValue({ ...admin, csrfToken: 'csrf-2' });
-
-    renderAt('/admin', <><TriggerSensitive /><TriggerSensitive /></>);
-
-    const dialogs = await screen.findAllByRole('dialog');
-    expect(dialogs).toHaveLength(1);
-    const password = screen.getByLabelText('Password');
-    expect(password).toHaveAttribute('autocomplete', 'current-password');
-
-    fireEvent.change(password, { target: { value: 'wrong' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
-    expect(await screen.findByText('That password is incorrect.')).toBeInTheDocument();
-    expect(auth?.session?.user.id).toBe('admin-1');
-    expect(screen.getByText('admin content')).toBeInTheDocument();
-    expect(screen.getByLabelText('Password')).toHaveValue('');
-
-    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'right' } });
-    getSession.mockResolvedValue({ ...admin, csrfToken: 'csrf-2' });
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
-    expect(await screen.findByText(/Repeat the action you were doing/)).toBeInTheDocument();
-    expect(reauth).toHaveBeenLastCalledWith('right');
-    expect(auth?.session?.csrfToken).toBe('csrf-2');
   });
 });

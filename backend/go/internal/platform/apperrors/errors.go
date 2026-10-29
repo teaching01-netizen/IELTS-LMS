@@ -113,9 +113,6 @@ const (
 	// CodeSATClassroomDisabled: the SAT Classroom rollout gate definitively
 	// refused this room creation before any room or operation receipt committed.
 	CodeSATClassroomDisabled Code = "SAT_CLASSROOM_DISABLED"
-	// CodeReauthRequired: the session is valid but the sensitive route needs a
-	// recent password confirmation; nothing was changed. Never a logout signal.
-	CodeReauthRequired Code = "REAUTH_REQUIRED"
 )
 
 // Error is a typed application error with a stable code.
@@ -145,7 +142,7 @@ func statusFor(c Code) int {
 	switch c {
 	case CodeUnauthorized, CodeAttemptTokenInvalid, CodeAttemptTokenExpired, CodeSessionExpired:
 		return http.StatusUnauthorized
-	case CodeForbidden, CodeCSRF, CodeLeaseFenced, CodeAttemptProctorBlocked, CodeStartCodeInvalid, CodeReauthRequired:
+	case CodeForbidden, CodeCSRF, CodeLeaseFenced, CodeAttemptProctorBlocked, CodeStartCodeInvalid:
 		return http.StatusForbidden
 	case CodeNotFound, CodeExamNotFound, CodeOperationNotFound:
 		return http.StatusNotFound

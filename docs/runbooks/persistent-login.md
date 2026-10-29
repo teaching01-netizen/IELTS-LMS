@@ -16,15 +16,13 @@ SESSION_REMEMBER_STAFF_IDLE_HOURS=168
 SESSION_REMEMBER_STAFF_ABSOLUTE_HOURS=720
 SESSION_REMEMBER_ADMIN_IDLE_HOURS=24
 SESSION_REMEMBER_ADMIN_ABSOLUTE_HOURS=168
-SESSION_CREDENTIAL_FRESH_MINS=15
 ```
 
 Replace the example origin with the public browser origin. It must be HTTPS,
 including the correct nondefault port when applicable, with no credentials,
 query or fragment. Terminate TLS at the trusted public ingress; preserve the
 browser Origin/Referer and forward cookies and CSRF headers. Do not derive this
-setting from forwarded headers or the coediting service's origin. Confirm login,
-reauthentication and logout through the actual ingress before enabling issuance.
+setting from forwarded headers or the coediting service's origin. Confirm login and logout through the actual ingress before enabling issuance.
 The API refuses insecure production cookies or an enabled process-local session
 cache. Workers retain their own runtime validation.
 
@@ -75,12 +73,9 @@ frontend role parity is separately delivered. Existing sessions are not promoted
 
 Session bearer tokens exist only in HttpOnly cookies; stored session tokens are
 hashed. Idle extensions never move the hard deadline or password timestamp.
-Ordinary staff polling does not refresh cookies. Password confirmation rotates
-the exact session and retains mounted same-user drafts. Sensitive actions return
-403 `REAUTH_REQUIRED`; users confirm and repeat their action. Mutations are not
-blindly replayed. Prepared staff PDFs are bound to the issuing session and expire
-no later than password freshness; reprepare after rotation. Browser printing or
-exports from data already loaded remain outside this server boundary.
+Ordinary staff polling does not refresh cookies. Prepared staff PDFs are bound
+to the issuing session and expire no later than that session's deadline. Browser
+printing or exports from data already loaded remain outside this server boundary.
 
 Current-device logout is idempotent even with an expired cookie. Offline logout
 hides private UI immediately and persists only a credential-free intent; recovery
@@ -96,7 +91,7 @@ contain only invalidation types and random operation IDs, never user objects or
 credentials. Database authorization remains authoritative for old clients too.
 
 Monitor `auth_session_lookup_total{outcome="restored|absent|transient"}`,
-`auth_session_lookup_seconds` and `auth_reauthentication_required_total`, alongside
+`auth_session_lookup_seconds`, alongside
 existing HTTP status/latency, query duration, pool wait and deadlock metrics.
 These labels contain no user/session identifiers. Error responses for auth routes
 carry `Cache-Control: no-store`. Do not record request bodies, cookies, CSRF tokens,
@@ -105,14 +100,14 @@ passwords, password hashes or bearer tokens in deployment logs.
 ## Rollback
 
 Disable new remembered issuance first. This does not revoke previously issued
-credentials. Keep primary-backed admission, the cache disabled, the additive
-schema and freshness guards. If reverting to an old reader is necessary, first
+credentials. Keep primary-backed admission, the cache disabled, and the additive
+schema. If reverting to an old reader is necessary, first
 have the operator approve the sign-in impact and revoke live remembered sessions
 under the same user/session locking order as other lifecycle changes. Verify
 that no remembered row remains live before deploying old readers. Do not drop
 columns or undo migration history.
 
 Stop rollout immediately for authorization after revocation on a new request,
-student scope expansion, a protected action without freshness, or a credential
+student scope expansion, a protected action admitted without its role check, or a credential
 leak. Investigate false login redirects, restore failures and the agreed latency
 threshold before widening the cohort.

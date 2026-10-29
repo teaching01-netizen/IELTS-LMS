@@ -27,7 +27,7 @@ export async function downloadSatRawdataXlsx(
   const response = await fetch(endpoint, { credentials: 'same-origin' });
   if (!response.ok) {
     const error = await apiClient.errorFromResponse(response);
-    // Shared auth owners first (sign-in check / password confirmation), so the
+    // Shared auth owners first (sign-in check), so the
     // structured code is not lost to the message-only error below.
     await apiClient.reportAuthFailure(error, {
       endpoint,

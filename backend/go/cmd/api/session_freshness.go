@@ -5,11 +5,9 @@ import (
 	"net/url"
 	"strings"
 
-	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/httpx"
-	"example.com/ielts-proctoring/internal/platform/telemetry"
 )
 
 // noStoreMiddleware marks every /api/v1/auth response, including early
@@ -83,28 +81,5 @@ func authOriginGuard(app *App) func(http.Handler) http.Handler {
 			}
 			next.ServeHTTP(w, r)
 		})
-	}
-}
-
-// withFreshPassword guards a sensitive route: the live staff account session
-// must have verified its password within SESSION_CREDENTIAL_FRESH_MINS of
-// this request's database admission time. It runs inside the route's authz
-// wrapper (role/scope checks still apply) and before any domain side effect.
-// Failure is 403 REAUTH_REQUIRED, which clients must never treat as logout.
-func withFreshPassword(app *App, h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		sess := SessionOf(r.Context())
-		if sess == nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeSessionExpired, "Session expired."))
-			return
-		}
-		if err := auth.RequireFreshPassword(sess, sess.ValidatedAt, auth.CredentialFreshWindow(app.Config)); err != nil {
-			if typed, ok := apperrors.As(err); ok && typed.Code == apperrors.CodeReauthRequired {
-				telemetry.IncCounter(telemetry.MAuthReauthenticationRequiredTotal)
-			}
-			httpx.WriteError(w, r, err)
-			return
-		}
-		h(w, r)
 	}
 }

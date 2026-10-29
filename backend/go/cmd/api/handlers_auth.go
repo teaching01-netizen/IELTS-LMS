@@ -219,48 +219,6 @@ func loginHandler(app *App) http.HandlerFunc {
 	}
 }
 
-// reauthenticateHandler confirms the current staff user's password and
-// rotates the session (new session + CSRF cookies). Identity comes only from
-// the live session; the body carries the password and nothing else.
-func reauthenticateHandler(app *App) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		sess := requireSession(w, r)
-		if sess == nil {
-			return
-		}
-		if sess.Role == auth.RoleStudent || sess.Proof.Source != auth.SessionSourceAccount || sess.RecoveryScoped() || sess.Proof.PracticeScheduleID != "" {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeForbidden, "The authenticated user is not allowed to access this route."))
-			return
-		}
-		var req struct {
-			Password string `json:"password"`
-		}
-		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		if req.Password == "" {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeBadRequest, "Password is required."))
-			return
-		}
-		if app.DB == nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Database not configured."))
-			return
-		}
-		created, err := auth.Reauthenticate(r.Context(), app.DB, app.Config, sess, req.Password, userAgentHash(r))
-		if err != nil {
-			httpx.WriteError(w, r, authStoreError("reauthenticate", err))
-			return
-		}
-		if app.SessionCache != nil {
-			if cookie, cerr := r.Cookie(app.Config.EffectiveSessionCookieName()); cerr == nil && cookie.Value != "" {
-				app.SessionCache.Invalidate(auth.SHA256Hex(cookie.Value))
-			}
-		}
-		writeAccountSession(w, r, app, created)
-	}
-}
-
 // cookieSameSite keeps the existing policy: Strict, Lax in development.
 func cookieSameSite(app *App) http.SameSite {
 	if strings.ToLower(app.Config.Environment) == "development" {

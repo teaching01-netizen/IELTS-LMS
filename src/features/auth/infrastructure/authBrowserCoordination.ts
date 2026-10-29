@@ -120,7 +120,7 @@ export function supportsAuthMutationLock(): boolean {
 let inTabQueue: Promise<unknown> = Promise.resolve();
 
 /**
- * Serialize credential-changing operations (login, reauth, reset, activation,
+ * Serialize credential-changing operations (login, reset, activation,
  * logout) across cooperating tabs with Web Locks. Without Web Locks this falls
  * back to an in-tab queue; callers must not claim cross-tab serialization then.
  */

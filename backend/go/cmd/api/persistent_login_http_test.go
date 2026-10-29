@@ -235,82 +235,29 @@ func serveAs(router http.Handler, method, path string) *httptest.ResponseRecorde
 	return rec
 }
 
-// Every manifest route and alias demands a fresh password before its
-// handler runs; a fresh one passes the guard; the 15-minute boundary is
-// stale; a student never gains access through it.
-func TestSensitiveRouteManifestRequiresFreshPassword(t *testing.T) {
+// Password confirmation never gates the sensitive routes: a staff session
+// without any recent password verification reaches authorization like any
+// other, and a student is still denied by it.
+func TestSensitiveRouteManifestNeverRequiresPasswordConfirmation(t *testing.T) {
 	cfg := persistentRouterCfg()
 	cfg.SessionCookieName = "session"
-	cfg.SessionCredentialFreshMins = 15
 	now := time.Date(2026, 10, 29, 9, 0, 0, 0, time.UTC)
-	stale := routerWithSession(t, cfg, liveStaff(auth.RoleAdmin, 15*time.Minute, now))
-	never := routerWithSession(t, cfg, liveStaff(auth.RoleAdmin, -1, now))
-	fresh := routerWithSession(t, cfg, liveStaff(auth.RoleAdmin, 14*time.Minute, now))
-	unadmitted := routerWithSession(t, cfg, liveStaff(auth.RoleAdmin, time.Minute, time.Time{}))
+	staff := routerWithSession(t, cfg, liveStaff(auth.RoleAdmin, -1, now))
 	student := routerWithSession(t, cfg, &auth.Session{ID: "s-2", UserID: "u-2", Role: auth.RoleStudent, CSRFToken: "csrf-1", Proof: auth.SessionProof{Source: auth.SessionSourceAccount}, ValidatedAt: now})
 	for _, route := range sensitiveRouteManifest {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
-			for name, router := range map[string]http.Handler{"boundary": stale, "never verified": never, "zero admission time": unadmitted} {
-				rec := serveAs(router, route.method, route.path)
-				if rec.Code != http.StatusForbidden || responseCode(t, rec) != "REAUTH_REQUIRED" {
-					t.Fatalf("%s: want 403 REAUTH_REQUIRED, got %d %s", name, rec.Code, rec.Body.String())
-				}
+			if rec := serveAs(staff, route.method, route.path); responseCode(t, rec) == "REAUTH_REQUIRED" {
+				t.Fatalf("staff session must not need password confirmation: %d %s", rec.Code, rec.Body.String())
 			}
-			if rec := serveAs(fresh, route.method, route.path); responseCode(t, rec) == "REAUTH_REQUIRED" {
-				t.Fatalf("fresh password must pass the guard: %d %s", rec.Code, rec.Body.String())
-			}
-			if rec := serveAs(student, route.method, route.path); rec.Code < 400 || responseCode(t, rec) == "REAUTH_REQUIRED" {
-				t.Fatalf("student must be denied by authorization, not offered reauth: %d %s", rec.Code, rec.Body.String())
+			if rec := serveAs(student, route.method, route.path); rec.Code < 400 {
+				t.Fatalf("student must be denied by authorization: %d %s", rec.Code, rec.Body.String())
 			}
 		})
 	}
 	// The deprecated results/export-profile alias has no authz table entry, so
-	// it already denies closed before the (also attached) freshness guard.
-	if rec := serveAs(fresh, http.MethodPost, "/api/v1/results/export-profile"); rec.Code != http.StatusForbidden || responseCode(t, rec) != "FORBIDDEN" {
+	// it denies closed.
+	if rec := serveAs(staff, http.MethodPost, "/api/v1/results/export-profile"); rec.Code != http.StatusForbidden || responseCode(t, rec) != "FORBIDDEN" {
 		t.Fatalf("export-profile alias must stay denied: %d %s", rec.Code, rec.Body.String())
-	}
-	// Routine reads and student downloads keep their existing policy.
-	for _, route := range []struct{ method, path string }{
-		{http.MethodGet, "/api/v1/results"},
-		{http.MethodGet, "/api/v1/sat-answered-pdf/downloads/exp-1"},
-	} {
-		if rec := serveAs(never, route.method, route.path); responseCode(t, rec) == "REAUTH_REQUIRED" {
-			t.Fatalf("%s %s must not require reauth", route.method, route.path)
-		}
-	}
-}
-
-func TestReauthenticateRejectsScopedPrincipals(t *testing.T) {
-	cfg := persistentRouterCfg()
-	cfg.SessionCookieName = "session"
-	now := time.Now().UTC()
-	for name, sess := range map[string]*auth.Session{
-		"student":  {ID: "s", UserID: "u", Role: auth.RoleStudent, CSRFToken: "csrf-1", Proof: auth.SessionProof{Source: auth.SessionSourceAccount}, ValidatedAt: now},
-		"practice": {ID: "s", UserID: "u", Role: auth.RoleStudent, CSRFToken: "csrf-1", Proof: auth.SessionProof{Source: auth.SessionSourcePractice, PracticeScheduleID: "11111111-1111-1111-1111-111111111111"}, ValidatedAt: now},
-		"recovery": {ID: "s", UserID: "u", Role: auth.RoleStudent, CSRFToken: "csrf-1", Proof: auth.SessionProof{Source: auth.SessionSourceRecovery, RecoveryAttemptID: "11111111-1111-1111-1111-111111111111", RecoveryScheduleID: "22222222-2222-2222-2222-222222222222"}, ValidatedAt: now},
-		"legacy":   {ID: "s", UserID: "u", Role: auth.RoleAdmin, CSRFToken: "csrf-1", ValidatedAt: now},
-	} {
-		t.Run(name, func(t *testing.T) {
-			router := routerWithSession(t, cfg, sess)
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reauthenticate", strings.NewReader(`{"password":"x"}`))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Origin", "http://example.com")
-			req.Header.Set("X-CSRF-Token", "csrf-1")
-			req.AddCookie(&http.Cookie{Name: "session", Value: "cookie"})
-			rec := httptest.NewRecorder()
-			router.ServeHTTP(rec, req)
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("%s must not confirm a password: %d %s", name, rec.Code, rec.Body.String())
-			}
-		})
-	}
-	anon := routerWithSession(t, cfg, nil)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reauthenticate", strings.NewReader(`{"password":"x"}`))
-	req.Header.Set("Origin", "http://example.com")
-	rec := httptest.NewRecorder()
-	anon.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous reauth = %d", rec.Code)
 	}
 }
 

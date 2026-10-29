@@ -4325,41 +4325,6 @@ paths:
             application/json:
               schema: { type: object }
         "403": { $ref: "#/components/responses/Error" }
-  /auth/reauthenticate:
-    post:
-      tags: [auth]
-      operationId: reauthenticateStaffSession
-      summary: Confirm the current staff account password and rotate its session
-      description: |-
-        Requires a live account-origin staff session, exact same-origin proof,
-        and CSRF. Rotation retains the remembered-device preference and revokes
-        the previous session atomically. Wrong password is 401 without signing
-        out other requests, except when the account reaches its lockout limit.
-        Do not automatically replay a rejected sensitive action after confirming.
-      security:
-        - cookieAuth: []
-          csrfToken: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [password]
-              properties:
-                password: { type: string, format: password }
-      responses:
-        "200":
-          description: Replacement session committed; old session revoked
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AuthSession" }
-        "400": { $ref: "#/components/responses/Error" }
-        "401": { $ref: "#/components/responses/Error" }
-        "403": { $ref: "#/components/responses/Error" }
-        "429": { $ref: "#/components/responses/RateLimited" }
-        "503": { $ref: "#/components/responses/Error" }
   /auth/logout-all:
     post:
       tags: [auth]
@@ -5689,7 +5654,6 @@ components:
               CSRF_FAILED,
               CSRF_REJECTED,
               SESSION_EXPIRED,
-              REAUTH_REQUIRED,
               ATTEMPT_TOKEN_INVALID,
               ATTEMPT_TOKEN_EXPIRED,
               LEASE_FENCED,

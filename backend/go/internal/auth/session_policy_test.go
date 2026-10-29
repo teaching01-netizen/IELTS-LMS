@@ -3,8 +3,6 @@ package auth
 import (
 	"testing"
 	"time"
-
-	"example.com/ielts-proctoring/internal/platform/apperrors"
 )
 
 func TestPolicyForPassword(t *testing.T) {
@@ -60,46 +58,5 @@ func TestPolicyDeadlinesCapIdleAtAbsolute(t *testing.T) {
 	expires, idle := policyDeadlines(SessionPolicy{IdleWindow: 48 * time.Hour, AbsoluteLifetime: 24 * time.Hour}, now)
 	if !expires.Equal(now.Add(24*time.Hour)) || !idle.Equal(expires) {
 		t.Fatalf("expires=%s idle=%s", expires, idle)
-	}
-}
-
-func TestRequireFreshPassword(t *testing.T) {
-	now := time.Date(2026, 10, 29, 9, 0, 0, 0, time.UTC)
-	window := 15 * time.Minute
-	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
-	staff := func(cred *time.Time) *Session {
-		return &Session{Role: RoleAdmin, Proof: SessionProof{Source: SessionSourceAccount}, CredentialAuthenticatedAt: cred}
-	}
-	cases := []struct {
-		name string
-		s    *Session
-		now  time.Time
-		want string
-	}{
-		{"fresh", staff(at(-time.Minute)), now, ""},
-		{"just inside", staff(at(-window + time.Second)), now, ""},
-		{"exact boundary is stale", staff(at(-window)), now, string(apperrors.CodeReauthRequired)},
-		{"stale", staff(at(-time.Hour)), now, string(apperrors.CodeReauthRequired)},
-		{"never verified", staff(nil), now, string(apperrors.CodeReauthRequired)},
-		{"future time", staff(at(time.Minute)), now, string(apperrors.CodeReauthRequired)},
-		{"zero admission time", staff(at(-time.Minute)), time.Time{}, string(apperrors.CodeReauthRequired)},
-		{"student", &Session{Role: RoleStudent, Proof: SessionProof{Source: SessionSourceAccount}, CredentialAuthenticatedAt: at(-time.Minute)}, now, string(apperrors.CodeForbidden)},
-		{"legacy origin", &Session{Role: RoleAdmin, CredentialAuthenticatedAt: at(-time.Minute)}, now, string(apperrors.CodeForbidden)},
-		{"no session", nil, now, string(apperrors.CodeSessionExpired)},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := RequireFreshPassword(tc.s, tc.now, window)
-			if tc.want == "" {
-				if err != nil {
-					t.Fatalf("want fresh, got %v", err)
-				}
-				return
-			}
-			ae, ok := apperrors.As(err)
-			if !ok || string(ae.Code) != tc.want {
-				t.Fatalf("want %s, got %v", tc.want, err)
-			}
-		})
 	}
 }

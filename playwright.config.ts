@@ -113,9 +113,6 @@ const backendRuntimeEnv = {
   LIVE_UPDATE_POLL_INTERVAL_MS: inheritedEnv["LIVE_UPDATE_POLL_INTERVAL_MS"] ?? "100",
   // e2e/persistent-login.spec.ts exercises remembered issuance end to end.
   PERSISTENT_LOGIN_ENABLED: inheritedEnv["PERSISTENT_LOGIN_ENABLED"] ?? "true",
-  // globalSetup logs staff in once for every suite; 60 minutes (the server
-  // maximum) keeps those sessions valid for sensitive routes during a run.
-  SESSION_CREDENTIAL_FRESH_MINS: inheritedEnv["SESSION_CREDENTIAL_FRESH_MINS"] ?? "60",
 };
 const backendFeatureEnv = {
   VITE_BACKEND_API_URL: backendApiUrl,

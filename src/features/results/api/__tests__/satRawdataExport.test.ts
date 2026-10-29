@@ -64,22 +64,18 @@ describe('downloadSatRawdataXlsx', () => {
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
-  it('keeps the structured code and routes REAUTH_REQUIRED to the confirmation owner', async () => {
-    const onReauth = vi.fn();
-    apiClient.setReauthenticationRequiredHandler(onReauth);
+  it('keeps the structured code of a 403 response', async () => {
     fetchMock.mockResolvedValue(
-      new Response(JSON.stringify({ code: 'REAUTH_REQUIRED', message: 'Confirm your password.' }), {
+      new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'Not allowed.' }), {
         status: 403,
         headers: { 'content-type': 'application/json' },
       }),
     );
 
     await expect(downloadSatRawdataXlsx('exam-1', 'schedule-1')).rejects.toMatchObject({
-      code: 'REAUTH_REQUIRED',
+      code: 'FORBIDDEN',
       status: 403,
     });
-    expect(onReauth).toHaveBeenCalledTimes(1);
-    apiClient.setReauthenticationRequiredHandler(null);
   });
 
   it('does not download a workbook once the signed-in account changed', async () => {

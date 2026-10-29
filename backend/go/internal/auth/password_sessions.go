@@ -8,7 +8,7 @@ package auth
 //	users -> user_password_credentials -> reset/activation token ->
 //	user_sessions (stable id order) -> user_session_events
 //
-// Issuance holds the user row FOR SHARE; reset, activation, reauth, login
+// Issuance holds the user row FOR SHARE; reset, activation, login
 // and revoke-all hold it FOR UPDATE. Password hashing and verification run
 // outside any lock; the locked transaction then re-reads the exact stored
 // hash, so a password changed after verification can never authorize a new
@@ -25,7 +25,6 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/config"
 	"example.com/ielts-proctoring/internal/platform/tx"
-	"github.com/google/uuid"
 )
 
 // Failed-login lockout policy (unchanged from the pre-persistence handler).
@@ -213,107 +212,6 @@ func LoginWithPassword(ctx context.Context, db *sql.DB, cfg config.Config, email
 		return CreatedSession{}, err
 	}
 	created.User.State = "active"
-	return created, nil
-}
-
-// ErrReauthSessionGone reports that the session being confirmed is no longer
-// live (revoked, expired or replaced by a concurrent confirmation).
-func reauthSessionGone() *apperrors.Error {
-	return apperrors.New(apperrors.CodeSessionExpired, "Session expired.")
-}
-
-// Reauthenticate confirms the current session owner's password and replaces
-// the session: the old row is revoked and a new one (same remembered choice,
-// fresh password time, new absolute lifetime) is created in one commit.
-// Identity comes only from current; a wrong password leaves the session
-// intact unless it reaches the real lockout threshold.
-func Reauthenticate(ctx context.Context, db *sql.DB, cfg config.Config, current *Session, password string, userAgentHash *string) (CreatedSession, error) {
-	if current == nil || current.UserID == "" {
-		return CreatedSession{}, reauthSessionGone()
-	}
-	if current.Role == RoleStudent || current.Proof.Source != SessionSourceAccount || current.Proof.PracticeScheduleID != "" || current.Proof.RecoveryAttemptID != "" {
-		return CreatedSession{}, apperrors.New(apperrors.CodeForbidden, "The authenticated user is not allowed to access this route.")
-	}
-	var snapshot string
-	err := db.QueryRowContext(ctx, `SELECT password_hash FROM user_password_credentials WHERE user_id = ?`, current.UserID).Scan(&snapshot)
-	if errors.Is(err, sql.ErrNoRows) {
-		return CreatedSession{}, invalidCredentials()
-	}
-	if err != nil {
-		return CreatedSession{}, fmt.Errorf("auth: reauth lookup: %w", err)
-	}
-	matched := VerifyPassword(password, snapshot)
-
-	sqlTx, err := beginAuthTx(ctx, db)
-	if err != nil {
-		return CreatedSession{}, err
-	}
-	defer func() { _ = sqlTx.Rollback() }()
-	u, err := lockUserForUpdate(ctx, sqlTx, current.UserID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return CreatedSession{}, reauthSessionGone()
-	}
-	if err != nil {
-		return CreatedSession{}, fmt.Errorf("auth: reauth lock user: %w", err)
-	}
-	hash, err := lockCredentialHash(ctx, sqlTx, current.UserID)
-	if err != nil {
-		return CreatedSession{}, fmt.Errorf("auth: reauth lock credential: %w", err)
-	}
-	if hash != snapshot {
-		return CreatedSession{}, invalidCredentials()
-	}
-	old, err := scanLockedSession(sqlTx.QueryRowContext(ctx, `SELECT `+sessionColumns+` FROM user_sessions WHERE id = ? FOR UPDATE`, current.ID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return CreatedSession{}, reauthSessionGone()
-	}
-	if err != nil {
-		return CreatedSession{}, fmt.Errorf("auth: reauth lock session: %w", err)
-	}
-	now, err := dbNow(ctx, sqlTx)
-	if err != nil {
-		return CreatedSession{}, err
-	}
-	if u.State != "active" || u.Role != current.Role {
-		return CreatedSession{}, reauthSessionGone()
-	}
-	if old.UserID != current.UserID || old.Role != current.Role || old.Proof.Source != SessionSourceAccount || !old.liveAt(now) {
-		return CreatedSession{}, reauthSessionGone()
-	}
-	if !matched {
-		if err := recordFailedPassword(ctx, sqlTx, u, now); err != nil {
-			return CreatedSession{}, err
-		}
-		if err := commitAuthTx(sqlTx); err != nil {
-			return CreatedSession{}, err
-		}
-		return CreatedSession{}, invalidCredentials()
-	}
-	if _, err := sqlTx.ExecContext(ctx,
-		`UPDATE user_sessions SET revoked_at = ?, revocation_reason = 'reauthenticated' WHERE id = ? AND revoked_at IS NULL`, now, old.ID); err != nil {
-		return CreatedSession{}, fmt.Errorf("auth: reauth revoke: %w", err)
-	}
-	if _, err := sqlTx.ExecContext(ctx,
-		`INSERT INTO user_session_events (id, session_id, user_id, event_type, created_at) VALUES (?, ?, ?, 'reauthenticated', ?)`,
-		uuid.NewString(), old.ID, old.UserID, now); err != nil {
-		return CreatedSession{}, fmt.Errorf("auth: reauth audit: %w", err)
-	}
-	if u.failed != 0 {
-		if _, err := sqlTx.ExecContext(ctx, `UPDATE users SET failed_login_count = 0, updated_at = ? WHERE id = ?`, now, u.ID); err != nil {
-			return CreatedSession{}, fmt.Errorf("auth: reauth reset failures: %w", err)
-		}
-	}
-	policy, err := policyForPassword(cfg, u.Role, old.Remembered)
-	if err != nil {
-		return CreatedSession{}, err
-	}
-	created, err := insertSessionInTx(ctx, sqlTx, u.ID, u.Role, SessionProof{Source: SessionSourceAccount}, policy, &now, userAgentHash, nil, now)
-	if err != nil {
-		return CreatedSession{}, err
-	}
-	if err := commitAuthTx(sqlTx); err != nil {
-		return CreatedSession{}, err
-	}
 	return created, nil
 }
 

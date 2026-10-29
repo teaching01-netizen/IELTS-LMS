@@ -426,9 +426,6 @@ type Config struct {
 	SessionRememberStaffAbsoluteHours int
 	SessionRememberAdminIdleHours     int
 	SessionRememberAdminAbsoluteHours int
-	// SessionCredentialFreshMins bounds how long a password verification
-	// authorizes sensitive actions (1..60 minutes).
-	SessionCredentialFreshMins int
 	// AuthPublicOrigin is the exact browser origin (scheme://host[:port]) that
 	// credential and logout requests must come from. Required (https) for
 	// production-like API startup; empty in development derives it from the
@@ -932,7 +929,6 @@ func Load() Config {
 		SessionRememberStaffAbsoluteHours: getenvInt("SESSION_REMEMBER_STAFF_ABSOLUTE_HOURS", 720),
 		SessionRememberAdminIdleHours:     getenvInt("SESSION_REMEMBER_ADMIN_IDLE_HOURS", 24),
 		SessionRememberAdminAbsoluteHours: getenvInt("SESSION_REMEMBER_ADMIN_ABSOLUTE_HOURS", 168),
-		SessionCredentialFreshMins:        getenvInt("SESSION_CREDENTIAL_FRESH_MINS", 15),
 		AuthPublicOrigin:                  strings.TrimRight(strings.TrimSpace(os.Getenv("AUTH_PUBLIC_ORIGIN")), "/"),
 
 		MaxMutationsPerBatch:  getenvInt("MAX_MUTATIONS_PER_BATCH", 200),
@@ -1218,10 +1214,7 @@ func (c Config) ValidateForRuntime() error {
 // MaxRememberedSessionHours caps every remembered idle/absolute window.
 const MaxRememberedSessionHours = 720
 
-// MaxCredentialFreshMins caps the sensitive-action password window.
-const MaxCredentialFreshMins = 60
-
-// validateSessionPolicy rejects remembered/freshness windows that are not
+// validateSessionPolicy rejects remembered windows that are not
 // positive, exceed the caps, or put the idle window beyond the hard maximum.
 // Bounds are checked on the integer hours before any duration multiplication.
 func (c Config) validateSessionPolicy() error {
@@ -1238,9 +1231,6 @@ func (c Config) validateSessionPolicy() error {
 		if pair.idle > pair.total {
 			return fmt.Errorf("%s_IDLE_HOURS must not exceed %s_ABSOLUTE_HOURS", pair.name, pair.name)
 		}
-	}
-	if c.SessionCredentialFreshMins <= 0 || c.SessionCredentialFreshMins > MaxCredentialFreshMins {
-		return fmt.Errorf("SESSION_CREDENTIAL_FRESH_MINS must be between 1 and %d", MaxCredentialFreshMins)
 	}
 	if c.AuthPublicOrigin != "" {
 		if _, err := ParseAuthOrigin(c.AuthPublicOrigin); err != nil {

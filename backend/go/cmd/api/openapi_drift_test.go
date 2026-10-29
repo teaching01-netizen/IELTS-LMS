@@ -140,7 +140,6 @@ func TestOpenAPIRateLimitedResponseContract(t *testing.T) {
 	}
 
 	rateLimitedPaths := []string{
-		"/auth/reauthenticate",
 		"/auth/student/entry",
 		"/grading/export",
 		"/results/export",

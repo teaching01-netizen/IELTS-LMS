@@ -2,7 +2,7 @@ package auth
 
 // Real-MySQL evidence for the persistent-login lifecycle (TC-3/6/7/8):
 // locked admission, monotonic touch, credential fences, atomic reset /
-// activation / reauthentication and revoke-all audit. Races use InnoDB lock
+// activation and revoke-all audit. Races use InnoDB lock
 // waits as barriers (a holder transaction plus polling information_schema
 // for the waiter), never sleeps. Failure injection uses a trigger scoped to
 // one test user. Gated on TEST_MYSQL_DSN pointing at a disposable, fully
@@ -49,7 +49,6 @@ func persistentTestCfg() config.Config {
 	cfg.PersistentLoginEnabled = true
 	cfg.SessionRememberStaffIdleHours, cfg.SessionRememberStaffAbsoluteHours = 168, 720
 	cfg.SessionRememberAdminIdleHours, cfg.SessionRememberAdminAbsoluteHours = 24, 168
-	cfg.SessionCredentialFreshMins = 15
 	return cfg
 }
 
@@ -446,119 +445,6 @@ func TestLookupLockedAdmissionMySQL(t *testing.T) {
 			t.Fatalf("idle deadline regressed to %s", row.idleAt)
 		}
 	})
-}
-
-func TestReauthenticateMySQL(t *testing.T) {
-	db := authMySQL(t)
-	ctx := context.Background()
-	cfg := persistentTestCfg()
-	_, email := seedAccount(t, db, RoleAdmin, "active")
-
-	original, err := LoginWithPassword(ctx, db, cfg, email, testPassword, true, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := LookupSession(ctx, db, cfg, original.Token)
-	if err != nil || current == nil {
-		t.Fatal(err)
-	}
-
-	_, err = Reauthenticate(ctx, db, cfg, current, "wrong", nil)
-	wantCode(t, err, apperrors.CodeUnauthorized)
-	if s, _ := LookupSession(ctx, db, cfg, original.Token); s == nil {
-		t.Fatal("a wrong confirmation password must not end the session")
-	}
-
-	var wg sync.WaitGroup
-	results := make([]error, 2)
-	created := make([]CreatedSession, 2)
-	for i := range results {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			created[i], results[i] = Reauthenticate(ctx, db, cfg, current, testPassword, nil)
-		}(i)
-	}
-	wg.Wait()
-	winners := 0
-	var replacement CreatedSession
-	for i, err := range results {
-		if err == nil {
-			winners++
-			replacement = created[i]
-		} else {
-			wantCode(t, err, apperrors.CodeSessionExpired)
-		}
-	}
-	if winners != 1 {
-		t.Fatalf("exactly one concurrent confirmation may replace the session, got %d", winners)
-	}
-	if !readSessionRow(t, db, original.Session.ID).revoked {
-		t.Fatal("confirmation must revoke the replaced session")
-	}
-	if s, _ := LookupSession(ctx, db, cfg, original.Token); s != nil {
-		t.Fatal("replaced session still authorizes")
-	}
-	next, err := LookupSession(ctx, db, cfg, replacement.Token)
-	if err != nil || next == nil {
-		t.Fatalf("replacement session: %+v %v", next, err)
-	}
-	if !next.Remembered || next.CredentialAuthenticatedAt == nil {
-		t.Fatal("confirmation must keep the remembered choice and record password time")
-	}
-	if err := RequireFreshPassword(next, next.ValidatedAt, CredentialFreshWindow(cfg)); err != nil {
-		t.Fatalf("confirmed session must be fresh: %v", err)
-	}
-	_, err = Reauthenticate(ctx, db, cfg, current, "wrong", nil)
-	wantCode(t, err, apperrors.CodeSessionExpired)
-}
-
-func TestReauthenticateRejectsExpiryDuringSessionLockMySQL(t *testing.T) {
-	db := authMySQL(t)
-	ctx := context.Background()
-	cfg := persistentTestCfg()
-	_, email := seedAccount(t, db, RoleBuilder, "active")
-	created, err := LoginWithPassword(ctx, db, cfg, email, testPassword, true, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := LookupSession(ctx, db, cfg, created.Token)
-	if err != nil || current == nil {
-		t.Fatalf("lookup: %v", err)
-	}
-	mustExecDB(t, db, `UPDATE user_sessions SET idle_timeout_at = UTC_TIMESTAMP() + INTERVAL 1 SECOND WHERE id = ?`, current.ID)
-	holder, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer holder.Rollback()
-	if _, err := holder.ExecContext(ctx, `SELECT id FROM user_sessions WHERE id = ? FOR UPDATE`, current.ID); err != nil {
-		t.Fatal(err)
-	}
-	out := make(chan error, 1)
-	go func() { _, err := Reauthenticate(ctx, db, cfg, current, testPassword, nil); out <- err }()
-	awaitLockWait(t, db)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var expired bool
-		if err := db.QueryRow(`SELECT idle_timeout_at <= UTC_TIMESTAMP() FROM user_sessions WHERE id = ?`, current.ID).Scan(&expired); err != nil {
-			t.Fatal(err)
-		}
-		if expired {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("database clock did not reach expiry")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if err := holder.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	wantCode(t, <-out, apperrors.CodeSessionExpired)
-	if readSessionRow(t, db, current.ID).revoked {
-		t.Fatal("expired confirmation changed the session")
-	}
 }
 
 func TestPasswordResetAtomicityMySQL(t *testing.T) {

@@ -118,7 +118,7 @@ var RequiredColumns = []RequiredColumn{
 	// binding column is part of the boot gate.
 	{Table: "user_sessions", Column: "recovery_attempt_id"},
 	// Persistent staff sessions (0111): lookup reads the stored idle policy
-	// and freshness guards read the password-authentication time.
+	// and remembered-session checks read the password-authentication time.
 	{Table: "user_sessions", Column: "remembered"},
 	{Table: "user_sessions", Column: "idle_window_seconds"},
 	{Table: "user_sessions", Column: "credential_authenticated_at"},

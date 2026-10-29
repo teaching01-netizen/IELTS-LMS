@@ -252,11 +252,10 @@ type Session struct {
 	// IdleWindowSeconds is the stored idle policy snapshot (nil = legacy).
 	IdleWindowSeconds *int64
 	// CredentialAuthenticatedAt is the last accepted real password
-	// verification for this session (nil = never; sensitive actions need it).
+	// verification for this session (nil = never; remembered sessions must carry one).
 	CredentialAuthenticatedAt *time.Time
 	// ValidatedAt is the database time at which lookup admitted this request.
-	// It is derived, never stored; freshness checks use it so API hosts never
-	// need synchronized clocks. Zero (fake resolvers) fails freshness closed.
+	// It is derived, never stored, so API hosts never need synchronized clocks.
 	ValidatedAt time.Time
 }
 
@@ -349,9 +348,9 @@ func policyDeadlines(p SessionPolicy, now time.Time) (expiresAt, idleTimeoutAt t
 // csrf token. now should be UTC (callers may pass DB time).
 //
 // It remains the public entry point for flows that own no transaction and
-// issue legacy (non-remembered, no password freshness) sessions: student
+// issue legacy (non-remembered) sessions: student
 // entry, practice, master key, and bootstrap paths. Password workflows use
-// LoginWithPassword / Reauthenticate instead.
+// LoginWithPassword instead.
 func CreateSession(ctx context.Context, db *sql.DB, cfg config.Config, userID, role string, proof SessionProof, userAgentHash *string, ipMetadata *string, now time.Time) (sessionID, sessionToken, csrfToken string, err error) {
 	sqlTx, err := tx.Begin(ctx, db, &sql.TxOptions{})
 	if err != nil {
