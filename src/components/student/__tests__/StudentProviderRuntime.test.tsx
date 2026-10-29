@@ -140,6 +140,51 @@ describe("Student Provider Runtime Integration", () => {
     };
   });
 
+  it("reopens IELTS on the saved question and passage with the saved answer", async () => {
+    state.reading.passages = [1, 2].map((part) => ({
+      id: `passage-${part}`,
+      title: `Passage ${part}`,
+      content: `Saved passage content ${part}`,
+      blocks: [{
+        id: `block-${part}`,
+        type: "SHORT_ANSWER" as const,
+        instruction: "Answer using one word.",
+        questions: [{
+          id: `question-${part}`,
+          prompt: `Question prompt ${part}`,
+          correctAnswer: "answer",
+          answerRule: "ONE_WORD" as const,
+        }],
+      }],
+    }));
+    attemptSnapshot.currentModule = "reading";
+    attemptSnapshot.currentQuestionId = "question-2";
+    attemptSnapshot.answers = { "question-2": "saved-response" };
+    const renderExam = () => render(
+      <StudentAppWrapper
+        state={state}
+        onExit={() => {}}
+        scheduleId={attemptSnapshot.scheduleId}
+        attemptSnapshot={attemptSnapshot}
+        runtimeSnapshot={runtimeSnapshot}
+        persistenceEnabled={false}
+        enableMonitoring={false}
+      />
+    );
+
+    const originalTab = renderExam();
+    expect(await screen.findByRole("button", { name: /Question 2, current/ })).toHaveAttribute("aria-current", "true");
+    originalTab.unmount();
+    window.sessionStorage.clear();
+    const reopenedTab = renderExam();
+    expect(await screen.findByRole("button", { name: /Question 2, current/ })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByText("Saved passage content 2")).toBeInTheDocument();
+    expect(screen.queryByText("Saved passage content 1")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("saved-response")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Exam Check-in" })).not.toBeInTheDocument();
+    reopenedTab.unmount();
+  });
+
   it("initializes providers with runtime-backed mode when runtimeSnapshot is provided", () => {
     render(<StudentAppWrapper state={state} onExit={() => {}} runtimeSnapshot={runtimeSnapshot} />);
 

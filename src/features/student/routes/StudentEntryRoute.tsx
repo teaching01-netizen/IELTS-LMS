@@ -19,7 +19,7 @@ import {
   focusFirstInvalidField,
   satCheckInStep,
 } from "../../student-delivery/api/satEntryPortal";
-import { resumeSatStudentSession } from "../../student-delivery/api/satResume";
+import { resumeSatStudentSession as resumeStudentSession } from "../../student-delivery/api/satResume";
 import {
   loadSatResumeLocator,
   saveSatResumeLocator,
@@ -268,7 +268,7 @@ export function StudentEntryRoute() {
   const [resumeRetry, setResumeRetry] = useState(0);
   const resumePromiseRef = useRef<{
     key: string;
-    promise: ReturnType<typeof resumeSatStudentSession>;
+    promise: ReturnType<typeof resumeStudentSession>;
   } | null>(null);
 
   useEffect(() => {
@@ -308,7 +308,7 @@ export function StudentEntryRoute() {
     scheduleAvailability.state === "unavailable" ? scheduleAvailability : null;
 
   useEffect(() => {
-    if (!scheduleId || !isSat) {
+    if (!scheduleId) {
       setResumeState({ kind: "idle" });
       return;
     }
@@ -336,7 +336,7 @@ export function StudentEntryRoute() {
     const promise =
       existing?.key === key
         ? existing.promise
-        : resumeSatStudentSession({ scheduleId, locator: resumeLocator });
+        : resumeStudentSession({ scheduleId, locator: resumeLocator });
     if (!existing || existing.key !== key) resumePromiseRef.current = { key, promise };
     let active = true;
     setResumeState({ kind: "checking" });
@@ -344,7 +344,7 @@ export function StudentEntryRoute() {
       if (!active) return;
       if (result.kind === "resumed") {
         setResumeState({ kind: "resumable", route: result.route });
-        if (!result.terminal) {
+        if (isSat && !result.terminal) {
           saveSatResumeLocator({
             scheduleId,
             candidateId: result.attempt.candidateId,
@@ -378,7 +378,7 @@ export function StudentEntryRoute() {
   ]);
 
   useEffect(() => {
-    if (!isSat) return;
+    if (!scheduleId) return;
     const retryWhenOnline = () => {
       if (!navigator.onLine) return;
       void refresh().finally(() => {
@@ -389,9 +389,9 @@ export function StudentEntryRoute() {
     };
     window.addEventListener("online", retryWhenOnline);
     return () => window.removeEventListener("online", retryWhenOnline);
-  }, [isSat, refresh]);
+  }, [scheduleId, refresh]);
 
-  const retrySatResume = () => {
+  const retryResume = () => {
     if (scheduleId) {
       setResumeLocator(loadSatResumeLocator());
       setResumePromiseRefForRetry();
@@ -797,28 +797,27 @@ export function StudentEntryRoute() {
   ]);
 
   if (
-    isSat &&
-    (scheduleAvailabilityLoading ||
-      authStatus === "loading" ||
-      resumeState.kind === "checking" ||
-      (authStatus === "authenticated" &&
-        session?.user.role === "student" &&
-        resumeState.kind === "idle"))
+    (isSat && scheduleAvailabilityLoading) ||
+    authStatus === "loading" ||
+    resumeState.kind === "checking" ||
+    (authStatus === "authenticated" &&
+      session?.user.role === "student" &&
+      resumeState.kind === "idle")
   ) {
-    return <SatLoadingSurface label="Reconnecting to your SAT…" />;
+    return <SatLoadingSurface label={isSat ? "Reconnecting to your SAT…" : "Reconnecting to your exam…"} />;
   }
 
-  if (isSat && resumeState.kind === "offline") {
+  if (resumeState.kind === "offline") {
     return (
       <SatErrorSurface
-        title="We couldn’t reconnect to your SAT"
+        title={isSat ? "We couldn’t reconnect to your SAT" : "We couldn’t reconnect to your exam"}
         description={
           resumeState.reason === "server_error"
             ? "The exam service is temporarily unavailable. Your saved responses are still on this device. Try again shortly."
             : "Check your connection. Your saved responses are still on this device, and you can retry when you’re back online."
         }
         actionLabel="Retry"
-        onAction={retrySatResume}
+        onAction={retryResume}
       />
     );
   }

@@ -59,9 +59,10 @@ function emitResumeMetric(
 }
 
 /**
- * Resolve a likely SAT session from the authenticated user's server-owned
+ * Resolve an exam session from the authenticated user's server-owned
  * attempt. The locator only picks a schedule; its candidate/attempt values
- * are never sent as identity or admission proof.
+ * are never sent as identity or admission proof. Shared by IELTS/ACT check-in
+ * and SAT entry; the SAT locator is optional for other providers.
  */
 export async function resumeSatStudentSession(input: {
   scheduleId: string;

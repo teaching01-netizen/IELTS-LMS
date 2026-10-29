@@ -44,11 +44,12 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-function renderRoute(scheduleId: string, strict = false) {
+function renderRoute(scheduleId: string, strict = false, publishedLink = false) {
   const route = (
-    <MemoryRouter initialEntries={[`/student/${scheduleId}`]}>
+    <MemoryRouter initialEntries={[`/student/${scheduleId}${publishedLink ? "/register?openExternalBrowser=1" : ""}`]}>
       <Routes>
         <Route path="/student/:scheduleId" element={<StudentEntryRoute />} />
+        <Route path="/student/:scheduleId/register" element={<StudentEntryRoute />} />
       </Routes>
     </MemoryRouter>
   );
@@ -171,9 +172,9 @@ describe("StudentEntryRoute", () => {
     });
   });
 
-  it("does not let the local attempt cache authorize automatic resume", async () => {
+  it.each(["sat", "ielts"])("does not let the local attempt cache authorize automatic %s resume", async (providerKey) => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440001";
-    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "sat" });
+    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey });
     window.localStorage.setItem(`ielts-student-last-wcode:${scheduleId}`, "W250334");
     window.localStorage.setItem(
       "ielts_student_attempts_v1",
@@ -266,9 +267,64 @@ describe("StudentEntryRoute", () => {
     expect(studentEntryMock).not.toHaveBeenCalled();
   });
 
-  it("returns to check-in after the server confirms authentication failure", async () => {
+  it.each(["ielts", "act"])("resumes an authenticated %s student when reopening the published registration link", async (providerKey) => {
+    const scheduleId = "published-schedule";
+    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey });
+    authSessionMock.status = "authenticated";
+    authSessionMock.session = { user: { role: "student" } };
+    // Closing the old tab discards sessionStorage; the authenticated cookie
+    // must be enough to discover the attempt without trusting a local cache.
+    window.sessionStorage.clear();
+    resumeSatStudentSessionMock.mockResolvedValue({
+      kind: "resumed",
+      route: `/student/${scheduleId}/W250334`,
+      terminal: false,
+      attempt: { id: "existing-attempt", candidateId: "W250334" },
+    });
+
+    renderRoute(scheduleId, true, true);
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
+      `/student/${scheduleId}/W250334`, { replace: true }
+    ));
+    expect(resumeSatStudentSessionMock).toHaveBeenCalledTimes(1);
+    expect(studentEntryMock).not.toHaveBeenCalled();
+    expect(loadSatResumeLocator()).toBeNull();
+  });
+
+  it("keeps IELTS check-in hidden while the restored student session is loading", async () => {
+    authSessionMock.status = "loading";
+    renderRoute("published-schedule", false, true);
+    await waitFor(() => expect(getStudentEntryScheduleMock).toHaveBeenCalled());
+    expect(screen.queryByRole("heading", { name: "Exam Check-in" })).not.toBeInTheDocument();
+    expect(resumeSatStudentSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("offers retry instead of registration when IELTS resume fails transiently", async () => {
+    authSessionMock.status = "authenticated";
+    authSessionMock.session = { user: { role: "student" } };
+    resumeSatStudentSessionMock.mockResolvedValue({ kind: "transient-error", reason: "network" });
+    renderRoute("published-schedule", false, true);
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Exam Check-in" })).not.toBeInTheDocument();
+    expect(studentEntryMock).not.toHaveBeenCalled();
+    authSessionMock.refresh.mockResolvedValue(undefined);
+    resumeSatStudentSessionMock.mockResolvedValue({
+      kind: "resumed",
+      route: "/student/published-schedule/W250334",
+      terminal: false,
+      attempt: { id: "existing-attempt", candidateId: "W250334" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith(
+      "/student/published-schedule/W250334", { replace: true }
+    ));
+    expect(resumeSatStudentSessionMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["sat", "ielts"])("returns to %s check-in after the server confirms authentication failure", async (providerKey) => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440143";
-    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "sat" });
+    getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey });
     authSessionMock.status = "authenticated";
     authSessionMock.session = { user: { role: "student" } };
     saveSatResumeLocator({ scheduleId, candidateId: "W250334", attemptId: "attempt-1" });
@@ -280,6 +336,16 @@ describe("StudentEntryRoute", () => {
       expect(screen.getByRole("heading", { name: "Exam Check-in" })).toBeInTheDocument()
     );
     expect(resumeSatStudentSessionMock).toHaveBeenCalledTimes(1);
+    expect(studentEntryMock).not.toHaveBeenCalled();
+  });
+
+  it("shows IELTS registration when the server finds no existing attempt", async () => {
+    authSessionMock.status = "authenticated";
+    authSessionMock.session = { user: { role: "student" } };
+    resumeSatStudentSessionMock.mockResolvedValue({ kind: "no-attempt" });
+    renderRoute("new-schedule", false, true);
+    expect(await screen.findByRole("heading", { name: "Exam Check-in" })).toBeInTheDocument();
+    expect(navigateMock).not.toHaveBeenCalled();
     expect(studentEntryMock).not.toHaveBeenCalled();
   });
 
