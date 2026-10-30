@@ -102,8 +102,9 @@ export function useIeltsOfflineContinuity(input: {
   // descriptor without exposing another browser's session id. The credentialed
   // session read is the existing owner-only path that does. Retry on a timer:
   // the descriptor is absent until the room commits its timetable.
+  const scheduleCommitted = Boolean(runtimeSnapshot?.ieltsSharedSchedule);
   useEffect(() => {
-    if (!shared || manifest || !userId || !attemptSnapshot?.id) return undefined;
+    if (!shared || manifest || !userId || !attemptSnapshot?.id || !scheduleCommitted) return undefined;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
@@ -123,7 +124,7 @@ export function useIeltsOfflineContinuity(input: {
     };
     // Identity fields only: the attempt projection object is replaced by polls.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shared, manifest, userId, attemptSnapshot?.id, attemptSnapshot?.scheduleId]);
+  }, [shared, manifest, userId, attemptSnapshot?.id, attemptSnapshot?.scheduleId, scheduleCommitted]);
 
   // --- Preparation: once per package identity, online only -----------------
   const identityKey = manifest

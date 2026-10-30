@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   IeltsOfflineMediaError,
   cacheIeltsOfflineMedia,
@@ -40,6 +40,16 @@ describe('IELTS offline media cache', () => {
     expect(await reason(cacheIeltsOfflineMedia('a', media, { caches, fetchImpl: okFetch(bodies), probeAudio: async () => false }))).toBe('undecodable');
     const truncated = (async () => new Response('abc', { headers: { 'content-length': '10' } })) as typeof fetch;
     expect(await reason(cacheIeltsOfflineMedia('a', [media[1]!], { caches, fetchImpl: truncated }))).toBe('size_mismatch');
+  });
+
+  it('reuses verified cached bytes on a retry instead of re-downloading', async () => {
+    const caches = createFakeCaches();
+    const fetchImpl = vi.fn(okFetch(bodies));
+    await cacheIeltsOfflineMedia('att-1', testManifest().media, { caches, fetchImpl, probeAudio: audioOk });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    await cacheIeltsOfflineMedia('att-1', testManifest().media, { caches, fetchImpl, probeAudio: audioOk });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('honours cancellation', async () => {

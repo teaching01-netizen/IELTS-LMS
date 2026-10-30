@@ -85,6 +85,35 @@ async function cacheOne(
   signal: AbortSignal | undefined,
 ): Promise<IeltsOfflineMediaRecord> {
   const fail = (reason: IeltsMediaFailure) => new IeltsOfflineMediaError(reason, descriptor.resourceId);
+  // A failed preparation keeps verified bytes; a retry must not re-download
+  // the whole package just because one later resource failed.
+  try {
+    const cached = await cache.match(cacheKey(descriptor));
+    if (cached) {
+      const bytes = await cached.arrayBuffer();
+      const digest = await sha256Hex(bytes);
+      const contentType = cached.headers.get('content-type') ?? (descriptor.kind === 'audio' ? 'audio/mpeg' : 'image/*');
+      if (
+        bytes.byteLength > 0 &&
+        (descriptor.bytes === null || descriptor.bytes === bytes.byteLength) &&
+        (descriptor.sha256 === null || descriptor.sha256 === digest) &&
+        (descriptor.kind !== 'audio' || (await deps.probeAudio(new Blob([bytes], { type: contentType }))))
+      ) {
+        return {
+          resourceId: descriptor.resourceId,
+          kind: descriptor.kind,
+          partId: descriptor.partId,
+          mediaRevision: descriptor.mediaRevision,
+          url: descriptor.url,
+          sha256: digest,
+          bytes: bytes.byteLength,
+          contentType,
+        };
+      }
+    }
+  } catch {
+    // Fall through to a fresh verified fetch.
+  }
   let response: Response;
   try {
     response = await deps.fetchImpl(descriptor.url, fetchInit(descriptor.url, signal));
