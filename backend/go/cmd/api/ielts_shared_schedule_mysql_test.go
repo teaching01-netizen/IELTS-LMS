@@ -221,7 +221,7 @@ func TestIELTSSharedScheduleStartPauseResumeMySQL(t *testing.T) {
 	}
 	schedule := loadSharedSchedule(t, f, runtimeID)
 	first := schedule.Windows[0]
-	if lead := first.StartAt.Sub(before); lead < examruntime.IELTSSharedDeliveryLead || lead > examruntime.IELTSSharedDeliveryLead+5*time.Second {
+	if lead := first.StartAt.Sub(before); lead < examruntime.IELTSSharedDeliveryLead() || lead > examruntime.IELTSSharedDeliveryLead()+5*time.Second {
 		t.Fatalf("first window lead %s", lead)
 	}
 	var rowStart, projectedEnd time.Time

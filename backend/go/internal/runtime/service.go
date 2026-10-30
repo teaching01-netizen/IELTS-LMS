@@ -440,7 +440,7 @@ func (s *Service) insertLiveRuntimeTx(ctx context.Context, q tx.Tx, sch *StartSc
 		if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&dbNow); err != nil {
 			return nil, err
 		}
-		built, err := BuildIELTSSharedSchedule(dbNow.Add(IELTSSharedDeliveryLead), plan, ResponseSaveGrace)
+		built, err := BuildIELTSSharedSchedule(dbNow.Add(IELTSSharedDeliveryLead()), plan, ResponseSaveGrace)
 		if err != nil {
 			return nil, err
 		}

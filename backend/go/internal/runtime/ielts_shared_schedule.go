@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -12,8 +15,16 @@ import (
 )
 
 // IELTSSharedDeliveryLead is the room-wide gap between Start and the first
-// section's clock. It is a constant, never derived from the slowest device.
-const IELTSSharedDeliveryLead = 10 * time.Second
+// section's clock. It is fixed per deployment (IELTS_SHARED_DELIVERY_LEAD_SECONDS,
+// 2–60, default 10), never derived from the slowest device.
+func IELTSSharedDeliveryLead() time.Duration {
+	const defaultSeconds = 10
+	seconds, err := strconv.Atoi(strings.TrimSpace(os.Getenv("IELTS_SHARED_DELIVERY_LEAD_SECONDS")))
+	if err != nil || seconds < 2 || seconds > 60 {
+		seconds = defaultSeconds
+	}
+	return time.Duration(seconds) * time.Second
+}
 
 const ieltsSharedScheduleSchema = 1
 

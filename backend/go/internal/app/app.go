@@ -113,7 +113,7 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	s.Terminal = terminalization.NewService(s.Tx, nil, nil).SetOutboxExecOnly(cfg.OutboxExecOnly)
 	s.Attempts = attempts.NewService(s.Tx, clock.System{}, s.Secret).SetRowFirst(cfg.RowFirstWrites)
 	s.Exams = exams.NewService(pool, s.Tx)
-	s.Schedules = schedules.NewService(pool, s.Tx)
+	s.Schedules = schedules.NewService(pool, s.Tx).SetOutboxExecOnly(cfg.OutboxExecOnly)
 	s.Student = student.NewService(pool, nil).SetRowFirst(cfg.RowFirstWrites)
 	// Plan D2: memory presence (off/inline = untouched per-beat tx).
 	// Conditional per the code-comment prescription: the worker used to

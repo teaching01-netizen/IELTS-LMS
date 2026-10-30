@@ -25,6 +25,7 @@ import (
 	"github.com/google/uuid"
 
 	examdomain "example.com/ielts-proctoring/internal/exams"
+	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -100,11 +101,19 @@ type Service struct {
 	db      *sql.DB
 	runner  *tx.Runner
 	runtime *examruntime.Service
+	// outboxExecOnly skips the roster_changed wakeup INSERT (B4.1 OUTBOX_EXEC_ONLY).
+	outboxExecOnly bool
 }
 
 // NewService wires dependencies explicitly.
 func NewService(db *sql.DB, runner *tx.Runner) *Service {
 	return &Service{db: db, runner: runner, runtime: examruntime.NewService(runner, nil)}
+}
+
+// SetOutboxExecOnly toggles B4.1 executable-only enqueueing (chainable).
+func (s *Service) SetOutboxExecOnly(on bool) *Service {
+	s.outboxExecOnly = on
+	return s
 }
 
 // SetRuntime shares the configured runtime owner used by proctor commands.
@@ -1440,6 +1449,14 @@ func (s *Service) CreateScheduleAttempt(ctx context.Context, scheduleID, registr
 				return conflictError("Schedule references a missing exam or version; republish the schedule.")
 			}
 			return err
+		}
+		// Check-in changes the proctor roster: wake staff sockets in the same tx
+		// so a joined candidate appears without waiting for the detail poll.
+		if !outbox.SkipEnqueue(outbox.FamilyRosterChanged, s.outboxExecOnly) {
+			if err := outbox.EnqueueInTx(ctx, q, "schedule_roster", scheduleID, 0, outbox.FamilyRosterChanged,
+				map[string]any{"scheduleId": scheduleID, "event": "attempt_created", "attemptId": attemptID}); err != nil {
+				return err
+			}
 		}
 		// Code-start sessions freeze the start mode on the attempt at admission.
 		// The candidate stays pre-exam (lobby, no clock, no content) until their
