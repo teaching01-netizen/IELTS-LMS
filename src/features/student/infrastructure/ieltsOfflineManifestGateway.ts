@@ -1,5 +1,9 @@
 import { backendGet } from '@services/backendBridge';
-import { tryBuildAttemptAuthorizationHeader } from '@services/attemptCredentialAdapter';
+import {
+  sittingAttemptAuthorizationHeaders,
+  storeAttemptCredential,
+  type BackendAttemptCredential,
+} from '@services/attemptCredentialAdapter';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 import { emitStudentObservabilityMetric } from '../../../utils/studentObservability';
 import { rememberIeltsOfflineManifest } from './ieltsOfflinePackageStore';
@@ -10,6 +14,10 @@ import { rememberIeltsOfflineManifest } from './ieltsOfflinePackageStore';
  * identity, so it cannot return a descriptor without exposing the owner's
  * session id. This read runs only for a shared-timetable room that has no
  * manifest yet; the descriptor authorizes nothing server-side.
+ *
+ * Only a sitting grant may read this route as a bearer; a legacy attempt
+ * credential is refused there, so it uses the account cookie session like
+ * legacy credential refresh, and keeps the credential that read re-issues.
  */
 export async function fetchIeltsOfflineManifestForAttempt(
   attempt: StudentAttempt,
@@ -20,14 +28,15 @@ export async function fetchIeltsOfflineManifestForAttempt(
     clientSessionId,
     refreshAttemptCredential: 'true',
   });
-  const session = await backendGet<{ offlineManifest?: unknown }>(
+  const session = await backendGet<{ offlineManifest?: unknown; attemptCredential?: BackendAttemptCredential }>(
     `/v1/student/sessions/${encodeURIComponent(attempt.scheduleId)}?${query.toString()}`,
     {
-      headers: tryBuildAttemptAuthorizationHeader(attempt.scheduleId, attempt.id) ?? {},
+      headers: sittingAttemptAuthorizationHeaders(attempt.scheduleId, attempt.candidateId, attempt.id),
       retries: 0,
       skipUnauthorizedHandler: true,
     },
   );
+  storeAttemptCredential(attempt, session.attemptCredential);
   if (!session.offlineManifest) {
     emitStudentObservabilityMetric('ielts_offline_manifest', { reason: 'absent' });
     return false;

@@ -5,10 +5,12 @@ const mocks = vi.hoisted(() => ({
   backendGet: vi.fn(),
   remember: vi.fn(),
   headers: vi.fn(),
+  store: vi.fn(),
 }));
 vi.mock('@services/backendBridge', () => ({ backendGet: mocks.backendGet }));
 vi.mock('@services/attemptCredentialAdapter', () => ({
-  tryBuildAttemptAuthorizationHeader: mocks.headers,
+  sittingAttemptAuthorizationHeaders: mocks.headers,
+  storeAttemptCredential: mocks.store,
 }));
 vi.mock('../ieltsOfflinePackageStore', () => ({ rememberIeltsOfflineManifest: mocks.remember }));
 
@@ -35,7 +37,19 @@ describe('IELTS offline manifest gateway', () => {
       '/v1/student/sessions/sched-1?candidateId=W001&clientSessionId=cs-1&refreshAttemptCredential=true',
       expect.objectContaining({ headers: { Authorization: 'Bearer attempt' }, retries: 0 }),
     );
+    expect(mocks.headers).toHaveBeenCalledWith('sched-1', 'W001', 'att-1');
     expect(mocks.remember).toHaveBeenCalledWith({ schemaVersion: 1 });
+  });
+
+  it('reads through the cookie session and keeps the re-issued credential without a sitting grant', async () => {
+    mocks.headers.mockReturnValue({});
+    const credential = { attemptToken: 'rotated', expiresAt: '2026-10-30T20:00:00Z' };
+    mocks.backendGet.mockResolvedValue({ attemptCredential: credential, offlineManifest: { schemaVersion: 1 } });
+
+    await expect(fetchIeltsOfflineManifestForAttempt(attempt, 'cs-1')).resolves.toBe(true);
+
+    expect(mocks.backendGet).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ headers: {} }));
+    expect(mocks.store).toHaveBeenCalledWith(attempt, credential);
   });
 
   it('does not remember an absent descriptor', async () => {
