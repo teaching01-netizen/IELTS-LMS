@@ -29,9 +29,9 @@ describe('ExamEntryCard waiting room', () => {
     expect(screen.getByText(/having trouble reaching the server/i)).toBeInTheDocument();
   });
 
-  it('uses a readable contrast color for the field labels', () => {
+  it('keeps the exam facts labelled with the muted, AA-checked meta style', () => {
     render(<ExamEntryCard config={config} examTitle="Test" candidateName="Ada Lovelace" />);
-    expect(screen.getByText('Candidate').className).toContain('text-gray-600');
-    expect(screen.getByText('Exam').className).toContain('text-gray-600');
+    expect(screen.getByText('Candidate').className).toContain('exam-entry-meta-label');
+    expect(screen.getByText('Exam').className).toContain('exam-entry-meta-label');
   });
 });

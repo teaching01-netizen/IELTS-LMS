@@ -527,8 +527,7 @@ func BuildRouter(app *App) http.Handler {
 	// session store.
 	r.Use(app.Tiers.Middleware(httpx.TierBackstop, httpx.ClientIPKey))
 	r.Use(activityMiddleware(app))
-	r.Use(authMiddleware(app))
-	r.Use(csrfMiddleware(app))
+	r.Use(routeAuthenticationMiddleware(app, r))
 	// authorize wraps one route handler with the authz first-layer gate
 	// for its exact table key: Public/Bearer entries passthrough to
 	// their handler credential checks, session entries 401 anon and 403
@@ -810,6 +809,8 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/sessions/{scheduleID}/attempts/{attemptID}/device-recovery", proctorDeviceRecoveryOptionsHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/device-recovery", proctorIssueDeviceRecoveryHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/device-recovery/restore-original", proctorRestoreOriginalDeviceHandler(app))
+			authzRoute(r, "GET", "/sessions/{scheduleID}/attempts/{attemptID}/draft-evidence", proctorDraftEvidenceListHandler(app))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/draft-evidence/{evidenceID}/review", proctorDraftEvidenceReviewHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/attempts/{attemptID}/late-evidence/review", proctorReviewLateEvidenceHandler(app))
 			authzRoute(r, "GET", "/sessions/{scheduleID}/device-transfers", proctorDeviceTransfersHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/device-transfers/{requestID}/decision", proctorDeviceTransferDecisionHandler(app))
@@ -951,9 +952,12 @@ func BuildRouter(app *App) http.Handler {
 				authzRoute(r, "POST", "/{attemptID}/responses:batch", v2BatchHandler(app))
 				authzRoute(r, "POST", "/{attemptID}/submit", v2SubmitHandler(app))
 				authzRoute(r, "POST", "/{attemptID}/takeover", v2TakeoverHandler(app))
+				authzRoute(r, "POST", "/{attemptID}/access:resume", attemptAccessResumeHandler(app))
+				authzRoute(r, "POST", "/{attemptID}/draft-evidence", studentDraftEvidenceHandler(app))
 			})
 			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
 				authzRoute(r, "GET", "/{attemptID}/responses", v2SnapshotHandler(app))
+				authzRoute(r, "GET", "/{attemptID}/submission-receipt", attemptSubmissionReceiptHandler(app))
 			})
 		})
 	} // Private Hocuspocus -> Go surface. Same router, but these routes are

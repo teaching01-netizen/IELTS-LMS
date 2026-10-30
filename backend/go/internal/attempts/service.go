@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/answerblobs"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/clock"
@@ -166,7 +167,7 @@ func (s *Service) SaveResponses(ctx context.Context, bearer string, cmd SaveResp
 	}
 	claims, err := crypto.VerifyAttemptToken(s.secret, s.clock.Now(), bearer)
 	if err != nil {
-		return SaveResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Invalid attempt credential.", HTTPStatus: 401}
+		return SaveResult{}, auth.AttemptCredentialError(err)
 	}
 	if claims.AttemptID != cmd.AttemptID {
 		return SaveResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Attempt credential mismatch.", HTTPStatus: 401}
@@ -616,7 +617,7 @@ func (s *Service) validateTokenSession(ctx context.Context, q tx.Tx, claims cryp
 	var revoked sql.NullTime
 	var expires sql.NullTime
 	var attemptID, sessionID string
-	err := q.QueryRowContext(ctx, `SELECT attempt_id, client_session_id, revoked_at, expires_at FROM attempt_sessions WHERE token_id=? AND revoked_at IS NULL FOR UPDATE`, claims.TokenID).Scan(&attemptID, &sessionID, &revoked, &expires)
+	err := q.QueryRowContext(ctx, `SELECT attempt_id, client_session_id, revoked_at, expires_at FROM attempt_sessions WHERE token_id=? AND revoked_at IS NULL AND `+auth.ActiveAttemptPrincipalSQL+` FOR UPDATE`, claims.TokenID).Scan(&attemptID, &sessionID, &revoked, &expires)
 	if err == sql.ErrNoRows {
 		// A writer superseded by a device transfer or takeover is told so
 		// (LEASE_FENCED: stop and preserve drafts) rather than handed a
@@ -626,14 +627,21 @@ func (s *Service) validateTokenSession(ctx context.Context, q tx.Tx, claims cryp
 			(reason.String == "device_transfer" || reason.String == "response_durability_lease_takeover") {
 			return leaseFenced()
 		}
+		if claims.CredentialPolicy == auth.ExamCredentialSitting {
+			return auth.ExamAccessRevokedError()
+		}
 		log.Printf("attempts: session fence rejected unknown-or-revoked token (attempt %s)", claims.AttemptID)
 		return &apperrors.Error{Code: apperrors.CodeUnauthorized, Message: "Attempt credential session is not recognized.", HTTPStatus: 401}
 	}
 	if err != nil {
 		return err
 	}
-	if revoked.Valid || (expires.Valid && expires.Time.Before(s.clock.Now())) {
+	if revoked.Valid || (expires.Valid && !s.clock.Now().Before(expires.Time)) {
 		log.Printf("attempts: session fence rejected expired token (attempt %s)", claims.AttemptID)
+		if claims.CredentialPolicy == auth.ExamCredentialSitting {
+			// The stored horizon is authoritative for a sitting grant; renewal cannot help.
+			return auth.ExamAccessExpiredError()
+		}
 		return &apperrors.Error{Code: apperrors.CodeUnauthorized, Message: "Attempt credential is revoked or expired.", HTTPStatus: 401}
 	}
 	if attemptID != claims.AttemptID || sessionID != claims.ClientSessionID {

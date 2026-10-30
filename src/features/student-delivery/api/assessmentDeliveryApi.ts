@@ -48,7 +48,6 @@ import type {
 const ATTEMPT_REFRESH_WINDOW_MS = 5 * 60 * 1_000;
 const attemptCandidates = new Map<string, string>();
 const attemptPreferredSessions = new Map<string, string>();
-const credentialRefreshes = new Map<string, Promise<boolean>>();
 interface LifecycleStateReadFlight {
   promise: Promise<AssessmentDeliveryState>;
   followUpRequested: boolean;
@@ -119,7 +118,7 @@ function removeLegacySatSessionKeys(scheduleId: string, attemptId: string): void
 function attemptConfig(scheduleId: string, attemptId: string): ApiRequestConfig {
   const headers = tryBuildAttemptAuthorizationHeader(scheduleId, attemptId);
   return {
-    ...(headers ? { headers } : {}),
+    ...(headers ? { headers, credentialScope: "attempt" as const } : {}),
     retries: 0,
     skipUnauthorizedHandler: true,
   };
@@ -149,22 +148,17 @@ function clientSessionId(scheduleId: string, attemptId: string): string {
   return resolved;
 }
 
-async function refreshCredentialSingleflight(
+async function refreshConfiguredCredential(
   scheduleId: string,
   attemptId: string
 ): Promise<boolean> {
   const key = attemptKey(scheduleId, attemptId);
   const candidateId = attemptCandidates.get(key);
   if (!candidateId) return false;
-  const existing = credentialRefreshes.get(key);
-  if (existing) return existing;
-
-  const refresh = refreshAttemptCredential(
+  return refreshAttemptCredential(
     { id: attemptId, scheduleId, candidateId },
     clientSessionId(scheduleId, attemptId)
-  ).finally(() => credentialRefreshes.delete(key));
-  credentialRefreshes.set(key, refresh);
-  return refresh;
+  );
 }
 
 async function attemptRequest<T>(
@@ -173,14 +167,14 @@ async function attemptRequest<T>(
   request: (config: ApiRequestConfig) => Promise<T>
 ): Promise<T> {
   if (isAttemptCredentialExpiringWithin(scheduleId, attemptId, ATTEMPT_REFRESH_WINDOW_MS)) {
-    await refreshCredentialSingleflight(scheduleId, attemptId).catch(() => false);
+    await refreshConfiguredCredential(scheduleId, attemptId).catch(() => false);
   }
 
   try {
     return await request(attemptConfig(scheduleId, attemptId));
   } catch (error) {
     if (!hasBackendStatusCode(error, 401)) throw error;
-    const refreshed = await refreshCredentialSingleflight(scheduleId, attemptId);
+    const refreshed = await refreshConfiguredCredential(scheduleId, attemptId);
     if (!refreshed) throw error;
     return request(attemptConfig(scheduleId, attemptId));
   }

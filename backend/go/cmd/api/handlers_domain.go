@@ -134,7 +134,7 @@ func v1SessionInner(app *App, w http.ResponseWriter, r *http.Request) {
 			telemetry.SetGauge(telemetry.MStudentResumeRecoveryMS, float64(time.Since(startedAt).Milliseconds()))
 		}()
 	}
-	sess := requireStudentDeps(w, r, app)
+	sess := requireStudentProjectionIdentity(w, r, app)
 	if sess == nil {
 		if resumeProbe {
 			telemetry.IncCounter(telemetry.MStudentResumeFailureTotal, "reason", "unauthenticated")
@@ -195,13 +195,13 @@ func v1StaticHandler(app *App) http.HandlerFunc {
 
 func v1StaticInner(app *App, w http.ResponseWriter, r *http.Request) {
 	{
-		sess := requireStudentDeps(w, r, app)
+		sess := requireStudentProjectionIdentity(w, r, app)
 		if sess == nil {
 			return
 		}
 		// This projection changes when routing assigns a branch, even if the
 		// published version does not. Resolve assignment before considering 304.
-		attemptID, err := resolveStudentAttemptIDForUser(r.Context(), app.DB, chi.URLParam(r, "scheduleID"), r.URL.Query().Get("candidateId"), sess.UserID)
+		attemptID, err := resolveStudentAttemptForSession(r.Context(), app.DB, chi.URLParam(r, "scheduleID"), r.URL.Query().Get("candidateId"), sess)
 		if err != nil && err != sql.ErrNoRows {
 			httpx.WriteError(w, r, MapDBError(err))
 			return
@@ -278,7 +278,7 @@ func v1LiveHandler(app *App) http.HandlerFunc {
 }
 
 func v1LiveInner(app *App, w http.ResponseWriter, r *http.Request) {
-	sess := requireStudentDeps(w, r, app)
+	sess := requireStudentProjectionIdentity(w, r, app)
 	if sess == nil {
 		return
 	}

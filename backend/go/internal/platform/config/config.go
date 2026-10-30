@@ -407,7 +407,11 @@ type Config struct {
 	FrontendDistDir        string
 	ObjectStorageLocalRoot string
 
-	AuthSecret             string
+	AuthSecret string
+	// AuthSecretPrevious lists retired AUTH_SECRET values that still verify
+	// (never sign) attempt credentials during a rotation window. Keep each for
+	// at least EXAM_ACCESS_MAX_HOURS after rotation, then remove it.
+	AuthSecretPrevious     []string
 	SessionCookieName      string
 	CsrfCookieName         string
 	CookieSecure           bool
@@ -415,6 +419,8 @@ type Config struct {
 	SessionIdleStudentMins int
 	SessionAbsoluteHours   int
 	AttemptTokenTTLMins    int
+	ExamAccessEnabled      bool
+	ExamAccessMaxHours     int
 
 	// Persistent staff login (docs/plans/2026-10-29-persistent-login-low-level.md).
 	// PersistentLoginEnabled gates NEW remembered issuance only; rows issued
@@ -721,6 +727,17 @@ func productionLike(environment string) bool {
 	}
 }
 
+// csvFromEnv returns the trimmed, non-empty comma-separated values of key.
+func csvFromEnv(key string) []string {
+	var values []string
+	for _, part := range strings.Split(os.Getenv(key), ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			values = append(values, part)
+		}
+	}
+	return values
+}
+
 func trustedProxyCIDRsFromEnv() []string {
 	raw := strings.TrimSpace(os.Getenv("TRUSTED_PROXIES"))
 	if raw == "" {
@@ -916,6 +933,7 @@ func Load() Config {
 		ObjectStorageLocalRoot: getenv("OBJECT_STORAGE_LOCAL_ROOT", ".data/object-store"),
 
 		AuthSecret:             os.Getenv("AUTH_SECRET"),
+		AuthSecretPrevious:     csvFromEnv("AUTH_SECRET_PREVIOUS"),
 		SessionCookieName:      getenv("SESSION_COOKIE_NAME", "__Host-session"),
 		CsrfCookieName:         getenv("CSRF_COOKIE_NAME", "__Host-csrf"),
 		CookieSecure:           getenvBool("COOKIE_SECURE", defaultCookieSecure(environment)),
@@ -923,6 +941,8 @@ func Load() Config {
 		SessionIdleStudentMins: getenvInt("SESSION_IDLE_STUDENT_MINS", 60),
 		SessionAbsoluteHours:   getenvInt("SESSION_ABSOLUTE_HOURS", 12),
 		AttemptTokenTTLMins:    getenvInt("ATTEMPT_TOKEN_TTL_MINUTES", 15),
+		ExamAccessEnabled:      getenvBool("EXAM_ACCESS_ENABLED", false),
+		ExamAccessMaxHours:     getenvInt("EXAM_ACCESS_MAX_HOURS", 12),
 
 		PersistentLoginEnabled:            getenvBool("PERSISTENT_LOGIN_ENABLED", false),
 		SessionRememberStaffIdleHours:     getenvInt("SESSION_REMEMBER_STAFF_IDLE_HOURS", 168),
@@ -1104,6 +1124,14 @@ func (c Config) ValidateForRuntime() error {
 	// closed). Tests that never sign tokens must set a throwaway value.
 	if strings.TrimSpace(c.AuthSecret) == "" || c.AuthSecret == "dev-secret-change-me" || len(c.AuthSecret) < 32 {
 		return fmt.Errorf("AUTH_SECRET must be set to a strong value of at least 32 characters")
+	}
+	for _, previous := range c.AuthSecretPrevious {
+		if len(previous) < 32 || previous == c.AuthSecret {
+			return fmt.Errorf("AUTH_SECRET_PREVIOUS entries must be retired secrets of at least 32 characters")
+		}
+	}
+	if c.ExamAccessMaxHours < 1 || c.ExamAccessMaxHours > 24 {
+		return fmt.Errorf("EXAM_ACCESS_MAX_HOURS must be between 1 and 24")
 	}
 	if c.BackgroundMode != BackgroundContinuous && c.BackgroundMode != BackgroundActivityDriven {
 		return fmt.Errorf("invalid BACKGROUND_RUNTIME_MODE %q", c.BackgroundMode)

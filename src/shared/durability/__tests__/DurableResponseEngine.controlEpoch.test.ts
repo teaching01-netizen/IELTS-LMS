@@ -26,6 +26,7 @@ import type {
 
 const storage = vi.hoisted(() => ({ save: vi.fn(), list: vi.fn(), clear: vi.fn() }));
 vi.mock('../../../utils/durableDraftStore', () => ({
+  loadDurableDraft: vi.fn(async () => null),
   saveDurableDraft: storage.save,
   listDurableDrafts: storage.list,
   clearDurableDraft: storage.clear,

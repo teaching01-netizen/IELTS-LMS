@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
@@ -834,6 +835,11 @@ func commitTransferInTx(ctx context.Context, q tx.Tx, cmd CommitTransferCommand,
 		return TransferCommit{}, apperrors.New(apperrors.CodeBadRequest, "Lease epoch overflow.")
 	}
 	if _, err := q.ExecContext(ctx, `UPDATE student_attempts SET lease_epoch = ?, active_client_session_id = ?, revision = revision + 1 WHERE id = ?`, newLease, t.TargetSession, row.ID); err != nil {
+		return TransferCommit{}, err
+	}
+	// Account lock before grant locks: issuance below reads users, and
+	// logout-all locks users then grants (auth.LockExamPrincipalTx).
+	if err := auth.LockExamPrincipalTx(ctx, q, cmd.Requester.UserID); err != nil {
 		return TransferCommit{}, err
 	}
 	if _, err := q.ExecContext(ctx, `UPDATE attempt_sessions SET revoked_at = ?, revocation_reason = 'device_transfer' WHERE attempt_id = ? AND client_session_id <> ? AND revoked_at IS NULL`, now, row.ID, t.TargetSession); err != nil {

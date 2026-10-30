@@ -30,6 +30,8 @@ import {
   restoreClientSessionIdForStudentKey,
   satWriterStudentKey,
 } from "@student/application/studentAttemptFacade";
+import { ExamCheckInScreen } from "@components/student/preExam/ExamCheckInScreen";
+import { PreExamStatusScreen } from "@components/student/preExam/PreExamStatusScreen";
 import {
   SatRegistrationGroup,
   useRegistrationAnswers,
@@ -300,10 +302,13 @@ export function StudentEntryRoute() {
     isSatSchedule ||
     (scheduleAvailability.state === "unknown" && locatorSuggestsSat);
   const isActSchedule =
-    scheduleAvailability.state === "ready" && scheduleAvailability.providerKey === "act";
-  const accessCodeLabel = isActSchedule ? "WCode" : "Access code";
-  const courseLabel =
-    isActSchedule ? "ACT Course" : "IELTS Course";
+    (scheduleAvailability.state === "ready" || scheduleAvailability.state === "unavailable") &&
+    scheduleAvailability.providerKey === "act";
+  const isIeltsSchedule =
+    (scheduleAvailability.state === "ready" || scheduleAvailability.state === "unavailable") &&
+    scheduleAvailability.providerKey === "ielts";
+  const entryExamBadge = isActSchedule ? "ACT" : "IELTS";
+  const courseLabel = isActSchedule ? "ACT Course" : "IELTS Course";
   const availabilityGate =
     scheduleAvailability.state === "unavailable" ? scheduleAvailability : null;
 
@@ -495,16 +500,10 @@ export function StudentEntryRoute() {
   const handleInputChange = (field: keyof EntryFormData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: "" }));
-
-    if (!isSat && field === "email" && value && !validateEmail(value)) {
-      setErrors((prev) => ({
-        ...prev,
-        email: "Invalid email format",
-      }));
-    }
   };
 
-  // SAT validates an email when the student leaves the field, not mid-typing.
+  // Every provider validates an email when the student leaves the field, not
+  // mid-typing: a half-typed address is not a mistake yet.
   const handleEmailBlur = () => {
     const email = formData.email.trim();
     if (email && !validateEmail(email)) {
@@ -524,7 +523,7 @@ export function StudentEntryRoute() {
     const newErrors: Partial<Record<keyof EntryFormData, string>> = {};
 
     if (!normalizedWcode) {
-      newErrors.wcode = isSat ? "Student ID/WCODE is required" : "Code is required";
+      newErrors.wcode = isSat ? "Student ID/WCODE is required" : "WCode is required";
     }
 
     if (!normalizedEmail || !validateEmail(normalizedEmail)) {
@@ -550,7 +549,9 @@ export function StudentEntryRoute() {
     const prepared = isSat ? registration.prepare() : { valid: true };
     if (Object.keys(newErrors).length > 0 || !prepared.valid) {
       setErrors(newErrors);
-      if (isSat) focusFirstInvalidField(e.currentTarget as HTMLFormElement);
+      // One focus move to the first invalid control: the error is read as the
+      // field's description instead of firing five alerts at once.
+      focusFirstInvalidField(e.currentTarget as HTMLFormElement);
       return;
     }
     const registrationForm = prepared.submission;
@@ -804,18 +805,43 @@ export function StudentEntryRoute() {
       session?.user.role === "student" &&
       resumeState.kind === "idle")
   ) {
-    return <SatLoadingSurface label={isSat ? "Reconnecting to your SAT…" : "Reconnecting to your exam…"} />;
+    if (!isSat && (isIeltsSchedule || isActSchedule)) {
+      return (
+        <PreExamStatusScreen
+          examBadge={entryExamBadge}
+          busy
+          title="Preparing your check-in"
+          description="Checking this device for an existing exam session."
+        />
+      );
+    }
+    return (
+      <SatLoadingSurface
+        label={isSat ? "Reconnecting to your SAT…" : "Reconnecting to your exam…"}
+      />
+    );
   }
 
   if (resumeState.kind === "offline") {
+    const description =
+      resumeState.reason === "server_error"
+        ? "The exam service is temporarily unavailable. Your saved responses are still on this device. Try again shortly."
+        : "Check your connection. Your saved responses are still on this device, and you can retry when you’re back online.";
+    if (!isSat && (isIeltsSchedule || isActSchedule)) {
+      return (
+        <PreExamStatusScreen
+          examBadge={entryExamBadge}
+          title="We couldn’t reconnect to your exam"
+          description={description}
+          actionLabel="Retry"
+          onAction={retryResume}
+        />
+      );
+    }
     return (
       <SatErrorSurface
         title={isSat ? "We couldn’t reconnect to your SAT" : "We couldn’t reconnect to your exam"}
-        description={
-          resumeState.reason === "server_error"
-            ? "The exam service is temporarily unavailable. Your saved responses are still on this device. Try again shortly."
-            : "Check your connection. Your saved responses are still on this device, and you can retry when you’re back online."
-        }
+        description={description}
         actionLabel="Retry"
         onAction={retryResume}
       />
@@ -826,19 +852,27 @@ export function StudentEntryRoute() {
     if (isSat) {
       return (
         <SatEntryStatus
-          icon={<Clock3 size={24} />}
+          icon={<Clock3 size={24} aria-hidden="true" />}
+          title={availabilityGate.title}
+          description={availabilityGate.description}
+        />
+      );
+    }
+    if (isIeltsSchedule || isActSchedule) {
+      return (
+        <PreExamStatusScreen
+          examBadge={entryExamBadge}
           title={availabilityGate.title}
           description={availabilityGate.description}
         />
       );
     }
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8 text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">{availabilityGate.title}</h1>
-          <p className="text-sm text-gray-600">{availabilityGate.description}</p>
-        </div>
-      </div>
+      <SatEntryStatus
+        icon={<Clock3 size={24} aria-hidden="true" />}
+        title={availabilityGate.title}
+        description={availabilityGate.description}
+      />
     );
   }
 
@@ -938,189 +972,23 @@ export function StudentEntryRoute() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Exam Check-in</h1>
-
-        {submitError && (
-          <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
-            <p className="text-sm text-red-600">{submitError}</p>
-          </div>
-        )}
-
-        {queuedAdmission && (
-          <div aria-live="polite" className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
-            <p className="text-sm text-blue-700">
-              High traffic; retrying in {queueEtaSeconds(queueRetryAfterMs)} seconds.
-            </p>
-            <p className="mt-1 text-xs text-blue-600">
-              We&apos;ll retry automatically. You can leave and try again later.
-            </p>
-            <button
-              type="button"
-              onClick={handleLeaveQueue}
-              className="mt-2 text-xs font-medium text-blue-700 underline hover:text-blue-900"
-            >
-              Leave and edit
-            </button>
-          </div>
-        )}
-
-        {queuePollFailure && (
-          <div
-            aria-live="polite"
-            className="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-md"
-          >
-            <p className="text-sm font-medium text-amber-800">
-              Retry failed after {queuePollFailure.attempts}{" "}
-              {queuePollFailure.attempts === 1 ? "attempt" : "attempts"}
-            </p>
-            <p className="mt-1 text-xs text-amber-700">
-              {queuePollFailure.message} Your details are still here — retry to try again or leave
-              to edit the form.
-            </p>
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={handleRetryQueue}
-                className="bg-blue-600 text-white text-sm py-1.5 px-3 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
-              >
-                Retry
-              </button>
-              <button
-                type="button"
-                onClick={handleLeaveQueue}
-                className="bg-white text-sm py-1.5 px-3 rounded-md border border-gray-300 hover:bg-gray-50"
-              >
-                Leave and edit
-              </button>
-            </div>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label htmlFor="wcode" className="block text-sm font-medium text-gray-700 mb-2">
-              {accessCodeLabel}
-              <input
-                id="wcode"
-                type="text"
-                value={formData.wcode}
-                onChange={(e) => handleInputChange("wcode", e.target.value)}
-                placeholder={`Enter your ${accessCodeLabel}`}
-                aria-label={accessCodeLabel}
-                disabled={isLoading || Boolean(queuedAdmission)}
-                className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.wcode ? "border-red-300" : "border-gray-300"
-                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              />
-            </label>
-            {errors.wcode && <p className="mt-1 text-sm text-red-600">{errors.wcode}</p>}
-            <p className="mt-1 text-xs text-gray-500">
-              Enter the {isActSchedule ? "WCode" : "access code"} provided to you.
-            </p>
-          </div>
-
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-              Email
-              <input
-                id="email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => handleInputChange("email", e.target.value)}
-                placeholder="student@example.com"
-                aria-label="Email"
-                disabled={isLoading || Boolean(queuedAdmission)}
-                className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.email ? "border-red-300" : "border-gray-300"
-                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              />
-            </label>
-            {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
-          </div>
-
-          <div>
-            <label htmlFor="studentName" className="block text-sm font-medium text-gray-700 mb-2">
-              Full Name
-              <input
-                id="studentName"
-                type="text"
-                value={formData.studentName}
-                onChange={(e) => handleInputChange("studentName", e.target.value)}
-                placeholder="John Doe"
-                aria-label="Full Name"
-                disabled={isLoading || Boolean(queuedAdmission)}
-                className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                  errors.studentName ? "border-red-300" : "border-gray-300"
-                } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              />
-            </label>
-            {errors.studentName && (
-              <p className="mt-1 text-sm text-red-600">{errors.studentName}</p>
-            )}
-          </div>
-
-          {!isSat && (
-            <>
-              <div>
-                <label htmlFor="nickname" className="block text-sm font-medium text-gray-700 mb-2">
-                  Nickname
-                  <input
-                    id="nickname"
-                    type="text"
-                    value={formData.nickname}
-                    onChange={(e) => handleInputChange("nickname", e.target.value)}
-                    placeholder="Nickname"
-                    aria-label="Nickname"
-                    disabled={isLoading || Boolean(queuedAdmission)}
-                    maxLength={50}
-                    className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                      errors.nickname ? "border-red-300" : "border-gray-300"
-                    } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                  />
-                </label>
-                {errors.nickname && <p className="mt-1 text-sm text-red-600">{errors.nickname}</p>}
-              </div>
-              <div>
-                <label
-                  htmlFor="ieltsCourse"
-                  className="block text-sm font-medium text-gray-700 mb-2"
-                >
-                  {courseLabel}
-                  <input
-                    id="ieltsCourse"
-                    type="text"
-                    value={formData.ieltsCourse}
-                    onChange={(e) => handleInputChange("ieltsCourse", e.target.value)}
-                    placeholder={courseLabel}
-                    aria-label={courseLabel}
-                    disabled={isLoading || Boolean(queuedAdmission)}
-                    className={`mt-2 w-full px-3 py-2 border rounded-md ${
-                      errors.ieltsCourse ? "border-red-300" : "border-gray-300"
-                    } focus:outline-none focus:ring-2 focus:ring-blue-500`}
-                  />
-                </label>
-                {errors.ieltsCourse && (
-                  <p className="mt-1 text-sm text-red-600">{errors.ieltsCourse}</p>
-                )}
-              </div>
-            </>
-          )}
-
-          <button
-            type="submit"
-            disabled={isLoading || Boolean(queuedAdmission)}
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            {queuedAdmission
-              ? "Waiting for Admission..."
-              : isLoading
-                ? "Checking in..."
-                : "Continue"}
-          </button>
-        </form>
-      </div>
-    </div>
+    <ExamCheckInScreen
+      examBadge={entryExamBadge}
+      values={formData}
+      errors={errors}
+      onChange={handleInputChange}
+      onSubmit={handleSubmit}
+      onEmailBlur={handleEmailBlur}
+      isLoading={isLoading}
+      queue={{
+        active: queuedAdmission,
+        etaSeconds: queueEtaSeconds(queueRetryAfterMs),
+        failure: queuePollFailure,
+      }}
+      onRetryQueue={handleRetryQueue}
+      onLeaveQueue={handleLeaveQueue}
+      submitError={submitError}
+      courseLabel={courseLabel}
+    />
   );
 }

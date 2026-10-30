@@ -769,7 +769,7 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 	// Credential issue/refresh goes through the same admission boundary as
 	// entry: authoritative lease, and no writer credential (nor protected
 	// content) for a session competing with the current owner.
-	admission, err := admitStudentSession(ctx, app, sess.UserID, scheduleID, attemptID, clientSessionID, nil)
+	admission, err := admitStudentSession(ctx, app, sess.UserID, scheduleID, attemptID, clientSessionID, nil, auth.ExamGrantOptions{AccountSessionID: sess.ID})
 	if err != nil {
 		return nil, err
 	}
@@ -782,7 +782,7 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 		return context, nil
 	}
 	if admission.Token != "" {
-		context["attemptCredential"] = map[string]any{"attemptToken": admission.Token, "expiresAt": admission.ExpiresAt.UTC()}
+		context["attemptCredential"] = map[string]any{"attemptToken": admission.Token, "expiresAt": admission.ExpiresAt.UTC(), "credentialPolicy": admission.CredentialPolicy}
 	}
 	return context, nil
 }

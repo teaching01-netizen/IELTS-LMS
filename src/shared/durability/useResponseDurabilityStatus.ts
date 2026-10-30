@@ -71,7 +71,7 @@ export function mapEngineStatus(
   const blocked = Number.isFinite(blockedCount) && blockedCount > 0;
   // Blocked wins over every raw status: even a "synced" engine with blocked
   // drafts must show "needs attention", never "saved".
-  if (status === "blocked_attention" || blocked) return "blocked_attention";
+  if (status === "authentication_required" || status === "blocked_attention" || blocked) return "blocked_attention";
   if (status === "conflict_fenced" || status === "conflict_terminal") return "conflict";
   if (status === "durability_fault") return "error";
   if (status === "saved_locally") return "saved_locally";

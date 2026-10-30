@@ -61,3 +61,48 @@ func TestAttemptTokenZeroExpiryRejected(t *testing.T) {
 		t.Fatal("expected zero-expiry rejection")
 	}
 }
+
+func TestAttemptTokenExpiryBoundaryIsExclusive(t *testing.T) {
+	secret := []byte("boundary-secret-32-characters-long!")
+	deadline := time.Now().UTC().Truncate(time.Second)
+	token, err := SignAttemptToken(secret, AttemptClaims{TokenID: "token", Exp: deadline.Unix(), CredentialPolicy: "sitting_v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = VerifyAttemptToken(secret, deadline.Add(-time.Second), token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = VerifyAttemptToken(secret, deadline, token); err == nil {
+		t.Fatal("credential accepted at its expiry boundary")
+	}
+}
+
+// A rotation keeps tokens signed by the retired secret verifiable for the
+// configured window; nothing new is ever signed with it, and an unknown key
+// is rejected.
+func TestRetiredAttemptSecretVerifiesDuringRotation(t *testing.T) {
+	retired := []byte("retired-attempt-secret-with-32-characters")
+	current := []byte("current-attempt-secret-with-32-characters")
+	t.Cleanup(func() { ConfigurePreviousAttemptSecrets(nil) })
+	exp := time.Now().Add(time.Hour).Unix()
+	old, err := SignAttemptToken(retired, AttemptClaims{TokenID: "grant", Exp: exp, CredentialPolicy: "sitting_v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyAttemptToken(current, time.Now(), old); err == nil {
+		t.Fatal("retired-key token verified before the keyring was configured")
+	}
+	ConfigurePreviousAttemptSecrets([][]byte{retired})
+	claims, err := VerifyAttemptToken(current, time.Now(), old)
+	if err != nil || claims.TokenID != "grant" {
+		t.Fatalf("retired-key token rejected during rotation: %+v %v", claims, err)
+	}
+	foreign, _ := SignAttemptToken([]byte("unknown-attempt-secret-with-32-characters"), AttemptClaims{TokenID: "x", Exp: exp})
+	if _, err := VerifyAttemptToken(current, time.Now(), foreign); err == nil {
+		t.Fatal("token from an unknown key verified")
+	}
+	ConfigurePreviousAttemptSecrets(nil)
+	if _, err := VerifyAttemptToken(current, time.Now(), old); err == nil {
+		t.Fatal("retired key still verified after removal")
+	}
+}

@@ -42,6 +42,8 @@ export interface ApiRequestConfig {
   retrySafe?: boolean;
   signal?: AbortSignal;
   skipUnauthorizedHandler?: boolean;
+  /** Exam bearer requests have their own grant/lease lifetime, independent of account changes. */
+  credentialScope?: "attempt";
   /**
    * Per-request bearer token. Merged as an `Authorization` header without
    * mutating the client's default headers.
@@ -287,7 +289,13 @@ class ApiClient {
 
     const url = endpoint.startsWith("/api/") ? endpoint : `${this.baseURL}${endpoint}`;
     const requestId = this.generateRequestId();
-    const generation = this.captureAuthGeneration();
+    const bearer = Boolean(config.token) || Object.entries(headers).some(
+      ([name, value]) => name.toLowerCase() === "authorization" && /^Bearer\s+\S+/i.test(value),
+    );
+    if (config.credentialScope === "attempt" && !bearer) {
+      throw new Error("Attempt-scoped requests require an explicit exam credential.");
+    }
+    const generation = config.credentialScope === "attempt" ? undefined : this.captureAuthGeneration();
 
     const retries =
       method === "GET" || config.retrySafe === true
@@ -402,7 +410,7 @@ class ApiClient {
             method,
             requestId,
             generation,
-            bearer: Boolean(config.token),
+            bearer,
             skipUnauthorizedHandler,
           });
           throw responseError;

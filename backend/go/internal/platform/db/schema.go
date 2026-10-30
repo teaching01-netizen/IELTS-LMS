@@ -119,6 +119,10 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "user_sessions", Column: "recovery_attempt_id"},
 	// Persistent staff sessions (0111): lookup reads the stored idle policy
 	// and remembered-session checks read the password-authentication time.
+	{Table: "attempt_sessions", Column: "credential_policy"},
+	{Table: "attempt_sessions", Column: "account_session_id"},
+	// Draft evidence (0113): FR7 ingestion and one-time review.
+	{Table: "attempt_draft_evidence", Column: "disposition"},
 	{Table: "user_sessions", Column: "remembered"},
 	{Table: "user_sessions", Column: "idle_window_seconds"},
 	{Table: "user_sessions", Column: "credential_authenticated_at"},

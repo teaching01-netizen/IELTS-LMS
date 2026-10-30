@@ -52,6 +52,7 @@ export interface StudentEntrySuccess extends AuthSession {
   attemptId?: string | undefined;
   attemptToken?: string | undefined;
   attemptExpiresAt?: string | undefined;
+  credentialPolicy?: "legacy_v1" | "sitting_v1" | undefined;
   clientSessionId?: string | undefined;
 }
 

@@ -703,6 +703,28 @@ describe("StudentEntryRoute", () => {
     });
   });
 
+  it("labels the IELTS access code as WCode and keeps every requirement", async () => {
+    const scheduleId = "550e8400-e29b-41d4-a716-446655440199";
+    getStudentEntryScheduleMock.mockResolvedValue({ status: "scheduled", providerKey: "ielts" });
+
+    renderRoute(scheduleId);
+    await waitFor(() => expect(getStudentEntryScheduleMock).toHaveBeenCalledWith(scheduleId));
+
+    expect(screen.getByRole("heading", { name: "Exam Check-in" })).toBeInTheDocument();
+    expect(screen.getByLabelText("WCode")).toBeInTheDocument();
+    expect(screen.getByLabelText(/IELTS Course/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/nickname/i)).toHaveAttribute("maxlength", "50");
+    expect(screen.queryByLabelText("Access code")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Warwick Institute" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    expect(await screen.findByText("WCode is required")).toBeInTheDocument();
+    expect(screen.getByLabelText("WCode")).toHaveAttribute("aria-invalid", "true");
+    await waitFor(() => expect(screen.getByLabelText("WCode")).toHaveFocus());
+    expect(studentEntryMock).not.toHaveBeenCalled();
+  });
+
   it("uses ACT-specific WCode and course labels without changing the entry payload", async () => {
     const scheduleId = "550e8400-e29b-41d4-a716-446655440141";
     getStudentEntryScheduleMock.mockResolvedValue({ status: "live", providerKey: "act" });

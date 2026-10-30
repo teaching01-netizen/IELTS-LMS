@@ -317,7 +317,7 @@ func logoutHandler(app *App) http.HandlerFunc {
 				httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Database not configured."))
 				return
 			}
-			if err := auth.RevokeSessionWithCache(r.Context(), app.DB, app.SessionCache, cookie.Value, time.Now().UTC()); err != nil {
+			if err := auth.RevokeBrowserSessionWithCache(r.Context(), app.DB, app.SessionCache, cookie.Value, time.Now().UTC()); err != nil {
 				httpx.WriteError(w, r, authStoreError("logout", err))
 				return
 			}

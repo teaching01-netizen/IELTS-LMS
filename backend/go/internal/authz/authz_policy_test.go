@@ -112,6 +112,8 @@ var expectedAnnotated = []string{
 	"POST /sessions/{scheduleID}/attempts/{attemptID}/late-evidence/review",
 	"GET /sessions/{scheduleID}/attempts/{attemptID}/device-recovery",
 	"POST /sessions/{scheduleID}/attempts/{attemptID}/device-recovery",
+	"GET /sessions/{scheduleID}/attempts/{attemptID}/draft-evidence",
+	"POST /sessions/{scheduleID}/attempts/{attemptID}/draft-evidence/{evidenceID}/review",
 	"GET /sessions/{scheduleID}/device-transfers",
 	"POST /sessions/{scheduleID}/device-transfers/{requestID}/decision",
 	"GET /sessions/{scheduleID}/start-code", "POST /sessions/{scheduleID}/start-code/rotate", "GET /sessions/{scheduleID}/entry-info",
@@ -154,6 +156,9 @@ var expectedAnnotated = []string{
 	"GET /attempts/{attemptID}/targets/{targetID}",
 	"GET /ws/live",
 	"GET /ws/authoring",
+	"POST /{attemptID}/access:resume",
+	"POST /{attemptID}/draft-evidence",
+	"GET /{attemptID}/submission-receipt",
 	"POST /{attemptID}/responses:batch", "POST /{attemptID}/submit", "POST /{attemptID}/takeover",
 	"GET /{attemptID}/responses",
 }

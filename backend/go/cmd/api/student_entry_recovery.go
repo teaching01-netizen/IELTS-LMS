@@ -97,7 +97,7 @@ func writeStudentEntry(w http.ResponseWriter, r *http.Request, app *App, identit
 	if identity.ClientSessionID == "" {
 		identity.ClientSessionID = uuid.NewString()
 	}
-	admission, err := admitStudentSession(r.Context(), app, identity.UserID, identity.ScheduleID, identity.AttemptID, identity.ClientSessionID, identity.Registration)
+	admission, err := admitStudentSession(r.Context(), app, identity.UserID, identity.ScheduleID, identity.AttemptID, identity.ClientSessionID, identity.Registration, auth.ExamGrantOptions{Reauthorize: identity.Proof.Source == auth.SessionSourceAccount || identity.Proof.Source == auth.SessionSourcePractice})
 	if err != nil {
 		httpx.WriteError(w, r, MapDBError(err))
 		return
@@ -105,10 +105,16 @@ func writeStudentEntry(w http.ResponseWriter, r *http.Request, app *App, identit
 	// A blocked browser receives only the authenticated student session needed
 	// to request transfer. Admit never mints a competing writer credential.
 	now := time.Now().UTC()
-	_, sessionToken, csrfToken, err := auth.CreateSession(r.Context(), app.DB, app.Config, identity.UserID, auth.RoleStudent, identity.Proof, nil, nil, now)
+	accountID, sessionToken, csrfToken, err := auth.CreateSession(r.Context(), app.DB, app.Config, identity.UserID, auth.RoleStudent, identity.Proof, nil, nil, now)
 	if err != nil {
 		httpx.WriteError(w, r, MapDBError(err))
 		return
+	}
+	if admission.Token != "" {
+		if err := auth.BindExamGrantAccountSession(r.Context(), app.DB, app.Config, admission.Token, accountID, now); err != nil {
+			httpx.WriteError(w, r, MapDBError(err))
+			return
+		}
 	}
 	expiresAt, idleTimeoutAt := auth.SessionExpiry(app.Config, auth.RoleStudent, now)
 	setCreatedSessionCookies(w, app, auth.RoleStudent, sessionToken, csrfToken, expiresAt, now)
@@ -122,6 +128,7 @@ func writeStudentEntry(w http.ResponseWriter, r *http.Request, app *App, identit
 	if admission.Token != "" {
 		out["attemptToken"] = admission.Token
 		out["attemptExpiresAt"] = admission.ExpiresAt.UTC()
+		out["credentialPolicy"] = admission.CredentialPolicy
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

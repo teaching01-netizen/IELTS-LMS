@@ -1,10 +1,11 @@
-import { backendGet, backendPost, hasBackendStatusCode } from "./backendBridge";
+import { backendGet, backendPost, hasBackendStatusCode, type ApiRequestConfig } from "./backendBridge";
 import { studentSessionTransport } from "./studentSessionTransport";
 import type { StudentAttempt } from "../types/studentAttempt";
 
 const STORAGE_KEY_ATTEMPT_CREDENTIALS = "ielts_student_attempt_credentials_v1";
 
 export interface BackendAttemptCredential {
+  credentialPolicy?: "legacy_v1" | "sitting_v1" | undefined;
   attemptToken: string;
   expiresAt: string;
 }
@@ -14,9 +15,10 @@ interface BackendStudentSessionContextWithCredential {
   attemptCredential?: BackendAttemptCredential | null;
 }
 
-interface StoredAttemptCredential {
+interface StoredAttemptCredential extends BackendAttemptCredential {
   attemptId: string;
   scheduleId: string;
+  candidateId?: string | undefined;
   attemptToken: string;
   expiresAt: string;
 }
@@ -25,7 +27,7 @@ const ATTEMPT_CREDENTIAL_REFRESH_RETRIES = 3;
 
 function isTransientCredentialRefreshFailure(error: unknown): boolean {
   return (
-    [0, 502, 503, 504].some((status) => hasBackendStatusCode(error, status)) ||
+    [0, 429, 502, 503, 504].some((status) => hasBackendStatusCode(error, status)) ||
     error instanceof TypeError
   );
 }
@@ -59,6 +61,7 @@ async function fetchAttemptCredentialWithRetry(
 export interface AttemptCredentialRef {
   id: string;
   scheduleId: string;
+  candidateId?: string | undefined;
 }
 
 export interface AttemptCredentialRefreshRef extends AttemptCredentialRef {
@@ -69,6 +72,7 @@ export interface AttemptCredentialRefreshRef extends AttemptCredentialRef {
 }
 
 export interface AttemptCredentialStatus {
+  credentialPolicy?: "legacy_v1" | "sitting_v1" | undefined;
   expiresAt: string;
   expiresAtMs: number;
 }
@@ -222,6 +226,8 @@ export function storeAttemptCredential(
     scheduleId: attempt.scheduleId,
     attemptToken: credential.attemptToken,
     expiresAt: credential.expiresAt,
+    ...(credential.credentialPolicy ? { credentialPolicy: credential.credentialPolicy } : {}),
+    ...(attempt.candidateId ? { candidateId: attempt.candidateId } : {}),
   });
   setAttemptCredentialStorage(credentials);
 }
@@ -242,6 +248,7 @@ export function getAttemptCredentialStatus(
   return {
     expiresAt: credential.expiresAt,
     expiresAtMs,
+    credentialPolicy: credential.credentialPolicy,
   };
 }
 
@@ -252,6 +259,7 @@ export function isAttemptCredentialExpiringWithin(
   nowMs = Date.now()
 ): boolean {
   const status = getAttemptCredentialStatus(scheduleId, attemptId);
+  if (status?.credentialPolicy === "sitting_v1") return false;
   return !status || !Number.isFinite(status.expiresAtMs) || status.expiresAtMs - nowMs <= withinMs;
 }
 
@@ -276,10 +284,47 @@ export function tryBuildAttemptAuthorizationHeader(
   }
 }
 
-export async function refreshAttemptCredential(
+// All student transports share renewal: concurrent rotations would invalidate
+// the credential another save or submission is about to use.
+const credentialRefreshes = new Map<string, Promise<boolean>>();
+
+export function refreshAttemptCredential(
   attempt: AttemptCredentialRefreshRef,
   clientSessionId: string
 ): Promise<boolean> {
+  const key = JSON.stringify([attempt.scheduleId, attempt.id, attempt.candidateId, clientSessionId]);
+  const existing = credentialRefreshes.get(key);
+  if (existing) return existing;
+
+  const refresh = renewAttemptCredential(attempt, clientSessionId).finally(() => {
+    credentialRefreshes.delete(key);
+  });
+  credentialRefreshes.set(key, refresh);
+  return refresh;
+}
+
+async function renewAttemptCredential(
+  attempt: AttemptCredentialRefreshRef,
+  clientSessionId: string
+): Promise<boolean> {
+  const existing = loadAttemptCredential(attempt);
+  if (existing?.credentialPolicy === "sitting_v1") {
+    // Resume the existing exam grant using its own proof. Account bootstrap
+    // cannot extend or resurrect a sitting grant, even when it has expired.
+    const resumed = await backendPost<BackendAttemptCredential & {
+      attemptId: string; clientSessionId: string;
+    }>(`/v2/student/attempts/${encodeURIComponent(attempt.id)}/access:resume`, {}, {
+      headers: { Authorization: `Bearer ${existing.attemptToken}` },
+      credentialScope: "attempt",
+      retries: 0,
+      skipUnauthorizedHandler: true,
+    });
+    if (resumed.attemptId !== attempt.id || resumed.clientSessionId !== clientSessionId) {
+      throw new Error("The resumed exam credential does not match this browser.");
+    }
+    storeAttemptCredential(attempt, resumed);
+    return true;
+  }
   try {
     const session = await fetchAttemptCredentialWithRetry(
       studentSessionTransport.paths.credentialRefresh(
@@ -331,4 +376,40 @@ export async function refreshAttemptCredentialForAttempt(
   clientSessionId: string
 ): Promise<boolean> {
   return refreshAttemptCredential(attempt, clientSessionId);
+}
+
+/**
+ * Select only an unambiguous, unexpired sitting grant. This is a hint: the
+ * server re-checks the grant's schedule, attempt, and candidate binding. The
+ * route's candidate may be a WCODE or student key while the stored value is
+ * the canonical candidate ID, so an exact match is preferred but a single
+ * grant for the schedule is still usable. An expired grant is never sent; the
+ * account session (if any) then decides, and re-entry issues a new grant.
+ */
+export function findSittingAttemptCredential(
+  scheduleId: string,
+  candidateId?: string,
+  attemptId?: string,
+  nowMs = Date.now(),
+): (BackendAttemptCredential & { attemptId: string; candidateId?: string | undefined }) | null {
+  const grants = getAttemptCredentialStorage().filter((credential) =>
+    credential.scheduleId === scheduleId && credential.credentialPolicy === "sitting_v1" &&
+    (!attemptId || credential.attemptId === attemptId) &&
+    Date.parse(credential.expiresAt) > nowMs
+  );
+  if (candidateId) {
+    const exact = grants.filter((credential) => credential.candidateId === candidateId);
+    if (exact.length === 1) return exact[0]!;
+  }
+  return grants.length === 1 ? grants[0]! : null;
+}
+
+export function sittingAttemptAuthorizationHeaders(scheduleId: string, candidateId?: string, attemptId?: string): Record<string, string> {
+  const grant = findSittingAttemptCredential(scheduleId, candidateId, attemptId);
+  return grant ? { Authorization: `Bearer ${grant.attemptToken}` } : {};
+}
+
+export function sittingAttemptRequestConfig(scheduleId: string, candidateId?: string, attemptId?: string): ApiRequestConfig {
+  const headers = sittingAttemptAuthorizationHeaders(scheduleId, candidateId, attemptId);
+  return { headers, skipUnauthorizedHandler: true, ...(headers["Authorization"] ? { credentialScope: "attempt" as const } : {}) };
 }

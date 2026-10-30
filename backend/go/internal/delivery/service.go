@@ -27,6 +27,7 @@ import (
 	"example.com/ielts-proctoring/internal/act"
 	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/attempts"
+	"example.com/ielts-proctoring/internal/auth"
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -2921,7 +2922,7 @@ func claimWriterSessionWithAuthorityTx(ctx context.Context, t tx.Tx, scheduleID,
 	err := t.QueryRowContext(ctx,
 		`SELECT schedule_id, attempt_id, client_session_id, expires_at, lease_epoch
 		 FROM attempt_sessions
-		 WHERE token_id = ? AND revoked_at IS NULL
+		 WHERE token_id = ? AND revoked_at IS NULL AND `+auth.ActiveAttemptPrincipalSQL+`
 		 FOR SHARE`, tokenID).Scan(&dbScheduleID, &dbAttemptID, &dbClientSessionID, &expiresAt, &sessionLease)
 	if isMySQLMissingColumn(err) {
 		// Preserve the pre-0079 schema fallback used by VerifyAttemptRead.
@@ -2929,7 +2930,7 @@ func claimWriterSessionWithAuthorityTx(ctx context.Context, t tx.Tx, scheduleID,
 		err = t.QueryRowContext(ctx,
 			`SELECT schedule_id, attempt_id, client_session_id, expires_at
 			 FROM attempt_sessions
-			 WHERE token_id = ? AND revoked_at IS NULL
+			 WHERE token_id = ? AND revoked_at IS NULL AND `+auth.ActiveAttemptPrincipalSQL+`
 			 FOR SHARE`, tokenID).Scan(&dbScheduleID, &dbAttemptID, &dbClientSessionID, &expiresAt)
 	}
 	if err != nil {

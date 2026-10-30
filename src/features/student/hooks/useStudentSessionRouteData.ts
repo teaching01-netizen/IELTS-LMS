@@ -28,6 +28,7 @@ import {
 } from "../liveSnapshotFreshness";
 import { createStudentSessionBootstrap } from "../application/exam-session/studentSessionBootstrap";
 import { createStudentRuntimePoll } from "../infrastructure/exam-session/studentRuntimePoll";
+import { hasSittingGrant, sittingGrantHeaders } from "../infrastructure/exam-session/sittingGrantAccess";
 import { createStudentRuntimePollLoop } from "../infrastructure/exam-session/studentRuntimePollLoop";
 import { resolveStudentRealtimeTransport } from "../infrastructure/exam-session/studentRealtimeRollout";
 import {
@@ -158,6 +159,10 @@ export function useStudentSessionRouteData(
     []
   );
   const candidateId = useMemo(() => normalizeCandidateId(studentId), [studentId]);
+  // Server reads re-check the grant; this only decides whether to try.
+  const canLoadSession =
+    authStatus === "authenticated" ||
+    (authStatus !== "loading" && Boolean(scheduleId && candidateId && hasSittingGrant(scheduleId, candidateId)));
   const staticVersionIdRef = useRef<string | null>(null);
   const refreshEpochRef = useRef(0);
   // Phase 02 seed: wall-clock ms when the load path last applied a live
@@ -1123,16 +1128,18 @@ export function useStudentSessionRouteData(
   }, [loadStudentData]);
 
   useEffect(() => {
-    const mountKey = `${scheduleId ?? ""}::${candidateId ?? ""}::${authStatus}`;
+    // Keyed on load eligibility, not auth status: an account session expiring
+    // mid-sitting keeps eligibility through the grant and must not reload.
+    const mountKey = `${scheduleId ?? ""}::${candidateId ?? ""}::${canLoadSession}`;
     if (initialLoadKeyRef.current === mountKey) {
       return;
     }
     initialLoadKeyRef.current = mountKey;
-    if (!scheduleId || !candidateId || authStatus !== "authenticated") {
+    if (!scheduleId || !candidateId || !canLoadSession) {
       return;
     }
     loadStudentDataRef.current("load").catch(() => {});
-  }, [authStatus, candidateId, scheduleId]);
+  }, [canLoadSession, candidateId, scheduleId]);
 
   // The runtime poll loop is the student recovery channel: server hints set its
   // cadence, bounded by the coordinator's provider policy. Proctored IELTS
@@ -1173,7 +1180,13 @@ export function useStudentSessionRouteData(
       scheduleId,
       ...(candidateId ? { candidateId } : {}),
       fetchJson: async (path) => {
-        const res = await fetch(path, { credentials: "include" });
+        let res = await fetch(path, { credentials: "include" });
+        if (res.status === 401) {
+          // The account session expired mid-sitting: poll with the sitting
+          // grant instead. Cookie first keeps recovery-session scoping intact.
+          const headers = sittingGrantHeaders(scheduleId, candidateId ?? undefined);
+          if (headers["Authorization"]) res = await fetch(path, { credentials: "include", headers });
+        }
         if (res.status === 304) {
           return { status: 304, json: null };
         }

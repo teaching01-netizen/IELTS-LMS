@@ -3,6 +3,8 @@ import { saveSatResumeLocator, loadSatResumeLocator } from "../satResumeLocator"
 
 const mocks = vi.hoisted(() => ({
   backendGet: vi.fn(),
+  findSittingAttemptCredential: vi.fn(),
+  sittingAttemptRequestConfig: vi.fn(),
   storeAttemptCredential: vi.fn(),
   refreshAttemptCredentialForAttempt: vi.fn(),
   ensureClientSessionIdForStudentKey: vi.fn(),
@@ -30,6 +32,8 @@ vi.mock("@services/studentAttemptRepository", () => ({
 
 vi.mock("@services/attemptCredentialAdapter", () => ({
   storeAttemptCredential: mocks.storeAttemptCredential,
+  findSittingAttemptCredential: mocks.findSittingAttemptCredential,
+  sittingAttemptRequestConfig: mocks.sittingAttemptRequestConfig,
 }));
 
 vi.mock("@services/studentSessionTransport", () => ({
@@ -62,6 +66,8 @@ describe("resumeSatStudentSession", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     window.localStorage.clear();
+    mocks.findSittingAttemptCredential.mockReturnValue(null);
+    mocks.sittingAttemptRequestConfig.mockReturnValue({ headers: {}, skipUnauthorizedHandler: true });
     mocks.ensureClientSessionIdForStudentKey.mockImplementation(
       (_schedule: string, key: string, preferred?: string | null) => preferred ?? `writer:${key}`
     );
@@ -98,7 +104,7 @@ describe("resumeSatStudentSession", () => {
 
     expect(mocks.backendGet).toHaveBeenCalledWith(
       "/v1/student/sessions/schedule-1?refreshAttemptCredential=true&clientSessionId=writer%3Astudent-schedule-1-CANONICAL-CANDIDATE",
-      { retries: 0, timeout: 8_000 }
+      expect.objectContaining({ retries: 0, timeout: 8_000, skipUnauthorizedHandler: true })
     );
     expect(mocks.ensureClientSessionIdForStudentKey).toHaveBeenCalledWith(
       "schedule-1",

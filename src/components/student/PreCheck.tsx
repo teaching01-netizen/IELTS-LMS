@@ -59,6 +59,7 @@ export function PreCheck({
     <ExamEntryCard
       config={config}
       examTitle={examTitle}
+      examType={config?.general.type}
       candidateName={candidateName}
       candidateId={candidateId}
       status="connecting"

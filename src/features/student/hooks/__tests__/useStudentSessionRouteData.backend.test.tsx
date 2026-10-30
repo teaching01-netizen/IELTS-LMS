@@ -8,6 +8,7 @@ import {
   mapBackendStudentAttempt,
   studentAttemptRepository,
 } from "../../../../services/studentAttemptRepository";
+import { storeAttemptCredential } from "../../../../services/attemptCredentialAdapter";
 import { useStudentSessionRouteData } from "../useStudentSessionRouteData";
 
 const originalFetch = global.fetch;
@@ -587,6 +588,46 @@ describe("useStudentSessionRouteData backend mode", () => {
         expect.objectContaining({ method: "POST" })
       );
     });
+  });
+
+  it("reloads an admitted sitting with its exam grant after the account session expired", async () => {
+    vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
+    vi.spyOn(authService, "getSession").mockResolvedValue(null);
+    storeAttemptCredential(
+      { id: "attempt-1", scheduleId: "sched-1" },
+      { attemptToken: "sitting-grant", expiresAt: "2099-01-01T00:00:00.000Z", credentialPolicy: "sitting_v1" },
+    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(buildStaticSessionContext()))
+      .mockResolvedValue(jsonResponse(buildLiveSessionContext(buildAttempt())));
+    global.fetch = fetchMock as typeof fetch;
+
+    const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.attemptSnapshot?.id).toBe("attempt-1"));
+    const staticCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/static?"));
+    expect(new Headers((staticCall?.[1] as RequestInit | undefined)?.headers).get("Authorization")).toBe("Bearer sitting-grant");
+  });
+
+  it("does not load an unauthenticated sitting without a live exam grant", async () => {
+    vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
+    vi.spyOn(authService, "getSession").mockResolvedValue(null);
+    storeAttemptCredential(
+      { id: "attempt-1", scheduleId: "sched-1" },
+      { attemptToken: "expired-grant", expiresAt: "2001-01-01T00:00:00.000Z", credentialPolicy: "sitting_v1" },
+    );
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(buildStaticSessionContext()));
+    global.fetch = fetchMock as typeof fetch;
+
+    renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), { wrapper: createWrapper() });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/student/sessions/"))).toBe(false);
   });
 
   it("keeps initial backend load parity for schedule, state, runtime, and attempt snapshots", async () => {

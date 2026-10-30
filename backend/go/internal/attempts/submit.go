@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
@@ -48,7 +49,7 @@ func (s *Service) Submit(ctx context.Context, bearer string, cmd SubmitCommand, 
 	}
 	claims, err := crypto.VerifyAttemptToken(s.secret, s.clock.Now(), bearer)
 	if err != nil {
-		return SubmitResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Invalid attempt credential.", HTTPStatus: 401}
+		return SubmitResult{}, auth.AttemptCredentialError(err)
 	}
 	if cmd.BearerTokenID != "" && cmd.BearerTokenID != claims.TokenID {
 		return SubmitResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Attempt credential mismatch.", HTTPStatus: 401}
@@ -199,14 +200,17 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 		return SubmitResult{}, err
 	}
 	// Apply final commands through the same fencing/version rules.
+	finalAcknowledgements := []Ack{}
 	if len(cmd.FinalCommands) > 0 {
 		// Final commands fence on the client-supplied expected control
 		// epoch so a pause/resume racing the submit cannot slip through
 		// on a fresh-read epoch.
 		saveCmd := SaveResponsesCommand{AttemptID: cmd.AttemptID, LeaseEpoch: cmd.LeaseEpoch, ControlEpoch: cmd.ExpectedControlEpoch, Commands: cmd.FinalCommands}
-		if _, err := s.saveInTx(ctx, q, claims, saveCmd, preparePayloads(saveCmd.Commands), qr, rl, ""); err != nil {
+		saved, err := s.saveInTx(ctx, q, claims, saveCmd, preparePayloads(saveCmd.Commands), qr, rl, "")
+		if err != nil {
 			return SubmitResult{}, err
 		}
+		finalAcknowledgements = saved.Acks
 		attempt, err = lockAttempt(ctx, q, cmd.AttemptID)
 		if err != nil {
 			return SubmitResult{}, err
@@ -241,7 +245,7 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 	if _, err := q.ExecContext(ctx, `UPDATE student_attempts SET response_revision=?, final_response_digest=? WHERE id=?`, attempt.ResponseRevision, digest, cmd.AttemptID); err != nil {
 		return SubmitResult{}, err
 	}
-	result := SubmitResult{SubmissionID: cmd.SubmissionID, FinalDigest: digest, ServerTime: now}
+	result := SubmitResult{SubmissionID: cmd.SubmissionID, FinalDigest: digest, ServerTime: now, Acknowledgements: finalAcknowledgements}
 	if err := insertSubmissionReceipt(ctx, q, cmd, attempt, reqHash, digest, result, now); err != nil {
 		return SubmitResult{}, err
 	}
@@ -292,17 +296,19 @@ func loadSubmissionReceipt(ctx context.Context, q tx.Tx, attemptID string) (stor
 	}
 	r.Result = SubmitResult{SubmissionID: r.SubmissionID, FinalDigest: digest, Replayed: true, ServerTime: submittedAt.UTC()}
 	var decoded struct {
-		Provisional bool `json:"provisional"`
+		Provisional      bool  `json:"provisional"`
+		Acknowledgements []Ack `json:"acknowledgements"`
 	}
 	if receiptJSON != "" {
 		_ = json.Unmarshal([]byte(receiptJSON), &decoded)
 		r.Result.Provisional = decoded.Provisional
+		r.Result.Acknowledgements = decoded.Acknowledgements
 	}
 	return r, true, nil
 }
 
 func insertSubmissionReceipt(ctx context.Context, q tx.Tx, cmd SubmitCommand, attempt AttemptState, reqHash, digest string, result SubmitResult, now time.Time) error {
-	receiptJSON, _ := json.Marshal(map[string]any{"submissionId": result.SubmissionID, "provisional": result.Provisional, "digest": digest})
+	receiptJSON, _ := json.Marshal(map[string]any{"submissionId": result.SubmissionID, "provisional": result.Provisional, "digest": digest, "acknowledgements": result.Acknowledgements})
 	actualRev := attempt.ResponseRevision
 	// expected_attempt_revision is NOT NULL: a client that omits
 	// expectedAttemptRevision means "no fence", recorded as the sealed
@@ -370,7 +376,7 @@ func (s *Service) Takeover(ctx context.Context, bearer, attemptID, clientSession
 	}
 	claims, err := crypto.VerifyAttemptToken(s.secret, s.clock.Now(), bearer)
 	if err != nil {
-		return TakeoverResult{}, &apperrors.Error{Code: apperrors.CodeAttemptTokenInvalid, Message: "Invalid attempt credential.", HTTPStatus: 401}
+		return TakeoverResult{}, auth.AttemptCredentialError(err)
 	}
 	var out TakeoverResult
 	// B1: lease takeover is a single-row CAS + session revoke (RC-safe).
@@ -391,12 +397,12 @@ func (s *Service) Takeover(ctx context.Context, bearer, attemptID, clientSession
 // replay of the current owner: same session, current lease, still the active
 // writer, and a live (non-revoked) session row for it.
 func (s *Service) replayableOwnerRotation(ctx context.Context, q tx.Tx, claims crypto.AttemptClaims, attempt AttemptState, active sql.NullString, clientSessionID string) bool {
-	if claims.LeaseEpoch == nil || *claims.LeaseEpoch != attempt.LeaseEpoch ||
+	if claims.CredentialPolicy == auth.ExamCredentialSitting || claims.LeaseEpoch == nil || *claims.LeaseEpoch != attempt.LeaseEpoch ||
 		claims.ClientSessionID != clientSessionID || !active.Valid || active.String != clientSessionID {
 		return false
 	}
 	var live int
-	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM attempt_sessions WHERE attempt_id=? AND client_session_id=? AND user_id=? AND revoked_at IS NULL AND expires_at > ?`,
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM attempt_sessions WHERE attempt_id=? AND client_session_id=? AND user_id=? AND revoked_at IS NULL AND expires_at > ? AND `+auth.ActiveAttemptPrincipalSQL,
 		attempt.ID, clientSessionID, attempt.UserID, s.clock.Now().UTC()).Scan(&live); err != nil {
 		return false
 	}
@@ -405,11 +411,12 @@ func (s *Service) replayableOwnerRotation(ctx context.Context, q tx.Tx, claims c
 
 // TakeoverResult is the new writer credential.
 type TakeoverResult struct {
-	AttemptID       string    `json:"attemptId"`
-	ClientSessionID string    `json:"clientSessionId"`
-	LeaseEpoch      uint64    `json:"leaseEpoch"`
-	ExpiresAt       time.Time `json:"expiresAt"`
-	Token           string    `json:"token"`
+	AttemptID        string    `json:"attemptId"`
+	ClientSessionID  string    `json:"clientSessionId"`
+	LeaseEpoch       uint64    `json:"leaseEpoch"`
+	ExpiresAt        time.Time `json:"expiresAt"`
+	Token            string    `json:"token"`
+	CredentialPolicy string    `json:"credentialPolicy,omitempty"`
 }
 
 func (s *Service) takeoverInTx(ctx context.Context, q tx.Tx, claims crypto.AttemptClaims, attemptID, clientSessionID string) (TakeoverResult, error) {
@@ -468,6 +475,24 @@ func (s *Service) takeoverInTx(ctx context.Context, q tx.Tx, claims crypto.Attem
 	// not be refused for a section clock its candidate is no longer on.
 	if attempt.TimingModel != personalTimingModel && attempt.ClosingGraceUntil != nil && now.After(*attempt.ClosingGraceUntil) {
 		return TakeoverResult{}, &apperrors.Error{Code: apperrors.CodeAttemptNotWritable, Message: "Response deadline has passed.", HTTPStatus: 422}
+	}
+	if claims.CredentialPolicy == auth.ExamCredentialSitting {
+		// Sitting grants never rotate through this legacy endpoint. Changing
+		// their writer requires the approved transfer/recovery boundary.
+		if clientSessionID != claims.ClientSessionID {
+			return TakeoverResult{}, transferError(apperrors.CodeTransferApprovalRequired, "Changing devices requires an approved device transfer.", "transfer_required")
+		}
+		if err := validateClaimLease(attempt, claims); err != nil {
+			return TakeoverResult{}, err
+		}
+		if err := ensureActiveSession(attempt, claims); err != nil {
+			return TakeoverResult{}, err
+		}
+		token, err := crypto.SignAttemptToken(s.secret, claims)
+		if err != nil {
+			return TakeoverResult{}, err
+		}
+		return TakeoverResult{AttemptID: attemptID, ClientSessionID: clientSessionID, LeaseEpoch: attempt.LeaseEpoch, ExpiresAt: time.Unix(claims.Exp, 0).UTC(), Token: token, CredentialPolicy: auth.ExamCredentialSitting}, nil
 	}
 	newLease := attempt.LeaseEpoch
 	if !active.Valid || active.String != clientSessionID {

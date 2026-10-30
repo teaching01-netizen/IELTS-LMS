@@ -38,6 +38,7 @@ func TestBeginDeviceRecoveryCommitsClockAndCredentialsAtomically(t *testing.T) {
 			mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 			expectRecoveryGrantRead(mock, grant, false)
 			expectRecoveryAttempt(mock, attempt, true)
+			expectRecoveryPrincipalLock(mock, attempt)
 			expectRecoveryGrantRead(mock, grant, true)
 			mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(now))
 			mock.ExpectQuery("(?s)FROM assessment_module_attempts ma.*").WithArgs(attempt.id, attempt.version).WillReturnRows(recoverySATTargetRows(now.Add(-time.Minute)))
@@ -125,6 +126,7 @@ func TestBeginDeviceRecoveryReplayDoesNotAwardTimeAgain(t *testing.T) {
 	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
 	expectRecoveryGrantRead(mock, grant, false)
 	expectRecoveryAttempt(mock, attempt, true)
+	expectRecoveryPrincipalLock(mock, attempt)
 	expectRecoveryGrantRead(mock, grant, true)
 	mock.ExpectQuery("SELECT UTC_TIMESTAMP").WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(now))
 	mock.ExpectQuery("SELECT candidate_id").WithArgs(attempt.id).WillReturnRows(sqlmock.NewRows([]string{"candidate_id"}).AddRow("candidate-1"))
@@ -142,4 +144,11 @@ func TestBeginDeviceRecoveryReplayDoesNotAwardTimeAgain(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Begin locks the account before fencing grants (users -> attempt_sessions),
+// matching logout-all and security reset.
+func expectRecoveryPrincipalLock(mock sqlmock.Sqlmock, attempt recoveryAttemptFixture) {
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT state FROM users WHERE id = ? FOR SHARE")).WithArgs(attempt.userID).
+		WillReturnRows(sqlmock.NewRows([]string{"state"}).AddRow("active"))
 }

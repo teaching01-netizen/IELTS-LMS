@@ -31,6 +31,7 @@ import (
 	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/config"
+	platformcrypto "example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/objectstore"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/proctor"
@@ -148,6 +149,13 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 	ring, ringErr := satstartcode.ValidateConfig(cfg.SATAccessCodeStart, cfg.SATStartCodeKeys)
 	s.SATStartCodeConfigErr = ringErr
 	satstartcode.Configure(cfg.SATAccessCodeStart && ringErr == nil, ring)
+	// Retired AUTH_SECRET values verify attempt credentials issued before a
+	// rotation; only the current secret signs.
+	previousSecrets := make([][]byte, 0, len(cfg.AuthSecretPrevious))
+	for _, secret := range cfg.AuthSecretPrevious {
+		previousSecrets = append(previousSecrets, []byte(secret))
+	}
+	platformcrypto.ConfigurePreviousAttemptSecrets(previousSecrets)
 	// One owner for the SAT handoff policy: the V2 write gate, the legacy save
 	// gate, the reconciler and the close endpoint all read it from attempts.
 	attempts.ConfigureSATHandoff(attempts.SATHandoffConfig{
@@ -166,7 +174,7 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 		if err != nil {
 			return delivery.RecoveryCredentialIdentity{}, err
 		}
-		bearer, expires, err := auth.IssueAttemptTokenTx(ctx, q, cfg, req.UserID, req.ScheduleID, req.AttemptID, req.ClientSessionID, req.OrganizationID, &req.LeaseEpoch, req.Now)
+		bearer, expires, err := auth.IssueExamGrantTx(ctx, q, cfg, req.UserID, req.ScheduleID, req.AttemptID, req.ClientSessionID, req.OrganizationID, req.LeaseEpoch, req.Now, auth.ExamGrantOptions{AccountSessionID: id, Reauthorize: true})
 		if err != nil {
 			return delivery.RecoveryCredentialIdentity{}, err
 		}

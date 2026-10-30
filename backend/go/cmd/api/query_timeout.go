@@ -2,7 +2,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -55,7 +59,10 @@ func attemptVerificationError(err error) error {
 	if errors.As(err, &lookupErr) {
 		return apperrors.New(apperrors.CodeServiceUnavailable, "Attempt verification is temporarily unavailable; please retry.")
 	}
-	return apperrors.New(apperrors.CodeAttemptTokenInvalid, "Invalid attempt credential.")
+	if known, ok := apperrors.As(err); ok {
+		return known
+	}
+	return auth.AttemptCredentialError(err)
 }
 
 func writeAttemptVerificationError(w http.ResponseWriter, r *http.Request, err error) {
@@ -104,6 +111,10 @@ func MapDBError(err error) error {
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return apperrors.New(apperrors.CodeServiceUnavailable, "Database budget exhausted; please retry.")
+	}
+	var networkError net.Error
+	if errors.Is(err, driver.ErrBadConn) || errors.Is(err, sql.ErrConnDone) || errors.Is(err, mysql.ErrInvalidConn) || errors.Is(err, io.EOF) || errors.As(err, &networkError) || strings.Contains(err.Error(), "sql: database is closed") {
+		return apperrors.New(apperrors.CodeServiceUnavailable, "Database connection is unavailable; please retry.")
 	}
 	var mysqlErr *mysql.MySQLError
 	if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1205 || mysqlErr.Number == 1213) {

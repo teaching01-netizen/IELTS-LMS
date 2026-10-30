@@ -28,6 +28,8 @@ const (
 	CodeSessionExpired             Code = "SESSION_EXPIRED"
 	CodeAttemptTokenInvalid        Code = "ATTEMPT_TOKEN_INVALID"
 	CodeAttemptTokenExpired        Code = "ATTEMPT_TOKEN_EXPIRED"
+	CodeExamAccessExpired          Code = "EXAM_ACCESS_EXPIRED"
+	CodeExamAccessRevoked          Code = "EXAM_ACCESS_REVOKED"
 	CodeLeaseFenced                Code = "LEASE_FENCED"
 	CodeControlEpochStale          Code = "CONTROL_EPOCH_STALE"
 	CodeVersionCollision           Code = "VERSION_COLLISION"
@@ -140,9 +142,9 @@ func New(code Code, msg string) *Error {
 
 func statusFor(c Code) int {
 	switch c {
-	case CodeUnauthorized, CodeAttemptTokenInvalid, CodeAttemptTokenExpired, CodeSessionExpired:
+	case CodeUnauthorized, CodeAttemptTokenInvalid, CodeAttemptTokenExpired, CodeSessionExpired, CodeExamAccessExpired:
 		return http.StatusUnauthorized
-	case CodeForbidden, CodeCSRF, CodeLeaseFenced, CodeAttemptProctorBlocked, CodeStartCodeInvalid:
+	case CodeExamAccessRevoked, CodeForbidden, CodeCSRF, CodeLeaseFenced, CodeAttemptProctorBlocked, CodeStartCodeInvalid:
 		return http.StatusForbidden
 	case CodeNotFound, CodeExamNotFound, CodeOperationNotFound:
 		return http.StatusNotFound

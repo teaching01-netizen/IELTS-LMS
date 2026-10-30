@@ -10,6 +10,8 @@ import type {
   ConfirmedResponseState,
   ControlEpochAdoptionResult,
   ControlEpochAdoptionSkipReason,
+  DraftEvidenceAckV2,
+  DraftEvidenceItemV2,
   DurabilitySyncStatus,
   PendingResponseState,
   QuarantinedWrite,
@@ -35,6 +37,9 @@ export interface TransportClient {
   sendBatch(attemptId: string, req: ResponseBatchRequestV2): Promise<ResponseBatchResponseV2>;
   submit(attemptId: string, req: SubmitAttemptV2Request): Promise<SubmitAttemptV2Response>;
   fetchSnapshot(attemptId: string): Promise<ResponseSnapshotV2 | ResponseAcknowledgementV2[]>;
+  fetchSubmissionReceipt?(attemptId: string, submissionId: string): Promise<SubmitAttemptV2Response | null>;
+  /** Records retained drafts as unscored evidence (exam continuity FR7). */
+  submitDraftEvidence?(attemptId: string, items: DraftEvidenceItemV2[]): Promise<DraftEvidenceAckV2>;
 }
 
 export interface DurableResponseEngineOptions {
@@ -100,6 +105,9 @@ const CHECKPOINT_PREFIX = "response-checkpoint:v2:";
 const DURABLE_DRAFT_PREFIX = "v2_attempt_";
 const QUARANTINE_PREFIX = "v2_quarantine:";
 const SCOPE_CLOSE_PREFIX = "v2_scope_close:";
+const SUBMISSION_INTENT_PREFIX = "v2_submission_intent:";
+/** Mirrors the server's evidence batch limit (attempts.MaxBatchCommands). */
+const MAX_EVIDENCE_BATCH = 100;
 const MAX_RETRY_ATTEMPTS_PER_DRAIN = 8;
 /**
  * Control-epoch self-heal budget. The server bumps `control_epoch` on every
@@ -456,6 +464,8 @@ export class DurableResponseEngine {
   private readonly issuedCommands = new Map<string, ResponseCommandV2>();
   private readonly commandEpochs = new Map<string, CommandEpoch>();
   private readonly quarantined: QuarantinedWrite[] = [];
+  /** Write IDs the evidence ledger has acknowledged in this engine's life. */
+  private readonly evidenceRecorded = new Set<string>();
   private readonly scopeOf: ((questionId: string) => string | null) | undefined;
   /** Scopes the server closed (scope -> reason). Their drafts never fly. */
   private readonly closedScopes = new Map<string, string>();
@@ -1869,20 +1879,58 @@ export class DurableResponseEngine {
       throw new Error("Blocked drafts need attention before submit. Reconcile or discard them first.");
     }
 
-    const finalCommands = this.collectPendingCommands();
-    const request: SubmitAttemptV2Request = {
+    const intentKey = `${SUBMISSION_INTENT_PREFIX}${this.scheduleId}:${this.attemptId}:${this.leaseEpoch}`;
+    const savedIntent = await loadDurableDraft<{
+      scheduleId: string; attemptId: string; request: SubmitAttemptV2Request;
+    }>(intentKey);
+    if (savedIntent && (
+      savedIntent.scheduleId !== this.scheduleId || savedIntent.attemptId !== this.attemptId ||
+      !savedIntent.request || savedIntent.request.leaseEpoch !== this.leaseEpoch ||
+      typeof savedIntent.request.submissionId !== "string" || !savedIntent.request.submissionId ||
+      !Array.isArray(savedIntent.request.finalCommands)
+    )) {
+      throw new Error("The saved submission intent needs recovery before submitting again.");
+    }
+    // A timeout/reload cannot invent a second submission or change the body of
+    // an operation whose commit outcome is unknown. Later edits remain drafts.
+    const request: SubmitAttemptV2Request = savedIntent?.request ?? {
       submissionId,
       leaseEpoch: this.leaseEpoch,
       controlEpoch: this.controlEpoch,
-      finalCommands,
+      finalCommands: this.collectPendingCommands(),
       expectedAttemptRevision,
     };
+    const finalCommands = request.finalCommands;
+    if (!savedIntent) {
+      await saveDurableDraft(intentKey, {
+        scheduleId: this.scheduleId, attemptId: this.attemptId, request,
+      });
+    }
+    if (this.isDestroyed) throw new Error("Response durability engine is destroyed.");
 
     let response: SubmitAttemptV2Response;
     try {
-      response = await this.transport.submit(this.attemptId, request);
+      const receipt = savedIntent && this.transport.fetchSubmissionReceipt
+        ? await this.transport.fetchSubmissionReceipt(this.attemptId, request.submissionId)
+        : null;
+      // Older receipts may predate durable final acknowledgements. Exact
+      // submit replay recovers them without changing the original operation.
+      const receiptHasFinalAcks = receipt && Array.isArray(receipt.acknowledgements) &&
+        finalCommands.every((command) => receipt.acknowledgements.some((ack) => ack.writeId === command.writeId));
+      response = receiptHasFinalAcks ? receipt : await this.transport.submit(this.attemptId, request);
+      if (response.submissionId !== request.submissionId || response.attemptId !== this.attemptId) {
+        throw new Error("The submission receipt does not match this exam operation.");
+      }
     } catch (error: unknown) {
       const errorCode = this.extractErrorCode(error);
+      if (errorCode === "BAD_REQUEST" || errorCode === "VALIDATION_ERROR" || errorCode === "PAYLOAD_TOO_LARGE") {
+        // A definitive payload rejection committed no submission. Keep the
+        // answers, but allow a corrected request after batching/revalidation.
+        await clearDurableDraft(intentKey);
+      }
+      if (errorCode === "EXAM_ACCESS_EXPIRED" || errorCode === "EXAM_ACCESS_REVOKED") {
+        this.markAuthenticationRequired();
+      }
       // N1: the server's VERSION_COLLISION envelope is overloaded. A
       // submit-time expectedAttemptRevision mismatch (details.expected +
       // details.current, no questionId) is a benign race — a late batch ack or
@@ -1898,9 +1946,12 @@ export class DurableResponseEngine {
         this.emitDurabilityEvent("submit_revision_refresh", {
           reason: "VERSION_COLLISION",
         });
+        // This is a definitive rejection, so no committed operation exists
+        // under the old revision. Replace its intent only after clearing it.
+        await clearDurableDraft(intentKey);
         await this.recover();
         if (this.isDestroyed) throw error;
-        return this.submitInternal(submissionId, this.attemptRevision, true);
+        return this.submitInternal(request.submissionId, this.attemptRevision, true);
       }
       if (this.isTerminalConflict(errorCode)) {
         this.quarantineAllPending(errorCode ?? "SUBMISSION_CONFLICT");
@@ -1921,6 +1972,11 @@ export class DurableResponseEngine {
     if (this.isDestroyed) return response;
     this.attemptRevision = Math.max(this.attemptRevision, response.attemptRevision);
     this.terminalState = true;
+    // A cleanup failure cannot undo a committed receipt; a retained intent is
+    // harmless and will recover the same receipt on reload.
+    await clearDurableDraft(intentKey).catch(() => {
+      this.emitDurabilityEvent("submission_intent_cleanup_failed");
+    });
 
     // A user event can arrive while the terminal request is in flight. Let its
     // durable acceptance finish before quarantining it, otherwise its later
@@ -1965,6 +2021,10 @@ export class DurableResponseEngine {
       throw lateAcceptanceError;
     }
 
+    // Drafts the server refused (closed window, terminal) stay on this device;
+    // also hand them to staff review while this credential is still live.
+    await this.recordRetainedEvidence();
+
     // Bug 5: the terminal receipt clears the server queue, but a draft that is
     // still visible-unacknowledged must not be reported as server-saved.
     if (this.getPendingCount() === 0 && !this.hasUnacknowledgedIntent()) {
@@ -1973,6 +2033,42 @@ export class DurableResponseEngine {
       this.notifyStatusChange();
     }
     return response;
+  }
+
+  /**
+   * Sends quarantined drafts to the provider-neutral evidence ledger. Evidence
+   * never changes answers or scores; it preserves what this device held for a
+   * staff decision. Best-effort and idempotent server-side: local copies are
+   * always kept, and a failure leaves them for staff-assisted recovery.
+   */
+  public async recordRetainedEvidence(): Promise<number> {
+    const submit = this.transport.submitDraftEvidence?.bind(this.transport);
+    if (!submit) return 0;
+    const items: DraftEvidenceItemV2[] = this.quarantined
+      .filter((entry) => !this.evidenceRecorded.has(entry.writeId))
+      .map((entry) => ({
+        writeId: entry.writeId,
+        questionId: entry.questionId,
+        clientVersion: entry.clientVersion,
+        response: entry.payload,
+        originLeaseEpoch: entry.leaseEpoch,
+        claimedClientAt: entry.quarantinedAt,
+        reason: entry.reason.slice(0, 64),
+      }));
+    let recorded = 0;
+    for (let start = 0; start < items.length; start += MAX_EVIDENCE_BATCH) {
+      const batch = items.slice(start, start + MAX_EVIDENCE_BATCH);
+      try {
+        const ack = await submit(this.attemptId, batch);
+        recorded += ack.recorded;
+        for (const item of batch) this.evidenceRecorded.add(item.writeId);
+      } catch (error: unknown) {
+        this.emitDurabilityEvent("draft_evidence_failed", { code: this.extractErrorCode(error) ?? "UNKNOWN" });
+        break;
+      }
+    }
+    if (recorded > 0) this.emitDurabilityEvent("draft_evidence_recorded", { count: recorded });
+    return recorded;
   }
 
   private collectPendingCommands(): ResponseCommandV2[] {
@@ -2239,6 +2335,11 @@ export class DurableResponseEngine {
             if (!this.outbox.has(questionId)) this.outbox.set(questionId, command);
           }
           this.inFlight.clear();
+          if (errorCode === "EXAM_ACCESS_EXPIRED" || errorCode === "EXAM_ACCESS_REVOKED") {
+            this.markAuthenticationRequired();
+            this.scheduleRetry(30_000);
+            break;
+          }
           retryAttempt += 1;
           if (retryAttempt >= MAX_RETRY_ATTEMPTS_PER_DRAIN) {
             // RISK-6: retry exhaustion never clears an explicit conflict.
@@ -3461,6 +3562,12 @@ export class DurableResponseEngine {
     return (
       candidates.find((candidate): candidate is string => typeof candidate === "string") ?? null
     );
+  }
+
+  private markAuthenticationRequired(): void {
+    this.syncStatus = "authentication_required";
+    this.lastError = "Exam access needs to be restored. Your pending answers are kept here. Ask your proctor before leaving this page.";
+    this.notifyStatusChange();
   }
 
   private errorMessage(error: unknown): string {

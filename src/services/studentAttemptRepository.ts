@@ -2,7 +2,7 @@ import { backendGet, backendPost, rememberAttemptSchedule } from "./backendBridg
 import { studentSessionTransport } from "./studentSessionTransport";
 import {
   buildAttemptAuthorizationHeader as buildAttemptAuthorizationHeaderFromAdapter,
-  clearAttemptCredential as clearAttemptCredentialFromAdapter,
+  sittingAttemptRequestConfig,
   hasAttemptCredential as hasAttemptCredentialFromAdapter,
   refreshAttemptCredentialForAttempt as refreshAttemptCredentialForAttemptFromAdapter,
   storeAttemptCredential as storeAttemptCredentialFromAdapter,
@@ -13,23 +13,17 @@ import { ApiError } from "../shared/api-client/errors";
 import { ApiClientError } from "../app/api/apiClient";
 import type {
   StudentAttempt,
-  StudentFinalAnswerPatch,
   StudentAttemptMutation,
   StudentAttemptSeed,
   StudentHeartbeatEvent,
 } from "../types/studentAttempt";
 import {
-  mergeStudentAttemptRecovery,
   normalizeStudentAttempt,
 } from "./studentAttemptNormalization";
 import type { ModuleType } from "../types";
 import type { ExamSchedule } from "../types/domain";
 import { createTtlLruCache } from "../utils/ttlLruCache";
 import { quarantineAnswerSyncCheckpoint } from "./studentMutationOutbox";
-import {
-  emitStudentObservabilityMetric,
-  withStudentObservabilityDimensions,
-} from "../utils/studentObservability";
 
 const STORAGE_KEY_ATTEMPTS = "ielts_student_attempts_v1";
 const STORAGE_KEY_PENDING_MUTATIONS = "ielts_student_attempt_pending_mutations_v1";
@@ -1605,6 +1599,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     const doPost = async (): Promise<T> =>
       backendPost<T>(endpoint, body, {
         ...options,
+        credentialScope: "attempt",
         headers: {
           ...(options?.headers ?? {}),
           ...buildAttemptAuthorizationHeaderFromAdapter(attempt),
@@ -1712,7 +1707,8 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     }
     const clientSessionId = ensureClientSessionId(scheduleId, studentKey);
     const session = await backendGet<BackendStudentSessionContext>(
-      studentSessionTransport.paths.session(scheduleId, candidateId, clientSessionId)
+      studentSessionTransport.paths.session(scheduleId, candidateId, clientSessionId),
+      sittingAttemptRequestConfig(scheduleId, candidateId),
     );
     if (!session.attempt) {
       return null;
@@ -1734,7 +1730,8 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     if (!candidateId) return null;
     const clientSessionId = ensureClientSessionId(scheduleId, studentKey);
     const session = await backendGet<BackendStudentSessionContext>(
-      studentSessionTransport.paths.session(scheduleId, candidateId, clientSessionId)
+      studentSessionTransport.paths.session(scheduleId, candidateId, clientSessionId),
+      sittingAttemptRequestConfig(scheduleId, candidateId),
     );
     if (!session.attempt) return null;
     const attempt = mapBackendStudentAttempt(session.attempt);

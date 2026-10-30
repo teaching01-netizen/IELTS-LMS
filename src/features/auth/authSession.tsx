@@ -520,7 +520,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     if (result.attemptId && result.attemptToken && result.attemptExpiresAt) {
       storeAttemptCredential(
         { id: result.attemptId, scheduleId: result.scheduleId },
-        { attemptToken: result.attemptToken, expiresAt: result.attemptExpiresAt },
+        { attemptToken: result.attemptToken, expiresAt: result.attemptExpiresAt, credentialPolicy: result.credentialPolicy },
       );
     }
     acceptSession(result);

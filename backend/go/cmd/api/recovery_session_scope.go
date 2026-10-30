@@ -53,6 +53,14 @@ func recoveryScopeError() error {
 }
 
 func resolveStudentAttemptForSession(ctx context.Context, db *sql.DB, scheduleID, candidateID string, sess *auth.Session) (string, error) {
+	if claims := sess.AttemptCredential; claims != nil {
+		if claims.ScheduleID != scheduleID || claims.UserID != sess.UserID {
+			return "", recoveryScopeError()
+		}
+		var id string
+		err := db.QueryRowContext(ctx, `SELECT id FROM student_attempts WHERE id = ? AND schedule_id = ? AND user_id = ? AND (? = '' OR candidate_id = ? OR wcode = ? OR student_key = ?)`, claims.AttemptID, scheduleID, sess.UserID, candidateID, candidateID, candidateID, candidateID).Scan(&id)
+		return id, err
+	}
 	if !sess.Proof.IsRecovery() {
 		return resolveStudentAttemptIDForUser(ctx, db, scheduleID, candidateID, sess.UserID)
 	}

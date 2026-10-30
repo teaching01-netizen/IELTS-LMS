@@ -28,6 +28,7 @@ import {
 // checkpoints real — reload/recovery assertions still parse real content.
 const storage = vi.hoisted(() => ({ save: vi.fn(), list: vi.fn(), clear: vi.fn() }));
 vi.mock("../../../utils/durableDraftStore", () => ({
+  loadDurableDraft: vi.fn(async () => null),
   saveDurableDraft: storage.save,
   listDurableDrafts: storage.list,
   clearDurableDraft: storage.clear,
@@ -902,6 +903,40 @@ describe("DurableResponseEngine", () => {
     // Checkpoint must be cleared after successful receipt
     expect(localStorage.getItem("response-checkpoint:v2:att-1:q-1")).toBeNull();
     expect(engine.getQuarantined()).toHaveLength(0);
+  });
+
+  it("retains final answers after session expiry and resubmits the same writes after recovery", async () => {
+    const engine = new DurableResponseEngine({
+      scheduleId: "sched-1", attemptId: "att-1", leaseEpoch: 1, controlEpoch: 1, transport,
+    });
+    try {
+      const payload = { answer: "final answer", markedForReview: false, eliminatedOptions: [], annotations: [] };
+      await engine.acceptResponse("q-1", payload);
+      const writeId = engine.getStates().get("q-1")?.pending?.writeId;
+      const checkpoint = localStorage.getItem("response-checkpoint:v2:att-1:q-1");
+      expect(checkpoint).not.toBeNull();
+      const expired = { status: 401, code: "SESSION_EXPIRED" };
+      vi.mocked(transport.submit).mockRejectedValueOnce(expired).mockImplementationOnce(async (_id, request) => ({
+        attemptId: "att-1", submissionId: request.submissionId, status: "submitted",
+        attemptRevision: 2, finalResponseDigest: "digest", submittedAt: new Date().toISOString(),
+        acknowledgements: request.finalCommands.map((command) => ({
+          writeId: command.writeId, questionId: command.questionId, clientVersion: command.clientVersion,
+          outcome: "applied", serverRevision: 2, canonicalResponse: command.response, contentHash: "hash",
+        })),
+      }));
+      await expect(engine.submit("submission-auth-retry", 1)).rejects.toBe(expired);
+      expect(localStorage.getItem("response-checkpoint:v2:att-1:q-1")).toBe(checkpoint);
+      expect(engine.getStates().get("q-1")?.pending?.writeId).toBe(writeId);
+      expect(engine.getQuarantined()).toHaveLength(0);
+
+      await expect(engine.submit("submission-auth-retry", 1)).resolves.toMatchObject({ status: "submitted" });
+      const calls = vi.mocked(transport.submit).mock.calls;
+      expect(calls[1]?.[1]).toEqual(calls[0]?.[1]);
+      expect(localStorage.getItem("response-checkpoint:v2:att-1:q-1")).toBeNull();
+      expect(engine.getStates().get("q-1")?.confirmed?.payload).toEqual(payload);
+    } finally {
+      engine.destroy();
+    }
   });
 
   it("E1(a) harden: typing on a blocked question keeps the block and stays non-sendable (visible tracks latest)", async () => {

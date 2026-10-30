@@ -36,6 +36,13 @@ function databaseOptions(databaseUrl: string): PoolOptions {
     return { uri: value };
   }
 
+  // Isolated local fault tests use a private Unix socket, avoiding any
+  // dependency on the developer's ordinary MySQL instance or open TCP port.
+  const socket = /^(?<user>[^:@/]+)(?::(?<password>[^@]*))?@unix\((?<socketPath>[^)]+)\)\/(?<database>[^?]+)(?:\?(?<query>.*))?$/.exec(value);
+  if (socket?.groups) {
+    return { user: socket.groups.user, password: socket.groups.password, socketPath: socket.groups.socketPath, database: socket.groups.database };
+  }
+
   // Go's mysql driver accepts native DSNs while mysql2 expects either a URI
   // or decomposed connection fields. Keep the e2e verifier compatible with
   // the same local/Railway env files used by the migrated Go services.

@@ -265,7 +265,9 @@ const SUITES: SuiteDefinition[] = [
       ['sat-code-start', 'SAT code start'],
       ['sat-staff-ux', 'SAT staff UX'],
       ['sat-forms', 'SAT forms and Eva SIM'],
+      ['sat-break-boundary', 'SAT break boundaries'],
       ['coedit-live', 'Coedit live collaboration'],
+      ['exam-continuity', 'Exam session continuity'],
     ] as const
   ).map(([config, title]) =>
     commandSuite({
@@ -734,6 +736,7 @@ export const PACKAGE_SCRIPT_COVERAGE: Readonly<Record<string, EntrypointCoverage
   'e2e:prod-load': { source: 'package.json', classification: 'alias', suiteId: 'prod.ielts.browser.control', note: 'playwright config' },
   'e2e:sat-a11y': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-a11y', note: 'playwright config' },
   'e2e:sat-forms': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-forms', note: 'playwright config' },
+  'e2e:sat-break-boundary': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-break-boundary', note: 'playwright config' },
   'e2e:sat-spectrum': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-spectrum', note: 'playwright config' },
   'e2e:sat-annotations': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-annotations', note: 'playwright config' },
   'e2e:sat-auto-fit': { source: 'package.json', classification: 'alias', suiteId: 'browser.specialized.sat-auto-fit', note: 'playwright config' },
@@ -788,6 +791,8 @@ export const PLAYWRIGHT_CONFIG_COVERAGE: Readonly<Record<string, EntrypointCover
   'playwright.sat-authoring.config.ts': { source: 'playwright.sat-authoring.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-authoring', note: 'specialized' },
   'playwright.sat-auto-fit.config.ts': { source: 'playwright.sat-auto-fit.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-auto-fit', note: 'specialized' },
   'playwright.sat-code-start.config.ts': { source: 'playwright.sat-code-start.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-code-start', note: 'specialized' },
+  'playwright.exam-continuity.config.ts': { source: 'playwright.exam-continuity.config.ts', classification: 'executable', suiteId: 'browser.specialized.exam-continuity', note: 'specialized' },
+  'playwright.sat-break-boundary.config.ts': { source: 'playwright.sat-break-boundary.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-break-boundary', note: 'specialized' },
   'playwright.sat-results.config.ts': { source: 'playwright.sat-results.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-results', note: 'specialized' },
   'playwright.sat-screen-zoom.config.ts': { source: 'playwright.sat-screen-zoom.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-screen-zoom', note: 'specialized' },
   'playwright.sat-spectrum.config.ts': { source: 'playwright.sat-spectrum.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-spectrum', note: 'specialized' },

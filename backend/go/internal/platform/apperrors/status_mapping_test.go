@@ -30,6 +30,8 @@ func TestStatusForMapsEveryCode(t *testing.T) {
 		{CodeInternal, http.StatusInternalServerError},
 		{CodeCSRF, http.StatusForbidden},
 		{CodeSessionExpired, http.StatusUnauthorized},
+		{CodeExamAccessExpired, http.StatusUnauthorized},
+		{CodeExamAccessRevoked, http.StatusForbidden},
 		{CodeAttemptTokenInvalid, http.StatusUnauthorized},
 		{CodeAttemptTokenExpired, http.StatusUnauthorized},
 		{CodeLeaseFenced, http.StatusForbidden},

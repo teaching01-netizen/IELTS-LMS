@@ -6,7 +6,7 @@ import {
   createStudentClientSessionId,
   satWriterStudentKey,
 } from "@services/studentAttemptRepository";
-import { storeAttemptCredential } from "@services/attemptCredentialAdapter";
+import { storeAttemptCredential, findSittingAttemptCredential, sittingAttemptRequestConfig, type BackendAttemptCredential } from "@services/attemptCredentialAdapter";
 import { studentSessionTransport } from "@services/studentSessionTransport";
 import type { StudentAttempt } from "../../../types/studentAttempt";
 import { getVerifiedTerminalState } from "../../student/api/verifiedTerminalState";
@@ -22,7 +22,7 @@ import {
 
 interface ResumeSessionResponse {
   attempt?: unknown | null;
-  attemptCredential?: { attemptToken: string; expiresAt: string } | null;
+  attemptCredential?: BackendAttemptCredential | null;
   clientSessionId?: string | null;
   runtime?: { status?: string | null } | null;
 }
@@ -76,10 +76,11 @@ export async function resumeSatStudentSession(input: {
   // writer identity. The server still resolves the attempt from the cookie.
   // When there is no usable hint, send a fresh browser-owned id and bind it to
   // the canonical candidate only after the server returns that identity.
+  const grant = findSittingAttemptCredential(scheduleId, undefined, locator?.attemptId);
   const hintedCandidateId =
     locator?.providerKey === "sat" && locator.scheduleId === scheduleId
       ? locator.candidateId
-      : null;
+      : grant?.candidateId ?? null;
   const requestedWriterId = hintedCandidateId
     ? ensureClientSessionIdForStudentKey(
         scheduleId,
@@ -90,7 +91,7 @@ export async function resumeSatStudentSession(input: {
   try {
     const session = await backendGet<ResumeSessionResponse>(
       studentSessionTransport.paths.resume(scheduleId, requestedWriterId),
-      { retries: 0, timeout: 8_000 }
+      { retries: 0, timeout: 8_000, ...sittingAttemptRequestConfig(scheduleId, undefined, grant?.attemptId) }
     );
     if (!session.attempt || typeof session.attempt !== "object") {
       if (matchesSatResumeLocator(locator, { scheduleId })) clearSatResumeLocator();

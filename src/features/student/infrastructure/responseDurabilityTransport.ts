@@ -1,11 +1,13 @@
 import { backendGet, backendPost, hasBackendStatusCode } from '@services/backendBridge';
 import {
   storeAttemptCredential,
+  isAttemptCredentialExpiringWithin,
   tryBuildAttemptAuthorizationHeader,
 } from '@services/attemptCredentialAdapter';
 import { refreshAttemptCredentialForAttempt } from '@services/studentAttemptRepository';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 import type {
+  DraftEvidenceAckV2,
   ResponseBatchRequestV2,
   ResponseBatchResponseV2,
   ResponseAcknowledgementV2,
@@ -16,6 +18,8 @@ import type {
 import type { TransportClient } from '@shared/durability/DurableResponseEngine';
 
 const V2_ATTEMPT_PATH = '/v2/student/attempts';
+// Leave room for the 60-second submission request and clock/network skew.
+const ATTEMPT_REFRESH_WINDOW_MS = 120_000;
 
 function attemptPath(attemptId: string): string {
   return `${V2_ATTEMPT_PATH}/${encodeURIComponent(attemptId)}`;
@@ -27,6 +31,12 @@ async function withAttemptCredentialRefresh<T>(
   request: () => Promise<T>,
   clientSessionId?: string,
 ): Promise<T> {
+  if (attempt && isAttemptCredentialExpiringWithin(
+    attempt.scheduleId, attempt.id, ATTEMPT_REFRESH_WINDOW_MS,
+  )) {
+    // A temporary renewal failure must not prevent trying a still-valid bearer.
+    await refreshAttemptCredentialForAttempt(attempt, clientSessionId).catch(() => false);
+  }
   try {
     return await request();
   } catch (error) {
@@ -48,12 +58,14 @@ export function createResponseDurabilityV2Transport(
 ): TransportClient {
   const attemptHeaders = (attemptId: string): Record<string, string> =>
     tryBuildAttemptAuthorizationHeader(scheduleId, attemptId) ?? {};
-  const requestConfig = (attemptId: string, extra: Record<string, unknown> = {}) => ({
-    ...extra,
-    headers: attemptHeaders(attemptId),
-    retries: 0,
-    skipUnauthorizedHandler: true,
-  });
+  const requestConfig = (attemptId: string, extra: Record<string, unknown> = {}) => {
+    const headers = attemptHeaders(attemptId);
+    return {
+      ...extra, headers,
+      ...(headers["Authorization"] ? { credentialScope: "attempt" as const } : {}),
+      retries: 0, skipUnauthorizedHandler: true,
+    };
+  };
 
   return {
     sendBatch: (attemptId, request: ResponseBatchRequestV2) =>
@@ -73,6 +85,29 @@ export function createResponseDurabilityV2Transport(
           requestConfig(attemptId, { timeout: 60_000 }),
         ),
         clientSessionId,
+      ),
+    fetchSubmissionReceipt: async (attemptId, submissionId) => {
+      try {
+        return await withAttemptCredentialRefresh(credentialAttempt, () =>
+          backendGet<SubmitAttemptV2Response>(
+            `${attemptPath(attemptId)}/submission-receipt?submissionId=${encodeURIComponent(submissionId)}`,
+            requestConfig(attemptId),
+          ), clientSessionId,
+        );
+      } catch (error) {
+        // Old servers have no receipt endpoint; exact submit replay remains
+        // safe there. A real outage/auth failure must retain the intent.
+        if (hasBackendStatusCode(error, 404)) return null;
+        throw error;
+      }
+    },
+    submitDraftEvidence: (attemptId, items) =>
+      withAttemptCredentialRefresh(credentialAttempt, () =>
+        backendPost<DraftEvidenceAckV2>(
+          `${attemptPath(attemptId)}/draft-evidence`,
+          { items },
+          requestConfig(attemptId),
+        ), clientSessionId,
       ),
     fetchSnapshot: (attemptId) =>
       withAttemptCredentialRefresh(credentialAttempt, () =>
@@ -96,6 +131,7 @@ export interface TakeoverLeaseV2Response {
   leaseEpoch: number;
   expiresAt: string;
   token: string;
+  credentialPolicy?: "legacy_v1" | "sitting_v1";
 }
 
 export async function takeOverResponseDurabilityLease(
@@ -110,6 +146,7 @@ export async function takeOverResponseDurabilityLease(
       request,
       {
         headers: tryBuildAttemptAuthorizationHeader(scheduleId, attemptId) ?? {},
+        ...(tryBuildAttemptAuthorizationHeader(scheduleId, attemptId) ? { credentialScope: "attempt" as const } : {}),
         retries: 0,
         skipUnauthorizedHandler: true,
       },
@@ -117,7 +154,7 @@ export async function takeOverResponseDurabilityLease(
   );
   storeAttemptCredential(
     { id: attemptId, scheduleId },
-    { attemptToken: response.token, expiresAt: response.expiresAt },
+    { attemptToken: response.token, expiresAt: response.expiresAt, credentialPolicy: response.credentialPolicy },
   );
   return response;
 }

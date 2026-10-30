@@ -213,9 +213,10 @@ type SubmitCommand struct {
 
 // SubmitResult carries receipt + digest.
 type SubmitResult struct {
-	SubmissionID string    `json:"submissionId"`
-	FinalDigest  string    `json:"finalDigest"`
-	Replayed     bool      `json:"replayed"`
-	Provisional  bool      `json:"provisional"`
-	ServerTime   time.Time `json:"serverTime"`
+	Acknowledgements []Ack     `json:"acknowledgements,omitempty"`
+	SubmissionID     string    `json:"submissionId"`
+	FinalDigest      string    `json:"finalDigest"`
+	Replayed         bool      `json:"replayed"`
+	Provisional      bool      `json:"provisional"`
+	ServerTime       time.Time `json:"serverTime"`
 }

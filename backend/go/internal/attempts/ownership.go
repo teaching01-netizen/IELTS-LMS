@@ -56,10 +56,11 @@ type CredentialIssuer func(ctx context.Context, q tx.Tx, lease uint64) (token st
 
 // Admission is the committed admission decision.
 type Admission struct {
-	Outcome         AdmissionOutcome `json:"outcome"`
-	AttemptID       string           `json:"attemptId"`
-	ClientSessionID string           `json:"-"`
-	LeaseEpoch      uint64           `json:"leaseEpoch"`
+	CredentialPolicy string           `json:"credentialPolicy,omitempty"`
+	Outcome          AdmissionOutcome `json:"outcome"`
+	AttemptID        string           `json:"attemptId"`
+	ClientSessionID  string           `json:"-"`
+	LeaseEpoch       uint64           `json:"leaseEpoch"`
 	// SingleWriter reports whether the attempt is under the single-writer
 	// policy (only then can entry be blocked or a transfer be requested).
 	SingleWriter bool `json:"singleWriter"`

@@ -30,7 +30,7 @@ describe('Lobby', () => {
     expect(screen.getByText('Test Exam')).toBeInTheDocument();
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.getByText('C-42')).toBeInTheDocument();
-    expect(screen.getByText('Exam').className).toContain('text-gray-600');
+    expect(screen.getByText('Exam').className).toContain('exam-entry-meta-label');
     const sections = screen.getAllByTestId('exam-section');
     expect(sections[0]).toHaveTextContent('Reading');
     expect(sections[0]).toHaveTextContent('1 hour');

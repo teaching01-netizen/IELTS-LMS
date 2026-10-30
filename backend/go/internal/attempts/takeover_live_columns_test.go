@@ -12,6 +12,7 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
+	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/clock"
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -48,7 +49,7 @@ func TestTakeoverUsesLiveSessionColumns(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).
 		WillReturnRows(sqlmock.NewRows([]string{"recovery_control", "active_client_session_id", "lease_epoch", "control_epoch", "terminal_generation", "writer_policy"}).
 			AddRow("", "cs-old", 1, 2, 0, nil))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id=? AND revoked_at IS NULL FOR UPDATE")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE token_id=? AND revoked_at IS NULL AND " + auth.ActiveAttemptPrincipalSQL + " FOR UPDATE")).
 		WillReturnRows(sqlmock.NewRows([]string{"attempt_id", "client_session_id", "revoked_at", "expires_at"}).
 			AddRow("att-1", "cs-new", nil, time.Date(2026, 9, 8, 13, 0, 0, 0, time.UTC)))
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).

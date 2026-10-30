@@ -91,3 +91,18 @@ describe('apiClient auth generation fence', () => {
     expect(seconds).toBeLessThanOrEqual(45);
   });
 });
+
+it('keeps an exam acknowledgement when the ordinary account session changes', async () => {
+  let generation = 1;
+  apiClient.setAuthGenerationReader(() => generation);
+  global.fetch = vi.fn(async () => { generation = 2; return json(200, { saved: true }); });
+  await expect(apiClient.request('/v2/student/attempts/attempt/responses:batch', {
+    method: 'POST', body: {}, headers: { Authorization: 'Bearer exam-grant' }, credentialScope: 'attempt', retries: 0,
+  })).resolves.toMatchObject({ data: { saved: true } });
+});
+
+it('refuses an attempt scope without an explicit credential', async () => {
+  global.fetch = vi.fn();
+  await expect(apiClient.request('/v2/student/attempts/attempt/responses', { credentialScope: 'attempt' })).rejects.toThrow('require an explicit exam credential');
+  expect(global.fetch).not.toHaveBeenCalled();
+});

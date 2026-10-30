@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"example.com/ielts-proctoring/internal/attempts"
+	"example.com/ielts-proctoring/internal/auth"
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -47,6 +48,13 @@ func (s *Service) BeginDeviceRecovery(ctx context.Context, grantID string, req B
 		row, err := loadRecoveryAttempt(ctx, q, head.ScheduleID, head.AttemptID, true)
 		if err != nil {
 			return err
+		}
+		// Recovery fences grants, then issues a credential that reads users.
+		// Take the account lock first to match logout-all (users -> grants).
+		if row.UserID.Valid {
+			if err := auth.LockExamPrincipalTx(ctx, q, row.UserID.String); err != nil {
+				return err
+			}
 		}
 		grant, err := loadRecoveryGrantByID(ctx, q, grantID, true)
 		if err != nil {

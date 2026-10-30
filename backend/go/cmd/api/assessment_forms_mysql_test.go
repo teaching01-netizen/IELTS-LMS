@@ -17,6 +17,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/assessmentforms"
 	"example.com/ielts-proctoring/internal/assessmentforms/definition"
+	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoring"
 	"example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -78,7 +79,7 @@ func (f formsFixture) prepare(t *testing.T) formsCandidate {
 }
 
 func (f formsFixture) admit(c formsCandidate, sub *assessmentforms.RegistrationSubmission) (string, error) {
-	adm, err := admitStudentSession(context.Background(), f.app, c.user, f.scheduleID, c.attemptID, uuid.NewString(), sub)
+	adm, err := admitStudentSession(context.Background(), f.app, c.user, f.scheduleID, c.attemptID, uuid.NewString(), sub, auth.ExamGrantOptions{})
 	return adm.Token, err
 }
 

@@ -1,3 +1,4 @@
+import { sittingAttemptRequestConfig } from "@services/attemptCredentialAdapter";
 import { hydrateExamState as hydrateExamStateFromAdapter } from '@services/examAdapterService';
 import {
   backendGet,
@@ -32,12 +33,14 @@ export function createStudentSessionGateway(): StudentSessionFacade {
       const writerSession = peekClientSessionIdForStudentKey(scheduleId, satWriterStudentKey(scheduleId, candidateId));
       return backendGet<StudentSessionStaticPayload>(
         studentSessionTransport.paths.staticSession(scheduleId, candidateId, writerSession),
+        sittingAttemptRequestConfig(scheduleId, candidateId),
       );
     },
 
     async loadLiveSession(scheduleId, candidateId) {
       return backendGet<StudentSessionLivePayload>(
         studentSessionTransport.paths.liveSession(scheduleId, candidateId),
+        sittingAttemptRequestConfig(scheduleId, candidateId),
       );
     },
 

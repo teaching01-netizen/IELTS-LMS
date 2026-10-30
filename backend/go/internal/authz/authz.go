@@ -99,6 +99,10 @@ type Policy struct {
 	// Bearer admits requests without a cookie session: the handler
 	// enforces the attempt-credential check instead.
 	Bearer bool
+	// SessionOrBearer declares a mixed route. When Authorization is present,
+	// only the handler's attempt credential may authorize it; otherwise the
+	// normal cookie-session and CSRF middleware applies.
+	SessionOrBearer bool
 }
 
 // RoleIn reports whether role is in roles.

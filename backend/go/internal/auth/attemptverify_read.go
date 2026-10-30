@@ -71,10 +71,13 @@ func VerifyAttemptReadBinding(ctx context.Context, db Querier, now time.Time, cl
 	var expiresAt time.Time
 	var rowLease sql.NullInt64
 	err := db.QueryRowContext(ctx,
-		`SELECT token_id, revoked_at, expires_at, lease_epoch FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL`,
+		`SELECT token_id, revoked_at, expires_at, lease_epoch FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL AND `+ActiveAttemptPrincipalSQL,
 		claims.TokenID).Scan(&tokenID, &revokedAt, &expiresAt, &rowLease)
 	if err != nil && !isMissingColumn(err) {
 		if errors.Is(err, sql.ErrNoRows) {
+			if claims.CredentialPolicy == ExamCredentialSitting {
+				return zero, ExamAccessRevokedError()
+			}
 			return zero, fmt.Errorf("auth: unknown attempt session")
 		}
 		return zero, &AttemptSessionLookupError{Err: err}
@@ -83,9 +86,12 @@ func VerifyAttemptReadBinding(ctx context.Context, db Querier, now time.Time, cl
 		// Pre-migration schema: lease_epoch is absent; the
 		// token_id/revoked_at probe is authoritative.
 		err = db.QueryRowContext(ctx,
-			`SELECT token_id, revoked_at, expires_at FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL`,
+			`SELECT token_id, revoked_at, expires_at FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL AND `+ActiveAttemptPrincipalSQL,
 			claims.TokenID).Scan(&tokenID, &revokedAt, &expiresAt)
 		if errors.Is(err, sql.ErrNoRows) {
+			if claims.CredentialPolicy == ExamCredentialSitting {
+				return zero, ExamAccessRevokedError()
+			}
 			return zero, fmt.Errorf("auth: unknown attempt session")
 		}
 		if err != nil {

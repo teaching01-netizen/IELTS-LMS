@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,7 +22,22 @@ import (
 // The entire production router participates: anonymous capability routes,
 // cookies/CSRF, session lookup, route scope, and bearer authorization. Neither
 // the claim nor the ready request receives an account session.
-func TestStaffDeviceRecoveryColdHTTPMySQL(t *testing.T) {
+type recoveryHTTPFixture struct {
+	db                          *sql.DB
+	cfg                         config.Config
+	schedule, attempt, base     string
+	student                     string
+	oldBearer, grantPath, proof string
+	ready                       delivery.RecoveryReadyView
+	claim                       *httptest.ResponseRecorder
+	call                        func(method, path string, body any, cookies []*http.Cookie, csrf, bearer string) *httptest.ResponseRecorder
+	decode                      func(rec *httptest.ResponseRecorder, into any)
+}
+
+// newRecoveryHTTPFixture issues a staff device recovery and claims it from a
+// fresh browser, stopping just before Continue (begin).
+func newRecoveryHTTPFixture(t *testing.T) recoveryHTTPFixture {
+	t.Helper()
 	db := staleETagTestDB(t)
 	ctx := context.Background()
 	schedule, attempt, base, _, _ := seedStaleETagExam(t, db)
@@ -107,6 +123,14 @@ func TestStaffDeviceRecoveryColdHTTPMySQL(t *testing.T) {
 	var ready delivery.RecoveryReadyView
 	claim := call("POST", grantPath+"/claim", delivery.ClaimDeviceRecoveryRequest{OperationID: uuid.NewString(), LinkSecret: issued.LinkSecret, Code: issued.Code, BrowserProof: proof}, nil, "", "")
 	decode(claim, &ready)
+	return recoveryHTTPFixture{db: db, cfg: cfg, schedule: schedule, attempt: attempt, base: base, student: student,
+		oldBearer: oldBearer, grantPath: grantPath, proof: proof, ready: ready, claim: claim, call: call, decode: decode}
+}
+
+func TestStaffDeviceRecoveryColdHTTPMySQL(t *testing.T) {
+	f := newRecoveryHTTPFixture(t)
+	cfg, schedule, attempt, base := f.cfg, f.schedule, f.attempt, f.base
+	oldBearer, grantPath, proof, ready, claim, call, decode := f.oldBearer, f.grantPath, f.proof, f.ready, f.claim, f.call, f.decode
 	if len(claim.Result().Cookies()) != 0 || strings.Contains(claim.Body.String(), "attemptToken") || strings.Contains(claim.Body.String(), "correctOptionId") || strings.Contains(claim.Body.String(), "answers") {
 		t.Fatal("preparation exposed exam authority or answers")
 	}
@@ -163,7 +187,76 @@ func TestStaffDeviceRecoveryColdHTTPMySQL(t *testing.T) {
 	if rec := call("GET", "/api/v1/proctor/sessions/"+schedule, nil, cookies, "", ""); rec.Code != http.StatusForbidden {
 		t.Fatalf("recovery cookie escaped to staff routes: %d", rec.Code)
 	}
-	if rec := call("GET", "/api/v2/student/attempts/"+uuid.NewString()+"/responses", nil, cookies, "", begun.AttemptCredential.AttemptToken); rec.Code != http.StatusForbidden {
-		t.Fatalf("recovery cookie escaped to another attempt: %d", rec.Code)
+	// Bearer-only routes ignore ambient cookies. The recovery bearer itself
+	// must fail the URL attempt binding before any protected projection is read.
+	if rec := call("GET", "/api/v2/student/attempts/"+uuid.NewString()+"/responses", nil, cookies, "", begun.AttemptCredential.AttemptToken); rec.Code != http.StatusUnauthorized || decodeCode(t, rec) != "ATTEMPT_TOKEN_INVALID" {
+		t.Fatalf("recovery bearer escaped to another attempt: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Continue fences every grant for the attempt and then issues a credential that
+// reads the account. Logout-all locks the account and then revokes grants. With
+// a logout-all-shaped transaction holding the account row, Continue must wait
+// on the account without holding any grant lock, then succeed once it commits.
+func TestStaffDeviceRecoveryBeginTakesAccountLockBeforeGrantsMySQL(t *testing.T) {
+	f := newRecoveryHTTPFixture(t)
+	ctx := context.Background()
+	// A credential still live at Continue is what Continue fences and what
+	// logout-all revokes: the two transactions contend on this grant row.
+	lease := uint64(1)
+	if _, _, err := auth.IssueAttemptToken(ctx, f.db, f.cfg, f.student, f.schedule, f.attempt, "stray-browser", nil, &lease, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	logoutAll, err := f.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logoutAll.Rollback() }()
+	var state string
+	if err := logoutAll.QueryRowContext(ctx, `SELECT state FROM users WHERE id = ? FOR UPDATE`, f.student).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- f.call("POST", f.grantPath+"/begin", delivery.BeginDeviceRecoveryRequest{OperationID: uuid.NewString(), BrowserProof: f.proof, ExpectedGrantRevision: f.ready.GrantRevision}, nil, "", "")
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := f.db.QueryRow(`SELECT COUNT(*) FROM information_schema.innodb_trx WHERE trx_state = 'LOCK WAIT' AND trx_query LIKE '%FROM users WHERE id = %FOR SHARE%'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Continue never waited on the account lock")
+		}
+		select {
+		case rec := <-done:
+			t.Fatalf("Continue finished before waiting on the account lock: %d %s", rec.Code, rec.Body.String())
+		// INNODB_TRX refreshes only after 0.1s without reads; poll slower.
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+	probe, err := f.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tokenID string
+	probeErr := probe.QueryRowContext(ctx, `SELECT token_id FROM attempt_sessions WHERE attempt_id = ? AND client_session_id = 'stray-browser' FOR UPDATE NOWAIT`, f.attempt).Scan(&tokenID)
+	_ = probe.Rollback()
+	if probeErr != nil {
+		t.Fatalf("Continue locked a grant before the account row: %v", probeErr)
+	}
+	if _, err := logoutAll.ExecContext(ctx, `UPDATE attempt_sessions SET revoked_at = UTC_TIMESTAMP(6), revocation_reason = 'logout_all' WHERE user_id = ? AND revoked_at IS NULL`, f.student); err != nil {
+		t.Fatalf("logout-all grant revocation: %v", err)
+	}
+	if err := logoutAll.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if rec := <-done; rec.Code != http.StatusOK {
+		t.Fatalf("Continue after logout-all: %d %s", rec.Code, rec.Body.String())
 	}
 }

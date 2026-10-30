@@ -6031,3 +6031,65 @@ html:has(.sat-staff-root)::view-transition-new(root) { animation: none; }
 @media (prefers-reduced-motion: reduce) {
   .sat-navigation-pending { animation: none; opacity: 1; }
 }
+
+/* ============================================================
+ * Pre-exam candidate surfaces — check-in and waiting room
+ *
+ * Product UI, not a campaign. Neutral zinc chrome, IELTS red as the only
+ * accent, one border system, one radius system. No gradients, no decorative
+ * imagery, no entrance choreography.
+ * ============================================================ */
+.exam-entry {
+  --exam-canvas: #f7f7f8;
+  --exam-surface: #ffffff;
+
+  --exam-ink: #18181b;
+  --exam-ink-secondary: #52525b;
+  --exam-ink-muted: #71717a;
+
+  --exam-hairline: #e4e4e7;
+  --exam-control-border: #8f8f96;
+  --exam-control-border-hover: #6b6b73;
+
+  /* Pantone 485, the red in the IELTS identity. */
+  --exam-accent: #da291c;
+  --exam-accent-hover: #be1e12;
+  --exam-accent-pressed: #a51a0f;
+  --exam-accent-soft: #fdf0ee;
+  --exam-accent-strong: #a81d12;
+  --exam-focus: #da291c;
+
+  --exam-danger: #b42318;
+  --exam-danger-soft: #fef3f2;
+  --exam-attention: #b54708;
+  --exam-attention-soft: #fffaeb;
+
+  min-height: 100dvh;
+  background-color: var(--exam-canvas);
+  color: var(--exam-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.exam-entry-meta-label {
+  color: var(--exam-ink-muted);
+}
+
+.exam-entry-status-dot {
+  display: inline-block;
+  height: 0.5rem;
+  width: 0.5rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background-color: var(--exam-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exam-entry *,
+  .exam-entry *::before,
+  .exam-entry *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

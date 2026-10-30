@@ -79,6 +79,9 @@ var metricHelpText = map[string]string{
 	MV1MutationTotal:                "Total v1 mutation requests by outcome.",
 	MV1SubmitTotal:                  "Total v1 submit requests by outcome.",
 	MLeaseFencedTotal:               "Total v2 responses rejected by lease fencing.",
+	MExamAccessRejectedTotal:        "Exam credential rejections by bounded reason (expired, revoked, invalid) and credential policy (legacy_v1, sitting_v1, unknown).",
+	MExamAccessAdmittedTotal:        "Committed exam credential admissions by credential policy.",
+	MDraftEvidenceTotal:             "Retained drafts recorded as provider-neutral evidence (never scored automatically).",
 	MControlStaleTotal:              "Total v2 responses rejected for a stale control epoch.",
 	MVersionCollTotal:               "Total v2 responses rejected for a version collision.",
 	MSubmitReplayTotal:              "Total replayed v2 submissions.",
@@ -240,9 +243,16 @@ const (
 	MV1MutationTotal              = "v1_mutation_requests_total"
 	MV1SubmitTotal                = "v1_submit_requests_total"
 	MLeaseFencedTotal             = "v2_lease_fenced_total"
-	MControlStaleTotal            = "v2_control_epoch_stale_total"
-	MVersionCollTotal             = "v2_version_collision_total"
-	MSubmitReplayTotal            = "v2_submit_replay_total"
+	// Exam-access guardrails (docs/plans/2026-10-29-exam-session-continuity.md
+	// section 8). Labels: reason in expired|revoked|invalid, policy in
+	// legacy_v1|sitting_v1|unknown. Never tokens, users, attempts, or candidates.
+	MExamAccessRejectedTotal = "exam_access_rejected_total"
+	MExamAccessAdmittedTotal = "exam_access_admitted_total"
+	// MDraftEvidenceTotal counts FR7 draft-evidence batches (outcome=recorded).
+	MDraftEvidenceTotal = "draft_evidence_total"
+	MControlStaleTotal  = "v2_control_epoch_stale_total"
+	MVersionCollTotal   = "v2_version_collision_total"
+	MSubmitReplayTotal  = "v2_submit_replay_total"
 
 	MTerminalCreated  = "terminalization_created_total"
 	MTerminalReplay   = "terminalization_replay_total"
@@ -508,6 +518,9 @@ func Names() []string {
 		MV1MutationTotal,
 		MV1SubmitTotal,
 		MLeaseFencedTotal,
+		MExamAccessRejectedTotal,
+		MExamAccessAdmittedTotal,
+		MDraftEvidenceTotal,
 		MControlStaleTotal,
 		MVersionCollTotal,
 		MSubmitReplayTotal,

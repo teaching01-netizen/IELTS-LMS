@@ -237,6 +237,10 @@ func RandomToken(byteLen int) (string, error) {
 
 // Session is the authenticated session row subset handlers need.
 type Session struct {
+	// AttemptCredential is request-local projection authority, never a stored
+	// account session or proof for registration/account operations.
+	AttemptCredential *crypto.AttemptClaims
+
 	ID             string
 	UserID         string
 	Role           string
@@ -692,6 +696,13 @@ func revokeUserSessionsInTx(ctx context.Context, q tx.Tx, userID, reason string,
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("auth: revoke all rows: %w", err)
+	}
+	// Exam mutations hold the grant lock through commit. Revoking grants in
+	// this transaction makes logout-all/reset effective across API replicas.
+	if _, err := q.ExecContext(ctx,
+		`UPDATE attempt_sessions SET revoked_at = ?, revocation_reason = ? WHERE user_id = ? AND revoked_at IS NULL`,
+		now, reason, userID); err != nil {
+		return nil, fmt.Errorf("auth: revoke exam grants: %w", err)
 	}
 	for _, id := range ids {
 		if _, err := q.ExecContext(ctx,
@@ -1186,7 +1197,7 @@ func VerifyAttemptToken(ctx context.Context, db Querier, cfg config.Config, now 
 	// later migration adds them); older schemas fall back to the base
 	// select so verification never breaks pre-migration.
 	err = db.QueryRowContext(ctx,
-		`SELECT user_id, schedule_id, attempt_id, client_session_id, expires_at, revoked_at, organization_id, lease_epoch FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL`,
+		`SELECT user_id, schedule_id, attempt_id, client_session_id, expires_at, revoked_at, organization_id, lease_epoch FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL AND `+ActiveAttemptPrincipalSQL,
 		claims.TokenID).Scan(&userID, &scheduleID, &attemptID, &clientSessionID, &expiresAt, &revokedAt, &rowOrg, &rowLease)
 	// Round 168: live schemas predate organization_id/lease_epoch (verified
 	// absent locally AND live). A hard 1054 here fails EVERY bearer verify
@@ -1197,7 +1208,7 @@ func VerifyAttemptToken(ctx context.Context, db Querier, cfg config.Config, now 
 	}
 	if err != nil {
 		err = db.QueryRowContext(ctx,
-			`SELECT user_id, schedule_id, attempt_id, client_session_id, expires_at, revoked_at FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL`,
+			`SELECT user_id, schedule_id, attempt_id, client_session_id, expires_at, revoked_at FROM attempt_sessions WHERE token_id = ? AND revoked_at IS NULL AND `+ActiveAttemptPrincipalSQL,
 			claims.TokenID).Scan(&userID, &scheduleID, &attemptID, &clientSessionID, &expiresAt, &revokedAt)
 		if err == sql.ErrNoRows {
 			return zero, fmt.Errorf("auth: unknown attempt session")

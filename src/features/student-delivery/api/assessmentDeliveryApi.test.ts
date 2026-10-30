@@ -313,7 +313,7 @@ describe("assessmentDeliveryApi attempt-auth transport", () => {
     }
   });
 
-  it("singleflights proactive refresh across concurrent near-expiry requests", async () => {
+  it("waits for shared credential renewal before concurrent near-expiry requests", async () => {
     configureAssessmentDeliveryAttempt(
       "schedule-proactive",
       "attempt-proactive",
@@ -321,12 +321,8 @@ describe("assessmentDeliveryApi attempt-auth transport", () => {
     );
     mockedExpiring.mockReturnValue(true);
     let releaseRefresh!: (value: boolean) => void;
-    mockedRefresh.mockImplementationOnce(
-      () =>
-        new Promise<boolean>((resolve) => {
-          releaseRefresh = resolve;
-        })
-    );
+    const renewal = new Promise<boolean>((resolve) => { releaseRefresh = resolve; });
+    mockedRefresh.mockReturnValue(renewal);
     mockedPost.mockResolvedValue({ ok: true });
 
     const first = assessmentDeliveryApi.recordAudit(
@@ -342,12 +338,12 @@ describe("assessmentDeliveryApi attempt-auth transport", () => {
       {}
     );
 
-    await vi.waitFor(() => expect(mockedRefresh).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(mockedRefresh).toHaveBeenCalledTimes(2));
     expect(mockedPost).not.toHaveBeenCalled();
     releaseRefresh(true);
     await Promise.all([first, second]);
 
-    expect(mockedRefresh).toHaveBeenCalledTimes(1);
+    expect(mockedRefresh).toHaveBeenCalledTimes(2);
     expect(mockedPost).toHaveBeenCalledTimes(2);
     for (const call of mockedPost.mock.calls) {
       expect(call[2]).toMatchObject({ retries: 0, skipUnauthorizedHandler: true });

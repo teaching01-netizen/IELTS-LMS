@@ -90,29 +90,29 @@ func init() {
 		"POST /schedules/{scheduleID}/submit":                        {Bearer: true, Scope: ScopeAttemptOwner},
 		// student sessions: session-or-bearer STUDENT paths (handler:
 		// requireV1StudentIdentity / requireStudentDeps + resolve check).
-		"GET /{scheduleID}":                              {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{scheduleID}/static":                       {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/precheck":                    {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/sections/{sectionKey}/ready": {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/bootstrap":                   {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{scheduleID}/live":                         {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{scheduleID}/runtime":                      {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/heartbeat":                   {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}":                              {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/static":                       {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/precheck":                    {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/sections/{sectionKey}/ready": {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/bootstrap":                   {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/live":                         {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/runtime":                      {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/heartbeat":                   {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
 		// mutations:batch + submit are registered via r.Method with an
 		// absolute-ish annotated template ("POST /{scheduleID}/..."):
 		// these verbatim keys let CtxRouteTemplate resolve.
-		"POST /{scheduleID}/mutations:batch": {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/audit":           {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/submit":          {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/mutations:batch": {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/audit":           {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/submit":          {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
 		// SAT device transfer. Blocked browser: student cookie session,
 		// enforced in-handler (requireStudentDeps + requester binding in
 		// the attempts transaction). Current writer: attempt bearer.
-		"POST /{scheduleID}/device-transfers":                            {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{scheduleID}/device-transfers/{requestID}":                 {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/device-transfers/{requestID}/cancel":         {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/device-transfers/{requestID}/commit":         {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{scheduleID}/writer/device-transfer":                       {Bearer: true, Scope: ScopeAttemptOwner},
-		"POST /{scheduleID}/writer/device-transfers/{requestID}/confirm": {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/device-transfers":                            {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/device-transfers/{requestID}":                 {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/device-transfers/{requestID}/cancel":         {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/device-transfers/{requestID}/commit":         {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"GET /{scheduleID}/writer/device-transfer":                       {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"POST /{scheduleID}/writer/device-transfers/{requestID}/confirm": {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
 		// proctor sessions/notes/rules/controls. NOTE: "GET /sessions"
 		// is shared by proctor-sessions (admin/observer/proctor) and
 		// grading-sessions (admin/observer/grader): this single entry
@@ -182,7 +182,10 @@ func init() {
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/device-recovery/restore-original": {MinRoles: []string{RoleAdmin, RoleProctor}},
 		"POST /{scheduleID}/attempts/{attemptID}/device-recovery/original-ready":            {MinRoles: []string{RoleStudent}},
 		"POST /sessions/{scheduleID}/attempts/{attemptID}/device-recovery":                  {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
-		"GET /sessions/{scheduleID}/route-queue":                                            {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		// Draft evidence review (exam continuity FR7): assigned proctors/admins.
+		"GET /sessions/{scheduleID}/attempts/{attemptID}/draft-evidence":                      {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"POST /sessions/{scheduleID}/attempts/{attemptID}/draft-evidence/{evidenceID}/review": {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
+		"GET /sessions/{scheduleID}/route-queue":                                              {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 
 		// library passages/questions.
 		"GET /passages":                         {MinRoles: readStaff},
@@ -274,8 +277,10 @@ func init() {
 		"PUT /uploads/{assetID}":           {MinRoles: mediaWrite},
 		"POST /uploads/{assetID}/complete": {MinRoles: mediaWrite},
 		"GET /assets/{assetID}":            {MinRoles: AllRoles},
-		"GET /{assetID}/content":           {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /{assetID}":                   {MinRoles: AllRoles},
+		// Staff/student cookie sessions read authoring media; exam
+		// browsers present an attempt bearer (mediaDownloadContentHandler).
+		"GET /{assetID}/content": {Bearer: true, SessionOrBearer: true, Scope: ScopeAttemptOwner},
+		"GET /{assetID}":         {MinRoles: AllRoles},
 		// answer-history.
 		"GET /submissions/{submissionID}/overview":           {MinRoles: resultsRead},
 		"GET /submissions/{submissionID}/targets/{targetID}": {MinRoles: resultsRead},
@@ -292,6 +297,9 @@ func init() {
 		// V2: attempt bearer credential (handler).
 		"GET /{scheduleID}/audio-checkpoint":  {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /{scheduleID}/audio-checkpoint": {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{attemptID}/access:resume":     {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /{attemptID}/draft-evidence":    {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /{attemptID}/submission-receipt": {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /{attemptID}/responses:batch":   {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /{attemptID}/submit":            {Bearer: true, Scope: ScopeAttemptOwner},
 		"POST /{attemptID}/takeover":          {Bearer: true, Scope: ScopeAttemptOwner},

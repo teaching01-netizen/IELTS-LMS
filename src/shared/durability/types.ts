@@ -121,8 +121,26 @@ export type DurabilitySyncStatus =
   | 'saved_locally'
   | 'blocked_attention'
   | 'durability_fault'
+  | 'authentication_required'
   | 'conflict_fenced'
   | 'conflict_terminal';
+
+/** One retained draft offered as unscored evidence (exam continuity FR7). */
+export interface DraftEvidenceItemV2 {
+  writeId: string;
+  questionId: string;
+  clientVersion: number;
+  response: ResponsePayload;
+  originLeaseEpoch: number | null;
+  /** The device's claim; provenance for staff, never proof of timeliness. */
+  claimedClientAt: string;
+  reason: string;
+}
+
+export interface DraftEvidenceAckV2 {
+  recorded: number;
+  replayed: number;
+}
 
 export interface QuarantinedWrite {
   writeId: string;
@@ -151,7 +169,8 @@ export type ControlEpochAdoptionSkipReason =
   | 'not_advanced'
   | 'not_idle'
   | 'conflict_fenced'
-  | 'durability_fault';
+  | 'durability_fault'
+  | 'authentication_required';
 
 export type ControlEpochAdoptionResult =
   | { adopted: true; controlEpoch: number }

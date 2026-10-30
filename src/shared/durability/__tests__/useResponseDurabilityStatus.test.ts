@@ -32,6 +32,7 @@ const ALL_STATUSES: DurabilitySyncStatus[] = [
   'saved_locally',
   'blocked_attention',
   'durability_fault',
+  'authentication_required',
   'conflict_fenced',
   'conflict_terminal',
 ];
@@ -51,6 +52,7 @@ describe('mapEngineStatus contract (WP4/WP5 shared vocabulary)', () => {
     expect(mapEngineStatus('saved_locally', 0)).toBe('saved_locally');
     expect(mapEngineStatus('blocked_attention', 0)).toBe('blocked_attention');
     expect(mapEngineStatus('durability_fault', 0)).toBe('error');
+    expect(mapEngineStatus('authentication_required', 0)).toBe('blocked_attention');
     expect(mapEngineStatus('conflict_fenced', 0)).toBe('conflict');
     expect(mapEngineStatus('conflict_terminal', 0)).toBe('conflict');
 
@@ -70,6 +72,7 @@ describe('mapEngineStatus contract (WP4/WP5 shared vocabulary)', () => {
       'saved_locally',
       'blocked_attention',
       'durability_fault',
+  'authentication_required',
       'conflict_fenced',
       'conflict_terminal',
     ];
@@ -87,6 +90,7 @@ describe('mapEngineStatus contract (WP4/WP5 shared vocabulary)', () => {
 
   it('maps durability_fault to error', () => {
     expect(mapEngineStatus('durability_fault', 0)).toBe('error');
+    expect(mapEngineStatus('authentication_required', 0)).toBe('blocked_attention');
   });
 
   it('null-engine hook defaults to saving and never saved', () => {

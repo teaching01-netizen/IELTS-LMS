@@ -12,6 +12,7 @@ import (
 	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
@@ -61,7 +62,7 @@ func transferBlockedError() *apperrors.Error {
 // registration response and the first usable credential commit together on
 // every issuance path (entry, bootstrap, refresh, transfer). registration is
 // the entry-time answer set, nil on paths that collect none.
-func attemptCredentialIssuer(app *App, userID, scheduleID, attemptID, clientSessionID string, registration *assessmentforms.RegistrationSubmission) attempts.CredentialIssuer {
+func attemptCredentialIssuer(app *App, userID, scheduleID, attemptID, clientSessionID string, registration *assessmentforms.RegistrationSubmission, grant auth.ExamGrantOptions) attempts.CredentialIssuer {
 	return func(ctx context.Context, q tx.Tx, lease uint64) (string, time.Time, error) {
 		now, adm, err := authorizeStudentCredentialAdmissionTx(ctx, q, userID, scheduleID, attemptID)
 		if err != nil {
@@ -72,22 +73,34 @@ func attemptCredentialIssuer(app *App, userID, scheduleID, attemptID, clientSess
 				return "", time.Time{}, err
 			}
 		}
-		l := lease
-		return auth.IssueAttemptTokenTx(ctx, q, app.Config, userID, scheduleID, attemptID, clientSessionID, nil, &l, now)
+		return auth.IssueExamGrantTx(ctx, q, app.Config, userID, scheduleID, attemptID, clientSessionID, nil, lease, now, grant)
 	}
 }
 
 // admitStudentSession is the shared admission path for entry, session
 // bootstrap, and credential refresh: never a hardcoded lease, never a writer
-// credential for a blocked session.
-func admitStudentSession(ctx context.Context, app *App, userID, scheduleID, attemptID, clientSessionID string, registration *assessmentforms.RegistrationSubmission) (attempts.Admission, error) {
+// credential for a blocked session. grant carries only server-established
+// authority (the browser account session, explicit re-entry).
+func admitStudentSession(ctx context.Context, app *App, userID, scheduleID, attemptID, clientSessionID string, registration *assessmentforms.RegistrationSubmission, grant auth.ExamGrantOptions) (attempts.Admission, error) {
 	if app.Attempts == nil {
 		return attempts.Admission{}, apperrors.New(apperrors.CodeServiceUnavailable, "Attempt service is unavailable.")
 	}
-	return app.Attempts.Admit(ctx, attempts.AdmitCommand{
+	admission, err := app.Attempts.Admit(ctx, attempts.AdmitCommand{
 		AttemptID: attemptID, UserID: userID, ClientSessionID: clientSessionID,
 		SingleWriterEnabled: singleWriterEnabledForSchedule(app, scheduleID),
-	}, attemptCredentialIssuer(app, userID, scheduleID, attemptID, clientSessionID, registration))
+	}, attemptCredentialIssuer(app, userID, scheduleID, attemptID, clientSessionID, registration, grant))
+	if err != nil {
+		return admission, err
+	}
+	if admission.Token != "" {
+		claims, err := crypto.VerifyAttemptToken([]byte(app.Config.AuthSecret), time.Now().UTC(), admission.Token)
+		if err != nil {
+			return attempts.Admission{}, err
+		}
+		admission.CredentialPolicy = auth.NormalizeCredentialPolicy(claims.CredentialPolicy)
+		auth.RecordExamAccessAdmitted(admission.CredentialPolicy)
+	}
+	return admission, nil
 }
 
 // admissionPayload is the browser-facing admission summary.
@@ -237,7 +250,7 @@ func studentTransferCommitHandler(app *App) http.HandlerFunc {
 		requestID := chi.URLParam(r, "requestID")
 		target := strings.TrimSpace(body.ClientSessionID)
 		issuerFor := func(attemptID string) attempts.CredentialIssuer {
-			return attemptCredentialIssuer(app, sess.UserID, scheduleID, attemptID, target, nil)
+			return attemptCredentialIssuer(app, sess.UserID, scheduleID, attemptID, target, nil, auth.ExamGrantOptions{AccountSessionID: sess.ID, Reauthorize: true})
 		}
 		res, err := app.Attempts.CommitTransfer(r.Context(), attempts.CommitTransferCommand{
 			RequestID: requestID, TargetSessionID: target, Requester: requesterOf(sess, scheduleID, target),

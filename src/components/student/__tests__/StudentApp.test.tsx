@@ -310,15 +310,16 @@ describe("StudentApp runtime-backed mode", () => {
         };
       }
     );
-    v2TransportMocks.transport.submit.mockResolvedValue({
-      attemptId: "attempt-1",
-      submissionId: "submission-1",
+    // A real receipt echoes the operation; the engine rejects a foreign one.
+    v2TransportMocks.transport.submit.mockImplementation(async (attemptId: string, request: any) => ({
+      attemptId,
+      submissionId: request.submissionId,
       status: "submitted",
       attemptRevision: 2,
       finalResponseDigest: "digest-1",
       submittedAt: "2026-01-01T01:00:01.000Z",
       acknowledgements: [],
-    });
+    }));
   });
 
   const state: ExamState = {
