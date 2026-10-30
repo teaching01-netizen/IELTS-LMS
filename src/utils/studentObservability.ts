@@ -2,6 +2,8 @@ export type StudentObservabilityField = string | number | boolean | null | undef
 
 interface StudentObservabilityDimensions {
   attemptId?: StudentObservabilityField;
+  /** 1-based silent-download preparation attempt for this package identity. */
+  attempt?: StudentObservabilityField;
   browserEngine?: StudentObservabilityField;
   durablePersistResult?: StudentObservabilityField;
   deviceClass?: StudentObservabilityField;

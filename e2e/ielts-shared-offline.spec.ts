@@ -202,6 +202,10 @@ test.describe("IELTS shared timetable offline continuity", () => {
       await expect(page.getByTestId("ielts-offline-status")).toBeVisible({ timeout: 30_000 });
       await expect(page.getByText(/offline/i).first()).toBeVisible();
       await expect(answer).toHaveValue("offline-retained answer");
+      // A download failure is silent. Only real offline/save state may appear;
+      // there is no failure copy and no student retry control.
+      await expect(page.getByRole("button", { name: /try again/i })).toHaveCount(0);
+      await expect(page.getByText(/isn't ready to work offline|couldn't be saved on this device/i)).toHaveCount(0);
       const remainingAfter = await page.getByTestId("student-time-remaining").first().textContent();
       const secondsAfter = Number((remainingAfter ?? "0:00").split(":").at(-1)) || 0;
       expect(secondsAfter, "the offline reload never restarts the committed clock").toBeLessThanOrEqual(

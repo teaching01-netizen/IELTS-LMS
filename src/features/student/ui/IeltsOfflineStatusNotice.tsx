@@ -1,21 +1,15 @@
-import { useSyncExternalStore } from 'react';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 import type { IeltsOfflineContinuity } from '../hooks/useIeltsOfflineContinuity';
-
-function subscribeOnline(onChange: () => void): () => void {
-  window.addEventListener('online', onChange);
-  window.addEventListener('offline', onChange);
-  return () => {
-    window.removeEventListener('online', onChange);
-    window.removeEventListener('offline', onChange);
-  };
-}
-
-const isOnline = () => navigator.onLine;
+import { useBrowserOnline } from '../hooks/useBrowserOnline';
 
 /**
  * Device-only continuity status for IELTS shared-timetable rooms. A local
  * marker never claims submission (FR-7): only a server receipt does.
+ *
+ * A failed offline-download is a background cache miss, not an exam event
+ * (`2026-10-31-ielts-offline-download-silent-failure.md`). This component
+ * therefore has no failure text, no retry control and no failure announcement;
+ * it only reports real offline/save state.
  */
 export function IeltsOfflineStatusNotice({
   continuity,
@@ -24,7 +18,7 @@ export function IeltsOfflineStatusNotice({
   continuity: IeltsOfflineContinuity;
   attemptSnapshot: StudentAttempt | null;
 }) {
-  const online = useSyncExternalStore(subscribeOnline, isOnline, () => true);
+  const online = useBrowserOnline();
   const { packageStatus, projection, restoredOffline } = continuity;
   if (!projection && packageStatus.state === 'unavailable') return null;
 
@@ -38,13 +32,6 @@ export function IeltsOfflineStatusNotice({
   if (projection && projection.clockConfidence !== 'verified' && !serverConfirmed) {
     messages.push('The time shown is an estimate until this device reconnects.');
   }
-  if (packageStatus.state === 'failed' && online) {
-    messages.push(
-      packageStatus.reason === 'audio_unavailable' || packageStatus.reason === 'media_failed'
-        ? "Exam audio or images couldn't be saved on this device. Keep it connected and tell your invigilator."
-        : "This device isn't ready to work offline. Keep it connected — your exam continues as normal.",
-    );
-  }
   if (messages.length === 0) return null;
   return (
     <div
@@ -56,11 +43,6 @@ export function IeltsOfflineStatusNotice({
       {messages.map((message) => (
         <p key={message}>{message}</p>
       ))}
-      {packageStatus.state === 'failed' && online && (
-        <button type="button" className="mt-1 underline underline-offset-2" onClick={continuity.retryPreparation}>
-          Try again
-        </button>
-      )}
     </div>
   );
 }

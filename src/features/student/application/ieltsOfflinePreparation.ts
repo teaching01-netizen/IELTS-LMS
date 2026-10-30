@@ -27,6 +27,59 @@ export type IeltsOfflinePreparationResult =
   | { status: 'prepared'; record: IeltsOfflinePackage }
   | { status: 'failed'; reason: IeltsOfflinePreparationFailure; resourceId?: string };
 
+/**
+ * Why a package is deferred. Every preparation failure can defer, and an
+ * unexpected exception is deferred as its own non-retryable reason.
+ */
+export type IeltsOfflineDeferredReason = IeltsOfflinePreparationFailure | 'unexpected';
+
+/** Delay before retry N is indexed by the 1-based number of the failed attempt. */
+const OFFLINE_RETRY_DELAYS_MS = [5_000, 20_000, 60_000] as const;
+
+/**
+ * Total preparation attempts per package identity: the initial attempt plus
+ * one retry per configured delay (RULE-3).
+ */
+export const IELTS_OFFLINE_MAX_ATTEMPTS = OFFLINE_RETRY_DELAYS_MS.length + 1;
+
+/** Retries are jittered by ±20% so a reconnect burst does not synchronise. */
+const OFFLINE_RETRY_JITTER_RATIO = 0.2;
+
+/**
+ * Failures that may clear on their own. Everything else is deterministic for
+ * this package identity — retrying would only spend battery, quota and
+ * bandwidth without changing the outcome.
+ */
+const RETRYABLE_OFFLINE_FAILURES: ReadonlySet<IeltsOfflinePreparationFailure> = new Set([
+  'shell_unavailable',
+  'media_failed',
+  'storage_failed',
+]);
+
+/** Whether preparation may be attempted again for the same package identity. */
+export function isRetryableIeltsOfflineFailure(reason: IeltsOfflinePreparationFailure): boolean {
+  return RETRYABLE_OFFLINE_FAILURES.has(reason);
+}
+
+/**
+ * Delay before the next automatic attempt, or `null` when the retry budget is
+ * spent. `failedAttempt` is 1-based: 1 → ~5s, 2 → ~20s, 3 → ~60s, 4 → spent.
+ * `random` is injectable so tests can pin the jitter band deterministically.
+ */
+export function nextIeltsOfflineRetryDelayMs(
+  failedAttempt: number,
+  random: () => number = Math.random,
+): number | null {
+  if (!Number.isFinite(failedAttempt)) return null;
+  const index = Math.trunc(failedAttempt) - 1;
+  if (index < 0 || index >= OFFLINE_RETRY_DELAYS_MS.length) return null;
+  const sample = random();
+  // Clamp so a misbehaving generator can never leave the ±20% band or return NaN.
+  const bounded = Number.isFinite(sample) ? Math.min(Math.max(sample, 0), 1) : 0.5;
+  const base = OFFLINE_RETRY_DELAYS_MS[index]!;
+  return Math.round(base * (1 + (bounded * 2 - 1) * OFFLINE_RETRY_JITTER_RATIO));
+}
+
 export interface IeltsOfflinePreparationIdentity {
   userId: string;
   candidateId: string;

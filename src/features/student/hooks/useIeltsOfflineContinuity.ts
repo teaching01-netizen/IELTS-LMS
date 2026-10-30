@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isIeltsSharedScheduleTimingModel, type ExamSessionRuntime } from '../../../types/domain';
 import type { StudentAttempt } from '../../../types/studentAttempt';
 import {
@@ -14,8 +14,10 @@ import {
   type IeltsLocalProjection,
 } from '../application/ieltsOfflineRuntime';
 import {
+  isRetryableIeltsOfflineFailure,
+  nextIeltsOfflineRetryDelayMs,
   prepareIeltsOfflinePackage,
-  type IeltsOfflinePreparationFailure,
+  type IeltsOfflineDeferredReason,
 } from '../application/ieltsOfflinePreparation';
 import {
   ieltsOfflinePackageKey,
@@ -33,15 +35,27 @@ import {
   tryBuildAttemptAuthorizationHeader,
 } from '../api/studentAttemptGateway';
 import { emitStudentObservabilityMetric } from '../../../utils/studentObservability';
+import { useBrowserOnline } from './useBrowserOnline';
 
 /** Longest wait between projections; also the persistence cadence. */
 const MAX_TICK_MS = 30_000;
 
+/**
+ * `deferred` is the only state a preparation failure can reach. It exists for
+ * internal bookkeeping and the notice's "nothing to say yet" guard; it is
+ * never rendered, announced or actionable (FR-1, INV-5).
+ */
 export type IeltsOfflinePackageStatus =
   | { state: 'unavailable' }
   | { state: 'preparing' }
   | { state: 'prepared'; record: IeltsOfflinePackage }
-  | { state: 'failed'; reason: IeltsOfflinePreparationFailure };
+  | {
+      state: 'deferred';
+      reason: IeltsOfflineDeferredReason;
+      attempts: number;
+      /** Diagnostic only: the scheduled retry instant, null when none is due. */
+      retryAt: number | null;
+    };
 
 export interface IeltsOfflineContinuity {
   /** Effective runtime: the timetable projection for shared rooms, else the snapshot. */
@@ -50,7 +64,18 @@ export interface IeltsOfflineContinuity {
   projection: IeltsLocalProjection | null;
   /** The route is running from the package after a network failure. */
   restoredOffline: boolean;
-  retryPreparation: () => void;
+}
+
+/**
+ * Per-identity retry bookkeeping. Attempts live in a ref, not state: changing
+ * them must not restart the preparation effect (INV-3).
+ */
+interface IeltsOfflineRetryState {
+  identityKey: string | null;
+  attempts: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  /** The last verdict was terminal: no attempt until the identity changes. */
+  halted: boolean;
 }
 
 function useLatestManifest(attemptId: string | null): IeltsOfflineManifest | null {
@@ -87,12 +112,22 @@ export function useIeltsOfflineContinuity(input: {
 }): IeltsOfflineContinuity {
   const { runtimeSnapshot, attemptSnapshot, staticPayload, offlinePackage, userId, candidateId } = input;
   const shared = isIeltsSharedScheduleTimingModel(runtimeSnapshot?.timingModel);
+  const online = useBrowserOnline();
   const attemptId = attemptSnapshot?.id ?? null;
   const manifest = useLatestManifest(shared ? attemptId : null);
   const [packageStatus, setPackageStatus] = useState<IeltsOfflinePackageStatus>(
     offlinePackage ? { state: 'prepared', record: offlinePackage } : { state: 'unavailable' },
   );
-  const [retryToken, setRetryToken] = useState(0);
+  // Bumped when a retry timer fires; it is the only trigger of a retry.
+  const [retrySignal, setRetrySignal] = useState(0);
+  const retryRef = useRef<IeltsOfflineRetryState>({ identityKey: null, attempts: 0, timer: null, halted: false });
+  const clearRetryTimer = useCallback(() => {
+    const { timer } = retryRef.current;
+    if (timer !== null) clearTimeout(timer);
+    retryRef.current.timer = null;
+  }, []);
+  // A timer must never outlive the hook instance (INV-4).
+  useEffect(() => clearRetryTimer, [clearRetryTimer]);
   const record = packageStatus.state === 'prepared' ? packageStatus.record : null;
   const restoredRuntime = offlinePackage?.liveSnapshot?.runtime as ExamSessionRuntime | undefined;
   const restoredOffline = Boolean(restoredRuntime) && runtimeSnapshot?.serverNow === restoredRuntime?.serverNow;
@@ -126,21 +161,64 @@ export function useIeltsOfflineContinuity(input: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shared, manifest, userId, attemptSnapshot?.id, attemptSnapshot?.scheduleId, scheduleCommitted]);
 
-  // --- Preparation: once per package identity, online only -----------------
+  // --- Preparation: bounded automatic retry, online only -------------------
+  // The package is a cache-like capability: a failure is a cache miss for this
+  // device, never an exam event. Nothing here ever surfaces to the student
+  // (FR-1, INV-5); operators see reason-coded telemetry only (FR-6).
   const identityKey = manifest
-    ? [manifest.attemptId, manifest.publishedVersionId, manifest.clientSessionId, manifest.leaseEpoch, manifest.recoveryRunGeneration, manifest.contentDigest].join(':')
+    ? [
+        userId ?? '',
+        candidateId ?? '',
+        manifest.attemptId,
+        manifest.publishedVersionId,
+        manifest.clientSessionId,
+        manifest.leaseEpoch,
+        manifest.recoveryRunGeneration,
+        manifest.contentDigest,
+      ].join(':')
     : null;
   const latest = useRef({ runtimeSnapshot, attemptSnapshot, staticPayload, record });
   latest.current = { runtimeSnapshot, attemptSnapshot, staticPayload, record };
   const hasStatic = Boolean(staticPayload);
+  // FR-7: a submitted attempt or a finished room owns no further downloads.
+  const terminal =
+    Boolean(attemptSnapshot?.submittedAt) ||
+    runtimeSnapshot?.status === 'completed' ||
+    runtimeSnapshot?.status === 'cancelled';
   useEffect(() => {
-    if (!shared || !manifest || !userId || !candidateId || !attemptId || !hasStatic) return undefined;
+    if (!shared || !manifest || !userId || !candidateId || !attemptId || !hasStatic || terminal) {
+      clearRetryTimer();
+      return undefined;
+    }
+    // RULE-2: a reconnect restarts this effect, so an offline transition only
+    // has to cancel whatever was pending.
+    if (!online) {
+      clearRetryTimer();
+      return undefined;
+    }
+    // INV-3: a scheduled retry already owns the next attempt.
+    if (retryRef.current.timer !== null) return undefined;
+
+    if (retryRef.current.identityKey !== identityKey) {
+      // RULE-4: only a new package identity resets the budget and the halt.
+      clearRetryTimer();
+      retryRef.current = { identityKey, attempts: 0, timer: null, halted: false };
+    }
+    // FR-3: a terminal verdict holds until the identity changes or the page
+    // reloads, even if connectivity flaps in between.
+    if (retryRef.current.halted) return undefined;
+
     const current = latest.current;
     if (current.record?.key === ieltsOfflinePackageKey(userId, manifest) && current.record.manifest.contentDigest === manifest.contentDigest) {
       return undefined;
     }
+
+    const attempt = retryRef.current.attempts + 1;
+    retryRef.current.attempts = attempt;
     const controller = new AbortController();
     const startedAt = Date.now();
+    let settled = false;
+
     setPackageStatus({ state: 'preparing' });
     void prepareIeltsOfflinePackage({
       manifest,
@@ -155,23 +233,75 @@ export function useIeltsOfflineContinuity(input: {
       staticPayload: current.staticPayload ?? {},
       liveSnapshot: { runtime: current.runtimeSnapshot, attempt: current.attemptSnapshot },
       signal: controller.signal,
-    }).then((result) => {
-      if (controller.signal.aborted) return;
-      emitStudentObservabilityMetric('ielts_offline_preparation', {
-        reason: result.status === 'prepared' ? 'prepared' : result.reason,
-        latencyMs: Date.now() - startedAt,
+    })
+      .then((result) => {
+        settled = true;
+        if (controller.signal.aborted) return;
+        const latencyMs = Date.now() - startedAt;
+        emitStudentObservabilityMetric('ielts_offline_preparation', {
+          reason: result.status === 'prepared' ? 'prepared' : result.reason,
+          attempt,
+          latencyMs,
+        });
+        if (result.status === 'prepared') {
+          retryRef.current.attempts = 0;
+          setPackageStatus({ state: 'prepared', record: result.record });
+          if (result.record.shellBuildId) {
+            void pinIeltsOfflineShell(result.record.shellBuildId, attemptId).catch(() => undefined);
+          }
+          return;
+        }
+        const retryable = isRetryableIeltsOfflineFailure(result.reason);
+        const delay = retryable ? nextIeltsOfflineRetryDelayMs(attempt) : null;
+        setPackageStatus({
+          state: 'deferred',
+          reason: result.reason,
+          attempts: attempt,
+          retryAt: delay === null ? null : Date.now() + delay,
+        });
+        if (delay !== null) {
+          retryRef.current.timer = setTimeout(() => {
+            retryRef.current.timer = null;
+            setRetrySignal((value) => value + 1);
+          }, delay);
+        } else {
+          // Deterministic failure, or the budget is spent: hold this identity.
+          retryRef.current.halted = true;
+          if (retryable) {
+            emitStudentObservabilityMetric('ielts_offline_preparation_exhausted', {
+              reason: result.reason,
+              attempt,
+            });
+          }
+        }
+      })
+      .catch(() => {
+        settled = true;
+        if (controller.signal.aborted) return;
+        retryRef.current.halted = true;
+        setPackageStatus({ state: 'deferred', reason: 'unexpected', attempts: attempt, retryAt: null });
+        emitStudentObservabilityMetric('ielts_offline_preparation', {
+          reason: 'unexpected',
+          attempt,
+          latencyMs: Date.now() - startedAt,
+        });
       });
-      if (result.status === 'prepared') {
-        setPackageStatus({ state: 'prepared', record: result.record });
-        if (result.record.shellBuildId) void pinIeltsOfflineShell(result.record.shellBuildId, attemptId);
-      } else {
-        setPackageStatus({ state: 'failed', reason: result.reason });
+
+    return () => {
+      controller.abort();
+      clearRetryTimer();
+      // An aborted attempt reached no verdict, so it must not spend the
+      // budget: an offline pause or a StrictMode remount would otherwise
+      // exhaust all retries without ever trying the network.
+      if (!settled) {
+        retryRef.current.attempts = Math.max(0, retryRef.current.attempts - 1);
+        setPackageStatus((previous) => (previous.state === 'preparing' ? { state: 'unavailable' } : previous));
       }
-    });
-    return () => controller.abort();
-    // identityKey stands for the manifest fields that define the package.
+    };
+    // identityKey stands for the manifest fields that define the package; the
+    // manifest object itself is replaced by every poll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shared, identityKey, userId, candidateId, attemptId, hasStatic, retryToken]);
+  }, [shared, identityKey, userId, candidateId, attemptId, hasStatic, terminal, online, retrySignal, clearRetryTimer]);
 
   // --- Clock anchor: a fresh server read anchors monotonic time -------------
   const lastEstimateRef = useRef(offlinePackage?.clock.lastEstimatedServerNowMs ?? 0);
@@ -322,6 +452,5 @@ export function useIeltsOfflineContinuity(input: {
     packageStatus,
     projection: projected?.runtime.ieltsLocalProjection ?? null,
     restoredOffline,
-    retryPreparation: () => setRetryToken((value) => value + 1),
   };
 }

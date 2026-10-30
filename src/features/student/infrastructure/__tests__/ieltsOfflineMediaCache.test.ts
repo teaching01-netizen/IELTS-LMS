@@ -60,4 +60,19 @@ describe('IELTS offline media cache', () => {
     );
     expect(result).toBe('cancelled');
   });
+
+  it('downloads as a low-priority background request', async () => {
+    const fetchImpl = vi.fn(okFetch(bodies));
+    await cacheIeltsOfflineMedia('att-1', testManifest().media, { caches: createFakeCaches(), fetchImpl, probeAudio: audioOk });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchImpl.mock.calls) {
+      expect(init).toMatchObject({
+        priority: 'low',
+        cache: 'no-store',
+        credentials: expect.any(String),
+        mode: expect.any(String),
+      });
+      expect(init?.signal === null || init?.signal instanceof AbortSignal).toBe(true);
+    }
+  });
 });

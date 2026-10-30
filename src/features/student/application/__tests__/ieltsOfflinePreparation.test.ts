@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { prepareIeltsOfflinePackage } from '../ieltsOfflinePreparation';
+import {
+  IELTS_OFFLINE_MAX_ATTEMPTS,
+  isRetryableIeltsOfflineFailure,
+  nextIeltsOfflineRetryDelayMs,
+  prepareIeltsOfflinePackage,
+  type IeltsOfflinePreparationFailure,
+} from '../ieltsOfflinePreparation';
 import { loadIeltsOfflinePackageForRoute, recordIeltsOfflineAccount } from '../../infrastructure/ieltsOfflinePackageStore';
 import { createFakeCaches, okFetch, testManifest } from '../../infrastructure/__tests__/ieltsOfflineTestKit';
 
@@ -53,5 +59,52 @@ describe('prepareIeltsOfflinePackage', () => {
   it('refuses a manifest for another attempt or browser session', async () => {
     expect(await run({}, testManifest({ attemptId: 'other' }))).toMatchObject({ reason: 'identity_mismatch' });
     expect(await run({}, testManifest({ clientSessionId: 'other' }))).toMatchObject({ reason: 'identity_mismatch' });
+  });
+});
+
+describe('IELTS offline retry policy', () => {
+  it('retries only failures that can clear on their own', () => {
+    const expected: Array<[IeltsOfflinePreparationFailure, boolean]> = [
+      ['shell_unavailable', true],
+      ['media_failed', true],
+      ['storage_failed', true],
+      ['quota', false],
+      ['audio_unavailable', false],
+      ['identity_mismatch', false],
+      ['manifest_invalid', false],
+      ['cancelled', false],
+    ];
+    for (const [reason, retryable] of expected) {
+      expect(isRetryableIeltsOfflineFailure(reason), reason).toBe(retryable);
+    }
+  });
+
+  it('caps the budget at one initial attempt plus three retries', () => {
+    expect(IELTS_OFFLINE_MAX_ATTEMPTS).toBe(4);
+    expect(nextIeltsOfflineRetryDelayMs(1)).not.toBeNull();
+    expect(nextIeltsOfflineRetryDelayMs(2)).not.toBeNull();
+    expect(nextIeltsOfflineRetryDelayMs(3)).not.toBeNull();
+    expect(nextIeltsOfflineRetryDelayMs(4)).toBeNull();
+    expect(nextIeltsOfflineRetryDelayMs(IELTS_OFFLINE_MAX_ATTEMPTS)).toBeNull();
+  });
+
+  it('backs off 5s, 20s and 60s with ±20% jitter', () => {
+    const bases = [5_000, 20_000, 60_000];
+    for (const [index, base] of bases.entries()) {
+      const failedAttempt = index + 1;
+      expect(nextIeltsOfflineRetryDelayMs(failedAttempt, () => 0.5)).toBe(base);
+      expect(nextIeltsOfflineRetryDelayMs(failedAttempt, () => 0)).toBe(Math.round(base * 0.8));
+      expect(nextIeltsOfflineRetryDelayMs(failedAttempt, () => 1)).toBe(Math.round(base * 1.2));
+    }
+  });
+
+  it('never leaves the jitter band for degenerate input', () => {
+    expect(nextIeltsOfflineRetryDelayMs(1, () => Number.NaN)).toBe(5_000);
+    expect(nextIeltsOfflineRetryDelayMs(1, () => -5)).toBe(4_000);
+    expect(nextIeltsOfflineRetryDelayMs(1, () => 5)).toBe(6_000);
+    expect(nextIeltsOfflineRetryDelayMs(0)).toBeNull();
+    expect(nextIeltsOfflineRetryDelayMs(-1)).toBeNull();
+    expect(nextIeltsOfflineRetryDelayMs(Number.NaN)).toBeNull();
+    expect(nextIeltsOfflineRetryDelayMs(Number.POSITIVE_INFINITY)).toBeNull();
   });
 });

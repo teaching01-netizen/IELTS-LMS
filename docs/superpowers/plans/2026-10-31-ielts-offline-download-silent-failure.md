@@ -1,6 +1,6 @@
 # IELTS Offline Download Silent Failure — Low-Level Implementation Plan
 
-**Status:** Plan only, 2026-10-31. No source changes are made by this document.
+**Status:** Implemented 2026-10-31. Verification evidence is in section 9.
 
 **Supersedes for student-facing failure behavior:** the download-failure notice and
 manual retry described in
@@ -466,3 +466,49 @@ accept an earlier manifest without redesign.
 **Key design rule:** the offline package is a cache-like capability. Its failure
 is a cache miss for the device, not an exam event. The student sees nothing; the
 system retries within a budget and records the outcome for operators.
+
+---
+
+## 9. Implementation evidence (2026-10-31)
+
+| Step | File | Delivered |
+| --- | --- | --- |
+| 1 | `src/features/student/application/ieltsOfflinePreparation.ts` | `IELTS_OFFLINE_MAX_ATTEMPTS` (derived from the delay table), `IeltsOfflineDeferredReason`, `isRetryableIeltsOfflineFailure`, `nextIeltsOfflineRetryDelayMs` (5s/20s/60s, ±20%, clamped, injectable `random`) |
+| 2 | `src/features/student/application/__tests__/ieltsOfflinePreparation.test.ts` | Classification, budget and jitter-band table tests |
+| 3 | `src/features/student/hooks/useIeltsOfflineContinuity.ts` | `deferred` replaces `failed`; `retryPreparation`/`retryToken` removed; bounded timer-based retry; online, terminal, identity and unmount guards; `attempt`/`latencyMs` telemetry |
+| 4 | `src/features/student/hooks/useBrowserOnline.ts` | Shared `useSyncExternalStore` connectivity hook (hook + notice) |
+| 5 | `src/features/student/ui/IeltsOfflineStatusNotice.tsx` | Failure text and **Try again** removed; offline/save/clock messages unchanged |
+| 6 | `src/features/student/ui/__tests__/IeltsOfflineStatusNotice.test.tsx` | `unavailable`/`preparing`/`deferred` render and announce nothing; offline message still works |
+| 7 | `src/features/student/hooks/__tests__/useIeltsOfflineContinuity.test.tsx` | Retry, exhaustion, deterministic failure, unexpected exception, offline, unmount, identity change, terminal state, aborted-attempt budget |
+| 8 | `src/features/student/infrastructure/ieltsOfflineMediaCache.ts` | `priority: 'low'` on every media fetch; 2-request cap unchanged |
+| 9 | `docs/operations/ielts-offline-continuity.md` | Silent-failure policy, retry budget, operator-only telemetry, updated acceptance row |
+| 10 | `e2e/ielts-shared-offline.spec.ts` | Asserts no failure copy and no retry control during the offline reload |
+
+Verification run:
+
+```text
+bun run typecheck                                            -> passed (no output)
+bunx eslint src/features/student/                            -> 0 errors (2 pre-existing warnings
+                                                                in untouched files)
+bunx vitest run \
+  .../application/__tests__/ieltsOfflinePreparation.test.ts \
+  .../hooks/__tests__/useIeltsOfflineContinuity.test.tsx \
+  .../ui/__tests__/IeltsOfflineStatusNotice.test.tsx \
+  .../infrastructure/__tests__/ieltsOfflineMediaCache.test.ts
+                                                             -> 4 files, 38 tests passed
+bunx vitest run src/features/student src/components/student   -> 326 files, 2894 passed, 2 skipped
+```
+
+Not run here: `bunx playwright test e2e/ielts-shared-offline.spec.ts --config
+playwright.ielts-offline.config.ts`. It needs an isolated `TEST_DATABASE_URL`,
+the seeded `ieltsSharedScheduleId` fixture and a `vite preview` build with the
+service worker; that run remains the exam-day acceptance gate.
+
+Behavioural notes beyond the plan:
+
+- An attempt aborted by an offline transition or a StrictMode remount returns
+  its budget, so a flapping connection cannot exhaust the four attempts without
+  ever completing one.
+- The retry-budget identity includes the user and candidate, so switching
+  accounts on one device never inherits another student's budget.
+- `retryAt` is internal/diagnostic only; nothing renders or polls it.

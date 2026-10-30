@@ -75,7 +75,15 @@ function fetchInit(url: string, signal: AbortSignal | undefined): RequestInit {
   // Same-origin media carries the session cookie exactly like an <img>/<audio>
   // element would; cross-origin media must be CORS-readable (never opaque).
   const sameOrigin = url.startsWith('/') || url.startsWith(globalThis.location?.origin ?? '\u0000');
-  return { credentials: sameOrigin ? 'same-origin' : 'omit', mode: sameOrigin ? 'same-origin' : 'cors', cache: 'no-store', signal: signal ?? null };
+  return {
+    credentials: sameOrigin ? 'same-origin' : 'omit',
+    mode: sameOrigin ? 'same-origin' : 'cors',
+    cache: 'no-store',
+    // Background prefetch: an answer save, a runtime poll or a heartbeat must
+    // never wait behind exam media. The 2-request cap below stays.
+    priority: 'low',
+    signal: signal ?? null,
+  };
 }
 
 async function cacheOne(
@@ -117,7 +125,7 @@ async function cacheOne(
   let response: Response;
   try {
     response = await deps.fetchImpl(descriptor.url, fetchInit(descriptor.url, signal));
-  } catch (error) {
+  } catch {
     throw fail(signal?.aborted ? 'cancelled' : 'http_error');
   }
   if (response.type === 'opaque' || response.type === 'opaqueredirect') throw fail('opaque_response');

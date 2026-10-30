@@ -26,6 +26,7 @@ COPY src/ ./src
 COPY lib/ ./lib
 COPY public/ ./public
 COPY index.html vite.config.ts tsconfig.json postcss.config.cjs ./
+COPY scripts/compress-dist.mjs ./scripts/compress-dist.mjs
 COPY services/authoring-coedit/src ./services/authoring-coedit/src
 COPY services/authoring-coedit/tsconfig.json ./services/authoring-coedit/tsconfig.json
 RUN bun run build

@@ -24,6 +24,43 @@
   warning that disconnected students may still follow the previous timetable.
   These are diagnostic and never block a command or a room transition (FR-9).
 
+## Download failures are silent (2026-10-31)
+
+The offline package is a cache-like capability. A failed download is a cache
+miss for that device, never an exam event, and it has no student-facing
+surface (plan
+`docs/superpowers/plans/2026-10-31-ielts-offline-download-silent-failure.md`,
+which supersedes the manual retry in the 2026-10-30 plan).
+
+- **Nothing is shown and nothing is announced.** No text, button, modal, toast
+  or live-region message reports a preparation failure. Real offline/save
+  status ("You're offline…", "Saved on this device…", clock-estimate wording)
+  is still shown because it is not a download error.
+- **Bounded automatic retry.** One initial attempt plus three retries for the
+  same package identity, at roughly 5s, 20s and 60s with ±20% jitter. Retries
+  happen only while `navigator.onLine` is true; a reconnect resumes
+  immediately. A new package identity (attempt, version, browser session,
+  lease, recovery run or content digest) resets the budget.
+- **Only transient reasons retry:** `shell_unavailable`, `media_failed` and
+  `storage_failed`. `quota`, `audio_unavailable`, `identity_mismatch`,
+  `manifest_invalid`, `cancelled` and `unexpected` stop immediately for that
+  identity.
+- **Retries are cheap.** Verified Cache Storage bytes are reused; a retry only
+  downloads what is missing. Media downloads are `priority: 'low'` with a
+  two-request cap so an answer save, heartbeat or runtime poll never queues
+  behind a package.
+- **No exam effect.** A failure or retry never changes the projected runtime,
+  the committed timetable, answer durability or navigation.
+- **Terminal room state stops everything.** No attempt starts (and any timer is
+  cleared) once the attempt is submitted or the runtime is completed or
+  cancelled, or when the page unmounts.
+
+Operators see this only through telemetry. Per-room, compare
+`ielts_offline_preparation` coverage with the roster's offline-ready count: a
+device that never prepares is online-only and reloads from the network. Accept
+that state per the product decision; do not add a student-facing retry without
+revisiting the plan.
+
 ## Deliberate limits (must be explained to operators and candidates)
 
 1. **Future content is on the device.** Caching lets a device hold sections
@@ -75,7 +112,7 @@ delete cached drafts.
 | Stale projection still gates answers correctly | `go test ./internal/attempts ./cmd/api` | committed schedule wins at transaction time |
 | Prepared device crosses a boundary offline | `bunx playwright test e2e/ielts-shared-offline.spec.ts --config playwright.ielts-offline.config.ts` | Reading opens with network disabled, no new duration, no `/ready` dependency |
 | Hard offline reload | same browser profile | pinned shell/content, durable draft and provisional clock restore |
-| Missing/corrupt/partial media | package/media unit tests | device reports failure, room unaffected, no unverified audio plays |
+| Missing/corrupt/partial media | package/media unit tests | device defers silently with no student-visible text, room unaffected, no unverified audio plays |
 | Evidence, replay and dupes | durability suite | exact ack clears only its write; old/late writes stay evidence |
 | Auth denial with a cached package | route/security tests | no cached admission; no staff-route access |
 | New deployment during an active exam | rehearsal with a second build | active pinned build and drafts retained |
@@ -114,7 +151,8 @@ the service worker. A skipped suite is not acceptance evidence.
 ## Telemetry
 
 Client (redacted, low-cardinality): `ielts_offline_preparation` (reason,
-latency), `ielts_offline_prepared_report`, `ielts_offline_restore` (reason),
+attempt, latency), `ielts_offline_preparation_exhausted` (reason, attempt),
+`ielts_offline_prepared_report`, `ielts_offline_restore` (reason),
 `ielts_clock_uncertain` (confidence), `ielts_section_preparation`,
 `ielts_section_boundary_save`, `ielts_boundary_checkpoint_failed`.
 No answer content, candidate names, signed URLs or credentials are emitted.
