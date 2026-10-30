@@ -35,7 +35,7 @@ const ClosingGrace = 30 * time.Second
 // reaches zero. Runtime-backed exams keep the section writable during this
 // window so the final debounced responses can reach the server before advance.
 // The server bounds arrival time; it cannot prove when an offline browser edit was typed.
-const ResponseSaveGrace = 3 * time.Second
+const ResponseSaveGrace = examruntime.ResponseSaveGrace
 
 // SATSaveGrace keeps the provider-specific delivery gate vocabulary while
 // sharing the same short response-drain window as IELTS and ACT.
@@ -152,7 +152,10 @@ type RuntimeGate struct {
 	SectionLive           bool
 	SectionPaused         bool
 	SectionStarted        bool
-	Now                   time.Time // authoritative DB time
+	// SharedSchedule is the committed IELTS timetable for
+	// TimingModelIELTSSharedSchedule, read on the writing transaction.
+	SharedSchedule *examruntime.IELTSSharedSchedule
+	Now            time.Time // authoritative DB time
 }
 
 // RuntimeLocker locks runtime + active section after the attempt.
@@ -768,6 +771,10 @@ func ensureWritable(a AttemptState, gate RuntimeGate, now time.Time) error {
 	if a.RecoveryControl != nil {
 		return ensureRecoveryWritable(a, gate, now)
 	}
+	if usesSharedSchedule(gate) {
+		gate.Now = now
+		return ensureSharedScheduleWritable(gate)
+	}
 	ieltsNaturalRoomEnd := personalIELTS && gate.Status == "completed" && gate.CompletionReason == "time_expired"
 	if gate.Status == "paused" {
 		return savePaused("Exam runtime is paused.")
@@ -824,6 +831,9 @@ func ensureQuestionAdmitted(owner QuestionOwner, gate RuntimeGate, questionID st
 func ensureQuestionAdmittedForProvider(owner QuestionOwner, gate RuntimeGate, questionID, provider string) error {
 	if owner.ModuleState == "unassigned" {
 		return moduleRejection(apperrors.CodeAttemptNotWritable, "Question is not in an assigned module for this attempt.", ReasonModuleUnassigned, questionID, owner.ModuleID)
+	}
+	if usesSharedSchedule(gate) {
+		return ensureSharedQuestionAdmitted(owner, gate, questionID)
 	}
 	windowModel := owner.TimingModel
 	if windowModel == "" {

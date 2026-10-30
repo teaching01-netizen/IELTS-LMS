@@ -695,6 +695,15 @@ func (v2Locker) Lock(ctx context.Context, q tx.Tx, scheduleID string) (attempts.
 	if timingModel.Valid {
 		gate.TimingModel = timingModel.String
 	}
+	if runtime.IsIELTSSharedSchedule(gate.TimingModel) {
+		shared, ok, err := runtime.LoadIELTSSharedScheduleInTx(ctx, q, id, " FOR SHARE")
+		if err != nil {
+			return attempts.RuntimeGate{}, err
+		}
+		if ok {
+			gate.SharedSchedule = &shared
+		}
+	}
 	if status.Valid {
 		gate.Status = status.String
 	}

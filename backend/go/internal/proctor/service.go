@@ -735,12 +735,12 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 		if stored != nil {
 			return nil
 		}
-		const selRt = "SELECT id, status, active_section_key, waiting_for_next_section, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
-		var runtimeID, status string
+		const selRt = "SELECT id, status, active_section_key, waiting_for_next_section, revision, COALESCE(timing_model, '') FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
+		var runtimeID, status, timingModel string
 		var active sql.NullString
 		var waiting sql.NullBool
 		var revision int64
-		if err := q.QueryRowContext(ctx, selRt, scheduleID).Scan(&runtimeID, &status, &active, &waiting, &revision); err != nil {
+		if err := q.QueryRowContext(ctx, selRt, scheduleID).Scan(&runtimeID, &status, &active, &waiting, &revision, &timingModel); err != nil {
 			if err == sql.ErrNoRows {
 				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Runtime not found.", HTTPStatus: 404}
 			}
@@ -837,6 +837,14 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 		// audit and the advance remain (its recorded end feeds the gap
 		// arithmetic and must not be rewritten).
 		now := time.Now().UTC()
+		shared := examruntime.IsIELTSSharedSchedule(timingModel)
+		if shared {
+			// The timetable is committed in database time; amend it in the same clock.
+			if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&now); err != nil {
+				return err
+			}
+			now = now.UTC()
+		}
 		auditReason := ""
 		if cmd.Reason != nil {
 			auditReason = *cmd.Reason
@@ -857,12 +865,23 @@ func (s *Service) EndSectionNow(ctx context.Context, actor Actor, scheduleID str
 		}
 		if nextIdx >= 0 {
 			next := secs[nextIdx]
-			adv.prepare = pk == "ielts"
+			adv.prepare = pk == "ielts" && !shared
 			adv.nextKey = next.key
 			adv.nextRemaining = (next.planned + next.ext) * 60
 			adv.startAt = now
 		} else {
 			adv.endRuntime = true
+		}
+		if shared {
+			var nextStart *time.Time
+			if nextIdx >= 0 {
+				nextStart = &now
+			}
+			if err := examruntime.AmendIELTSSharedScheduleInTx(ctx, q, runtimeID, timingModel, func(sch examruntime.IELTSSharedSchedule) (examruntime.IELTSSharedSchedule, error) {
+				return examruntime.EndIELTSSharedSection(sch, activeKey, now, nextStart)
+			}); err != nil {
+				return err
+			}
 		}
 		if err := s.applySectionAdvance(ctx, q, scheduleID, runtimeID, adv); err != nil {
 			return err
@@ -914,11 +933,11 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 		if stored != nil {
 			return nil
 		}
-		const selRt = "SELECT id, active_section_key, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
-		var runtimeID string
+		const selRt = "SELECT id, active_section_key, revision, COALESCE(timing_model, '') FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
+		var runtimeID, timingModel string
 		var active sql.NullString
 		var revision int64
-		if err := q.QueryRowContext(ctx, selRt, scheduleID).Scan(&runtimeID, &active, &revision); err != nil {
+		if err := q.QueryRowContext(ctx, selRt, scheduleID).Scan(&runtimeID, &active, &revision, &timingModel); err != nil {
 			if err == sql.ErrNoRows {
 				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Runtime not found.", HTTPStatus: 404}
 			}
@@ -949,6 +968,9 @@ func (s *Service) ExtendSection(ctx context.Context, actor Actor, scheduleID str
 			return err
 		}
 		if err := examruntime.ExtendSATModulesInTx(ctx, q, scheduleID, cmd.Minutes); err != nil {
+			return err
+		}
+		if err := examruntime.ExtendIELTSSharedInTx(ctx, q, runtimeID, timingModel, activeKey, cmd.Minutes); err != nil {
 			return err
 		}
 		if err := examruntime.SyncV2TimingInTx(ctx, q, scheduleID, runtimeID, activeKey, nil); err != nil {

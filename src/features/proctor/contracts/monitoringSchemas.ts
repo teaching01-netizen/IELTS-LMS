@@ -52,6 +52,9 @@ const studentSessionSchema = z.looseObject({
   attemptRevision: revision,
   runtimeModuleAttemptId: z.string().nullish(),
   runtimeModuleAttemptRevision: revision,
+  ieltsOfflinePreparedSection: z.string().nullish(),
+  ieltsOfflinePreparedAt: instant,
+  draftEvidencePending: z.number().nullish(),
   violations: z.array(z.unknown()).nullish(),
 });
 

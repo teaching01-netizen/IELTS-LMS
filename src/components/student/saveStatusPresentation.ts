@@ -51,3 +51,27 @@ export function getStudentSaveStatusPresentation(
       return { label: 'Saved', shortLabel: 'Saved', tone: 'success' };
   }
 }
+
+/**
+ * Compact chip wording for the IELTS shared-timetable room, where a local
+ * marker must never read as a submission receipt. One owner with the header
+ * mapping so wording cannot drift.
+ */
+export function getStudentSaveStatusChipLabel(status: StudentAutoSaveStatus): string {
+  switch (status) {
+    case 'saving':
+      return 'Saving…';
+    case 'syncing':
+      return 'Syncing…';
+    case 'saved_locally':
+      return 'Saved on this device';
+    case 'offline':
+      return 'Offline · saved on this device';
+    case 'needs_recovery':
+      return 'Needs review · kept on this device';
+    case 'error':
+      return 'Not saved · retrying';
+    case 'saved':
+      return 'Saved to server';
+  }
+}

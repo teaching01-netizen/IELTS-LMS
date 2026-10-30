@@ -94,6 +94,9 @@ const MODULE_SCOPED_CLOSE_REASONS: Record<string, true> = {
   MODULE_DEADLINE_EXPIRED: true,
   MODULE_UNASSIGNED: true,
   MODULE_NOT_STARTED: true,
+  // IELTS shared timetable: the server closed this section's window. Its
+  // drafts become evidence; the next section keeps saving normally.
+  IELTS_SECTION_CLOSED: true,
 };
 
 export interface AcceptResponseOptions {
@@ -188,6 +191,17 @@ function readBlockedOriginLease(pending: PendingResponseState): number {
 }
 
 type SnapshotResponse = ResponseSnapshotV2 | ResponseAcknowledgementV2[];
+
+function confirmedAnswersKey(attemptId: string): string {
+  return `v2_confirmed_answers:${attemptId}`;
+}
+
+interface PersistedConfirmedAnswer {
+  payload: ResponsePayload;
+  serverRevision: number;
+  contentHash: string;
+  clientVersion: number;
+}
 
 function checkpointKey(attemptId: string, questionId: string): string {
   return `${CHECKPOINT_PREFIX}${encodeURIComponent(attemptId)}:${encodeURIComponent(questionId)}`;
@@ -544,6 +558,15 @@ export class DurableResponseEngine {
     return this.quarantined;
   }
 
+  /**
+   * Quarantined drafts whose evidence batch the server has not acknowledged.
+   * Local copies stay either way; only a zero count means the package can be
+   * discarded after a confirmed receipt (INV-8).
+   */
+  public getUnrecordedEvidenceCount(): number {
+    return this.quarantined.filter((entry) => !this.evidenceRecorded.has(entry.writeId)).length;
+  }
+
   /** Scopes the server closed; their drafts are kept as evidence and never sent. */
   public getClosedScopes(): ReadonlyMap<string, string> {
     this.restoreClosedScopes();
@@ -617,6 +640,26 @@ export class DurableResponseEngine {
   /** Synchronously stop accepting edits for a module before async close work. */
   public freezeScope(scope: string): void {
     this.frozenScopes.add(scope);
+  }
+
+  /**
+   * Network-independent boundary barrier: freezes `scope` and confirms every
+   * visible answer in it is recoverable from this device's storage. It never
+   * fetches, drains or waits for transport, so a section boundary can be
+   * crossed offline. (flush() is not this barrier: it may wait on network.)
+   */
+  public async checkpointScopeLocally(scope: string): Promise<{ durable: true } | { durable: false; reason: string }> {
+    this.freezeScope(scope);
+    for (const [questionId, state] of this.states) {
+      const pending = state.pending;
+      if (this.scopeOf?.(questionId) !== scope || !pending) continue;
+      if (pending.durability === "indexeddb") continue;
+      if (this.readCheckpointSync(questionId)?.writeId === pending.writeId) continue;
+      if (this.checkpointIntentSync(questionId, pending)) continue;
+      this.emitDurabilityEvent("scope_checkpoint_failed", { scope });
+      return { durable: false, reason: "storage_unavailable" };
+    }
+    return { durable: true };
   }
 
   /**
@@ -1546,6 +1589,32 @@ export class DurableResponseEngine {
       }
     }
 
+    // Acknowledged answers are not pending writes, but a fully offline reload
+    // has no snapshot to show them. Restore the last confirmed payloads so the
+    // candidate keeps seeing saved work; pending state still wins visibility.
+    for (const [questionId, entry] of this.readConfirmedAnswers()) {
+      const existing = this.states.get(questionId);
+      if (existing?.pending) continue;
+      const server = serverByQuestion.get(questionId);
+      if (server && server.clientVersion > entry.clientVersion) continue;
+      this.states.set(questionId, {
+        confirmed: {
+          payload: clonePayload(entry.payload),
+          serverRevision: entry.serverRevision,
+          contentHash: entry.contentHash,
+        },
+        pending: null,
+      });
+      this.versionTrackers.set(
+        questionId,
+        Math.max(this.versionTrackers.get(questionId) ?? 0, entry.clientVersion)
+      );
+      this.confirmedVersions.set(
+        questionId,
+        Math.max(this.confirmedVersions.get(questionId) ?? 0, entry.clientVersion)
+      );
+    }
+
     // First recovery seeds version ordering exactly once. Later recoveries
     // (takeover/bootstrap refresh) only raise the floor, never regress it.
     this.markRecoveryInitialized();
@@ -1830,7 +1899,72 @@ export class DurableResponseEngine {
     }
   }
 
-    private installServerResponse(response: ResponseAcknowledgementV2): void {
+    /** Last server-confirmed answer per question survives a reload offline. */
+  private persistConfirmedAnswer(response: ResponseAcknowledgementV2): void {
+    try {
+      if (typeof window === "undefined" || !window.localStorage) return;
+      const key = confirmedAnswersKey(this.attemptId);
+      let stored: Record<string, PersistedConfirmedAnswer> = {};
+      try {
+        const raw = window.localStorage.getItem(key);
+        const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          stored = parsed as Record<string, PersistedConfirmedAnswer>;
+        }
+      } catch {
+        stored = {};
+      }
+      stored[response.questionId] = {
+        payload: clonePayload(response.canonicalResponse),
+        serverRevision: response.serverRevision,
+        contentHash: response.contentHash,
+        clientVersion: response.clientVersion,
+      };
+      window.localStorage.setItem(key, JSON.stringify(stored));
+    } catch {
+      // A storage failure cannot make an acknowledged write unacknowledged, but
+      // staff need the lost offline-copy signal (never answer content).
+      this.emitDurabilityEvent("confirmed_answer_persist_failed", { reason: "STORAGE_UNAVAILABLE" });
+    }
+  }
+
+  private readConfirmedAnswers(): Map<string, PersistedConfirmedAnswer> {
+    const out = new Map<string, PersistedConfirmedAnswer>();
+    try {
+      if (typeof window === "undefined" || !window.localStorage) return out;
+      const raw = window.localStorage.getItem(confirmedAnswersKey(this.attemptId));
+      if (!raw) return out;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
+      for (const [questionId, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!questionId || !value || typeof value !== "object") continue;
+        const entry = value as Partial<PersistedConfirmedAnswer>;
+        if (
+          typeof entry.serverRevision !== "number" ||
+          typeof entry.contentHash !== "string" ||
+          typeof entry.clientVersion !== "number" ||
+          !Number.isSafeInteger(entry.clientVersion) ||
+          entry.clientVersion < 0 ||
+          !entry.payload ||
+          typeof entry.payload !== "object" ||
+          Array.isArray(entry.payload)
+        ) {
+          continue;
+        }
+        out.set(questionId, {
+          payload: clonePayload(entry.payload),
+          serverRevision: entry.serverRevision,
+          contentHash: entry.contentHash,
+          clientVersion: entry.clientVersion,
+        });
+      }
+    } catch {
+      // Corrupt local metadata is ignored; the server remains authoritative.
+    }
+    return out;
+  }
+
+  private installServerResponse(response: ResponseAcknowledgementV2): void {
     if (!response.questionId || !Number.isSafeInteger(response.clientVersion)) return;
     this.versionTrackers.set(
       response.questionId,
@@ -1858,6 +1992,7 @@ export class DurableResponseEngine {
       },
       pending: existing?.pending ?? null,
     });
+    this.persistConfirmedAnswer(response);
   }
 
   private async submitInternal(
@@ -2470,6 +2605,7 @@ export class DurableResponseEngine {
         confirmed: nextConfirmed,
         pending: existing?.pending ?? null,
       });
+      this.persistConfirmedAnswer(acknowledgement);
     }
 
     const existing = this.states.get(acknowledgement.questionId);
@@ -3182,7 +3318,9 @@ export class DurableResponseEngine {
    */
   private isRetryableConflictReason(error: unknown): boolean {
     const reason = this.extractConflictReason(error);
-    return reason === "SECTION_CLOCK_MISSING" || reason === "SAVE_PAUSED";
+    // IELTS_SECTION_NOT_OPEN: this device's projected clock opened the
+    // section a moment before the server did; the same write is retried.
+    return reason === "SECTION_CLOCK_MISSING" || reason === "SAVE_PAUSED" || reason === "IELTS_SECTION_NOT_OPEN";
   }
 
   /**
@@ -3227,6 +3365,9 @@ export class DurableResponseEngine {
     this.lastError = `MODULE_CLOSED:${scope}`;
     this.emitDurabilityEvent("module_scope_closed", { scope, reason, count: commands.size });
     this.notifyStatusChange();
+    // IELTS: hand the closed section's drafts to staff review now, while this
+    // credential is live. Evidence never becomes a scored answer.
+    if (reason === "IELTS_SECTION_CLOSED" && commands.size > 0) void this.recordRetainedEvidence();
   }
 
   /** Read details.reason (ApiClient surfaces backend details there). */

@@ -5,6 +5,7 @@
  * All UI and business logic should work with these types, not the legacy Exam type.
  */
 
+import type { IeltsSharedSchedule } from "../features/student/domain/exam-session/ieltsSharedSchedule";
 import type { ExamState, ExamConfig, ExamType, ModuleType } from "../types";
 import type { ExamProviderKey } from "../features/exam-authoring/contracts/provider";
 import type { SatPublishScope } from "../features/exam-authoring/contracts/assessment";
@@ -301,7 +302,13 @@ export type TimingModel =
   | "cohort_section_v3"
   | "sat_personal_v1"
   | "ielts_personal_v1"
-  | "ielts_cohort_personal_v2";
+  | "ielts_cohort_personal_v2"
+  | "ielts_shared_schedule_v1";
+
+/** The committed offline-capable IELTS room timetable. */
+export function isIeltsSharedScheduleTimingModel(model: unknown): boolean {
+  return model === "ielts_shared_schedule_v1";
+}
 
 /** Both IELTS personal models use per-attempt readiness and section deadlines. */
 export function isIeltsPersonalTimingModel(model: unknown): boolean {
@@ -464,6 +471,8 @@ export interface ExamSessionRuntime {
    * only). Null on the summary and student reads, which do not carry it.
    */
   examPlan?: ExamPlanSection[] | null | undefined;
+  /** Committed room timetable (`ielts_shared_schedule_v1` only), validated. */
+  ieltsSharedSchedule?: IeltsSharedSchedule | null | undefined;
   proctorPresence?: ProctorPresence[] | undefined;
   revision?: number | null | undefined;
   createdAt: string;

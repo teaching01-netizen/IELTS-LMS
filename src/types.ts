@@ -855,6 +855,15 @@ export interface StudentSession {
   ieltsPersonalSectionKey?: ModuleType | undefined;
   ieltsPersonalDeadlineAt?: string | null | undefined;
   ieltsPersonalTimeRemainingSeconds?: number | null | undefined;
+  /**
+   * Shared-timetable offline continuity, diagnostic only. `prepared` is the
+   * section whose complete offline package this device verified; it never
+   * holds or advances the room clock. `draftEvidencePending` counts retained,
+   * unscored drafts awaiting staff review.
+   */
+  ieltsOfflinePreparedSection?: ModuleType | null | undefined;
+  ieltsOfflinePreparedAt?: string | null | undefined;
+  draftEvidencePending?: number | undefined;
   violations: Violation[];
   warnings: number;
   lastActivity: string;

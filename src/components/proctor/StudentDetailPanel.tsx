@@ -242,6 +242,15 @@ export function StudentDetailPanel({
                     IELTS {student.ieltsPersonalSectionKey ?? runtimeSection} · {student.ieltsPersonalStatus === 'unable' ? 'unable to start' : student.ieltsPersonalStatus}
                   </p>
                 ) : null}
+                {(student.draftEvidencePending ?? 0) > 0 ? (
+                  <p className="mt-1 text-xs font-medium text-amber-700">
+                    Needs review · {student.draftEvidencePending} retained answer{(student.draftEvidencePending ?? 0) === 1 ? '' : 's'}
+                  </p>
+                ) : student.ieltsOfflinePreparedSection ? (
+                  <p className="mt-1 text-xs font-medium text-emerald-700" title="This device verified its complete offline package for the section">
+                    Offline ready · {student.ieltsOfflinePreparedSection}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Time left</p>

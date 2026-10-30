@@ -421,7 +421,7 @@ func loadStudentRuntimeContext(ctx context.Context, db *sql.DB, scheduleID strin
 		return nil, err
 	}
 	if examruntime.IsIELTSPersonal(runtime.TimingModel) && len(attemptIDs) > 0 && strings.TrimSpace(attemptIDs[0]) != "" {
-		if err := projectIELTSPersonalRuntime(ctx, db, runtime.ID, attemptIDs[0], out); err != nil {
+		if err := projectIELTSPersonalRuntime(ctx, db, runtime.ID, attemptIDs[0], runtime.TimingModel, out); err != nil {
 			return nil, err
 		}
 	}
@@ -432,12 +432,13 @@ type ieltsRuntimeSectionProjection struct {
 	key, label, state                                   string
 	order, minutes, gap, extension, pausedSeconds       int
 	start, deadline, expected, preparationEnd, pausedAt sql.NullTime
+	roomRelease                                         sql.NullTime
 }
 
-func projectIELTSPersonalRuntime(ctx context.Context, db *sql.DB, runtimeID, attemptID string, view map[string]any) error {
+func projectIELTSPersonalRuntime(ctx context.Context, db *sql.DB, runtimeID, attemptID, timingModel string, view map[string]any) error {
 	rows, err := db.QueryContext(ctx, `
 		SELECT rs.section_key, rs.label, rs.section_order, rs.planned_duration_minutes,
-		       rs.gap_after_minutes, rs.extension_minutes, rs.accumulated_paused_seconds,
+		       rs.gap_after_minutes, rs.extension_minutes, rs.accumulated_paused_seconds, rs.actual_start_at,
 		       COALESCE(t.state, ''), t.started_at, t.deadline_at,
 		       t.expected_start_at, t.preparation_deadline_at, t.paused_at
 		FROM exam_session_runtime_sections rs
@@ -453,7 +454,7 @@ func projectIELTSPersonalRuntime(ctx context.Context, db *sql.DB, runtimeID, att
 	for rows.Next() {
 		var section ieltsRuntimeSectionProjection
 		if err := rows.Scan(&section.key, &section.label, &section.order, &section.minutes,
-			&section.gap, &section.extension, &section.pausedSeconds, &section.state,
+			&section.gap, &section.extension, &section.pausedSeconds, &section.roomRelease, &section.state,
 			&section.start, &section.deadline, &section.expected, &section.preparationEnd, &section.pausedAt); err != nil {
 			return err
 		}
@@ -580,9 +581,21 @@ func projectIELTSPersonalRuntime(ctx context.Context, db *sql.DB, runtimeID, att
 	if !selectedSection.expected.Valid {
 		if selected == 0 {
 			selectedSection.expected = actualStart
-		} else if sections[selected-1].deadline.Valid {
-			v := sections[selected-1].deadline.Time.Add(time.Duration(sections[selected-1].gap) * time.Minute)
-			selectedSection.expected = sql.NullTime{Time: v, Valid: true}
+		} else if previous := sections[selected-1]; previous.deadline.Valid {
+			// Same eligibility as the /ready mutation; an unreleased V2 section
+			// advertises no expected start.
+			if examruntime.IsIELTSCohortPersonal(timingModel) {
+				var release *time.Time
+				if selectedSection.roomRelease.Valid {
+					release = &selectedSection.roomRelease.Time
+				}
+				if v, ok := examruntime.IELTSNextSectionEligibleAt(previous.deadline.Time, previous.gap, release); ok {
+					selectedSection.expected = sql.NullTime{Time: v, Valid: true}
+				}
+			} else {
+				v := previous.deadline.Time.Add(time.Duration(previous.gap) * time.Minute)
+				selectedSection.expected = sql.NullTime{Time: v, Valid: true}
+			}
 		}
 	}
 	if !selectedSection.preparationEnd.Valid && selectedSection.expected.Valid {
@@ -783,6 +796,14 @@ func studentSessionContext(ctx context.Context, app *App, sess *auth.Session, sc
 	}
 	if admission.Token != "" {
 		context["attemptCredential"] = map[string]any{"attemptToken": admission.Token, "expiresAt": admission.ExpiresAt.UTC(), "credentialPolicy": admission.CredentialPolicy}
+		// Only the admitted writer receives the offline package descriptor.
+		manifest, err := buildIELTSOfflineManifest(ctx, app.DB, runtime, version, attemptID, clientSessionID, admission.LeaseEpoch)
+		if err != nil {
+			return nil, err
+		}
+		if manifest != nil {
+			context["offlineManifest"] = manifest
+		}
 	}
 	return context, nil
 }

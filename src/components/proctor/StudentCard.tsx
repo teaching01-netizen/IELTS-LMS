@@ -54,6 +54,11 @@ export const StudentCard = React.memo(function StudentCard({
   const personalSectionActive = Boolean(
     session.ieltsPersonalStatus && session.ieltsPersonalSectionKey,
   );
+  // Shared-timetable continuity: distinct from the presence status. Evidence
+  // means retained, unscored drafts awaiting staff review; prepared means the
+  // device verified its complete offline package for that section.
+  const evidencePending = session.draftEvidencePending ?? 0;
+  const offlinePreparedSection = session.ieltsOfflinePreparedSection ?? null;
   const displayedSection = personalSectionActive
     ? session.ieltsPersonalSectionKey
     : runtimeSection;
@@ -119,6 +124,15 @@ export const StudentCard = React.memo(function StudentCard({
         {personalSectionActive ? (
           <p className={`mt-1 truncate text-xs font-medium capitalize ${session.ieltsPersonalStatus === 'unable' ? 'text-rose-700' : session.ieltsPersonalStatus === 'delayed' || session.ieltsPersonalStatus === 'reconnecting' ? 'text-amber-700' : 'text-indigo-700'}`}>
             IELTS · {session.ieltsPersonalStatus === 'unable' ? 'unable to start' : session.ieltsPersonalStatus}
+          </p>
+        ) : null}
+        {evidencePending > 0 ? (
+          <p className="mt-1 truncate text-xs font-medium text-amber-700" title={`${evidencePending} retained answer${evidencePending === 1 ? '' : 's'} awaiting staff review`}>
+            Needs review · {evidencePending}
+          </p>
+        ) : offlinePreparedSection ? (
+          <p className="mt-1 truncate text-xs font-medium text-emerald-700" title="This device verified its complete offline package for the section">
+            Offline ready · {offlinePreparedSection}
           </p>
         ) : null}
         <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">

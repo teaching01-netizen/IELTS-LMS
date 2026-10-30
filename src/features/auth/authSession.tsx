@@ -160,6 +160,29 @@ export function resolvePostLoginPath(
   return resolveRoleLandingPath(role);
 }
 
+const identityFenceListeners = new Set<() => void>();
+const identityResolvedListeners = new Set<(userId: string) => void>();
+
+function notifyIdentityFenced(): void {
+  for (const listener of identityFenceListeners) listener();
+}
+
+/**
+ * Runs on an explicit logout (this or another tab) or an account switch,
+ * never on a mere session expiry.
+ * Offline exam packages use it to block reuse without deleting unsent work.
+ */
+export function onAuthIdentityFenced(listener: () => void): () => void {
+  identityFenceListeners.add(listener);
+  return () => identityFenceListeners.delete(listener);
+}
+
+/** Runs whenever an authenticated session is confirmed by the server. */
+export function onAuthIdentityResolved(listener: (userId: string) => void): () => void {
+  identityResolvedListeners.add(listener);
+  return () => identityResolvedListeners.delete(listener);
+}
+
 export function AuthSessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(() => ({
     ...initialAuthState,
@@ -206,7 +229,10 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
 
   const acceptSession = useCallback(
     (next: AuthSession | null): AuthSession | null => {
-      if (isIdentityChange(stateRef.current.session, next)) fenceIdentity();
+      const previous = stateRef.current.session;
+      if (previous && next && previous.user.id !== next.user.id) notifyIdentityFenced();
+      if (isIdentityChange(previous, next)) fenceIdentity();
+      if (next) for (const listener of identityResolvedListeners) listener(next.user.id);
       cancelRecovery();
       recoveryAttemptRef.current = 0;
       transition({ type: 'sessionResolved', session: next });
@@ -302,6 +328,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
     async (scope: LogoutScope) => {
       const { intent, persisted } = writeLogoutIntent(scope);
       memoryIntentRef.current = { intent, persisted };
+      notifyIdentityFenced();
       // Hide private UI before any network round trip.
       fenceIdentity();
       transition({ type: 'logoutStarted', scope, durable: persisted });
@@ -403,6 +430,7 @@ export function AuthSessionProvider({ children }: { children: ReactNode }) {
         // Another tab is signing out: hide identity now; that tab completes it.
         const intent = readLogoutIntent();
         if (intent && stateRef.current.status !== 'logoutPending') {
+          notifyIdentityFenced();
           fenceIdentity();
           transition({ type: 'logoutStarted', scope: intent.scope });
         }

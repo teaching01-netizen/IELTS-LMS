@@ -100,6 +100,7 @@ type studentManifest struct {
 	PublishedVersionID                string `json:"publishedVersionId"`
 	ScheduleID                        string `json:"scheduleId"`
 	IELTSPersonalTimingScheduleID     string `json:"ieltsPersonalTimingScheduleId"`
+	IELTSSharedScheduleID             string `json:"ieltsSharedScheduleId"`
 	IELTSPersonalLoadScheduleID       string `json:"ieltsPersonalLoadScheduleId"`
 	IELTSPersonalRecoveryScheduleID   string `json:"ieltsPersonalRecoveryScheduleId"`
 	IELTSPersonalResilienceScheduleID string `json:"ieltsPersonalResilienceScheduleId"`
@@ -242,6 +243,7 @@ func run(ctx context.Context) error {
 		Student: studentManifest{
 			ExamID: studentFixture.examID, ExamSlug: studentSlug, PublishedVersionID: studentFixture.publishedVersionID,
 			ScheduleID: studentFixture.liveScheduleID, IELTSPersonalTimingScheduleID: studentFixture.ieltsPersonalTimingScheduleID,
+			IELTSSharedScheduleID:             studentFixture.ieltsSharedScheduleID,
 			IELTSPersonalLoadScheduleID:       studentFixture.ieltsPersonalLoadScheduleID,
 			IELTSPersonalRecoveryScheduleID:   studentFixture.ieltsPersonalRecoveryScheduleID,
 			IELTSPersonalResilienceScheduleID: studentFixture.ieltsPersonalResilienceScheduleID,
@@ -573,7 +575,7 @@ func mintOpenLink(ctx context.Context, db *sql.DB, examID, publishedVersionID, s
 }
 
 type studentFixture struct {
-	examID, publishedVersionID, liveScheduleID, ieltsPersonalTimingScheduleID, ieltsPersonalLoadScheduleID, ieltsPersonalRecoveryScheduleID, ieltsPersonalResilienceScheduleID, ieltsPersonalSubmissionScheduleID, ieltsPersonalControlsScheduleID, precheckScheduleID, proctorWorkflowScheduleID, flushScheduleID, submissionScheduleID, lifecycleScheduleID, selfPacedScheduleID string
+	examID, publishedVersionID, liveScheduleID, ieltsPersonalTimingScheduleID, ieltsSharedScheduleID, ieltsPersonalLoadScheduleID, ieltsPersonalRecoveryScheduleID, ieltsPersonalResilienceScheduleID, ieltsPersonalSubmissionScheduleID, ieltsPersonalControlsScheduleID, precheckScheduleID, proctorWorkflowScheduleID, flushScheduleID, submissionScheduleID, lifecycleScheduleID, selfPacedScheduleID string
 }
 
 type publishedFixtureExam struct {
@@ -701,6 +703,13 @@ func seedStudent(ctx context.Context, db *sql.DB, examService *exams.Service, sc
 	if _, err := db.ExecContext(ctx, "UPDATE exam_schedules SET ielts_timing_model = 'ielts_cohort_personal_v2' WHERE id = ?", ieltsPersonalTiming.ID); err != nil {
 		return studentFixture{}, fmt.Errorf("select IELTS personal timing for E2E schedule: %w", err)
 	}
+	ieltsShared, err := createAssignedSchedule("Backend E2E IELTS Shared Offline", false)
+	if err != nil {
+		return studentFixture{}, err
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE exam_schedules SET ielts_timing_model = 'ielts_shared_schedule_v1' WHERE id = ?", ieltsShared.ID); err != nil {
+		return studentFixture{}, fmt.Errorf("select IELTS shared schedule for E2E schedule: %w", err)
+	}
 	ieltsPersonalLoad, err := createAssignedSchedule("Backend E2E IELTS Personal Timing Load", false)
 	if err != nil {
 		return studentFixture{}, err
@@ -735,7 +744,8 @@ func seedStudent(ctx context.Context, db *sql.DB, examService *exams.Service, sc
 	}
 	return studentFixture{
 		examID: examID, publishedVersionID: publishedVersionID, liveScheduleID: live.ID,
-		ieltsPersonalTimingScheduleID: ieltsPersonalTiming.ID, ieltsPersonalLoadScheduleID: ieltsPersonalLoad.ID,
+		ieltsPersonalTimingScheduleID: ieltsPersonalTiming.ID, ieltsSharedScheduleID: ieltsShared.ID,
+		ieltsPersonalLoadScheduleID:       ieltsPersonalLoad.ID,
 		ieltsPersonalRecoveryScheduleID:   ieltsPersonalRecovery.ID,
 		ieltsPersonalResilienceScheduleID: ieltsPersonalResilience.ID,
 		ieltsPersonalSubmissionScheduleID: ieltsPersonalSubmission.ID,

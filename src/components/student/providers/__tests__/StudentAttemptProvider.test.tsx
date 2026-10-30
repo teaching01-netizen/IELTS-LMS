@@ -9,6 +9,7 @@ import type { ExamState } from '../../../../types';
 import type { StudentAttempt, StudentPreCheckResult } from '../../../../types/studentAttempt';
 import { StudentAttemptProvider, useStudentAttempt } from '../StudentAttemptProvider';
 import { StudentRuntimeProvider } from '../StudentRuntimeProvider';
+import { DurableResponseEngine } from '../../../../shared/durability/DurableResponseEngine';
 
 const transportMocks = vi.hoisted(() => ({
   transport: {
@@ -409,6 +410,35 @@ describe('StudentAttemptProvider', () => {
     });
 
     expect(flushed).toBe(false);
+  });
+
+  it('requires the engine boundary invariant only for boundary flushes', async () => {
+    const settled = vi
+      .spyOn(DurableResponseEngine.prototype, 'assertBoundarySettled')
+      .mockImplementation(() => {
+        throw new Error('Blocked drafts need attention before submit.');
+      });
+    const harness = renderAttemptHarness(createAttemptSnapshot(), { persistenceEnabled: true });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    let background = false;
+    let boundary = true;
+    await act(async () => {
+      background = await harness.current.actions.flushPending();
+      boundary = await harness.current.actions.flushPending({ boundary: true });
+    });
+
+    expect(background).toBe(true);
+    expect(boundary).toBe(false);
+    expect(settled).toHaveBeenCalled();
+
+    settled.mockImplementation(() => undefined);
+    await act(async () => {
+      boundary = await harness.current.actions.flushPending({ boundary: true });
+    });
+    expect(boundary).toBe(true);
   });
 
   it('reports lease takeover as unavailable when persistence is disabled', async () => {

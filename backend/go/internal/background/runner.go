@@ -2,6 +2,10 @@
 // reconciliation, terminal repairs + audits, grading projection, retention
 // and media cleanup.
 //
+// Room section reconciliation runs in its own loop every
+// RUNTIME_AUTO_ADVANCE_TICK_MS (RUNTIME_AUTO_ADVANCE_ENABLED is currently
+// unused; authored autoSubmit remains the business-policy gate).
+//
 // Hot cycle (every worker fallback interval): bounded outbox drain (at most
 // 20 claim batches of at most OUTBOX_BATCH_SIZE rows under a 60s lease) plus
 // the grading projection when GRADING_PROJECTION_ENABLED. SAT timeout
@@ -176,6 +180,8 @@ func (w *Runner) run(stop, work context.Context, timeoutOnly bool) {
 		<-stop.Done()
 		return
 	}
+	jobs.Add(1)
+	go func() { defer jobs.Done(); w.runSectionReconcileLoop(stop, work) }()
 	// Recovery and bounded maintenance run once on each activation.
 	runBounded(work, func(ctx context.Context) { w.runHotCycle(ctx, time.Now().UTC()) })
 	if stop.Err() == nil {
@@ -242,6 +248,62 @@ func (w *Runner) runPersonalTimeoutReconcileLoop(ctx, work context.Context) {
 			}
 		}
 	}
+}
+
+// sectionReconcileInterval clamps RUNTIME_AUTO_ADVANCE_TICK_MS: nonpositive
+// means the 1s default, and nothing schedules faster than 250ms.
+func sectionReconcileInterval(tickMs int) time.Duration {
+	if tickMs <= 0 {
+		return time.Second
+	}
+	return max(time.Duration(tickMs)*time.Millisecond, 250*time.Millisecond)
+}
+
+// runSectionReconcileLoop owns room section advance on its own sequential
+// cadence so outbox or maintenance duration cannot postpone it. A Ticker drops
+// missed ticks, so a slow sweep never causes a catch-up storm.
+func (w *Runner) runSectionReconcileLoop(ctx, work context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	runBounded(work, func(ctx context.Context) { _ = w.runSectionReconcileCycle(ctx) })
+	ticker := time.NewTicker(sectionReconcileInterval(w.cfg.RuntimeAutoAdvanceTickMs))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if ctx.Err() != nil {
+				return
+			}
+			runBounded(work, func(ctx context.Context) { _ = w.runSectionReconcileCycle(ctx) })
+		}
+	}
+}
+
+// runSectionReconcileCycle advances expired room sections at database time.
+func (w *Runner) runSectionReconcileCycle(ctx context.Context) error {
+	if w.proctor == nil {
+		return nil
+	}
+	defer observeJobDuration("reconcile_expired_sections", time.Now())
+	var serverNow time.Time
+	if err := w.db.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&serverNow); err != nil {
+		log.Printf("worker: ReconcileExpiredSections clock query failed: %v", err)
+		telemetry.IncCounter(telemetry.MJobFailures, "job", "reconcile_expired_sections")
+		return err
+	}
+	outcomes, err := w.proctor.ReconcileExpiredSections(ctx, serverNow, maintenance.SATRepairBatch, w.workerID)
+	if err != nil {
+		log.Printf("worker: ReconcileExpiredSections error: %v", err)
+		telemetry.IncCounter(telemetry.MJobFailures, "job", "reconcile_expired_sections")
+		return err
+	}
+	if len(outcomes) > 0 {
+		log.Printf("worker: ReconcileExpiredSections advanced=%d", len(outcomes))
+	}
+	return nil
 }
 
 // A database outage must not make parking wait forever for an old cycle.
@@ -350,20 +412,6 @@ func (w *Runner) runHotCycle(ctx context.Context, at time.Time) (cycleErr error)
 	defer observeJobDuration("hot", time.Now())
 	if w.db != nil {
 		observeWorkerPoolStats(w.db)
-	}
-	if w.proctor != nil {
-		var serverNow time.Time
-		if err := w.db.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&serverNow); err != nil {
-			cycleErr = errors.Join(cycleErr, err)
-			log.Printf("worker: ReconcileExpiredSections clock query failed: %v", err)
-			telemetry.IncCounter(telemetry.MJobFailures, "job", "reconcile_expired_sections")
-		} else if outcomes, err := w.proctor.ReconcileExpiredSections(ctx, serverNow, maintenance.SATRepairBatch, w.workerID); err != nil {
-			cycleErr = errors.Join(cycleErr, err)
-			log.Printf("worker: ReconcileExpiredSections error: %v", err)
-			telemetry.IncCounter(telemetry.MJobFailures, "job", "reconcile_expired_sections")
-		} else if len(outcomes) > 0 {
-			log.Printf("worker: ReconcileExpiredSections advanced=%d", len(outcomes))
-		}
 	}
 	// SAT access-code start: an expired, unsettled comparison reservation
 	// is conservatively counted as a failed guess (it may have compared).

@@ -6,7 +6,8 @@ import {MotionConfig} from 'motion/react';
 import {router} from './app/router/createRouter';
 import {ErrorBoundary} from './app/error/ErrorBoundary';
 import {queryClient} from './app/data/queryClient';
-import {AuthSessionProvider} from './features/auth/authSession';
+import {AuthSessionProvider, onAuthIdentityFenced, onAuthIdentityResolved} from './features/auth/authSession';
+import {bindIeltsOfflinePackagesToAuth} from './features/student/infrastructure/ieltsOfflinePackageStore';
 import {ConnectionRecoveryNotice} from './app/ConnectionRecoveryNotice';
 import './index.css';
 
@@ -24,6 +25,9 @@ router.subscribe((state) => {
   }
   lastLocationKey = key;
 });
+
+// Offline IELTS packages follow the account: a logout blocks them (never deletes unsent work).
+bindIeltsOfflinePackagesToAuth({onAuthIdentityFenced, onAuthIdentityResolved});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

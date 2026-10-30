@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { useStudentSubmissionOrchestration } from "../useStudentSubmissionOrchestration";
 
@@ -425,5 +426,100 @@ describe("useStudentSubmissionOrchestration", () => {
     expect(flushPending).toHaveBeenCalledTimes(1);
     expect(submitModule).not.toHaveBeenCalled();
     expect(transitionBlocking).toHaveBeenCalledTimes(1);
+  });
+
+  describe("boundarySave", () => {
+    const render = (flushBarrier: () => Promise<{ kind: "ready" } | { kind: "blocked"; reason: "durability_failed" }>) =>
+      renderHook(
+        ({ attemptId }: { attemptId: string }) =>
+          useStudentSubmissionOrchestration({
+            runtimeState: { runtimeBacked: true, runtimeStatus: "live", currentModule: "reading" },
+            runtimeStateRef: { current: { phase: "exam", currentModule: "reading" } },
+            attemptId,
+            runtimeCompletionVerified: false,
+            shouldRenderPostExam: false,
+            reconcileLiveAnswerCacheNow: vi.fn(),
+            commitWritingDraft: vi.fn(),
+            attemptActions: { flushPending: vi.fn(), submitAttempt: vi.fn() },
+            runtimeActions: { transitionBlocking: vi.fn(), submitModule: vi.fn() },
+            submissionCommands: {
+              flushBarrier: vi.fn(flushBarrier),
+              requestSubmit: vi.fn(),
+              submitAfterBarrier: vi.fn(),
+            },
+          }),
+        { initialProps: { attemptId: "attempt-a" } }
+      );
+
+    it("records the outgoing section as saved only after the barrier succeeds", async () => {
+      let release: () => void = () => {};
+      const { result } = render(
+        () => new Promise((resolve) => { release = () => resolve({ kind: "ready" }); })
+      );
+      let pending: Promise<void> = Promise.resolve();
+      act(() => {
+        pending = result.current.flushAndSubmitCurrentModuleWithRetry("runtime:reading");
+      });
+      expect(result.current.boundarySave).toEqual({ sectionKey: "reading", status: "saving" });
+      await act(async () => {
+        release();
+        await pending;
+      });
+      expect(result.current.boundarySave).toEqual({ sectionKey: "reading", status: "saved" });
+    });
+
+    it("re-proves a section without submitting and resets on attempt change", async () => {
+      const { result, rerender } = render(async () => ({ kind: "ready" }));
+      await act(async () => {
+        await result.current.confirmBoundarySaved("listening");
+      });
+      expect(result.current.boundarySave).toEqual({ sectionKey: "listening", status: "saved" });
+      rerender({ attemptId: "attempt-b" });
+      expect(result.current.boundarySave).toBeNull();
+    });
+
+    it("keeps working after a StrictMode dev remount", async () => {
+      const flushBarrier = vi.fn(async () => ({ kind: "ready" as const }));
+      const { result } = renderHook(
+        () =>
+          useStudentSubmissionOrchestration({
+            runtimeState: { runtimeBacked: true, runtimeStatus: "live", currentModule: "reading" },
+            runtimeStateRef: { current: { phase: "exam", currentModule: "reading" } },
+            attemptId: "attempt-strict",
+            runtimeCompletionVerified: false,
+            shouldRenderPostExam: false,
+            reconcileLiveAnswerCacheNow: vi.fn(),
+            commitWritingDraft: vi.fn(),
+            attemptActions: { flushPending: vi.fn(), submitAttempt: vi.fn() },
+            runtimeActions: { transitionBlocking: vi.fn(), submitModule: vi.fn() },
+            submissionCommands: { flushBarrier, requestSubmit: vi.fn(), submitAfterBarrier: vi.fn() },
+          }),
+        { wrapper: StrictMode }
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await result.current.confirmBoundarySaved("listening");
+      });
+      expect(flushBarrier).toHaveBeenCalledTimes(1);
+      expect(result.current.boundarySave).toEqual({ sectionKey: "listening", status: "saved" });
+    });
+
+    it("reports attention after bounded barrier failures", async () => {
+      vi.useFakeTimers();
+      try {
+        const { result } = render(async () => ({ kind: "blocked", reason: "durability_failed" }));
+        let pending: Promise<void> = Promise.resolve();
+        act(() => {
+          pending = result.current.confirmBoundarySaved("reading");
+        });
+        await act(async () => {
+          await vi.runAllTimersAsync();
+          await pending;
+        });
+        expect(result.current.boundarySave).toEqual({ sectionKey: "reading", status: "attention" });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

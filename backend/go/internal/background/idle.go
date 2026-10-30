@@ -36,6 +36,9 @@ func (w *Runner) Drain(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := w.runSectionReconcileCycle(ctx); err != nil {
+		return err
+	}
 	if err := w.runHotCycle(ctx, time.Now().UTC()); err != nil {
 		return err
 	}

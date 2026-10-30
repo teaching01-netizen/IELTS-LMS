@@ -22,10 +22,10 @@ var (
 	candidateQuery         = regexp.QuoteMeta("SELECT r.schedule_id, COALESCE")
 	personalCandidateQuery = regexp.QuoteMeta("WHERE r.timing_model = 'sat_personal_v1'")
 	attemptsLock           = regexp.QuoteMeta("SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE")
-	runtimeLock            = regexp.QuoteMeta("SELECT id, status, active_section_key, waiting_for_next_section, is_overrun, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")
+	runtimeLock            = regexp.QuoteMeta("SELECT id, status, active_section_key, waiting_for_next_section, is_overrun, revision, COALESCE(timing_model, '') FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")
 	// commandRuntimeLock is the proctor-command runtime lock: the same row
 	// without the overrun column.
-	commandRuntimeLock = regexp.QuoteMeta("SELECT id, status, active_section_key, waiting_for_next_section, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")
+	commandRuntimeLock = regexp.QuoteMeta("SELECT id, status, active_section_key, waiting_for_next_section, revision, COALESCE(timing_model, '') FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")
 	sectionsLock       = regexp.QuoteMeta("FROM exam_session_runtime_sections WHERE runtime_id = ? ORDER BY section_order ASC FOR UPDATE")
 	setTimeZone        = regexp.QuoteMeta("SET time_zone")
 	// runtimeRevisionRead is the row re-read every effect performs after bumping
@@ -83,7 +83,7 @@ func expectCandidateScan(mock sqlmock.Sqlmock, asOf time.Time, scheduleID string
 	mock.ExpectBegin()
 	mock.ExpectExec(setTimeZone).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(candidateQuery).
-		WithArgs(asOf, asOf, asOf, limit).
+		WithArgs(asOf, asOf, asOf, asOf, asOf, limit).
 		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "auto_submit", "provider_key"}).AddRow(scheduleID, autoSubmit, provider))
 	mock.ExpectQuery(personalCandidateQuery).
 		WithArgs(asOf, limit).
@@ -122,8 +122,8 @@ func expectScheduleTxOpen(mock sqlmock.Sqlmock, scheduleID, runtimeID, status, a
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
 	mock.ExpectQuery(runtimeLock).
 		WithArgs(scheduleID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "waiting_for_next_section", "is_overrun", "revision"}).
-			AddRow(runtimeID, status, activeKey, waiting, overrun, revision))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "waiting_for_next_section", "is_overrun", "revision", "timing_model"}).
+			AddRow(runtimeID, status, activeKey, waiting, overrun, revision, ""))
 	mock.ExpectQuery(sectionsLock).
 		WithArgs(runtimeID).
 		WillReturnRows(runtimeSectionRows(seeds))

@@ -29,6 +29,10 @@ const (
 	// TimingModelIELTSPersonal keeps the shared room section release while
 	// giving each attempt its own preparation and working deadlines.
 	TimingModelIELTSPersonal = "ielts_cohort_personal_v2"
+	// TimingModelIELTSSharedSchedule commits one absolute room timetable at
+	// Start. Every device and server reader derives the section from it, so
+	// no device's readiness or connection can delay the room.
+	TimingModelIELTSSharedSchedule = "ielts_shared_schedule_v1"
 )
 
 // IELTSPersonalTimingModelsSQL is the SQL IN-list matching IsIELTSPersonal.
@@ -100,7 +104,7 @@ func ProviderTimingModel(providerKey string) string {
 func ResolveTimingModel(providerKey, scheduleChoice string) string {
 	choice := strings.TrimSpace(scheduleChoice)
 	switch choice {
-	case TimingModelIELTSPersonalV1, TimingModelIELTSPersonal:
+	case TimingModelIELTSPersonalV1, TimingModelIELTSPersonal, TimingModelIELTSSharedSchedule:
 		if strings.EqualFold(strings.TrimSpace(providerKey), "ielts") {
 			return choice
 		}
@@ -122,4 +126,10 @@ func ResolveTimingModel(providerKey, scheduleChoice string) string {
 // legacy attempt".
 func IsPreStartCohort(providerKey string) bool {
 	return IsCohortTimed(ProviderTimingModel(providerKey))
+}
+
+// IsIELTSSharedSchedule reports whether the room runs on the committed
+// offline-capable timetable (exam_session_runtimes.ielts_shared_schedule).
+func IsIELTSSharedSchedule(model string) bool {
+	return model == TimingModelIELTSSharedSchedule
 }

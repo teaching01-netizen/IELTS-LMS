@@ -27,7 +27,7 @@ func expectPersonalSweepScan(mock sqlmock.Sqlmock, asOf time.Time, scheduleID st
 	mock.ExpectBegin()
 	mock.ExpectExec(setTimeZone).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(candidateQuery).
-		WithArgs(asOf, asOf, asOf, limit).
+		WithArgs(asOf, asOf, asOf, asOf, asOf, limit).
 		WillReturnRows(sqlmock.NewRows([]string{"schedule_id", "auto_submit", "provider_key"}))
 	mock.ExpectQuery(personalCandidateQuery).
 		WithArgs(asOf, limit).
@@ -49,8 +49,8 @@ func expectPersonalSweepTxPrologue(mock sqlmock.Sqlmock, scheduleID, runtimeID, 
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("att-1"))
 	mock.ExpectQuery(runtimeLock).
 		WithArgs(scheduleID).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "waiting_for_next_section", "is_overrun", "revision"}).
-			AddRow(runtimeID, status, nil, false, false, 7))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "waiting_for_next_section", "is_overrun", "revision", "timing_model"}).
+			AddRow(runtimeID, status, nil, false, false, 7, "sat_personal_v1"))
 	mock.ExpectQuery(personalRuntimeModelRead).
 		WithArgs(runtimeID).
 		WillReturnRows(sqlmock.NewRows([]string{"timing_model"}).AddRow(timingModel))

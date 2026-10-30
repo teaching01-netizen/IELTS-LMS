@@ -29,6 +29,7 @@ export interface BackendE2EManifest {
     publishedVersionId: string;
     scheduleId: string;
     ieltsPersonalTimingScheduleId: string;
+    ieltsSharedScheduleId: string;
     ieltsPersonalLoadScheduleId: string;
     ieltsPersonalRecoveryScheduleId: string;
     ieltsPersonalResilienceScheduleId: string;

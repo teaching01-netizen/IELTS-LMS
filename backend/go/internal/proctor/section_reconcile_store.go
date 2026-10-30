@@ -87,11 +87,11 @@ func openSectionModuleAttempts(ctx context.Context, q tx.Tx, scheduleID, section
 // (lock order: attempts -> runtime -> sections, matching manual proctor
 // commands and terminalization).
 func lockReconcileRuntime(ctx context.Context, q tx.Tx, scheduleID string) (*reconcileRuntime, error) {
-	const sel = "SELECT id, status, active_section_key, waiting_for_next_section, is_overrun, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
+	const sel = "SELECT id, status, active_section_key, waiting_for_next_section, is_overrun, revision, COALESCE(timing_model, '') FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE"
 	var runtime reconcileRuntime
 	var active sql.NullString
 	var waiting, overrun sql.NullBool
-	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&runtime.id, &runtime.status, &active, &waiting, &overrun, &runtime.revision); err != nil {
+	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&runtime.id, &runtime.status, &active, &waiting, &overrun, &runtime.revision, &runtime.timingModel); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Runtime not found.", HTTPStatus: 404}
 		}

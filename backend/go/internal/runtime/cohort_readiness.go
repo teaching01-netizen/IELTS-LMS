@@ -7,6 +7,7 @@ import (
 
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
@@ -19,12 +20,21 @@ type CohortReadiness struct {
 	ExpectedStartAt   *time.Time `json:"expectedStartAt,omitempty"`
 	PreparationEndsAt *time.Time `json:"preparationEndsAt,omitempty"`
 	Message           string     `json:"message,omitempty"`
+	// activationDelay is this request's committed start minus the previous
+	// section's personal deadline; observed only after commit.
+	activationDelay time.Duration
 }
 
 type IELTSReadinessSignals struct {
 	ContentReady      *bool `json:"contentReady"`
 	LocalStorageReady *bool `json:"localStorageReady"`
 	AudioReady        *bool `json:"audioReady"`
+	// OfflinePackageReady is set only after the device verified its full
+	// offline package (content, media, shell, answer storage). In the shared
+	// model it is the only signal that records a roster-visible preparation
+	// row: there is no readiness barrier, so a partial probe must not read as
+	// "prepared" to the proctor.
+	OfflinePackageReady *bool `json:"offlinePackageReady"`
 }
 
 // cohortStartLead covers readiness polling and delivery of the armed clock.
@@ -55,6 +65,13 @@ func (s *Service) ReadyCohortSection(ctx context.Context, scheduleID, sectionKey
 		var timingModel string
 		if err := q.QueryRowContext(ctx, `SELECT COALESCE(timing_model, '') FROM exam_session_runtimes WHERE schedule_id = ?`, scheduleID).Scan(&timingModel); err != nil {
 			return err
+		}
+		if IsIELTSSharedSchedule(timingModel) {
+			var readiness IELTSReadinessSignals
+			if len(signals) > 0 {
+				readiness = signals[0]
+			}
+			return readyIELTSSharedSectionInTx(ctx, q, scheduleID, sectionKey, attemptID, actorUserID, roundTripMS, readiness, &out)
 		}
 		if IsIELTSPersonal(timingModel) {
 			var readiness IELTSReadinessSignals
@@ -125,13 +142,24 @@ func (s *Service) ReadyCohortSection(ctx context.Context, scheduleID, sectionKey
 		if status != SectionLocked && status != SectionLive && status != SectionPaused {
 			return apperrors.New(apperrors.CodeConflict, "Section is no longer preparing.")
 		}
+		// Older clients omit preparation signals. Explicit failures from newer
+		// clients must not start the room before even this device is usable.
+		prepared := true
+		if len(signals) > 0 {
+			ready := signals[0]
+			prepared = (ready.ContentReady == nil || *ready.ContentReady) &&
+				(ready.LocalStorageReady == nil || *ready.LocalStorageReady) &&
+				(sectionKey != "listening" || ready.AudioReady == nil || *ready.AudioReady)
+		}
 		if roundTripMS != nil {
 			ms := *roundTripMS
 			if ms < 0 || ms > 10000 {
 				return apperrors.New(apperrors.CodeValidation, "roundTripMs must be between 0 and 10000.")
 			}
-			if _, err := q.ExecContext(ctx, `INSERT INTO ielts_section_readiness (runtime_id, section_key, attempt_id, round_trip_ms) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE round_trip_ms = GREATEST(round_trip_ms, VALUES(round_trip_ms))`, rt.ID, sectionKey, attemptID, ms); err != nil {
-				return err
+			if prepared {
+				if _, err := q.ExecContext(ctx, `INSERT INTO ielts_section_readiness (runtime_id, section_key, attempt_id, round_trip_ms) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE round_trip_ms = GREATEST(round_trip_ms, VALUES(round_trip_ms))`, rt.ID, sectionKey, attemptID, ms); err != nil {
+					return err
+				}
 			}
 		}
 		var maxRTT int
@@ -140,7 +168,10 @@ func (s *Service) ReadyCohortSection(ctx context.Context, scheduleID, sectionKey
    WHERE a.schedule_id = ? AND a.submitted_at IS NULL AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted','terminated','locked','cancelled')`, rt.ID, sectionKey, scheduleID).Scan(&out.RemainingStudents, &maxRTT); err != nil {
 			return err
 		}
-		if roundTripMS == nil || out.RemainingStudents > 0 || rt.Status != StatusLive {
+		// Readiness is diagnostic, not an all-student barrier. The first ready
+		// device starts the released section's shared clock; reconnecting devices
+		// read the same persisted start above without restarting it.
+		if roundTripMS == nil || !prepared || rt.Status != StatusLive || status == SectionPaused || proctorStatus == "paused" {
 			return nil
 		}
 		startAt := out.ServerNow.Add(cohortStartLead(maxRTT))
@@ -163,5 +194,64 @@ func (s *Service) ReadyCohortSection(ctx context.Context, scheduleID, sectionKey
 	if err == nil && changed {
 		s.invalidated(scheduleID)
 	}
+	if err == nil && out.activationDelay > 0 {
+		telemetry.ObserveSeconds(telemetry.MIELTSSectionActivationDelay, out.activationDelay.Seconds(), "section", sectionKey)
+	}
 	return out, err
+}
+
+// readyIELTSSharedSectionInTx records this device's preparation and returns
+// the committed window. It never allocates, re-arms or extends a clock and
+// takes no room-wide lock: one device's readiness cannot affect another's.
+func readyIELTSSharedSectionInTx(ctx context.Context, q tx.Tx, scheduleID, sectionKey, attemptID, actorUserID string, roundTripMS *int, ready IELTSReadinessSignals, out *CohortReadiness) error {
+	var one int
+	if err := q.QueryRowContext(ctx, `SELECT 1 FROM student_attempts WHERE id = ? AND schedule_id = ? AND COALESCE(user_id, '') = ? AND submitted_at IS NULL AND COALESCE(delivery_status, 'running') NOT IN ('submitted','terminated','locked','cancelled')`, attemptID, scheduleID, actorUserID).Scan(&one); err != nil {
+		if err == sql.ErrNoRows {
+			return apperrors.New(apperrors.CodeNotFound, "Active student attempt not found.")
+		}
+		return err
+	}
+	var runtimeID string
+	if err := q.QueryRowContext(ctx, `SELECT id FROM exam_session_runtimes WHERE schedule_id = ?`, scheduleID).Scan(&runtimeID); err != nil {
+		return err
+	}
+	schedule, ok, err := LoadIELTSSharedScheduleInTx(ctx, q, runtimeID, "")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return apperrors.New(apperrors.CodeConflict, "The IELTS room schedule is missing.")
+	}
+	window, ok := schedule.WindowFor(sectionKey)
+	if !ok {
+		return apperrors.New(apperrors.CodeConflict, "The exam section has changed. Refresh the exam.")
+	}
+	if out.ServerNow, err = dbNowInTx(ctx, q); err != nil {
+		return err
+	}
+	pos, err := ResolveIELTSSharedWindow(schedule, out.ServerNow)
+	if err != nil {
+		return err
+	}
+	prepared := readinessSignal(ready.ContentReady) && readinessSignal(ready.LocalStorageReady) &&
+		(sectionKey != "listening" || readinessSignal(ready.AudioReady))
+	// The shared model has no readiness barrier. A row here means this device
+	// proved a usable offline package for the section, which is what the
+	// proctor roster reports; ordinary probes do not create rows.
+	if readinessSignal(ready.OfflinePackageReady) && prepared {
+		ms := 0
+		if roundTripMS != nil {
+			ms = *roundTripMS
+			if ms < 0 || ms > 10000 {
+				return apperrors.New(apperrors.CodeValidation, "roundTripMs must be between 0 and 10000.")
+			}
+		}
+		if _, err := q.ExecContext(ctx, `INSERT INTO ielts_section_readiness (runtime_id, section_key, attempt_id, round_trip_ms) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE round_trip_ms = GREATEST(round_trip_ms, VALUES(round_trip_ms)), ready_at = CURRENT_TIMESTAMP(6)`, runtimeID, sectionKey, attemptID, ms); err != nil {
+			return err
+		}
+	}
+	start, deadline := window.StartAt, window.DeadlineAt
+	out.StartedAt, out.ExpectedStartAt, out.DeadlineAt = &start, &start, &deadline
+	out.Status = pos.Kind
+	return nil
 }

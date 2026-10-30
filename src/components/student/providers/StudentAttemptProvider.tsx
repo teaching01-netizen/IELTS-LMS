@@ -56,6 +56,8 @@ import {
   useStudentRuntimeLiveRef,
 } from "./StudentRuntimeProvider";
 import { isVerifiedTerminalStudentState } from "./verifiedTerminalState";
+import { getStudentQuestionsForModule } from "@student/application/studentExamContentFacade";
+import { isIeltsSharedScheduleTimingModel } from "../../../types/domain";
 
 interface StudentAttemptState {
   attempt: StudentAttempt | null;
@@ -68,6 +70,8 @@ interface StudentAttemptState {
   blockedQuestionIds: string[];
   /** Count of quarantined writes awaiting resolve-or-discard at submit time. */
   quarantinedCount: number;
+  /** Quarantined drafts whose evidence batch the server has not acknowledged. */
+  unacknowledgedEvidenceCount: number;
 }
 
 interface StudentAttemptActions {
@@ -92,7 +96,9 @@ interface StudentAttemptActions {
   submitAttemptAfterBarrier: () => Promise<boolean>;
   takeOverDurabilityLease: (reason?: string) => Promise<boolean>;
   setDeviceFingerprintHash: (hash: string) => Promise<void>;
-  flushPending: () => Promise<boolean>;
+  /** `boundary` additionally requires the engine's settled invariant
+   *  (no blocked/quarantined/unacknowledged work) — section transitions use it. */
+  flushPending: (options?: { boundary?: boolean }) => Promise<boolean>;
   /**
    * Best-effort reconcile of one blocked question; see implementation notes.
    * Returns a reason union: "reconciled" | "not-blocked" | "refusal" |
@@ -250,8 +256,19 @@ export function StudentAttemptProvider({
 }: StudentAttemptProviderProps) {
   // Response durability is always V2: the backend serves only the V2 response
   // protocol and the V1 mutation endpoints are unavailable.
-  const { state: runtimeState, actions: runtimeActions } = useStudentRuntimeSession();
+  const { state: runtimeState, actions: runtimeActions, examState: sessionExamState } = useStudentRuntimeSession();
   const runtimeLiveRef = useStudentRuntimeLiveRef();
+  // IELTS shared timetable: each answer belongs to its section, so a server
+  // refusal for a closed section (IELTS_SECTION_CLOSED) is confined to it.
+  const ieltsSectionByQuestionRef = useRef<Map<string, string>>(new Map());
+  ieltsSectionByQuestionRef.current = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const section of ["listening", "reading"] as const) {
+      for (const question of getStudentQuestionsForModule(sessionExamState, section)) map.set(question.id, section);
+    }
+    for (const id of writingQuestionIds) map.set(id, "writing");
+    return map;
+  }, [sessionExamState, writingQuestionIds]);
   const setRuntimeAttemptSyncState = runtimeActions.setAttemptSyncState;
   const [attempt, setAttempt] = useState<StudentAttempt | null>(attemptSnapshot);
   const renderedAttemptIdentityRef = useRef<{
@@ -276,6 +293,9 @@ export function StudentAttemptProvider({
   // publish path (no restructure of publishV2EngineState).
   const [blockedQuestionIds, setBlockedQuestionIds] = useState<string[]>([]);
   const [quarantinedCount, setQuarantinedCount] = useState(0);
+  // Evidence batches the server has acknowledged. A confirmed receipt may
+  // discard the offline package only when this is zero (INV-8).
+  const [unacknowledgedEvidenceCount, setUnacknowledgedEvidenceCount] = useState(0);
   const attemptRef = useRef<StudentAttempt | null>(attemptSnapshot);
   const controlScheduleIdRef = useRef<string | undefined>(
     scheduleId ?? attemptSnapshot?.scheduleId
@@ -291,8 +311,10 @@ export function StudentAttemptProvider({
   const observedViolationsRef = useRef<string>(JSON.stringify(attemptSnapshot?.violations ?? []));
   const objectiveFlushTimeoutRef = useRef<number | null>(null);
   const writingFlushTimeoutRef = useRef<number | null>(null);
-  const flushPendingRef = useRef<() => Promise<boolean>>(async () => true);
-  const flushInFlightRef = useRef<Promise<boolean> | null>(null);
+  const flushPendingRef = useRef<(options?: { boundary?: boolean }) => Promise<boolean>>(
+    async () => true
+  );
+  const flushInFlightRef = useRef<Promise<{ flushed: boolean; settled: boolean }> | null>(null);
   const backgroundSubmitInFlightRef = useRef<Promise<void> | null>(null);
   const durabilityMirrorRef = useRef<PendingMutationDurabilityMirror | null>(null);
 
@@ -333,6 +355,23 @@ export function StudentAttemptProvider({
   }, []);
 
   const v2EngineRef = useRef<DurableResponseEngine | null>(null);
+  // Shared-timetable boundary barrier: the outgoing section is frozen and must
+  // be locally recoverable; the network is never awaited (plan §4.5).
+  const sharedSectionKey = isIeltsSharedScheduleTimingModel(runtimeState.runtimeSnapshot?.timingModel)
+    ? (runtimeState.runtimeSnapshot?.currentSectionKey ?? null)
+    : null;
+  const previousSharedSectionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = previousSharedSectionRef.current;
+    previousSharedSectionRef.current = sharedSectionKey;
+    const engine = v2EngineRef.current;
+    if (!engine || !previous || previous === sharedSectionKey) return;
+    void engine.checkpointScopeLocally(previous).then((result) => {
+      if (result.durable) return;
+      emitStudentObservabilityMetric("ielts_boundary_checkpoint_failed", { reason: result.reason });
+      setStorageDurabilityBlocking(true);
+    });
+  }, [setStorageDurabilityBlocking, sharedSectionKey]);
   const v2ReadyRef = useRef<Promise<void> | null>(null);
   const v2PendingAcceptancesRef = useRef(new Set<Promise<void>>());
   const v2IdentityGenerationRef = useRef(0);
@@ -432,6 +471,7 @@ export function StudentAttemptProvider({
       setDurabilityLeaseConflict(false);
       setBlockedQuestionIds([]);
       setQuarantinedCount(0);
+      setUnacknowledgedEvidenceCount(0);
       return;
     }
 
@@ -445,6 +485,10 @@ export function StudentAttemptProvider({
         scheduleId ?? snapshot?.scheduleId ?? "unknown",
         snapshot ?? undefined
       ),
+      scopeOf: (questionId) =>
+        isIeltsSharedScheduleTimingModel(runtimeLiveRef.current.runtimeSnapshot?.timingModel)
+          ? (ieltsSectionByQuestionRef.current.get(questionId) ?? null)
+          : null,
       // WP7 reason-coded counters (telemetry only; never answer content).
       onDurabilityEvent: (name, fields) =>
         emitStudentObservabilityMetric(
@@ -477,8 +521,10 @@ export function StudentAttemptProvider({
         setBlockedQuestionIds(blockedIds);
         try {
           setQuarantinedCount(engine.getQuarantined().length);
+          setUnacknowledgedEvidenceCount(engine.getUnrecordedEvidenceCount());
         } catch {
           setQuarantinedCount(0);
+          setUnacknowledgedEvidenceCount(0);
         }
         const currentAttempt = attemptRef.current;
         if (currentAttempt) {
@@ -557,6 +603,7 @@ export function StudentAttemptProvider({
       // this the "needs attention" badge can stick after teardown.
       setBlockedQuestionIds([]);
       setQuarantinedCount(0);
+      setUnacknowledgedEvidenceCount(0);
     };
   }, [
     attemptSnapshot?.id,
@@ -824,9 +871,11 @@ export function StudentAttemptProvider({
     [persistenceEnabled, runtimeLiveRef, scheduleFlush, setPendingMutations, syncAttemptState]
   );
 
-  const flushPending = useCallback(async () => {
+  const flushPending = useCallback(async (options?: { boundary?: boolean }) => {
+    const pick = (result: { flushed: boolean; settled: boolean }) =>
+      options?.boundary ? result.flushed && result.settled : result.flushed;
     if (flushInFlightRef.current) {
-      return flushInFlightRef.current;
+      return pick(await flushInFlightRef.current);
     }
 
     const generation = v2IdentityGenerationRef.current;
@@ -843,30 +892,39 @@ export function StudentAttemptProvider({
     };
     if (!isCurrent()) return false;
 
+    const failed = { flushed: false, settled: false };
     const promise = (async () => {
       // V2 is the only durability engine: responses flush through the V2
       // engine and non-response mutations persist via the durability mirror.
       await waitForV2Acceptances();
-      if (!isCurrent()) return false;
+      if (!isCurrent()) return failed;
       const ready = v2ReadyRef.current;
       if (ready) await ready;
-      if (!isCurrent()) return false;
+      if (!isCurrent()) return failed;
       const engine = v2EngineRef.current;
       if (
         !engine ||
         engine.attemptId !== expectedIdentity.attemptId ||
         engine.scheduleId !== expectedIdentity.scheduleId
       ) {
-        return false;
+        return failed;
       }
       await engine.flush();
-      if (!isCurrent() || engine.getPendingCount() > 0) return false;
-      return true;
+      if (!isCurrent() || engine.getPendingCount() > 0) return failed;
+      // Pending count excludes blocked/quarantined/unacknowledged work; only
+      // the engine's boundary invariant proves a section's answers settled.
+      let settled = true;
+      try {
+        engine.assertBoundarySettled();
+      } catch {
+        settled = false;
+      }
+      return { flushed: true, settled };
     })();
 
     flushInFlightRef.current = promise;
     try {
-      return await promise;
+      return pick(await promise);
     } finally {
       if (flushInFlightRef.current === promise) {
         flushInFlightRef.current = null;
@@ -1791,6 +1849,7 @@ export function StudentAttemptProvider({
       // gate stays: this provider-level failure message plus engine-side guard.
       let blockedCount = 0;
       let quarantined = 0;
+      let unrecordedEvidence = 0;
       try {
         blockedCount = engine.getBlockedCount();
       } catch {
@@ -1798,9 +1857,12 @@ export function StudentAttemptProvider({
       }
       try {
         quarantined = engine.getQuarantined().length;
+        unrecordedEvidence = engine.getUnrecordedEvidenceCount();
       } catch {
         quarantined = 0;
+        unrecordedEvidence = 0;
       }
+      setUnacknowledgedEvidenceCount(unrecordedEvidence);
       if (blockedCount > 0 || quarantined > 0) {
         const blockedIds = (() => {
           try {
@@ -1872,8 +1934,10 @@ export function StudentAttemptProvider({
         }
         try {
           backstopQuarantined = backstopEngine?.getQuarantined().length ?? 0;
+          setUnacknowledgedEvidenceCount(backstopEngine?.getUnrecordedEvidenceCount() ?? 0);
         } catch {
           backstopQuarantined = 0;
+          setUnacknowledgedEvidenceCount(0);
         }
         try {
           setBlockedQuestionIds(backstopEngine?.getBlockedQuestionIds() ?? []);
@@ -2115,6 +2179,7 @@ export function StudentAttemptProvider({
       }
       try {
         setQuarantinedCount(engine.getQuarantined().length);
+        setUnacknowledgedEvidenceCount(engine.getUnrecordedEvidenceCount());
       } catch {
         // Quarantine count is advisory only.
       }
@@ -2138,6 +2203,7 @@ export function StudentAttemptProvider({
         durabilityLeaseConflict,
         blockedQuestionIds,
         quarantinedCount,
+        unacknowledgedEvidenceCount,
       },
       actions: {
         persistAnswer,
@@ -2165,6 +2231,7 @@ export function StudentAttemptProvider({
       attempt,
       blockedQuestionIds,
       quarantinedCount,
+      unacknowledgedEvidenceCount,
       flushPending,
       reconcileBlockedResponse,
       pendingMutationCount,

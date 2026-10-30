@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckSquare, ChevronLeft, Filter, LayoutGrid, List, Pause, Play, Settings, SkipForward, Square, StopCircle, Timer, X } from 'lucide-react';
 import type { ExamGroup, ModuleType, ProctorAlert, SessionAuditLog, SessionNote, StudentSession, StudentStatus, ViolationRule } from '../../types';
-import { isCohortTimingModel, type ExamSchedule, type ExamSessionRuntime } from '../../types/domain';
+import { isCohortTimingModel, isIeltsSharedScheduleTimingModel, type ExamSchedule, type ExamSessionRuntime } from '../../types/domain';
 import { ConfirmModal } from '../ConfirmModal';
 import { LoadingMark, SrLoadingText } from '../ui/LoadingMark';
 import { Toast, ToastContainer, type ToastVariant } from '../ui/Toast';
@@ -220,6 +220,18 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
 
   const selectedGroup = selectedScheduleId ? scheduleGroups.find((group) => group.scheduleId === selectedScheduleId) : undefined;
   const selectedRuntime = selectedScheduleId ? runtimeSnapshots.find((runtime) => runtime.scheduleId === selectedScheduleId) : undefined;
+  // A shared-timetable room can be paused/extended while disconnected devices
+  // keep following their last revision. Presence is diagnostic, so this is a
+  // warning beside the controls, never a reason to block a staff command.
+  const sharedTimetable = isIeltsSharedScheduleTimingModel(selectedRuntime?.timingModel);
+  const offlineSessionCount = sharedTimetable
+    ? enrichedSessions.filter((session) => {
+        if (session.scheduleId !== selectedScheduleId || session.status === 'terminated') return false;
+        const seenAt = Date.parse(session.lastActivity);
+        const now = selectedRuntime?.serverNow ? Date.parse(selectedRuntime.serverNow) : Date.now();
+        return Number.isFinite(seenAt) && Number.isFinite(now) && now - seenAt > 90_000;
+      }).length
+    : 0;
   const selectedStudent = enrichedSessions.find((session) => session.id === selectedStudentId);
   const activeSessionGroups = useMemo(
     () => scheduleGroups.filter((group) => getOverviewBucket(group) === 'active'),
@@ -667,6 +679,11 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                   ? `${filteredSessions.length} visible students · join progress ${selectedGroup.joinReadyCount}/${selectedGroup.joinTotalCount} · ${selectedGroup.violationCount} recorded violations`
                   : 'Select a cohort to open the roster and student activity drawer.'}
               </p>
+              {sharedTimetable && offlineSessionCount > 0 ? (
+                <p role="status" className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  {offlineSessionCount} student{offlineSessionCount === 1 ? ' is' : 's are'} not reporting right now. They may still be following the previous timetable until they reconnect; their retained answers stay available for review.
+                </p>
+              ) : null}
             </div>
             {selectedRuntime ? (
               <PresenceIndicator

@@ -11,7 +11,7 @@ import { AlertTriangle } from "lucide-react";
 import { AccessibilitySettings } from "./AccessibilitySettings";
 import { IeltsAccessibilitySettings } from "./IeltsAccessibilitySettings";
 import { isIeltsExamType } from "./layout/studentExamTypeContext";
-import { isIeltsPersonalTimingModel } from "../../types/domain";
+import { isIeltsPersonalTimingModel, isIeltsSharedScheduleTimingModel } from "../../types/domain";
 import { StudentExamPhaseRenderer } from "./StudentExamPhaseRenderer";
 import { StudentExamWorkspaceSession } from "./StudentExamWorkspaceSession";
 import "./StudentHeader";
@@ -63,9 +63,18 @@ import { useZoomScrollAnchoring } from "./useZoomScrollAnchoring";
 import { emitAnswerMutationDebugLog } from "./answerMutationDebug";
 import { isStudentHighlightToolContextActive } from "./studentHighlightToolContext";
 import type { StudentAnswerMutationMeta, StudentAnswerValue } from "../../types/studentAttempt";
-import type { ExamState, ModuleType } from "../../types";
+import type { ModuleType } from "../../types";
 import { ensureBrowserClientSessionIdForAttempt } from "@student/api/studentAttemptGateway";
 import { useIeltsCohortReadiness } from "@student/hooks/useIeltsCohortReadiness";
+import { useIeltsSectionPreparation } from "@student/hooks/useIeltsSectionPreparation";
+import { useIeltsOfflineCleanup } from "@student/hooks/useIeltsOfflineCleanup";
+import { IeltsSharedSaveStatus } from "@student/ui/IeltsSharedSaveStatus";
+import { emitStudentObservabilityMetric } from "../../utils/studentObservability";
+import {
+  IELTS_FAST_TRANSITIONS,
+  IELTS_PREPARATION_WINDOW_SECONDS,
+  isIeltsSectionContentAvailable,
+} from "@student/application/ieltsSectionPreparation";
 
 import { StudentExamHeaderClock } from "./StudentExamHeaderClock";
 import { StudentExamClockEffects } from "./StudentExamClockEffects";
@@ -108,7 +117,7 @@ function getBlockingCopy(
     case "waiting_for_runtime":
       return {
         title: "Preparing your section",
-        message: "The timer will start when every student’s section is ready.",
+        message: "Preparing the section for the shared room timer.",
         badge: "Waiting",
         contextLabel: "Session Runtime",
       };
@@ -164,40 +173,6 @@ function formatRuntimeTime(seconds: number) {
   return `${minutes.toString().padStart(2, "0")}:${remainingSeconds.toString().padStart(2, "0")}`;
 }
 
-function isIeltsSectionContentAvailable(
-  state: ExamState,
-  sectionKey: string | null | undefined
-): boolean {
-  switch (sectionKey as ModuleType | undefined) {
-    case "listening":
-      return (
-        state.listening.parts.length > 0 &&
-        state.listening.parts.every(
-          (part) =>
-            Boolean(part.title.trim()) &&
-            part.blocks.length > 0 &&
-            (!(state.config.sections.listening.audioPlaybackEnabled ?? true) ||
-              Boolean(part.audioUrl?.trim()))
-        )
-      );
-    case "reading":
-      return (
-        state.reading.passages.length > 0 &&
-        state.reading.passages.every(
-          (passage) =>
-            Boolean(passage.title.trim() || passage.content.trim()) && passage.blocks.length > 0
-        )
-      );
-    case "writing":
-      return (
-        Boolean(state.writing.task1Prompt.trim() && state.writing.task2Prompt.trim()) &&
-        (state.writing.tasks === undefined || state.writing.tasks.length > 0)
-      );
-    default:
-      return false;
-  }
-}
-
 interface StudentAppProps {
   showSubmitControls?: boolean | undefined;
   allowPreviewStart?: boolean | undefined;
@@ -219,44 +194,88 @@ export function StudentApp({
     onExit: onExit,
   } = useStudentRuntimeSession();
   const { actions: attemptActions, state: attemptState } = useStudentAttempt();
+  useIeltsOfflineCleanup({
+    enabled: isIeltsSharedScheduleTimingModel(runtimeState.runtimeSnapshot?.timingModel),
+    attempt: attemptState.attempt,
+    pendingMutationCount: attemptState.pendingMutationCount,
+    unacknowledgedEvidenceCount: attemptState.unacknowledgedEvidenceCount,
+  });
   const personalTransitionClockSeconds = useStudentRuntimeClock();
   const usesPersonalIeltsTiming = isIeltsPersonalTimingModel(
+    runtimeState.runtimeSnapshot?.timingModel
+  );
+  const sharedScheduleRoom = isIeltsSharedScheduleTimingModel(
     runtimeState.runtimeSnapshot?.timingModel
   );
   const readinessSectionKey = runtimeState.runtimeSnapshot?.currentSectionKey;
   const readinessSection = runtimeState.runtimeSnapshot?.sections.find(
     (section) => section.sectionKey === readinessSectionKey
   );
-  const readinessError = useIeltsCohortReadiness({
-    scheduleId: attemptState.attempt?.scheduleId,
-    attemptId: attemptState.attempt?.id ?? null,
-    clientSessionId: attemptState.attempt
-      ? ensureBrowserClientSessionIdForAttempt(attemptState.attempt)
-      : null,
-    sectionKey: readinessSectionKey ?? null,
-    contentAvailable: isIeltsSectionContentAvailable(examState, readinessSectionKey),
-    audioRequired: examState.config.sections.listening.audioPlaybackEnabled ?? true,
-    pending:
-      Boolean(onRuntimeRefresh) &&
-      examState.type !== "ACT" &&
-      runtimeState.runtimeBacked &&
-      runtimeState.phase === "exam" &&
-      Boolean(readinessSection) &&
-      (usesPersonalIeltsTiming
-        ? runtimeState.currentModule !== runtimeState.runtimeSnapshot?.currentSectionKey ||
-          (runtimeState.runtimeSnapshot?.personalSectionState !== "active" &&
-            runtimeState.runtimeSnapshot?.personalSectionState !== "completed")
-        : Boolean(
-            readinessSection &&
-            !readinessSection.actualStartAt &&
-            readinessSection.status !== "completed"
-          )),
-    refreshRuntime: onRuntimeRefresh,
-  });
   const enabledModules = getEnabledModules(examState.config);
   const currentModuleIndex = runtimeState.currentModule
     ? enabledModules.indexOf(runtimeState.currentModule)
     : -1;
+  // V2 fast transitions: one successor is prepared locally; activation waits
+  // for the outgoing section's answer barrier (server eligibility is separate).
+  const fastIeltsTransitions =
+    IELTS_FAST_TRANSITIONS &&
+    runtimeState.runtimeSnapshot?.timingModel === "ielts_cohort_personal_v2" &&
+    isIeltsExamType(examState.type);
+  const readinessSectionIndex = readinessSectionKey
+    ? enabledModules.indexOf(readinessSectionKey as ModuleType)
+    : -1;
+  const outgoingSectionKey =
+    readinessSectionIndex > 0 ? (enabledModules[readinessSectionIndex - 1] ?? null) : null;
+  const successorSectionKey =
+    currentModuleIndex >= 0 ? (enabledModules[currentModuleIndex + 1] ?? null) : null;
+  const preparationStatus = useIeltsSectionPreparation({
+    enabled:
+      fastIeltsTransitions &&
+      runtimeState.phase === "exam" &&
+      Boolean(successorSectionKey) &&
+      runtimeState.runtimeSnapshot?.personalSectionState === "active" &&
+      typeof personalTransitionClockSeconds === "number" &&
+      personalTransitionClockSeconds <= IELTS_PREPARATION_WINDOW_SECONDS,
+    contextKey:
+      attemptState.attempt && successorSectionKey
+        ? [
+            attemptState.attempt.id,
+            attemptState.attempt.publishedVersionId ?? "",
+            successorSectionKey,
+            attemptState.attempt.controlEpoch ?? "",
+            attemptState.attempt.leaseEpoch ?? "",
+          ].join(":")
+        : null,
+    attemptId: attemptState.attempt?.id ?? null,
+    contentAvailable: isIeltsSectionContentAvailable(examState, successorSectionKey),
+  });
+  // Preparation for the section now awaiting readiness carries over to it.
+  const preparedSectionRef = useRef<{ key: string | null; ready: boolean }>({
+    key: null,
+    ready: false,
+  });
+  if (successorSectionKey && preparationStatus !== "idle") {
+    preparedSectionRef.current = {
+      key: successorSectionKey,
+      ready: preparationStatus === "ready",
+    };
+  }
+  // Metric: the client first observed the outgoing section's end, from the
+  // clock reaching zero or from the projection moving on (whichever is first).
+  const expiryEmittedRef = useRef<string | null>(null);
+  const emitExpiryOnceRef = useRef((section: string | null | undefined) => {
+    void section;
+  });
+  emitExpiryOnceRef.current = (section) => {
+    const key = section ? `${attemptState.attempt?.id}:${section}` : null;
+    if (!key || expiryEmittedRef.current === key) return;
+    expiryEmittedRef.current = key;
+    emitStudentObservabilityMetric("ielts_section_expiry", {
+      reason: section,
+      attemptId: attemptState.attempt?.id,
+      scheduleId: attemptState.attempt?.scheduleId,
+    });
+  };
   const personalSectionNeedsTransitionRefresh =
     usesPersonalIeltsTiming &&
     isIeltsExamType(examState.type) &&
@@ -271,13 +290,32 @@ export function StudentApp({
     if (!personalSectionNeedsTransitionRefresh || !onRuntimeRefresh) {
       return;
     }
+    if (fastIeltsTransitions) emitExpiryOnceRef.current(runtimeStateRef.current.currentModule);
 
     let cancelled = false;
     let retryTimer: number | null = null;
     let retryDelayMs = 500;
+    let failures = 0;
     const refreshAtPersonalBoundary = async () => {
-      await onRuntimeRefresh();
+      let refreshed = true;
+      try {
+        await onRuntimeRefresh();
+      } catch {
+        refreshed = false;
+      }
       if (cancelled) {
+        return;
+      }
+      if (fastIeltsTransitions) {
+        // Healthy boundary refresh stays near 1s; only failures back off.
+        failures = refreshed ? 0 : Math.min(failures + 1, 3);
+        const delay = 1_000 * 2 ** failures * (0.9 + Math.random() * 0.2);
+        retryTimer = window.setTimeout(() => {
+          void refreshAtPersonalBoundary();
+        }, delay);
+        return;
+      }
+      if (!refreshed) {
         return;
       }
       retryTimer = window.setTimeout(() => {
@@ -293,9 +331,8 @@ export function StudentApp({
         window.clearTimeout(retryTimer);
       }
     };
-  }, [onRuntimeRefresh, personalSectionNeedsTransitionRefresh]);
+  }, [fastIeltsTransitions, onRuntimeRefresh, personalSectionNeedsTransitionRefresh]);
 
-  const readinessErrorIsFinal = readinessError?.startsWith("Could not start") ?? false;
   const examSessionCommands = useExamCommands();
   const examSessionStore = useStudentExamSessionStore();
   const { state: uiState, actions: uiActions } = useStudentUI();
@@ -557,7 +594,7 @@ export function StudentApp({
           },
         },
         transport: {
-          flushPending: attemptActions.flushPending,
+          flushPending: () => attemptActions.flushPending({ boundary: true }),
           submit: attemptActions.submitAttempt,
           submitAfterBarrier: attemptActions.submitAttemptAfterBarrier,
         },
@@ -566,6 +603,8 @@ export function StudentApp({
   );
 
   const {
+    boundarySave,
+    confirmBoundarySaved,
     finalSubmitStatus,
     flushAndSubmitCurrentModuleWithRetry,
     retryFinalSubmit,
@@ -586,7 +625,7 @@ export function StudentApp({
     reconcileLiveAnswerCacheNow,
     commitWritingDraft,
     attemptActions: {
-      flushPending: attemptActions.flushPending,
+      flushPending: () => attemptActions.flushPending({ boundary: true }),
       submitAttempt: attemptActions.submitAttempt,
       submitAttemptAfterBarrier: attemptActions.submitAttemptAfterBarrier,
     },
@@ -596,6 +635,100 @@ export function StudentApp({
     },
     submissionCommands,
   });
+  const readinessPending =
+    Boolean(onRuntimeRefresh) &&
+    examState.type !== "ACT" &&
+    runtimeState.runtimeBacked &&
+    runtimeState.phase === "exam" &&
+    Boolean(readinessSection) &&
+    (usesPersonalIeltsTiming
+      ? runtimeState.currentModule !== runtimeState.runtimeSnapshot?.currentSectionKey ||
+        (runtimeState.runtimeSnapshot?.personalSectionState !== "active" &&
+          runtimeState.runtimeSnapshot?.personalSectionState !== "completed")
+      : Boolean(
+          readinessSection &&
+          !readinessSection.actualStartAt &&
+          readinessSection.status !== "completed"
+        ));
+  // Activation needs this client's evidence that the outgoing section settled;
+  // after a reload that evidence is re-proved by rerunning the barrier.
+  const readinessActivationAllowed =
+    !outgoingSectionKey ||
+    (boundarySave?.sectionKey === outgoingSectionKey && boundarySave.status === "saved");
+  // A module submit can end without settling (e.g. the module already moved),
+  // so any unsettled evidence for the outgoing section is re-proved here.
+  const outgoingBoundarySettled =
+    boundarySave?.sectionKey === outgoingSectionKey &&
+    (boundarySave.status === "saved" || boundarySave.status === "attention");
+  const needsBoundaryConfirmation =
+    fastIeltsTransitions &&
+    readinessPending &&
+    Boolean(outgoingSectionKey) &&
+    !outgoingBoundarySettled &&
+    moduleSubmitStatus !== "submitting";
+  // The orchestrator's callbacks change identity every render; key the
+  // effect on the condition only so it cannot rerun on each render.
+  const confirmBoundarySavedRef = useRef(confirmBoundarySaved);
+  confirmBoundarySavedRef.current = confirmBoundarySaved;
+  useEffect(() => {
+    if (needsBoundaryConfirmation && outgoingSectionKey) {
+      void confirmBoundarySavedRef.current(outgoingSectionKey);
+    }
+  }, [needsBoundaryConfirmation, outgoingSectionKey]);
+  const readinessError = useIeltsCohortReadiness({
+    scheduleId: attemptState.attempt?.scheduleId,
+    attemptId: attemptState.attempt?.id ?? null,
+    clientSessionId: attemptState.attempt
+      ? ensureBrowserClientSessionIdForAttempt(attemptState.attempt)
+      : null,
+    sectionKey: readinessSectionKey ?? null,
+    contentAvailable: isIeltsSectionContentAvailable(examState, readinessSectionKey),
+    audioRequired: examState.config.sections.listening.audioPlaybackEnabled ?? true,
+    pending: readinessPending,
+    refreshRuntime: onRuntimeRefresh,
+    sharedClock: !usesPersonalIeltsTiming,
+    fastRetry: fastIeltsTransitions,
+    activationAllowed: !fastIeltsTransitions || readinessActivationAllowed,
+    storagePrepared:
+      fastIeltsTransitions &&
+      preparedSectionRef.current.key === readinessSectionKey &&
+      preparedSectionRef.current.ready,
+  });
+  // Metric: first frame painted after the server confirmed the activation.
+  const transitionSectionRef = useRef<string | null>(null);
+  const personalSectionState = runtimeState.runtimeSnapshot?.personalSectionState;
+  useEffect(() => {
+    if (!fastIeltsTransitions) return;
+    if (readinessPending) {
+      transitionSectionRef.current = readinessSectionKey ?? null;
+      emitExpiryOnceRef.current(outgoingSectionKey);
+      return;
+    }
+    const section = transitionSectionRef.current;
+    if (!section || personalSectionState !== "active") return;
+    transitionSectionRef.current = null;
+    requestAnimationFrame(() => {
+      emitStudentObservabilityMetric("ielts_section_first_usable_frame", {
+        reason: section,
+        attemptId: attemptState.attempt?.id,
+        scheduleId: attemptState.attempt?.scheduleId,
+      });
+    });
+  }, [
+    attemptState.attempt?.id,
+    attemptState.attempt?.scheduleId,
+    fastIeltsTransitions,
+    outgoingSectionKey,
+    personalSectionState,
+    readinessPending,
+    readinessSectionKey,
+  ]);
+  const boundarySaveNeedsAttention =
+    fastIeltsTransitions &&
+    readinessPending &&
+    boundarySave?.sectionKey === outgoingSectionKey &&
+    boundarySave?.status === "attention";
+  const readinessErrorIsFinal = readinessError?.startsWith("Could not start") ?? false;
   const flushAndSubmitCurrentModuleWithRetryRef = useRef(flushAndSubmitCurrentModuleWithRetry);
   useLayoutEffect(() => {
     flushAndSubmitCurrentModuleWithRetryRef.current = flushAndSubmitCurrentModuleWithRetry;
@@ -957,7 +1090,9 @@ export function StudentApp({
               ["waiting_for_runtime", "waiting_for_advance"].includes(
                 runtimeState.blocking.reason ?? ""
               )
-                ? readinessError
+                ? boundarySaveNeedsAttention
+                  ? "We could not confirm that your answers from the previous section were saved. Your next section has not started. Stay on this page and retry, or ask the proctor for help."
+                  : readinessError
                 : null) ??
               (runtimeState.blocking.reason === "time_expired" &&
               moduleSubmitStatus === "submitting"
@@ -968,7 +1103,9 @@ export function StudentApp({
                   : blockingCopy.message)}
           </p>
           {(runtimeState.blocking.reason === "time_expired" && moduleSubmitStatus !== "failed") ||
-          ((!readinessError || !usesPersonalIeltsTiming) &&
+          ((!readinessError ||
+            !usesPersonalIeltsTiming ||
+            (fastIeltsTransitions && !readinessActivationAllowed && !boundarySaveNeedsAttention)) &&
             (runtimeState.blocking.reason === "waiting_for_runtime" ||
               runtimeState.blocking.reason === "waiting_for_advance")) ? (
             <div
@@ -997,6 +1134,15 @@ export function StudentApp({
                   `${runtimeState.runtimeBacked ? "runtime" : "self"}:${runtimeState.currentModule}`
                 )
               }
+              className="mt-6 h-11 text-base font-semibold"
+            >
+              Retry saving answers
+            </Button>
+          ) : null}
+          {boundarySaveNeedsAttention && outgoingSectionKey ? (
+            <Button
+              variant="primary"
+              onClick={() => void confirmBoundarySaved(outgoingSectionKey)}
               className="mt-6 h-11 text-base font-semibold"
             >
               Retry saving answers
@@ -1192,6 +1338,12 @@ export function StudentApp({
           isExamActive={effectivePhase === "exam"}
         />
       )}
+      {sharedScheduleRoom && effectivePhase === 'exam' ? (
+        <IeltsSharedSaveStatus
+          status={autoSaveStatus}
+          needsReview={attemptState.quarantinedCount > 0}
+        />
+      ) : null}
       <StudentExamViewport>
         <StudentHighlightSelectionManagerProvider>
           <StudentExamWorkspaceSession

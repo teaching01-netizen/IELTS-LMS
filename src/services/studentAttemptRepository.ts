@@ -1,4 +1,5 @@
 import { backendGet, backendPost, rememberAttemptSchedule } from "./backendBridge";
+import { rememberIeltsOfflineManifest } from "../features/student/infrastructure/ieltsOfflinePackageStore";
 import { studentSessionTransport } from "./studentSessionTransport";
 import {
   buildAttemptAuthorizationHeader as buildAttemptAuthorizationHeaderFromAdapter,
@@ -134,6 +135,8 @@ interface BackendStudentAttempt {
 interface BackendStudentSessionContext {
   attempt?: BackendStudentAttempt | null | undefined;
   attemptCredential?: BackendAttemptCredential | null | undefined;
+  /** IELTS shared-timetable package descriptor (credentialed reads only). */
+  offlineManifest?: unknown;
   clientSessionId?: string | null | undefined;
   runtime?:
     | {
@@ -1716,6 +1719,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
     const attempt = mapBackendStudentAttempt(session.attempt);
     storeAttemptCredentialFromAdapter(attempt, session.attemptCredential);
+    rememberIeltsOfflineManifest(session.offlineManifest);
     return this.cacheAttempt(attempt);
   }
 
@@ -1736,6 +1740,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
     if (!session.attempt) return null;
     const attempt = mapBackendStudentAttempt(session.attempt);
     storeAttemptCredentialFromAdapter(attempt, session.attemptCredential);
+    rememberIeltsOfflineManifest(session.offlineManifest);
     return attempt;
   }
 
@@ -1775,6 +1780,7 @@ class BackendStudentAttemptRepository implements IStudentAttemptRepository {
 
     const attempt = mapBackendStudentAttempt(session.attempt);
     storeAttemptCredentialFromAdapter(attempt, session.attemptCredential);
+    rememberIeltsOfflineManifest(session.offlineManifest);
     return this.cacheAttempt(attempt);
   }
 

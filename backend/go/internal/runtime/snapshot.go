@@ -66,7 +66,10 @@ type Snapshot struct {
 	// the active section is complete and the next has not gone live. Writes are
 	// refused for the whole window (same 422 family as the liveness gate).
 	WaitingForNextSection bool
-	LoadedAt              time.Time
+	// SharedSchedule is the committed timetable of an IELTS shared room; the
+	// write gate and student view resolve the section from it.
+	SharedSchedule *IELTSSharedSchedule
+	LoadedAt       time.Time
 }
 
 // SectionLiveness maps a stored section status to the write gate's liveness
@@ -268,6 +271,19 @@ func LoadSnapshot(ctx context.Context, q SnapshotQuerier, scheduleID string, now
 	}
 	snap := Snapshot{Status: status.String, Revision: revision, TimingModel: timing.String, CompletionReason: completionReason.String,
 		WaitingForNextSection: waiting.Bool, LoadedAt: now}
+	if IsIELTSSharedSchedule(snap.TimingModel) {
+		var raw sql.NullString
+		if err := q.QueryRowContext(ctx, "SELECT ielts_shared_schedule FROM exam_session_runtimes WHERE id = ?", id).Scan(&raw); err != nil {
+			return Snapshot{}, err
+		}
+		if raw.Valid {
+			shared, err := ParseIELTSSharedSchedule([]byte(raw.String))
+			if err != nil {
+				return Snapshot{}, err
+			}
+			snap.SharedSchedule = &shared
+		}
+	}
 	if active.Valid && active.String != "" {
 		snap.ActiveSectionKey = strptr(active.String)
 		var secStatus sql.NullString

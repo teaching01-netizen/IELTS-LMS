@@ -50,8 +50,8 @@ func expectEndNowGuardQueriesWithOpenModules(mock sqlmock.Sqlmock, waiting bool,
 	// `commandRuntimeLock` in reconcile_sections_test.go).
 	mock.ExpectQuery(commandRuntimeLock).
 		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "waiting", "revision"}).
-			AddRow("rt-1", "live", "reading-writing", waiting, 7))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "status", "active_section_key", "waiting", "revision", "timing_model"}).
+			AddRow("rt-1", "live", "reading-writing", waiting, 7, ""))
 	// EndSectionNow's locked sections.
 	mock.ExpectQuery(sectionsLock).
 		WithArgs("rt-1").

@@ -64,7 +64,10 @@ func (s *Service) LoadStudentSessionsPage(ctx context.Context, scheduleID string
 	}
 	defer rows.Close()
 	attachPersonalStates := func(page *RosterPage) error {
-		return attachIELTSPersonalRosterStates(ctx, q, runtime, page.Rows)
+		if err := attachIELTSPersonalRosterStates(ctx, q, runtime, page.Rows); err != nil {
+			return err
+		}
+		return attachIELTSOfflineRosterStates(ctx, q, runtime, page.Rows)
 	}
 	type keyedRow struct {
 		summary StudentSessionSummary

@@ -58,4 +58,17 @@ describe('StudentCard between-sections indicator', () => {
 
     expect(screen.queryByText('on break')).not.toBeInTheDocument();
   });
+
+  it('shows a verified offline package without claiming server confirmation', () => {
+    renderCard({ ieltsOfflinePreparedSection: 'reading', ieltsOfflinePreparedAt: '2026-01-01T00:12:00.000Z' });
+
+    expect(screen.getByText('Offline ready · reading')).toBeInTheDocument();
+  });
+
+  it('prefers the retained-evidence state over the prepared label', () => {
+    renderCard({ ieltsOfflinePreparedSection: 'reading', draftEvidencePending: 2 });
+
+    expect(screen.getByText('Needs review · 2')).toBeInTheDocument();
+    expect(screen.queryByText(/offline ready/i)).not.toBeInTheDocument();
+  });
 });

@@ -1,4 +1,5 @@
 import { useListeningCheckpoint } from '@student/hooks/useListeningCheckpoint';
+import { useIeltsOfflineAudioSource } from '@student/hooks/useIeltsOfflineMedia';
 import type { ListeningCheckpointAuthorization } from '@student/infrastructure/audioCheckpointGateway';
 import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { DiagramLabelingBlock, ExamState, QuestionAnswer } from "../../types";
@@ -151,7 +152,8 @@ export function StudentListening({
   const hasAudioSource = Boolean(activePart?.audioUrl);
   const canPlayAudio = audioPlaybackEnabled && hasAudioSource;
   const shouldShowAudioPanel = audioPlaybackEnabled;
- const checkpointError = useListeningCheckpoint(audioRef, checkpointAuthorization, activePart?.id, activePart?.audioUrl, canPlayAudio);
+  const audioSource = useIeltsOfflineAudioSource(audioRef, activePart?.id, activePart?.audioUrl);
+  const checkpointError = useListeningCheckpoint(audioRef, checkpointAuthorization, activePart?.id, audioSource, canPlayAudio);
   const activeDiagramBlocks = useMemo(() => {
     const diagramBlocks = (activePart?.blocks ?? []).filter(
       (block): block is DiagramLabelingBlock => block.type === "DIAGRAM_LABELING"
@@ -399,7 +401,7 @@ export function StudentListening({
             {checkpointError && <p role="status" className="text-sm text-amber-700">{checkpointError}</p>}
             <audio
               ref={audioRef}
-              src={activePart.audioUrl}
+              src={audioSource}
               aria-label="Listening audio"
               aria-describedby={
                 activeTranscript ? `listening-transcript-${activePart.id}` : undefined

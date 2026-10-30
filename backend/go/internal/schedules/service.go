@@ -348,13 +348,42 @@ var ieltsPersonalTimingEnabled = func() bool {
 	}
 }
 
+// ieltsSharedScheduleEnv opts new IELTS rooms into the committed offline
+// timetable. Default off; it never applies to existing rooms.
+const ieltsSharedScheduleEnv = "IELTS_SHARED_SCHEDULE"
+
+var ieltsSharedScheduleEnabled = func() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(ieltsSharedScheduleEnv))) {
+	case "1", "true", "on", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 // PersistIeltsTimingChoice opts only new IELTS schedules into attempt-owned
-// section clocks. The schedule row captures rollout policy for the session.
+// section clocks or the shared offline timetable. The schedule row captures
+// rollout policy for the session. Both flags on is a deployment error, not a
+// silent choice.
 func PersistIeltsTimingChoice(ctx context.Context, q tx.Tx, scheduleID, providerKey string) error {
-	if !strings.EqualFold(strings.TrimSpace(providerKey), "ielts") || !ieltsPersonalTimingEnabled() {
+	if !strings.EqualFold(strings.TrimSpace(providerKey), "ielts") {
 		return nil
 	}
-	_, err := q.ExecContext(ctx, "UPDATE exam_schedules SET ielts_timing_model = ? WHERE id = ?", examruntime.TimingModelIELTSPersonal, scheduleID)
+	personal, shared := ieltsPersonalTimingEnabled(), ieltsSharedScheduleEnabled()
+	model := ""
+	switch {
+	case personal && shared:
+		err := apperrors.New(apperrors.CodeConflict, "IELTS_PERSONAL_TIMING and IELTS_SHARED_SCHEDULE are both enabled; enable only one before creating IELTS rooms.")
+		err.Details = map[string]any{"reason": "IELTS_TIMING_FLAGS_CONFLICT"}
+		return err
+	case personal:
+		model = examruntime.TimingModelIELTSPersonal
+	case shared:
+		model = examruntime.TimingModelIELTSSharedSchedule
+	default:
+		return nil
+	}
+	_, err := q.ExecContext(ctx, "UPDATE exam_schedules SET ielts_timing_model = ? WHERE id = ?", model, scheduleID)
 	return err
 }
 

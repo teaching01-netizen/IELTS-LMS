@@ -2,6 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ModuleType } from "../../types";
 import type { RuntimeStatus } from "../../types/domain";
 import type { StudentSubmissionCommands } from "@student/application/exam-session/submissionCommands";
+import { emitStudentObservabilityMetric } from "../../utils/studentObservability";
+
+/** Evidence from this client execution that an outgoing section's answer
+ *  barrier settled; it is not durable server state. */
+export interface StudentBoundarySave {
+  sectionKey: ModuleType;
+  status: "saving" | "saved" | "attention";
+}
 
 interface RuntimeStateSnapshot {
   runtimeBacked: boolean;
@@ -91,10 +99,40 @@ export function useStudentSubmissionOrchestration({
     "idle" | "submitting" | "retrying" | "failed"
   >("idle");
   const finalSubmitGenerationRef = useRef(0);
-
+  const [boundarySave, setBoundarySaveState] = useState<StudentBoundarySave | null>(null);
+  const boundaryAttemptRef = useRef(attemptId);
+  boundaryAttemptRef.current = attemptId;
+  const setBoundarySave = useCallback(
+    (forAttempt: string | null, sectionKey: ModuleType, status: StudentBoundarySave["status"]) => {
+      // A completion from a previous attempt/identity never lands on the current one.
+      if (boundaryAttemptRef.current !== forAttempt) return;
+      setBoundarySaveState((prev) =>
+        prev?.sectionKey === sectionKey && prev.status === status ? prev : { sectionKey, status }
+      );
+      if (status !== "saving") {
+        emitStudentObservabilityMetric("ielts_section_boundary_save", {
+          reason: status,
+          attemptId: forAttempt,
+        });
+      }
+    },
+    []
+  );
   useEffect(() => {
+    setBoundarySaveState(null);
+  }, [attemptId]);
+
+  // Abort only on a real unmount: StrictMode's synchronous dev remount must
+  // not leave the signal permanently aborted (submits would silently no-op).
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    const controller = cancellationControllerRef.current;
     return () => {
-      cancellationControllerRef.current.abort();
+      mountedRef.current = false;
+      queueMicrotask(() => {
+        if (!mountedRef.current) controller.abort();
+      });
     };
   }, []);
 
@@ -113,9 +151,11 @@ export function useStudentSubmissionOrchestration({
       }
 
       const moduleKey = runtimeStateRef.current.currentModule;
+      const boundaryAttempt = attemptId;
       moduleSubmitFingerprintRef.current = canonicalFingerprint;
       setModuleSubmitStatus("submitting");
       setModuleSubmitError(null);
+      setBoundarySave(boundaryAttempt, moduleKey, "saving");
 
       const promise = (async () => {
         let attemptIndex = 0;
@@ -157,6 +197,7 @@ export function useStudentSubmissionOrchestration({
           }
 
           if (flushed) {
+            setBoundarySave(boundaryAttempt, moduleKey, "saved");
             runtimeActions.transitionBlocking("syncing_reconnect", false);
             runtimeActions.transitionBlocking("offline", false);
             if (cancellationSignal.aborted) {
@@ -209,6 +250,7 @@ export function useStudentSubmissionOrchestration({
         }
 
         if (!cancellationSignal.aborted) {
+          setBoundarySave(boundaryAttempt, moduleKey, "attention");
           setModuleSubmitStatus("failed");
           setModuleSubmitError(
             "Could not save your answers after several tries. Stay on this page and check your connection."
@@ -227,6 +269,7 @@ export function useStudentSubmissionOrchestration({
     },
     [
       attemptActions,
+      attemptId,
       cancellationSignal,
       commitWritingDraft,
       reconcileLiveAnswerCacheNow,
@@ -234,6 +277,68 @@ export function useStudentSubmissionOrchestration({
       runtimeStateRef,
       runtimeState.runtimeBacked,
       isFinalModule,
+      setBoundarySave,
+      submissionCommands,
+    ]
+  );
+
+  const confirmInFlightRef = useRef<string | null>(null);
+  /**
+   * Re-proves an outgoing section's barrier when no in-memory evidence exists
+   * (reload/recovery into a transition). Runs the shared flush barrier only;
+   * it never submits a module. Bounded retries mirror module submission.
+   */
+  const confirmBoundarySaved = useCallback(
+    async (sectionKey: ModuleType) => {
+      const key = `${attemptId}:${sectionKey}`;
+      if (
+        cancellationSignal.aborted ||
+        moduleSubmitInFlightRef.current ||
+        confirmInFlightRef.current === key
+      ) {
+        return;
+      }
+      confirmInFlightRef.current = key;
+      const boundaryAttempt = attemptId;
+      setBoundarySave(boundaryAttempt, sectionKey, "saving");
+      try {
+        for (let attemptIndex = 0; attemptIndex <= STUDENT_MODULE_SUBMIT_MAX_RETRIES; attemptIndex += 1) {
+          if (cancellationSignal.aborted) return;
+          let flushed = false;
+          try {
+            if (submissionCommands) {
+              flushed = (await submissionCommands.flushBarrier()).kind === "ready";
+            } else {
+              reconcileLiveAnswerCacheNow();
+              commitWritingDraft();
+              flushed = await attemptActions.flushPending();
+            }
+          } catch {
+            flushed = false;
+          }
+          if (flushed) {
+            setBoundarySave(boundaryAttempt, sectionKey, "saved");
+            return;
+          }
+          if (
+            attemptIndex >= STUDENT_MODULE_SUBMIT_MAX_RETRIES ||
+            !(await waitForRetry(cancellationSignal, Math.min(30_000, 1_000 * 2 ** attemptIndex)))
+          ) {
+            break;
+          }
+        }
+        if (!cancellationSignal.aborted) setBoundarySave(boundaryAttempt, sectionKey, "attention");
+      } finally {
+        if (confirmInFlightRef.current === key) confirmInFlightRef.current = null;
+      }
+    },
+    [
+      attemptActions,
+      attemptId,
+      cancellationSignal,
+      commitWritingDraft,
+      reconcileLiveAnswerCacheNow,
+      setBoundarySave,
       submissionCommands,
     ]
   );
@@ -368,6 +473,8 @@ export function useStudentSubmissionOrchestration({
   );
 
   return {
+    boundarySave,
+    confirmBoundarySaved,
     finalSubmitStatus,
     flushAndSubmitCurrentModuleWithRetry,
     retryFinalSubmit,

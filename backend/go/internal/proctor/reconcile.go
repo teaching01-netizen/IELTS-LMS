@@ -25,7 +25,7 @@ const autoSubmitExpr = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(v.config_snapshot, '$
 var responseSaveGraceSeconds = strconv.FormatInt(int64(attempts.ResponseSaveGrace/time.Second), 10)
 
 // reconcileDueSectionsSQL selects live section runtimes whose active section
-// is due for an automatic advance, start or overrun signal (binds: asOf x3,
+// is due for an automatic advance, start or overrun signal (binds: asOf x5,
 // limit). Migration 0103's (status, timing_model) index serves the status
 // filter, so a pass reads the live runtimes rather than every historical
 // section.
@@ -40,7 +40,19 @@ var reconcileDueSectionsSQL = `
 			WHERE r.status = 'live'
 			  AND COALESCE(r.timing_model, '') <> 'sat_personal_v1'
 			  AND r.active_section_key IS NOT NULL
-			  AND (
+			  AND ((
+					-- The committed IELTS timetable is mirrored onto
+					-- projected_* (runtime.StoreIELTSSharedScheduleInTx): an
+					-- active window has drained, or a scheduled successor is due.
+					r.timing_model = '` + examruntime.TimingModelIELTSSharedSchedule + `'
+					AND (
+					  (rs.status = 'live' AND rs.projected_end_at IS NOT NULL AND ? >= rs.projected_end_at)
+					  OR (rs.status = 'completed' AND EXISTS (
+						SELECT 1 FROM exam_session_runtime_sections n
+						WHERE n.runtime_id = r.id AND n.status = 'locked' AND n.projected_start_at <= ?
+					  ))
+					)
+				) OR (COALESCE(r.timing_model, '') <> '` + examruntime.TimingModelIELTSSharedSchedule + `' AND (
 					-- Wait for the same final-response drain window used by the
 					-- section planner before attempting an automatic advance.
 					(
@@ -70,7 +82,7 @@ var reconcileDueSectionsSQL = `
 							INTERVAL ((rs.planned_duration_minutes + rs.extension_minutes) * 60 + rs.accumulated_paused_seconds + 30) SECOND
 						  )
 					)
-				  )
+				  )))
 			ORDER BY rs.actual_start_at ASC
 			LIMIT ?`
 
@@ -128,6 +140,7 @@ func (s runtimeSection) deadline() time.Time {
 
 type reconcileRuntime struct {
 	id               string
+	timingModel      string
 	providerKey      string
 	status           string
 	activeSectionKey *string
@@ -174,7 +187,7 @@ func (s *Service) ReconcileExpiredSections(ctx context.Context, asOf time.Time, 
 	candidates := make([]sectionReconcileCandidate, 0)
 	personalCandidates := make([]string, 0)
 	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		rows, err := q.QueryContext(ctx, reconcileDueSectionsSQL, asOf, asOf, asOf, limit)
+		rows, err := q.QueryContext(ctx, reconcileDueSectionsSQL, asOf, asOf, asOf, asOf, asOf, limit)
 		if err != nil {
 			return err
 		}
@@ -303,7 +316,12 @@ func (s *Service) completeOneDrainedPersonalRuntime(ctx context.Context, schedul
 
 func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID string, autoSubmit bool, providerKey string, asOf time.Time, origin string) (*int64, error) {
 	var runtimeRevision *int64
-	err := s.tx.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+	// Bounded deadlock retry: a response save holds its attempt and then
+	// share-locks the schedule through the audit FK, the inverse of this
+	// order. InnoDB picks this pass as the victim; retrying it is safe because
+	// every effect is recomputed from the rows locked on the new attempt.
+	err := s.tx.WithTxRetry(ctx, 3, func(ctx context.Context, q tx.Tx) error {
+		runtimeRevision = nil
 		// Global lock order: schedule -> attempts -> runtime -> sections. The
 		// reconciler writes exam_schedules when it completes a runtime, so it
 		// takes the schedule row before the attempt/runtime rows; otherwise it
@@ -342,7 +360,19 @@ func (s *Service) reconcileExpiredSchedule(ctx context.Context, scheduleID strin
 			}
 		}
 		runtime.providerKey = providerKey
-		plan := planSectionAdvance(*runtime, sections, autoSubmit, decisionAt, saveGrace)
+		var plan advancePlan
+		if examruntime.IsIELTSSharedSchedule(runtime.timingModel) {
+			schedule, ok, err := examruntime.LoadIELTSSharedScheduleInTx(ctx, q, runtime.id, "")
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return &apperrors.Error{Code: apperrors.CodeConflict, Message: "The IELTS room schedule is missing.", HTTPStatus: 409}
+			}
+			plan = planSharedScheduleAdvance(*runtime, sections, schedule, decisionAt)
+		} else {
+			plan = planSectionAdvance(*runtime, sections, autoSubmit, decisionAt, saveGrace)
+		}
 		if plan.activeSectionMissing {
 			return &apperrors.Error{Code: apperrors.CodeConflict, Message: "Active section row is missing.", HTTPStatus: 409}
 		}
@@ -723,7 +753,7 @@ func (s *Service) startSectionEffect(ctx context.Context, q tx.Tx, scheduleID, r
 	if err := q.QueryRowContext(ctx, `SELECT timing_model FROM exam_session_runtimes WHERE id = ?`, runtimeID).Scan(&timingModel); err != nil {
 		return err
 	}
-	prepare := adv.prepare && !examruntime.IsIELTSCohortPersonal(timingModel)
+	prepare := adv.prepare && !examruntime.IsIELTSCohortPersonal(timingModel) && !examruntime.IsIELTSSharedSchedule(timingModel)
 	var sectionErr error
 	if prepare {
 		_, sectionErr = q.ExecContext(ctx, `UPDATE exam_session_runtime_sections SET status = 'locked', available_at = UTC_TIMESTAMP(6), actual_start_at = NULL WHERE runtime_id = ? AND section_key = ?`, runtimeID, adv.nextKey)
@@ -779,7 +809,7 @@ func (s *Service) completeRuntimeEffect(ctx context.Context, q tx.Tx, scheduleID
 		SET status = 'completed', actual_end_at = ?, completion_reason = ?, active_section_key = NULL,
 			current_section_key = NULL, current_section_remaining_seconds = 0,
 			waiting_for_next_section = false, is_overrun = false,
-			updated_at = UTC_TIMESTAMP(6), revision = revision + 1
+			updated_at = UTC_TIMESTAMP(6), revision = revision + 1, `+examruntime.IELTSSharedScheduleEndedAssign+`
 		WHERE id = ?`, adv.endAt, adv.reason, runtimeID); err != nil {
 		return err
 	}
@@ -873,4 +903,71 @@ func markRuntimeOverrun(ctx context.Context, q tx.Tx, runtimeID string) error {
 		SET is_overrun = true, updated_at = UTC_TIMESTAMP(6), revision = revision + 1
 		WHERE id = ?`, runtimeID)
 	return err
+}
+
+// planSharedScheduleAdvance materializes the committed IELTS timetable onto
+// the section rows. Every effect time is a timetable instant, never asOf, so
+// a late worker catches up through elapsed sections without granting fresh
+// durations, and no device readiness is consulted. Authored auto-submit does
+// not hold the room: offline devices follow the same timetable regardless.
+func planSharedScheduleAdvance(runtime reconcileRuntime, locked []runtimeSection, schedule examruntime.IELTSSharedSchedule, asOf time.Time) advancePlan {
+	var plan advancePlan
+	if runtime.activeSectionKey == nil || *runtime.activeSectionKey == "" || schedule.Status != examruntime.SharedScheduleActive {
+		return plan
+	}
+	sections := make([]runtimeSection, len(locked))
+	copy(sections, locked)
+	activeIndex := -1
+	for i := range sections {
+		if sections[i].key == *runtime.activeSectionKey {
+			activeIndex = i
+		}
+	}
+	if activeIndex < 0 {
+		plan.activeSectionMissing = true
+		return plan
+	}
+	waiting := runtime.waiting
+	for {
+		active := &sections[activeIndex]
+		window, ok := schedule.WindowFor(active.key)
+		if !ok {
+			return plan
+		}
+		switch active.status {
+		case "live":
+			if asOf.Before(window.SaveUntil) {
+				return plan
+			}
+			plan.steps = append(plan.steps, advanceStep{kind: stepCompleteSection, sectionKey: active.key, effectiveAt: window.SaveUntil})
+			active.status = "completed"
+		case "completed":
+		default:
+			return plan
+		}
+		nextIndex := nextLockedSection(sections, activeIndex)
+		if nextIndex < 0 {
+			plan.steps = append(plan.steps, advanceStep{kind: stepCompleteRuntime, effectiveAt: window.SaveUntil})
+			return plan
+		}
+		next := &sections[nextIndex]
+		nextWindow, ok := schedule.WindowFor(next.key)
+		if !ok {
+			// A row without a window was cut by an early end: nothing follows.
+			plan.steps = append(plan.steps, advanceStep{kind: stepCompleteRuntime, effectiveAt: window.SaveUntil})
+			return plan
+		}
+		if asOf.Before(nextWindow.StartAt) {
+			if !waiting {
+				plan.steps = append(plan.steps, advanceStep{kind: stepEnterWaiting, sectionKey: active.key, nextKey: next.key, startAt: nextWindow.StartAt})
+			}
+			return plan
+		}
+		plan.steps = append(plan.steps, advanceStep{
+			kind: stepStartSection, sectionKey: next.key, startAt: nextWindow.StartAt,
+			remaining: int64(nextWindow.DeadlineAt.Sub(nextWindow.StartAt) / time.Second),
+		})
+		next.status = "live"
+		activeIndex, waiting = nextIndex, false
+	}
 }

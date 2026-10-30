@@ -147,10 +147,20 @@ var metricHelpText = map[string]string{
 	MSATStartCodeStageSeconds:          "SAT access-code start processing duration by bounded stage.",
 	MSATStartCodeHTTPSeconds:           "Full SAT access-code start HTTP handler duration, including response assembly.",
 	MSATStartCodeAdmissionWaitTotal:    "SAT access-code start admission waiters by fixed stage and outcome.",
+	MIELTSSectionActivationDelay:       "IELTS personal section activation delay in seconds (label: section).",
+	MIELTSSharedProjectionLagTotal:     "Shared IELTS commit-to-read section projection lag observations (diagnostic, label: section).",
 }
 
 // Metric name constants (plan 69).
 const (
+	// MIELTSSectionActivationDelay: committed start of an IELTS personal
+	// section minus the previous section's personal deadline (label: section).
+	MIELTSSectionActivationDelay = "ielts_section_activation_delay_seconds"
+	// MIELTSSharedProjectionLagTotal counts committed-timetable reads whose
+	// section differs from the stale materialized runtime row (label: section).
+	// The read is still served from the timetable; this is a lag signal only.
+	MIELTSSharedProjectionLagTotal = "ielts_shared_projection_lag_total"
+
 	MHTTPRequestsTotal = "http_requests_total"
 	MHTTPRequestDur    = "http_request_duration_seconds"
 	MHTTPInFlight      = "http_in_flight"

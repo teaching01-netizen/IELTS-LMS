@@ -104,6 +104,7 @@ func readyIELTSPersonalSectionInTx(
 	now := out.ServerNow.UTC()
 
 	expected := time.Time{}
+	var previousDeadlineAt time.Time
 	if order == 0 {
 		if !actualStart.Valid {
 			return apperrors.New(apperrors.CodeConflict, "The first IELTS section has not opened.")
@@ -139,11 +140,21 @@ func readyIELTSPersonalSectionInTx(
 			out.Message = "This section will open after the previous section is complete."
 			return nil
 		}
-		expected = previousDeadline.Time.UTC().Add(time.Duration(previousGap) * time.Minute)
-		if IsIELTSCohortPersonal(timingModel) && actualStart.Valid && actualStart.Time.UTC().After(expected) {
-			expected = actualStart.Time.UTC()
+		previousDeadlineAt = previousDeadline.Time.UTC()
+		released := true
+		if IsIELTSCohortPersonal(timingModel) {
+			var roomRelease *time.Time
+			if actualStart.Valid {
+				roomRelease = &actualStart.Time
+			}
+			expected, released = IELTSNextSectionEligibleAt(previousDeadline.Time, previousGap, roomRelease)
+		} else {
+			expected = previousDeadline.Time.UTC().Add(time.Duration(previousGap) * time.Minute)
 		}
-		out.ExpectedStartAt = &expected
+		// An unreleased V2 section advertises no start time: it is not permission.
+		if released {
+			out.ExpectedStartAt = &expected
+		}
 		if previousState == "active" {
 			if now.Before(previousDeadline.Time.UTC()) {
 				out.Status = "preparing"
@@ -158,7 +169,7 @@ func readyIELTSPersonalSectionInTx(
 				return err
 			}
 		}
-		if IsIELTSCohortPersonal(timingModel) && !actualStart.Valid {
+		if !released {
 			out.Status = "preparing"
 			out.Message = "This section will open when the room moves to it. Your previous section time is preserved."
 			return nil
@@ -271,6 +282,9 @@ func readyIELTSPersonalSectionInTx(
 			if err := recordDelayedStart(v, d); err != nil {
 				return err
 			}
+			if !previousDeadlineAt.IsZero() {
+				out.activationDelay = v.Sub(previousDeadlineAt)
+			}
 			*changed = true
 		}
 		return nil
@@ -346,6 +360,9 @@ func readyIELTSPersonalSectionInTx(
 	if activated == 1 {
 		if err := recordDelayedStart(v, d); err != nil {
 			return err
+		}
+		if !previousDeadlineAt.IsZero() {
+			out.activationDelay = v.Sub(previousDeadlineAt)
 		}
 		*changed = true
 	}

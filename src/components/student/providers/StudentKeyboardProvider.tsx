@@ -368,7 +368,7 @@ export function KeyboardProvider({ children }: KeyboardProviderProps) {
           }
 
           if (runtimeStateRef.current.runtimeBacked) {
-            const flushed = await attemptActionsRef.current.flushPending();
+            const flushed = await attemptActionsRef.current.flushPending({ boundary: true });
             if (!flushed) {
               if (!navigator.onLine) {
                 runtimeActionsRef.current.transitionBlocking('offline', true);

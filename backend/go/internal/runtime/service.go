@@ -431,6 +431,21 @@ func (s *Service) insertLiveRuntimeTx(ctx context.Context, q tx.Tx, sch *StartSc
 	if IsSatPersonal(timingModel) && s.satHandoffMode == "client_start" {
 		handoffMode = "client_start"
 	}
+	var shared *IELTSSharedSchedule
+	if IsIELTSSharedSchedule(timingModel) {
+		if providerKey != "ielts" {
+			return nil, apperrors.New(apperrors.CodeConflict, "The shared offline timetable is only available for IELTS.")
+		}
+		var dbNow time.Time
+		if err := q.QueryRowContext(ctx, "SELECT UTC_TIMESTAMP(6)").Scan(&dbNow); err != nil {
+			return nil, err
+		}
+		built, err := BuildIELTSSharedSchedule(dbNow.Add(IELTSSharedDeliveryLead), plan, ResponseSaveGrace)
+		if err != nil {
+			return nil, err
+		}
+		shared = &built
+	}
 	planJSON, _ := json.Marshal(plan)
 	const ins = "INSERT INTO exam_session_runtimes (id, schedule_id, exam_id, provider_key, status, plan_snapshot, timing_model, ielts_preparation_seconds, sat_handoff_mode, actual_start_at, actual_end_at, active_section_key, current_section_key, current_section_remaining_seconds, waiting_for_next_section, is_overrun, total_paused_seconds, created_at, updated_at, revision) VALUES (?, ?, ?, ?, 'live', ?, ?, ?, ?, UTC_TIMESTAMP(6), NULL, ?, ?, ?, false, false, 0, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6), 1)"
 	if _, err := q.ExecContext(ctx, ins, runtimeID, sch.ID, sch.ExamID, providerKey, string(planJSON), timingModel, ieltsPreparationAllowanceSeconds(), handoffMode, firstKey, firstKey, firstSecs); err != nil {
@@ -442,7 +457,14 @@ func (s *Service) insertLiveRuntimeTx(ctx context.Context, q tx.Tx, sch *StartSc
 	for i, entry := range plan {
 		status := SectionLocked
 		var availExpr, startExpr string
-		if i == 0 {
+		args := []any{uuid.NewString(), runtimeID, entry.SectionKey, entry.Label, entry.Order, entry.DurationMinutes, entry.GapAfterMinutes, status}
+		if i == 0 && shared != nil {
+			// The committed first window: the section is released now and its
+			// clock starts at the timetable's start, never at a readiness report.
+			status = SectionLive
+			availExpr = "UTC_TIMESTAMP(6)"
+			startExpr = "?"
+		} else if i == 0 {
 			status = SectionLive
 			availExpr = "UTC_TIMESTAMP(6)"
 			startExpr = "UTC_TIMESTAMP(6)"
@@ -455,7 +477,16 @@ func (s *Service) insertLiveRuntimeTx(ctx context.Context, q tx.Tx, sch *StartSc
 			startExpr = "NULL"
 		}
 		stmt := "INSERT INTO exam_session_runtime_sections (id, runtime_id, section_key, label, section_order, planned_duration_minutes, gap_after_minutes, status, available_at, actual_start_at, actual_end_at, paused_at, accumulated_paused_seconds, extension_minutes, completion_reason, projected_start_at, projected_end_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, " + availExpr + ", " + startExpr + ", NULL, NULL, 0, 0, NULL, NULL, NULL)"
-		if _, err := q.ExecContext(ctx, stmt, uuid.NewString(), runtimeID, entry.SectionKey, entry.Label, entry.Order, entry.DurationMinutes, entry.GapAfterMinutes, status); err != nil {
+		args[7] = status
+		if startExpr == "?" {
+			args = append(args, shared.Windows[0].StartAt)
+		}
+		if _, err := q.ExecContext(ctx, stmt, args...); err != nil {
+			return nil, err
+		}
+	}
+	if shared != nil {
+		if err := StoreIELTSSharedScheduleInTx(ctx, q, runtimeID, *shared); err != nil {
 			return nil, err
 		}
 	}
@@ -568,9 +599,18 @@ func (s *Service) Pause(ctx context.Context, scheduleID string, fence RevisionFe
 		if _, err := q.ExecContext(ctx, setPaused, rt.ID); err != nil {
 			return err
 		}
+		pauseRow := true
+		if IsIELTSSharedSchedule(rt.TimingModel) {
+			var err error
+			if pauseRow, err = pauseIELTSSharedInTx(ctx, q, rt); err != nil {
+				return err
+			}
+		}
 		const secPaused = "UPDATE exam_session_runtime_sections SET status = 'paused', paused_at = UTC_TIMESTAMP(6) WHERE runtime_id = ? AND section_key = ?"
-		if _, err := q.ExecContext(ctx, secPaused, rt.ID, active); err != nil {
-			return err
+		if pauseRow {
+			if _, err := q.ExecContext(ctx, secPaused, rt.ID, active); err != nil {
+				return err
+			}
 		}
 		if IsIELTSPersonal(rt.TimingModel) {
 			if _, err := q.ExecContext(ctx, `UPDATE ielts_attempt_section_timelines
@@ -636,13 +676,25 @@ func (s *Service) Resume(ctx context.Context, scheduleID string, fence RevisionF
 				pausedSecs = int64(d / time.Second)
 			}
 		}
+		rowEffect := sharedRowAccumulate
+		if IsIELTSSharedSchedule(rt.TimingModel) {
+			var err error
+			if pausedSecs, rowEffect, err = resumeIELTSSharedInTx(ctx, q, rt, serverNow); err != nil {
+				return err
+			}
+		}
 		const setLive = "UPDATE exam_session_runtimes SET status = 'live', total_paused_seconds = total_paused_seconds + ?, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
 		if _, err := q.ExecContext(ctx, setLive, pausedSecs, rt.ID); err != nil {
 			return err
 		}
-		const secLive = "UPDATE exam_session_runtime_sections SET status = 'live', paused_at = NULL, accumulated_paused_seconds = accumulated_paused_seconds + ? WHERE runtime_id = ? AND section_key = ?"
-		if _, err := q.ExecContext(ctx, secLive, pausedSecs, rt.ID, active); err != nil {
-			return err
+		secLive := "UPDATE exam_session_runtime_sections SET status = 'live', paused_at = NULL, accumulated_paused_seconds = accumulated_paused_seconds + ? WHERE runtime_id = ? AND section_key = ?"
+		if rowEffect == sharedRowShiftStart {
+			secLive = "UPDATE exam_session_runtime_sections SET status = 'live', paused_at = NULL, actual_start_at = DATE_ADD(actual_start_at, INTERVAL ? SECOND) WHERE runtime_id = ? AND section_key = ?"
+		}
+		if rowEffect != sharedRowUntouched {
+			if _, err := q.ExecContext(ctx, secLive, pausedSecs, rt.ID, active); err != nil {
+				return err
+			}
 		}
 		if IsIELTSPersonal(rt.TimingModel) {
 			// A candidate pause can overlap a room pause. Keep that candidate's
@@ -705,6 +757,10 @@ func (s *Service) Extend(ctx context.Context, scheduleID string, fence RevisionF
 		active := *rt.ActiveSectionKey
 		const extSec = "UPDATE exam_session_runtime_sections SET extension_minutes = extension_minutes + ?, projected_end_at = DATE_ADD(COALESCE(projected_end_at, UTC_TIMESTAMP(6)), INTERVAL ? MINUTE) WHERE runtime_id = ? AND section_key = ?"
 		if _, err := q.ExecContext(ctx, extSec, minutes, minutes, rt.ID, active); err != nil {
+			return err
+		}
+		// After the row update: the timetable rewrites projected_* exactly.
+		if err := ExtendIELTSSharedInTx(ctx, q, rt.ID, rt.TimingModel, active, minutes); err != nil {
 			return err
 		}
 		const bumpRt = "UPDATE exam_session_runtimes SET current_section_remaining_seconds = current_section_remaining_seconds + (? * 60), updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
@@ -859,7 +915,7 @@ func (s *Service) emitRuntimeChanged(ctx context.Context, q tx.Tx, scheduleID st
 // proctor CompleteExam path calls it too, so the two completion owners the
 // earlier passes kept in sync by hand cannot drift again.
 func CompleteInTx(ctx context.Context, q tx.Tx, scheduleID, runtimeID, completionReason string) error {
-	const doneRt = "UPDATE exam_session_runtimes SET status = 'completed', actual_end_at = UTC_TIMESTAMP(6), completion_reason = ?, active_section_key = NULL, current_section_key = NULL, current_section_remaining_seconds = 0, waiting_for_next_section = false, updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
+	const doneRt = "UPDATE exam_session_runtimes SET status = 'completed', actual_end_at = UTC_TIMESTAMP(6), completion_reason = ?, active_section_key = NULL, current_section_key = NULL, current_section_remaining_seconds = 0, waiting_for_next_section = false, updated_at = UTC_TIMESTAMP(6), revision = revision + 1, " + IELTSSharedScheduleEndedAssign + " WHERE id = ?"
 	if _, err := q.ExecContext(ctx, doneRt, completionReason, runtimeID); err != nil {
 		return err
 	}

@@ -1,7 +1,34 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import { defineConfig, loadEnv } from "vite";
+import { createHash } from "crypto";
+import { defineConfig, loadEnv, type Plugin } from "vite";
+
+/**
+ * Emits ielts-offline-assets.json: every immutable build asset plus the
+ * navigation document, for public/ielts-offline-sw.js. Listing the whole
+ * build is a superset of the student exam route graph, so no lazily loaded
+ * exam chunk can be missing offline.
+ * offcut: whole build, not the student subgraph; prune if the shell outgrows device quota.
+ */
+function ieltsOfflineShellManifest(): Plugin {
+  return {
+    name: "ielts-offline-shell-manifest",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const assets = Object.keys(bundle)
+        .filter((file) => !file.endsWith(".map") && !file.startsWith(".vite/") && file !== "index.html")
+        .map((file) => `/${file}`)
+        .sort();
+      const buildId = createHash("sha256").update(assets.join("\n")).digest("hex").slice(0, 16);
+      this.emitFile({
+        type: "asset",
+        fileName: "ielts-offline-assets.json",
+        source: JSON.stringify({ schemaVersion: 1, buildId, document: "/index.html", assets }),
+      });
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
@@ -9,7 +36,7 @@ export default defineConfig(({ mode }) => {
   const backendApiUrl =
     env["VITE_BACKEND_API_URL"] || backendEnv["VITE_BACKEND_API_URL"] || "http://127.0.0.1:4000";
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), ieltsOfflineShellManifest()],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "."),

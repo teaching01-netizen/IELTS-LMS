@@ -74,6 +74,9 @@ function mapBackendSessionSummary(payload: {
   ieltsPersonalSectionKey?: StudentSession["ieltsPersonalSectionKey"] | null | undefined;
   ieltsPersonalDeadlineAt?: string | null | undefined;
   ieltsPersonalTimeRemainingSeconds?: number | null | undefined;
+  ieltsOfflinePreparedSection?: string | null | undefined;
+  ieltsOfflinePreparedAt?: string | null | undefined;
+  draftEvidencePending?: number | null | undefined;
   violations: StudentSession["violations"];
   warnings: number;
   lastActivity: string;
@@ -122,6 +125,10 @@ function mapBackendSessionSummary(payload: {
     ieltsPersonalSectionKey: payload.ieltsPersonalSectionKey ?? undefined,
     ieltsPersonalDeadlineAt: payload.ieltsPersonalDeadlineAt ?? null,
     ieltsPersonalTimeRemainingSeconds: payload.ieltsPersonalTimeRemainingSeconds ?? null,
+    ieltsOfflinePreparedSection:
+      (payload.ieltsOfflinePreparedSection as StudentSession["ieltsOfflinePreparedSection"]) ?? null,
+    ieltsOfflinePreparedAt: payload.ieltsOfflinePreparedAt ?? null,
+    draftEvidencePending: payload.draftEvidencePending ?? 0,
     violations: payload.violations ?? [],
     warnings: payload.warnings,
     lastActivity: payload.lastActivity,

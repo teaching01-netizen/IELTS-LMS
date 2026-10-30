@@ -23,6 +23,7 @@ func snapshotRuntimeGate(snap runtime.Snapshot, now time.Time) attempts.RuntimeG
 		SectionPaused:         snap.SectionPaused,
 		SectionStarted:        snap.SectionStarted,
 		WaitingForNextSection: snap.WaitingForNextSection,
+		SharedSchedule:        snap.SharedSchedule,
 		Now:                   now.UTC(),
 	}
 	if snap.ActiveSectionKey != nil && *snap.ActiveSectionKey != "" {

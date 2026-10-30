@@ -37,6 +37,14 @@ import {
 } from "../infrastructure/exam-session/studentRealtimeCoordinator";
 import { runStudentSessionMachineCommands } from "./studentSessionMachineAdapters";
 import {
+  hasIeltsOfflineRoute,
+  isOfflineTransportFailure,
+  loadIeltsOfflinePackageForRoute,
+  type IeltsOfflinePackage,
+} from "../infrastructure/ieltsOfflinePackageStore";
+import { newestIeltsSchedule } from "../application/ieltsOfflineRuntime";
+import { parseIeltsSharedSchedule } from "../domain/exam-session/ieltsSharedSchedule";
+import {
   evaluateLiveSnapshotTransition,
   evaluateLoadTransition,
 } from "./studentSessionStateMachine";
@@ -88,6 +96,10 @@ interface StudentSessionRouteData {
   isSatStaticReady: boolean;
   refreshRuntime: () => Promise<void>;
   retry: () => Promise<void>;
+  /** Credential-free static payload of the last successful load (offline package input). */
+  staticPayload: Record<string, unknown> | null;
+  /** Ready offline package this route was restored from after a network failure. */
+  offlinePackage: IeltsOfflinePackage | null;
 }
 
 type BackendLiveSession = StudentSessionLivePayload;
@@ -132,7 +144,10 @@ export function useStudentSessionRouteData(
   scheduleId?: string,
   studentId?: string
 ): StudentSessionRouteData {
-  const { status: authStatus } = useAuthSession();
+  const { status: authStatus, session: authSession } = useAuthSession();
+  const authUserId = authSession?.user.id ?? null;
+  const [staticPayload, setStaticPayload] = useState<Record<string, unknown> | null>(null);
+  const [offlinePackage, setOfflinePackage] = useState<IeltsOfflinePackage | null>(null);
   const [answerInvariantRollout, setAnswerInvariantRollout] =
     useState<StudentAnswerInvariantRollout>(buildDefaultAnswerInvariantRollout);
   const [attemptSnapshot, setAttemptSnapshot] = useState<StudentAttempt | null>(null);
@@ -160,9 +175,17 @@ export function useStudentSessionRouteData(
   );
   const candidateId = useMemo(() => normalizeCandidateId(studentId), [studentId]);
   // Server reads re-check the grant; this only decides whether to try.
+  // An unreachable auth service with a prepared IELTS package may still try:
+  // the load itself falls back to the package only after a network failure.
   const canLoadSession =
     authStatus === "authenticated" ||
-    (authStatus !== "loading" && Boolean(scheduleId && candidateId && hasSittingGrant(scheduleId, candidateId)));
+    (authStatus !== "loading" &&
+      Boolean(
+        scheduleId &&
+          candidateId &&
+          (hasSittingGrant(scheduleId, candidateId) ||
+            (authStatus === "unavailable" && hasIeltsOfflineRoute(scheduleId, candidateId)))
+      ));
   const staticVersionIdRef = useRef<string | null>(null);
   const refreshEpochRef = useRef(0);
   // Phase 02 seed: wall-clock ms when the load path last applied a live
@@ -292,6 +315,7 @@ export function useStudentSessionRouteData(
 
     setSchedule(scheduleEntity);
     setState(examState);
+    setStaticPayload(session as unknown as Record<string, unknown>);
     staticVersionIdRef.current = version.id;
 
     return {
@@ -925,6 +949,44 @@ export function useStudentSessionRouteData(
     }
   }, [authStatus, candidateId, error, scheduleId]);
 
+  const restoreOfflinePackage = useCallback(async (): Promise<boolean> => {
+    if (!scheduleId || !candidateId) return false;
+    const restored = await loadIeltsOfflinePackageForRoute(scheduleId, candidateId, authUserId);
+    if (!restored.ok) {
+      emitStudentObservabilityMetric("ielts_offline_restore", { reason: restored.reason });
+      return false;
+    }
+    const { record } = restored;
+    const session = record.staticPayload as { schedule?: unknown; version?: unknown };
+    const scheduleEntity = studentSessionFacade.mapSchedule(session.schedule as never);
+    const version = studentSessionFacade.mapVersion(session.version as never);
+    if (version.id !== record.manifest.publishedVersionId) {
+      emitStudentObservabilityMetric("ielts_offline_restore", { reason: "version_mismatch" });
+      return false;
+    }
+    const examState = studentSessionFacade.hydrateExamState(version.contentSnapshot, version.configSnapshot);
+    // The package holds the last mapped projection; its timetable is re-validated.
+    const mapped = (record.liveSnapshot?.runtime ?? null) as ExamSessionRuntime | null;
+    const schedule = newestIeltsSchedule(parseIeltsSharedSchedule(mapped?.ieltsSharedSchedule), record.manifest.schedule);
+    const cachedAttempt =
+      (await readCachedAttemptForCandidate()) ?? ((record.liveSnapshot?.attempt ?? null) as StudentAttempt | null);
+    if (!mapped || !schedule || !cachedAttempt || cachedAttempt.id !== record.manifest.attemptId) {
+      emitStudentObservabilityMetric("ielts_offline_restore", { reason: "incomplete_snapshot" });
+      return false;
+    }
+    setProviderKey("ielts");
+    setSchedule(scheduleEntity);
+    setState(examState);
+    staticVersionIdRef.current = version.id;
+    const runtime = { ...mapped, ieltsSharedSchedule: schedule };
+    runtimeSnapshotRef.current = runtime;
+    setRuntimeSnapshot(runtime);
+    setAttemptSnapshot(cachedAttempt);
+    setOfflinePackage(record);
+    emitStudentObservabilityMetric("ielts_offline_restore", { reason: "restored" });
+    return true;
+  }, [authUserId, candidateId, readCachedAttemptForCandidate, scheduleId]);
+
   const loadStudentData = useCallback(
     async (source: "load" | "retry" = "load") => {
       if (!mountedRef.current) {
@@ -1095,6 +1157,14 @@ export function useStudentSessionRouteData(
         );
         applyLoadTransition(source, { type: "succeeded" });
       } catch (loadError) {
+        // Only a transport failure may fall back to the prepared package; an
+        // explicit server denial (401/403/404, transfer, terminal) never does.
+        if (isOfflineTransportFailure(loadError) && (await restoreOfflinePackage())) {
+          if (loadEpoch === refreshEpochRef.current && mountedRef.current) {
+            applyLoadTransition(source, { type: "succeeded" });
+          }
+          return;
+        }
         // Another browser/device owns this SAT attempt: not a load failure but
         // an ownership state the route answers with the device-transfer surface.
         if ((loadError as { code?: unknown } | null)?.code === "SESSION_ALREADY_ACTIVE") {
@@ -1114,6 +1184,7 @@ export function useStudentSessionRouteData(
       loadStaticSessionSnapshot,
       maybeRebootstrapStaticOnVersionMismatch,
       readCachedAttemptForCandidate,
+      restoreOfflinePackage,
       scheduleId,
       saveAndReadReconciledAttempt,
       sessionBootstrap,
@@ -1377,5 +1448,7 @@ export function useStudentSessionRouteData(
     refreshRuntime: (...args: Parameters<typeof refreshBackendSessionSnapshot>) =>
       refreshBackendSessionSnapshot(...args).catch(() => {}),
     retry: () => loadStudentData("retry").catch(() => {}),
+    staticPayload,
+    offlinePackage,
   };
 }

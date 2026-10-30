@@ -692,6 +692,26 @@ describe('ProctorDashboard runtime controls', () => {
         ],
       });
 
+    it('warns that disconnected shared-timetable students may follow the previous timetable', () => {
+      render(
+        <DashboardHarness
+          {...baseProps()}
+          runtimeSnapshots={[{ ...liveRuntime, timingModel: 'ielts_shared_schedule_v1', serverNow: '2026-01-01T02:00:00.000Z' }]}
+          sessions={[makeSession({ lastActivity: '2026-01-01T00:12:00.000Z' })]}
+        />,
+      );
+      selectCohort();
+
+      expect(screen.getByText(/may still be following the previous timetable/i)).toBeInTheDocument();
+    });
+
+    it('does not claim a shared timetable for other timing models', () => {
+      render(<DashboardHarness {...baseProps()} />);
+      selectCohort();
+
+      expect(screen.queryByText(/previous timetable/i)).not.toBeInTheDocument();
+    });
+
     it('marks completed cohorts complete and hides end-section and extend section controls', () => {
       render(
         <DashboardHarness

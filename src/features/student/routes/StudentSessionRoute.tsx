@@ -40,7 +40,7 @@ export function StudentSessionRoute() {
   const diagnosticsEnabled = new URLSearchParams(useLocation().search).get('touchSelectionDebug') === '1';
   const { scheduleId, studentId } = useParams<{ scheduleId: string; studentId?: string }>();
   const navigate = useNavigate();
-  const { logoutAll, status: authStatus } = useAuthSession();
+  const { logoutAll, status: authStatus, session: authSession } = useAuthSession();
   const {
     answerInvariantRollout,
     attemptSnapshot,
@@ -56,6 +56,8 @@ export function StudentSessionRoute() {
     state,
     refreshRuntime,
     satBootstrapSeed,
+    staticPayload,
+    offlinePackage,
   } =
     useStudentSessionRouteData(scheduleId, studentId);
 
@@ -235,6 +237,10 @@ export function StudentSessionRoute() {
             refreshRuntime={refreshRuntime}
             runtimeSnapshot={runtimeSnapshot}
             answerInvariantRollout={answerInvariantRollout}
+            staticPayload={staticPayload}
+            offlinePackage={offlinePackage}
+            candidateId={candidateId}
+            userId={authSession?.user.id ?? null}
           />
         </React.Suspense>
       </StudentTouchSelectionDiagnosticsProvider>

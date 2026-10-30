@@ -55,6 +55,7 @@ import (
 
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/telemetry"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
@@ -189,6 +190,10 @@ type SessionRuntime struct {
 	// proctor session detail read (loadExamPlan); summary and student reads
 	// leave it null, so the student hot paths keep their single sections leg.
 	ExamPlan []SessionPlanSection `json:"examPlan"`
+	// IeltsSharedSchedule is the committed room timetable (shared offline
+	// model only). Clients derive the section from it; the fields above are
+	// overlaid from it so a late projector never shows a stale section.
+	IeltsSharedSchedule *examruntime.IELTSSharedSchedule `json:"ieltsSharedSchedule,omitempty"`
 }
 
 // StudentSessionSummary mirrors Rust StudentSessionSummary (camelCase).
@@ -265,21 +270,29 @@ type StudentSessionSummary struct {
 	// adaptive role) — the same row the delivery service and the final result
 	// read, so staff, student and result cannot disagree about which Module 2
 	// the candidate is sitting.
-	RuntimeAttemptRevision            *int64          `json:"attemptRevision"`
-	RuntimeCurrentModuleID            *string         `json:"runtimeCurrentModuleId"`
-	RuntimeModuleAttemptID            *string         `json:"runtimeModuleAttemptId"`
-	RuntimeModuleAttemptRevision      *int            `json:"runtimeModuleAttemptRevision"`
-	RuntimeSectionStatus              *string         `json:"runtimeSectionStatus"`
-	RuntimeWaiting                    bool            `json:"runtimeWaiting"`
-	IELTSPersonalStatus               *string         `json:"ieltsPersonalStatus,omitempty"`
-	IELTSPersonalSectionKey           *string         `json:"ieltsPersonalSectionKey,omitempty"`
-	IELTSPersonalDeadlineAt           *time.Time      `json:"ieltsPersonalDeadlineAt,omitempty"`
-	IELTSPersonalTimeRemainingSeconds *int            `json:"ieltsPersonalTimeRemainingSeconds,omitempty"`
-	Violations                        json.RawMessage `json:"violations"`
-	Warnings                          int             `json:"warnings"`
-	LastActivity                      time.Time       `json:"lastActivity"`
-	ExamID                            string          `json:"examId"`
-	ExamName                          string          `json:"examName"`
+	RuntimeAttemptRevision            *int64     `json:"attemptRevision"`
+	RuntimeCurrentModuleID            *string    `json:"runtimeCurrentModuleId"`
+	RuntimeModuleAttemptID            *string    `json:"runtimeModuleAttemptId"`
+	RuntimeModuleAttemptRevision      *int       `json:"runtimeModuleAttemptRevision"`
+	RuntimeSectionStatus              *string    `json:"runtimeSectionStatus"`
+	RuntimeWaiting                    bool       `json:"runtimeWaiting"`
+	IELTSPersonalStatus               *string    `json:"ieltsPersonalStatus,omitempty"`
+	IELTSPersonalSectionKey           *string    `json:"ieltsPersonalSectionKey,omitempty"`
+	IELTSPersonalDeadlineAt           *time.Time `json:"ieltsPersonalDeadlineAt,omitempty"`
+	IELTSPersonalTimeRemainingSeconds *int       `json:"ieltsPersonalTimeRemainingSeconds,omitempty"`
+	// IELTSOfflinePreparedSection/At report the section this device verified a
+	// complete offline package for in a shared-timetable room. Diagnostic
+	// only: presence never holds or advances the room clock.
+	IELTSOfflinePreparedSection *string    `json:"ieltsOfflinePreparedSection,omitempty"`
+	IELTSOfflinePreparedAt      *time.Time `json:"ieltsOfflinePreparedAt,omitempty"`
+	// DraftEvidencePending counts retained drafts the server has not scored
+	// and staff have not reviewed. It is never a transition guard.
+	DraftEvidencePending int             `json:"draftEvidencePending"`
+	Violations           json.RawMessage `json:"violations"`
+	Warnings             int             `json:"warnings"`
+	LastActivity         time.Time       `json:"lastActivity"`
+	ExamID               string          `json:"examId"`
+	ExamName             string          `json:"examName"`
 	// SatStartState is the SAT access-code start disposition for code-start
 	// sessions: "waiting_for_code" (admitted, not started), "started", or
 	// "never_started" (closed without a start; no result). Null for proctor
@@ -821,7 +834,51 @@ func loadSessionRuntime(ctx context.Context, q sessionQuerier, schedule SessionS
 	if err != nil {
 		return SessionRuntime{}, err
 	}
-	return hydrateSessionRuntime(row, sections, now), nil
+	rt := hydrateSessionRuntime(row, sections, now)
+	if examruntime.IsIELTSSharedSchedule(rt.TimingModel) {
+		var raw sql.NullString
+		if err := q.QueryRowContext(ctx, "SELECT ielts_shared_schedule FROM exam_session_runtimes WHERE id = ?", row.id).Scan(&raw); err != nil {
+			return SessionRuntime{}, err
+		}
+		if raw.Valid {
+			shared, err := examruntime.ParseIELTSSharedSchedule([]byte(raw.String))
+			if err != nil {
+				return SessionRuntime{}, err
+			}
+			applySharedScheduleView(&rt, shared, now)
+		}
+	}
+	return rt, nil
+}
+
+// applySharedScheduleView overlays the timetable-resolved section on the
+// row projection, which lags until the reconciler materializes a boundary.
+func applySharedScheduleView(rt *SessionRuntime, shared examruntime.IELTSSharedSchedule, now time.Time) {
+	rt.IeltsSharedSchedule = &shared
+	if rt.Status != "live" {
+		return
+	}
+	pos, err := examruntime.ResolveIELTSSharedWindow(shared, now)
+	if err != nil || pos.Window == nil {
+		return
+	}
+	key := pos.Window.SectionKey
+	switch pos.Kind {
+	case examruntime.SharedWorking:
+		// The read is authoritative from the timetable; if the materialized
+		// row still names another section, report the lag without serving it.
+		if rt.CurrentSectionKey == nil || *rt.CurrentSectionKey != key {
+			telemetry.IncCounter(telemetry.MIELTSSharedProjectionLagTotal, "section", key)
+		}
+		deadline := pos.Window.DeadlineAt
+		rt.ActiveSectionKey, rt.CurrentSectionKey, rt.CurrentSectionDeadlineAt = &key, &key, &deadline
+		rt.CurrentSectionRemainingSeconds = int(deadline.Sub(now).Seconds())
+		rt.WaitingForNextSection, rt.NextSectionStartAt = false, nil
+	case examruntime.SharedGap:
+		start := pos.Window.StartAt
+		rt.WaitingForNextSection, rt.NextSectionStartAt, rt.CurrentSectionDeadlineAt = true, &start, nil
+		rt.CurrentSectionRemainingSeconds = 0
+	}
 }
 
 // loadRuntimeSections runs the sections leg shared by loadSessionRuntime
@@ -2081,6 +2138,9 @@ func (s *Service) GetSessionDetail(ctx context.Context, actor Actor, scheduleID 
 		sessions = append(sessions, attemptRowToSession(row, runtime))
 	}
 	if err := attachIELTSPersonalRosterStates(ctx, q, runtime, sessions); err != nil {
+		return ProctorSessionDetail{}, err
+	}
+	if err := attachIELTSOfflineRosterStates(ctx, q, runtime, sessions); err != nil {
 		return ProctorSessionDetail{}, err
 	}
 	auditLogs, err := loadAuditLogs(ctx, q, scheduleID, auditLimit)

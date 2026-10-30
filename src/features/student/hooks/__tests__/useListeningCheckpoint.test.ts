@@ -15,6 +15,7 @@ describe("listening checkpoint", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    localStorage.clear();
     gateway.read.mockResolvedValue(view);
     gateway.save.mockResolvedValue(view);
   });
@@ -92,5 +93,26 @@ describe("listening checkpoint", () => {
     expect(gateway.read).toHaveBeenCalledTimes(2);
     expect(audio.currentTime).toBe(17);
     expect(result.current).toBeNull();
+  });
+  it("resumes offline from this device's last position and reconciles it on reconnect", async () => {
+    localStorage.clear();
+    const { saveDurableDraft } = await import("../../../../utils/durableDraftStore");
+    await saveDurableDraft("ielts-audio-checkpoint:a:p", { view, positionMs: 42000, sequence: 9 });
+    gateway.read.mockRejectedValueOnce(new Error("offline"));
+    const audio = document.createElement("audio");
+    Object.defineProperty(audio, "duration", { value: 100 });
+    const ref = { current: audio };
+    const identity = { attemptId: "a", scheduleId: "s" };
+    renderHook(() => useListeningCheckpoint(ref, identity, "p", "blob:cached", true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(audio.currentTime).toBe(42);
+    expect(gateway.save).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    // Reconnected: the newer same-identity local position is sent once.
+    expect(gateway.save.mock.calls.some((call) => call[2] === 42000 && call[3] === 10)).toBe(true);
   });
 });

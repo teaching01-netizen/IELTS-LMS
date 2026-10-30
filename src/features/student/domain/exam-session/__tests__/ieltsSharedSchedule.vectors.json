@@ -1,0 +1,68 @@
+[
+  {
+    "name": "reading then writing, no gap",
+    "schedule": {
+      "schemaVersion": 1,
+      "scheduleRevision": 1,
+      "status": "active",
+      "windows": [
+        {"sectionKey": "reading", "order": 1, "startAt": "2026-10-30T03:00:00Z", "deadlineAt": "2026-10-30T04:00:00Z", "saveUntil": "2026-10-30T04:00:03Z"},
+        {"sectionKey": "writing", "order": 2, "startAt": "2026-10-30T04:00:03Z", "deadlineAt": "2026-10-30T05:00:03Z", "saveUntil": "2026-10-30T05:00:06Z"}
+      ]
+    },
+    "cases": [
+      {"at": "2026-10-30T02:59:59Z", "kind": "before_start", "section": "reading"},
+      {"at": "2026-10-30T03:00:00Z", "kind": "working", "section": "reading"},
+      {"at": "2026-10-30T03:59:59.999Z", "kind": "working", "section": "reading"},
+      {"at": "2026-10-30T04:00:00Z", "kind": "save_only", "section": "reading"},
+      {"at": "2026-10-30T04:00:03Z", "kind": "working", "section": "writing"},
+      {"at": "2026-10-30T05:00:06Z", "kind": "complete", "section": ""}
+    ]
+  },
+  {
+    "name": "authored gap",
+    "schedule": {
+      "schemaVersion": 1,
+      "scheduleRevision": 2,
+      "status": "active",
+      "windows": [
+        {"sectionKey": "reading", "order": 1, "startAt": "2026-10-30T03:00:00Z", "deadlineAt": "2026-10-30T04:00:00Z", "saveUntil": "2026-10-30T04:00:03Z"},
+        {"sectionKey": "writing", "order": 2, "startAt": "2026-10-30T04:10:03Z", "deadlineAt": "2026-10-30T05:10:03Z", "saveUntil": "2026-10-30T05:10:06Z"}
+      ]
+    },
+    "cases": [
+      {"at": "2026-10-30T04:00:03Z", "kind": "gap", "section": "writing"},
+      {"at": "2026-10-30T04:10:02Z", "kind": "gap", "section": "writing"},
+      {"at": "2026-10-30T04:10:03Z", "kind": "working", "section": "writing"}
+    ]
+  },
+  {
+    "name": "paused room freezes at pausedAt",
+    "schedule": {
+      "schemaVersion": 1,
+      "scheduleRevision": 2,
+      "status": "paused",
+      "pausedAt": "2026-10-30T03:30:00Z",
+      "windows": [
+        {"sectionKey": "reading", "order": 1, "startAt": "2026-10-30T03:00:00Z", "deadlineAt": "2026-10-30T04:00:00Z", "saveUntil": "2026-10-30T04:00:03Z"}
+      ]
+    },
+    "cases": [
+      {"at": "2026-10-30T09:00:00Z", "kind": "paused", "section": "reading"}
+    ]
+  },
+  {
+    "name": "ended room",
+    "schedule": {
+      "schemaVersion": 1,
+      "scheduleRevision": 3,
+      "status": "ended",
+      "windows": [
+        {"sectionKey": "reading", "order": 1, "startAt": "2026-10-30T03:00:00Z", "deadlineAt": "2026-10-30T04:00:00Z", "saveUntil": "2026-10-30T04:00:03Z"}
+      ]
+    },
+    "cases": [
+      {"at": "2026-10-30T03:30:00Z", "kind": "complete", "section": ""}
+    ]
+  }
+]

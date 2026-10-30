@@ -1,5 +1,6 @@
 import { backendGet, backendPost, hasBackendStatusCode, type ApiRequestConfig } from "./backendBridge";
 import { studentSessionTransport } from "./studentSessionTransport";
+import { rememberIeltsOfflineManifest } from "../features/student/infrastructure/ieltsOfflinePackageStore";
 import type { StudentAttempt } from "../types/studentAttempt";
 
 const STORAGE_KEY_ATTEMPT_CREDENTIALS = "ielts_student_attempt_credentials_v1";
@@ -13,6 +14,7 @@ export interface BackendAttemptCredential {
 interface BackendStudentSessionContextWithCredential {
   attempt?: unknown;
   attemptCredential?: BackendAttemptCredential | null;
+  offlineManifest?: unknown;
 }
 
 interface StoredAttemptCredential extends BackendAttemptCredential {
@@ -336,6 +338,7 @@ async function renewAttemptCredential(
 
     if (session.attemptCredential) {
       storeAttemptCredential(attempt, session.attemptCredential);
+    rememberIeltsOfflineManifest(session.offlineManifest);
       return true;
     }
     return false;
@@ -368,6 +371,7 @@ async function renewAttemptCredential(
   }
 
   storeAttemptCredential(attempt, session.attemptCredential);
+    rememberIeltsOfflineManifest(session.offlineManifest);
   return true;
 }
 

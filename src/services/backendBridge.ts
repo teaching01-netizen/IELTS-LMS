@@ -18,6 +18,7 @@ import type {
 import type { ModuleType } from "../types";
 import type { SatPublishScope } from "../features/exam-authoring/contracts/assessment";
 import { createTtlLruCache } from "../utils/ttlLruCache";
+import { parseIeltsSharedSchedule } from "../features/student/domain/exam-session/ieltsSharedSchedule";
 
 type BackendEnvelope<T> = {
   success: boolean;
@@ -212,6 +213,7 @@ type BackendExamSessionRuntime = {
   updatedAt: string;
   sections: BackendRuntimeSectionState[];
   examPlan?: BackendExamPlanSection[] | null | undefined;
+  ieltsSharedSchedule?: unknown;
 };
 
 const revisionCachePolicy = { maxEntries: 500, ttlMs: 30 * 60 * 1000 };
@@ -696,6 +698,8 @@ export function mapBackendRuntime(
     createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,
     examPlan: mapBackendExamPlan(payload.examPlan),
+    // Untrusted until validated: a malformed timetable is dropped, never guessed.
+    ieltsSharedSchedule: parseIeltsSharedSchedule(payload.ieltsSharedSchedule),
   };
 }
 

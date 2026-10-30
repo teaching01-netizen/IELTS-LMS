@@ -93,7 +93,7 @@ func TestReconcileDueSelectionReadsLiveRuntimesMySQL(t *testing.T) {
 	exec("ANALYZE TABLE exam_session_runtimes, exam_session_runtime_sections, exam_schedules, exam_versions")
 
 	asOf := time.Now().UTC()
-	rows, err := conn.QueryContext(ctx, reconcileDueSectionsSQL, asOf, asOf, asOf, 250)
+	rows, err := conn.QueryContext(ctx, reconcileDueSectionsSQL, asOf, asOf, asOf, asOf, asOf, 250)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestReconcileDueSelectionReadsLiveRuntimesMySQL(t *testing.T) {
 		query string
 		args  []any
 	}{
-		{"section due selection", reconcileDueSectionsSQL, []any{asOf, asOf, asOf, 250}},
+		{"section due selection", reconcileDueSectionsSQL, []any{asOf, asOf, asOf, asOf, asOf, 250}},
 		{"personal drain selection", reconcileDrainedPersonalSQL, []any{asOf, 250}},
 	} {
 		var plan string

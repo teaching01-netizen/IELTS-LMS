@@ -100,6 +100,9 @@ export type ProctorSessionDetailPayload = {
     ieltsPersonalSectionKey?: StudentSession['ieltsPersonalSectionKey'] | null | undefined;
     ieltsPersonalDeadlineAt?: string | null | undefined;
     ieltsPersonalTimeRemainingSeconds?: number | null | undefined;
+    ieltsOfflinePreparedSection?: string | null | undefined;
+    ieltsOfflinePreparedAt?: string | null | undefined;
+    draftEvidencePending?: number | null | undefined;
     violations: StudentSession['violations'];
     warnings: number;
     lastActivity: string;

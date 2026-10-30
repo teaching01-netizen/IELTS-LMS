@@ -268,6 +268,7 @@ const SUITES: SuiteDefinition[] = [
       ['sat-break-boundary', 'SAT break boundaries'],
       ['coedit-live', 'Coedit live collaboration'],
       ['exam-continuity', 'Exam session continuity'],
+      ['ielts-offline', 'IELTS offline continuity'],
     ] as const
   ).map(([config, title]) =>
     commandSuite({
@@ -792,6 +793,7 @@ export const PLAYWRIGHT_CONFIG_COVERAGE: Readonly<Record<string, EntrypointCover
   'playwright.sat-auto-fit.config.ts': { source: 'playwright.sat-auto-fit.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-auto-fit', note: 'specialized' },
   'playwright.sat-code-start.config.ts': { source: 'playwright.sat-code-start.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-code-start', note: 'specialized' },
   'playwright.exam-continuity.config.ts': { source: 'playwright.exam-continuity.config.ts', classification: 'executable', suiteId: 'browser.specialized.exam-continuity', note: 'specialized' },
+  'playwright.ielts-offline.config.ts': { source: 'playwright.ielts-offline.config.ts', classification: 'executable', suiteId: 'browser.specialized.ielts-offline', note: 'production-preview service-worker continuity' },
   'playwright.sat-break-boundary.config.ts': { source: 'playwright.sat-break-boundary.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-break-boundary', note: 'specialized' },
   'playwright.sat-results.config.ts': { source: 'playwright.sat-results.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-results', note: 'specialized' },
   'playwright.sat-screen-zoom.config.ts': { source: 'playwright.sat-screen-zoom.config.ts', classification: 'executable', suiteId: 'browser.specialized.sat-screen-zoom', note: 'specialized' },
