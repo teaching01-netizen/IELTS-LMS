@@ -1,9 +1,11 @@
 package main
 
 import (
+	"mime"
 	"net/http"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -26,7 +28,18 @@ func frontendHandler(distDir string) http.HandlerFunc {
 		}
 
 		if frontendRegularFile(fileSystem, requestPath) {
-			fileServer.ServeHTTP(w, r)
+			if !strings.HasPrefix(requestPath, "/assets/") {
+				w.Header().Set("Cache-Control", "no-cache")
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+			// Vite names every /assets file by content hash, so its bytes
+			// never change under the same URL.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Header().Add("Vary", "Accept-Encoding")
+			if !servePrecompressedAsset(w, r, fileSystem, requestPath) {
+				fileServer.ServeHTTP(w, r)
+			}
 			return
 		}
 
@@ -38,8 +51,62 @@ func frontendHandler(distDir string) http.HandlerFunc {
 			return
 		}
 
+		// The document names the current build's hashed assets: revalidate it.
+		w.Header().Set("Cache-Control", "no-cache")
 		http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
 	}
+}
+
+// frontendEncodings are tried in preference order; the build writes the
+// sibling files (scripts/compress-dist.mjs).
+var frontendEncodings = []struct{ token, ext string }{{"br", ".br"}, {"gzip", ".gz"}}
+
+// servePrecompressedAsset serves a build-time .br/.gz sibling the client
+// accepts. It reports false (nothing written) when none applies.
+func servePrecompressedAsset(w http.ResponseWriter, r *http.Request, fileSystem http.FileSystem, requestPath string) bool {
+	contentType := mime.TypeByExtension(path.Ext(requestPath))
+	if contentType == "" {
+		return false
+	}
+	accept := r.Header.Get("Accept-Encoding")
+	for _, enc := range frontendEncodings {
+		if !acceptsEncoding(accept, enc.token) {
+			continue
+		}
+		file, err := fileSystem.Open(requestPath + enc.ext)
+		if err != nil {
+			continue
+		}
+		info, err := file.Stat()
+		if err != nil || info.IsDir() {
+			file.Close()
+			continue
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Encoding", enc.token)
+		http.ServeContent(w, r, requestPath, info.ModTime(), file)
+		file.Close()
+		return true
+	}
+	return false
+}
+
+// acceptsEncoding reports whether an Accept-Encoding header lists token
+// without q=0.
+func acceptsEncoding(header, token string) bool {
+	for _, part := range strings.Split(header, ",") {
+		name, params, _ := strings.Cut(part, ";")
+		if !strings.EqualFold(strings.TrimSpace(name), token) {
+			continue
+		}
+		q, ok := strings.CutPrefix(strings.TrimSpace(params), "q=")
+		if !ok {
+			return true
+		}
+		weight, err := strconv.ParseFloat(strings.TrimSpace(q), 64)
+		return err == nil && weight > 0
+	}
+	return false
 }
 
 func frontendRegularFile(fileSystem http.FileSystem, requestPath string) bool {

@@ -733,7 +733,9 @@ func BuildRouter(app *App) http.Handler {
 		// authed-reads, the polled live view gets its own polling budget,
 		// heartbeats get a cheap high-frequency budget, and mutations/submits
 		// are writes — so no student traffic class can starve the others.
-		r.With(studentLimit).Route("/student/sessions", func(r chi.Router) {
+		// IELTS student JSON (static content, live/runtime polls) is
+		// gzip-compressed for the same shared-uplink reason as delivery.
+		r.With(studentLimit, chimw.Compress(5, "application/json")).Route("/student/sessions", func(r chi.Router) {
 			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
 				authzRoute(r, "GET", "/{scheduleID}", v1SessionHandler(app))
 				authzRoute(r, "GET", "/{scheduleID}/static", v1StaticHandler(app))

@@ -57,7 +57,8 @@ async function installCurrentBuild() {
   try {
     for (const asset of manifest.assets) {
       if (await cache.match(asset)) continue;
-      const response = await fetch(asset, { cache: 'no-store', credentials: 'same-origin' });
+      // Hashed and served immutable: reuse the bytes the page already loaded.
+      const response = await fetch(asset, { credentials: 'same-origin' });
       if (!response.ok || response.type !== 'basic') throw new Error(`asset ${asset} unavailable`);
       await cache.put(asset, response);
     }
