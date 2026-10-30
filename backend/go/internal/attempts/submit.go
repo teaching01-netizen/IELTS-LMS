@@ -197,7 +197,14 @@ func (s *Service) submitInTx(ctx context.Context, q tx.Tx, claims crypto.Attempt
 		}
 	}
 	if err := ensureWritable(attempt, gate, now); err != nil {
-		return SubmitResult{}, err
+		// A submit that loses the race with the room's natural end finalizes
+		// the saved answers instead of failing. Final commands still refuse:
+		// collection is closed and they must not be acknowledged.
+		late, ok := sealer.(TimeExpiredSealer)
+		if !ok || len(cmd.FinalCommands) > 0 || !ieltsRoomTimeExpired(provider, attempt, gate, now) {
+			return SubmitResult{}, err
+		}
+		return s.sealLateSubmitInTx(ctx, q, cmd, attempt, reqHash, now, late)
 	}
 	// Apply final commands through the same fencing/version rules.
 	finalAcknowledgements := []Ack{}

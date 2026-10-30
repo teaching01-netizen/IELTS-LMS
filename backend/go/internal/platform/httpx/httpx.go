@@ -122,6 +122,12 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 		unknownHook(r, err)
 		appErr = apperrors.New(apperrors.CodeInternal, "Internal server error.")
 	}
+	if holder, ok := r.Context().Value(CtxRouteHolder).(*routeHolder); ok && holder != nil {
+		holder.errorCode = string(appErr.Code)
+		if reason, ok := appErr.Details["reason"].(string); ok {
+			holder.errorReason = reason
+		}
+	}
 	WriteJSON(w, appErr.HTTPStatus, apperrors.Envelope{
 		Code:      string(appErr.Code),
 		Message:   appErr.Message,

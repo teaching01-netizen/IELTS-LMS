@@ -676,6 +676,11 @@ type Config struct {
 	// only auto_submit_schedule_attempts_requested (+ future executable
 	// families) enqueue. Rollback = off.
 	OutboxExecOnly bool
+	// IELTSLateSubmitSeal lets an IELTS submit that arrives after the room's
+	// time ran out finalize the saved answers (reason time_expired, as the
+	// auto-submit worker would) instead of refusing with 422. Off (default) =
+	// today's refusal; the worker still seals. Rollback = off.
+	IELTSLateSubmitSeal bool
 	// DBPoolMaxAPI/DBPoolMaxWorker split the pool by role from one DSN
 	// (plan B4.2, e.g. 40/10). Non-positive values fall back to DBPoolMax.
 	DBPoolMaxAPI    int
@@ -1003,6 +1008,7 @@ func Load() Config {
 		RollupEnabled:                 getenvBool("ROLLUP", false),
 		PresenceMode:                  parsePresenceMode(os.Getenv("PRESENCE_MODE")),
 		OutboxExecOnly:                getenvBool("OUTBOX_EXEC_ONLY", false),
+		IELTSLateSubmitSeal:           getenvBool("IELTS_LATE_SUBMIT_SEAL", false),
 		DBPoolMaxAPI:                  poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_API", 0)),
 		DBPoolMaxWorker:               poolMaxOr(poolMax, getenvInt("DB_POOL_MAX_WORKER", 0)),
 		WorkerClaimPartitions:         claimPartitionsFromEnv(),

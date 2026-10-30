@@ -201,7 +201,13 @@ var httpInFlight atomic.Int64
 // never propagates back up, so without this holder the outer logger falls
 // back to the raw path (high cardinality) and template-filtered alerts
 // silently stop firing. AccessLog installs the holder; WithRoute fills it.
-type routeHolder struct{ template string }
+// WriteError reports the envelope code and details.reason the same way, so
+// a 4xx line names which gate refused the request (fixed vocabulary only).
+type routeHolder struct {
+	template    string
+	errorCode   string
+	errorReason string
+}
 
 func AccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +226,7 @@ func AccessLog(next http.Handler) http.Handler {
 		if v, ok := r.Context().Value(CtxActorClass).(string); ok && v != "" {
 			actor = v
 		}
-		line, _ := json.Marshal(map[string]any{
+		fields := map[string]any{
 			"level":      "info",
 			"msg":        "request",
 			"request_id": RequestIDFrom(r.Context(), r),
@@ -229,7 +235,14 @@ func AccessLog(next http.Handler) http.Handler {
 			"status":     rec.status,
 			"latency_ms": time.Since(start).Milliseconds(),
 			"actor":      actor,
-		})
+		}
+		if holder.errorCode != "" {
+			fields["error_code"] = holder.errorCode
+		}
+		if holder.errorReason != "" {
+			fields["error_reason"] = holder.errorReason
+		}
+		line, _ := json.Marshal(fields)
 		log.Println(string(line))
 		telemetry.DefaultRegistry.IncCounter(telemetry.MHTTPRequestsTotal, "route", route, "method", method, "status", statusClass(rec.status))
 		// Plan E3 dashboards: per-endpoint latency signal (p50/p99 source).

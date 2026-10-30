@@ -85,6 +85,7 @@ var metricHelpText = map[string]string{
 	MControlStaleTotal:              "Total v2 responses rejected for a stale control epoch.",
 	MVersionCollTotal:               "Total v2 responses rejected for a version collision.",
 	MSubmitReplayTotal:              "Total replayed v2 submissions.",
+	MSubmitLateSealTotal:            "Total IELTS submits that finalized saved answers after the room's time ran out.",
 	MTerminalCreated:                "Total terminalization receipts created.",
 	MTerminalReplay:                 "Total terminalization replays.",
 	MTerminalConflict:               "Total terminalization conflicts.",
@@ -259,10 +260,11 @@ const (
 	MExamAccessRejectedTotal = "exam_access_rejected_total"
 	MExamAccessAdmittedTotal = "exam_access_admitted_total"
 	// MDraftEvidenceTotal counts FR7 draft-evidence batches (outcome=recorded).
-	MDraftEvidenceTotal = "draft_evidence_total"
-	MControlStaleTotal  = "v2_control_epoch_stale_total"
-	MVersionCollTotal   = "v2_version_collision_total"
-	MSubmitReplayTotal  = "v2_submit_replay_total"
+	MDraftEvidenceTotal  = "draft_evidence_total"
+	MControlStaleTotal   = "v2_control_epoch_stale_total"
+	MVersionCollTotal    = "v2_version_collision_total"
+	MSubmitReplayTotal   = "v2_submit_replay_total"
+	MSubmitLateSealTotal = "v2_submit_late_seal_total"
 
 	MTerminalCreated  = "terminalization_created_total"
 	MTerminalReplay   = "terminalization_replay_total"
@@ -534,6 +536,7 @@ func Names() []string {
 		MControlStaleTotal,
 		MVersionCollTotal,
 		MSubmitReplayTotal,
+		MSubmitLateSealTotal,
 		MTerminalCreated,
 		MTerminalReplay,
 		MTerminalConflict,

@@ -753,6 +753,29 @@ type terminalSealer struct {
 
 var _ attempts.Sealer = terminalSealer{}
 
+// lateSubmitSealer adds the time-expired seal (IELTS_LATE_SUBMIT_SEAL). It
+// writes the receipt the auto-submit worker would write for a natural room
+// end, so whichever of the two reaches the attempt lock first, the other
+// replays it.
+type lateSubmitSealer struct{ terminalSealer }
+
+var _ attempts.TimeExpiredSealer = lateSubmitSealer{}
+
+func (s lateSubmitSealer) SealTimeExpired(ctx context.Context, q tx.Tx, attemptID, scheduleID, requestID string) error {
+	finalSubmission, _ := json.Marshal(map[string]any{
+		"autoSubmission":   true,
+		"completionReason": terminalization.ReasonTimeExpired,
+		"proctorStatus":    "active",
+	})
+	_, err := s.materializer.TerminalizeInTx(ctx, q, terminalization.SealCommand{
+		AttemptID: attemptID, ScheduleID: scheduleID,
+		Outcome: terminalization.OutcomeSubmitted, Reason: terminalization.ReasonTimeExpired,
+		ActorKind: terminalization.ActorSystem, FinalSubmission: finalSubmission,
+		RequestID: requestID,
+	})
+	return err
+}
+
 func (s terminalSealer) SealSubmitted(ctx context.Context, q tx.Tx, attemptID, scheduleID, submissionID, digest, provider, actorID string, effectiveAt time.Time) error {
 	// No provider fence here: this value now arrives from the resolver that ran
 	// on THIS transaction after the attempt lock (attempts.submitInTx), so it is
@@ -1029,7 +1052,11 @@ func v2SubmitHandler(app *App) http.HandlerFunc {
 		}
 		// The provider is resolved by v2ProviderResolver on the submit
 		// transaction itself (attempts.ProviderResolver), never here.
-		res, err := app.Attempts.Submit(r.Context(), bearer, cmd, v2Resolver{}, app.RuntimeLockerFor(), v2ProviderResolver{}, terminalSealer{scorer: app.ACT, materializer: app.Terminal, outboxExecOnly: app.Config.OutboxExecOnly})
+		var sealer attempts.Sealer = terminalSealer{scorer: app.ACT, materializer: app.Terminal, outboxExecOnly: app.Config.OutboxExecOnly}
+		if app.Config.IELTSLateSubmitSeal && app.Terminal != nil {
+			sealer = lateSubmitSealer{terminalSealer: sealer.(terminalSealer)}
+		}
+		res, err := app.Attempts.Submit(r.Context(), bearer, cmd, v2Resolver{}, app.RuntimeLockerFor(), v2ProviderResolver{}, sealer)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
