@@ -82,6 +82,10 @@ func (s *Service) ProjectIELTSAttempt(ctx context.Context, attempt ProjectionAtt
 		if err != nil {
 			return err
 		}
+		overrides, err := loadProjectionOverrides(ctx, q, attempt.ScheduleID)
+		if err != nil {
+			return err
+		}
 
 		submissionID, err := ensureProjectionSubmission(ctx, q, attempt, submittedAt)
 		if err != nil {
@@ -92,7 +96,7 @@ func (s *Service) ProjectIELTSAttempt(ctx context.Context, attempt ProjectionAtt
 		answers := projectionObjectValue(finalSubmission["answers"])
 		writingAnswers := projectionObjectValue(finalSubmission["writingAnswers"])
 		publishedSections, err := buildProjectionSections(
-			ctx, q, answers, writingAnswers, content, config, attempt.PublishedVersionID,
+			ctx, q, answers, writingAnswers, content, config, attempt.PublishedVersionID, overrides,
 		)
 		if err != nil {
 			return err
@@ -120,7 +124,7 @@ func (s *Service) ProjectIELTSAttempt(ctx context.Context, attempt ProjectionAtt
 		// overrides or writing task records.
 		if objectiveVersion != attempt.PublishedVersionID {
 			objectiveSections, err := buildProjectionObjectiveSections(
-				ctx, q, answers, objectiveContent, objectiveConfig, objectiveVersion,
+				ctx, q, answers, objectiveContent, objectiveConfig, objectiveVersion, overrides,
 			)
 			if err != nil {
 				return err
@@ -290,8 +294,8 @@ func loadProjectionObjectiveSource(ctx context.Context, q tx.Tx, scheduleID, pub
 	return projectionObject(json.RawMessage(contentRaw)), projectionObject(json.RawMessage(configRaw)), strings.TrimSpace(versionID.String), nil
 }
 
-func buildProjectionSections(ctx context.Context, q tx.Tx, answers, writingAnswers, content, config map[string]any, versionID string) ([]projectionSection, error) {
-	objective, err := buildProjectionObjectiveSections(ctx, q, answers, content, config, versionID)
+func buildProjectionSections(ctx context.Context, q tx.Tx, answers, writingAnswers, content, config map[string]any, versionID string, overrides map[string]objectiveOverridePayload) ([]projectionSection, error) {
+	objective, err := buildProjectionObjectiveSections(ctx, q, answers, content, config, versionID, overrides)
 	if err != nil {
 		return nil, err
 	}
@@ -311,16 +315,14 @@ func buildProjectionSections(ctx context.Context, q tx.Tx, answers, writingAnswe
 	return sections, nil
 }
 
-func buildProjectionObjectiveSections(ctx context.Context, q tx.Tx, answers, content, config map[string]any, versionID string) ([]projectionSection, error) {
+func buildProjectionObjectiveSections(ctx context.Context, q tx.Tx, answers, content, config map[string]any, versionID string, overrides map[string]objectiveOverridePayload) ([]projectionSection, error) {
 	keys, err := loadObjectiveAnswerKey(ctx, q, versionID)
 	if err != nil {
 		return nil, err
 	}
 	sections := make([]projectionSection, 0, 2)
 	for _, name := range []string{"listening", "reading"} {
-		model := collectProjectionSection(content, name)
-		filtered := projectionSectionAnswers(answers, model)
-		results := projectionObjectiveResults(name, filtered, model.Specs, keys, versionID)
+		filtered, results := gradeProjectionObjectiveSection(name, answers, content, keys, overrides, versionID)
 		sections = append(sections, projectionSection{
 			Name:          name,
 			Answers:       projectionJSON(map[string]any{"type": name, "answers": filtered}),
@@ -329,6 +331,17 @@ func buildProjectionObjectiveSections(ctx context.Context, q tx.Tx, answers, con
 		})
 	}
 	return sections, nil
+}
+
+// gradeProjectionObjectiveSection narrows answers to one objective section and
+// scores them against the sealed key with the schedule's answer-key overrides
+// applied. The projection and the schedule regrade share it so a replay and a
+// teacher decision can never score the same answer differently.
+func gradeProjectionObjectiveSection(section string, answers, content map[string]any, keys map[string]string, overrides map[string]objectiveOverridePayload, versionID string) (map[string]any, map[string]any) {
+	model := collectProjectionSection(content, section)
+	filtered := projectionSectionAnswers(answers, model)
+	applyProjectionOverrides(model.Specs, overrides)
+	return filtered, projectionObjectiveResults(section, filtered, model.Specs, keys, versionID)
 }
 
 func projectionObjectiveStatus(results map[string]any) string {
@@ -346,6 +359,10 @@ type projectionQuestion struct {
 	Correct  any
 	Rule     string
 	Multi    bool
+	// Set only by a schedule answer-key override.
+	HasOverride bool
+	Excluded    []string
+	Points      int
 }
 
 type projectionSectionModel struct {
@@ -679,7 +696,11 @@ func projectionObjectiveResults(section string, answers map[string]any, specs []
 	issueCodes := map[string]bool{}
 	for _, spec := range specs {
 		known[spec.ID] = true
-		max++
+		points := 1
+		if spec.HasOverride {
+			points = spec.Points
+		}
+		max += points
 		given, present := answers[spec.ID]
 		blank := !present || len(projectionValueStrings(given)) == 0
 		status := "verified_incorrect"
@@ -697,9 +718,9 @@ func projectionObjectiveResults(section string, answers map[string]any, specs []
 			issueCodes["invalid_answer_key"] = true
 		} else if blank {
 			status, unansweredCount = "verified_unanswered", unansweredCount+1
-		} else if projectionAnswerMatches(given, spec.Accepted, spec.Multi) {
+		} else if projectionAnswerMatches(given, spec.Accepted, spec.Multi) && !projectionAnswerExcluded(given, spec.Excluded) {
 			status, correctCount = "verified_correct", correctCount+1
-			isCorrect, awarded, total = true, float64(1), total+1
+			isCorrect, awarded, total = true, float64(points), total+points
 		} else {
 			incorrectCount++
 		}
@@ -707,7 +728,7 @@ func projectionObjectiveResults(section string, answers map[string]any, specs []
 			"questionId": spec.ID, "studentAnswer": projectionDisplayValue(given),
 			"correctAnswer": spec.Correct, "acceptedAnswers": spec.Accepted,
 			"verificationStatus": status, "isCorrect": isCorrect, "awardedScore": awarded,
-			"maxScore": float64(1), "scoringRule": spec.Rule, "hasOverride": false,
+			"maxScore": float64(points), "scoringRule": spec.Rule, "hasOverride": spec.HasOverride,
 			"issueCode": issueCode, "issueMessage": issueMessage,
 		})
 	}
@@ -756,6 +777,23 @@ func projectionObjectiveResults(section string, answers map[string]any, specs []
 		"generatedAt": time.Now().UTC(), "totalScore": total, "maxScore": max,
 		"percentage": percentage, "integrity": audit, "questionResults": questionResults,
 	}
+}
+
+// projectionAnswerExcluded reports whether a typed answer was explicitly kept
+// incorrect by a schedule override. Unlike the accepted-answer match it is
+// case-sensitive: excluding "28 june" must not reject the key's "28 June".
+func projectionAnswerExcluded(given any, excluded []string) bool {
+	values := projectionValueStrings(given)
+	if len(values) == 0 {
+		return false
+	}
+	answer := projectionNormalize(values[0])
+	for _, value := range excluded {
+		if projectionNormalize(value) == answer {
+			return true
+		}
+	}
+	return false
 }
 
 func projectionAnswerMatches(given any, accepted []string, multi bool) bool {

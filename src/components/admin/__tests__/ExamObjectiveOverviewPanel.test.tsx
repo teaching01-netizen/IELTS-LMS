@@ -526,6 +526,63 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(gradingService.overrideObjectiveQuestion).not.toHaveBeenCalled();
   });
 
+  test('keeping a previously accepted answer incorrect removes it from the accepted answers', async () => {
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 1,
+        maxScore: 1,
+        percentage: 100,
+        questionResults: [{
+          questionId: 'q-1',
+          studentAnswer: 'ANSWER',
+          correctAnswer: 'Answer | ANSWER',
+          isCorrect: true,
+          awardedScore: 1,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: true,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+    vi.mocked(gradingService.upsertObjectiveOverride).mockResolvedValue({
+      success: true,
+      data: { regradeReport: {} as never },
+    });
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('group', { name: 'Filter answer groups' }).querySelector('button') as HTMLElement);
+    expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep incorrect' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep incorrect and regrade' }));
+
+    await waitFor(() => expect(gradingService.upsertObjectiveOverride).toHaveBeenCalledWith(
+      'schedule-1',
+      'q-1',
+      expect.objectContaining({
+        correctAnswer: 'Answer',
+        acceptedAnswers: ['Answer'],
+        excludedAnswers: ['ANSWER'],
+      }),
+    ));
+  });
+
   test('filters answer groups by correctness', async () => {
     const section = {
       id: 'section-1',

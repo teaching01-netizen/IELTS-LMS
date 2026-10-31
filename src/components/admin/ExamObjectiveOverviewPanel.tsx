@@ -92,8 +92,12 @@ function buildScheduleOverrideRequests(
     const observedVariants = sanitizeAcceptedAnswers(
       questionRows.map((row) => row.studentAnswer),
     );
+    // After an earlier accept the key already lists the observed variants, so
+    // keeping them incorrect must also drop them from the accepted answers.
     const acceptedAnswers = sanitizeAcceptedAnswers(
-      isCorrect ? [...answerKeyVariants, ...observedVariants] : answerKeyVariants,
+      isCorrect
+        ? [...answerKeyVariants, ...observedVariants]
+        : answerKeyVariants.filter((variant) => !observedVariants.includes(variant)),
     );
 
     return {

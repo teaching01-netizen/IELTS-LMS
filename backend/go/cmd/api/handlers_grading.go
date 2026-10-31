@@ -28,17 +28,6 @@ import (
 // ReleaseNow and ReopenReview are Admin-only. Results reads serve
 // Admin|AdminObserver|Grader|Proctor; fetching one result additionally allows Student.
 
-// latestSubmissionForSchedule resolves the newest student_submissions row
-// for a schedule (WS-05: thin shim over grading.Service; the SQL lives in
-// internal/grading/result_read.go). sql.ErrNoRows surfaces when the schedule
-// has none.
-func latestSubmissionForSchedule(r *http.Request, app *App, scheduleID string) (string, error) {
-	if app.Grading == nil {
-		return "", apperrors.New(apperrors.CodeServiceUnavailable, "Grading service not configured.")
-	}
-	return app.Grading.LatestSubmissionForSchedule(r.Context(), scheduleID)
-}
-
 // latestGradingResult loads the newest student_results row for a submission
 // (WS-05: thin shim over grading.Service.LatestGradingResult; the 22-column
 // scan lives in internal/grading/result_read.go). Corrupt JSON columns
@@ -109,7 +98,7 @@ func requireGradingDB(w http.ResponseWriter, r *http.Request, app *App) bool {
 	return true
 }
 
-// gradingOverridesHandler lists schedule-scoped question overrides.
+// gradingOverridesHandler lists schedule-scoped answer-key overrides.
 func gradingOverridesHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader) == nil {
@@ -118,33 +107,16 @@ func gradingOverridesHandler(app *App) http.HandlerFunc {
 		if !requireGradingDB(w, r, app) {
 			return
 		}
-		scheduleID := chi.URLParam(r, "scheduleID")
-		rows, err := app.DB.QueryContext(r.Context(),
-			`SELECT question_id, override_json FROM grading_schedule_question_overrides WHERE schedule_id = ?`,
-			scheduleID)
+		if app.Grading == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Grading service not configured."))
+			return
+		}
+		rows, err := app.Grading.ListScheduleObjectiveOverrides(r.Context(), chi.URLParam(r, "scheduleID"))
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		defer rows.Close()
-		type row struct {
-			QuestionID string          `json:"questionId"`
-			Override   json.RawMessage `json:"override"`
-		}
-		out := []row{}
-		for rows.Next() {
-			var qid, raw string
-			if err := rows.Scan(&qid, &raw); err != nil {
-				httpx.WriteError(w, r, err)
-				return
-			}
-			out = append(out, row{QuestionID: qid, Override: json.RawMessage(raw)})
-		}
-		if err := rows.Err(); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		httpx.WriteJSON(w, http.StatusOK, rows)
 	}
 }
 
@@ -202,7 +174,8 @@ func gradingIntegrityHandler(app *App) http.HandlerFunc {
 	}
 }
 
-// gradingOverridePutHandler records a teacher override for one schedule question.
+// gradingOverridePutHandler stores a schedule answer-key override for one
+// question and regrades the schedule's unreleased objective sections.
 func gradingOverridePutHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := requireRole(w, r, auth.RoleAdmin, auth.RoleGrader)
@@ -216,66 +189,66 @@ func gradingOverridePutHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Grading service not configured."))
 			return
 		}
-		var req struct {
-			Section     string  `json:"section"`
-			Points      float64 `json:"points"`
-			TeacherName string  `json:"teacherName"`
-		}
+		var req grading.ObjectiveOverrideRequest
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		scheduleID := chi.URLParam(r, "scheduleID")
-		questionID := chi.URLParam(r, "questionID")
-		submissionID, err := latestSubmissionForSchedule(r, app, scheduleID)
-		if err == sql.ErrNoRows {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Submission not found."))
-			return
-		}
+		row, report, err := app.Grading.UpsertScheduleObjectiveOverride(r.Context(),
+			chi.URLParam(r, "scheduleID"), chi.URLParam(r, "questionID"), req,
+			sess.UserID, gradingActorName(r, app, sess.UserID))
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		if err := app.Grading.OverrideObjectiveQuestion(r.Context(), submissionID, req.Section, questionID, req.Points, sess.UserID, req.TeacherName); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		gradingOK(w)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"overrideRow": row, "regradeReport": report})
 	}
 }
 
-// gradingOverrideDeleteHandler removes one schedule-scoped question override.
+// gradingOverrideDeleteHandler removes one schedule answer-key override and
+// regrades the schedule back to the sealed key.
 func gradingOverrideDeleteHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if requireRole(w, r, auth.RoleAdmin, auth.RoleGrader) == nil {
+		sess := requireRole(w, r, auth.RoleAdmin, auth.RoleGrader)
+		if sess == nil {
 			return
 		}
 		if !requireGradingDB(w, r, app) {
 			return
 		}
-		scheduleID := chi.URLParam(r, "scheduleID")
-		questionID := chi.URLParam(r, "questionID")
-		res, err := app.DB.ExecContext(r.Context(),
-			`DELETE FROM grading_schedule_question_overrides WHERE schedule_id = ? AND question_id = ?`,
-			scheduleID, questionID)
+		if app.Grading == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Grading service not configured."))
+			return
+		}
+		var req struct {
+			Reason string `json:"reason"`
+		}
+		if err := httpx.DecodeLimitedOptional(r, httpx.MaxAdminBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		report, err := app.Grading.DeleteScheduleObjectiveOverride(r.Context(),
+			chi.URLParam(r, "scheduleID"), chi.URLParam(r, "questionID"), req.Reason,
+			sess.UserID, gradingActorName(r, app, sess.UserID))
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		if n == 0 {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Override not found."))
-			return
-		}
-		gradingOK(w)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"deleted": true, "regradeReport": report})
 	}
 }
 
-// gradingRegradeHandler re-runs objective auto-grading for a schedule.
+// gradingActorName is the audit display name for a staff actor, falling back
+// to the id when the profile has no name.
+func gradingActorName(r *http.Request, app *App, actorID string) string {
+	if name := authoringDisplayNameFor(r.Context(), app, actorID); name != "" {
+		return name
+	}
+	return actorID
+}
+
+// gradingRegradeHandler regrades a schedule's objective sections against the
+// exam's latest draft.
 // Graders are fenced to their assigned schedules before the regrade runs.
 func gradingRegradeHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -297,36 +270,19 @@ func gradingRegradeHandler(app *App) http.HandlerFunc {
 			}
 		}
 		var req struct {
-			Answers map[string]any `json:"answers"`
+			Reason string `json:"reason"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		scheduleID := chi.URLParam(r, "scheduleID")
-		submissionID, err := latestSubmissionForSchedule(r, app, scheduleID)
-		if err == sql.ErrNoRows {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Submission not found."))
-			return
-		}
+		draftVersionID, report, err := app.Grading.RegradeScheduleObjectivesFromLatestDraft(r.Context(),
+			chi.URLParam(r, "scheduleID"), req.Reason, sess.UserID, gradingActorName(r, app, sess.UserID))
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		answers := req.Answers
-		if answers == nil {
-			answers = map[string]any{}
-		}
-		out, err := app.Grading.GradeObjective(r.Context(), submissionID, answers)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		if out == nil {
-			httpx.WriteJSON(w, http.StatusOK, []any{})
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"draftVersionId": draftVersionID, "regradeReport": report})
 	}
 }
 
