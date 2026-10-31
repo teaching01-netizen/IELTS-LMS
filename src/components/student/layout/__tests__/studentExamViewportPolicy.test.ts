@@ -96,6 +96,21 @@ describe('resolveStudentExamViewportPolicy', () => {
     expect(closed.shouldCommitNewBaseline).toBe(false);
   });
 
+  it('keeps the baseline when blur fires before the keyboard finishes closing', () => {
+    const closing = policy({
+      previousStableHeight: 900,
+      currentVisualHeight: 580,
+      previousOrientation: 'portrait',
+      keyboardOpen: true,
+    });
+
+    expect(closing).toEqual({
+      stableExamHeight: 900,
+      keyboardOpen: true,
+      shouldCommitNewBaseline: false,
+    });
+  });
+
   it('portrait -> landscape invalidates and recomputes the baseline', () => {
     const output = policy({
       previousStableHeight: 900,

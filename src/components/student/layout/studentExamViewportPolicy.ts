@@ -122,6 +122,20 @@ export function resolveStudentExamViewportPolicy(
     };
   }
 
+  // iOS blurs the input before the keyboard finishes sliding down. Until the
+  // viewport recovers, keep the frozen height or the footer jumps up mid-screen.
+  if (
+    keyboardOpen &&
+    previousStableHeight !== null &&
+    isMeaningfulKeyboardReduction(visualHeight, previousStableHeight)
+  ) {
+    return {
+      stableExamHeight: previousStableHeight,
+      keyboardOpen: true,
+      shouldCommitNewBaseline: false,
+    };
+  }
+
   // No editable focus: Safari chrome may shrink the viewport freely.
   const baselineChanged =
     previousStableHeight === null || Math.abs(previousStableHeight - visualHeight) > 1;
