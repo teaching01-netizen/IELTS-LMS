@@ -48,8 +48,15 @@ test("staff QR recovers saved work into a completely clean browser after explici
     await expect(recovered.getByText(studentName)).toHaveCount(0);
     await expect(recovered.getByTestId("sat-exam-shell")).toHaveCount(0);
     await recovered.getByLabel("รหัส 6 หลัก").fill(code!);
+    // The ready view polls on its own rate-limit tier (not anon-auth, which
+    // a room behind one NAT shares with staff login). One poll must succeed.
+    const readyPoll = recovered.waitForResponse(
+      (res) => res.request().method() === "POST" && /\/student\/device-recovery\/[^/]+\/ready$/.test(new URL(res.url()).pathname),
+      { timeout: 30_000 }
+    );
     await recovered.getByRole("button", { name: "ตรวจสอบรหัส" }).click();
     await expect(recovered.getByText(studentName)).toBeVisible();
+    expect((await readyPoll).status()).toBe(200);
     await expect(recovered.getByTestId("sat-exam-shell")).toHaveCount(0);
     await expect(recovered.locator('input[type="radio"]')).toHaveCount(0);
     expect(new URL(recovered.url()).hash).toBe("");

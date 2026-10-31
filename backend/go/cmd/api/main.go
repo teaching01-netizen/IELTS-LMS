@@ -597,8 +597,14 @@ func BuildRouter(app *App) http.Handler {
 		})
 		r.With(studentLimit, limitTier(app, httpx.TierAnonAuth, ipKey())).Group(func(r chi.Router) {
 			authzRoute(r, "POST", "/student/device-recovery/{grantID}/claim", studentClaimDeviceRecoveryHandler(app))
-			authzRoute(r, "POST", "/student/device-recovery/{grantID}/ready", studentReadyDeviceRecoveryHandler(app))
 			authzRoute(r, "POST", "/student/device-recovery/{grantID}/begin", studentBeginDeviceRecoveryHandler(app))
+		})
+		// The ready view polls every 5s and requires the browser proof minted
+		// by claim, so it is not a guessing surface. On anon-auth a few
+		// recovering students behind one NAT would exhaust the per-IP budget
+		// and lock staff login out of that network.
+		r.With(studentLimit, limitTier(app, httpx.TierStudentCheckin, ipKey())).Group(func(r chi.Router) {
+			authzRoute(r, "POST", "/student/device-recovery/{grantID}/ready", studentReadyDeviceRecoveryHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierStudentCheckin, ipKey())).Group(func(r chi.Router) {
 			authzRoute(r, "POST", "/public/access-links/{linkID}/resolve-entry", publicLinkResolveEntry(app))

@@ -238,6 +238,33 @@ func TestTierStudentCheckinBudgetIsLive(t *testing.T) {
 	}
 }
 
+// Several recovering students behind one NAT poll ready every 5s; that polling
+// must neither be throttled by nor spend the anon-auth budget that claim,
+// begin, and staff login share.
+func TestTierDeviceRecoveryReadyPollSparesAnonAuth(t *testing.T) {
+	t.Setenv("RATE_LIMIT_ANON_AUTH_PER_MIN", "2")
+	h := BuildRouter(BuildApp(config.Load(), nil))
+	const ready = "/api/v1/student/device-recovery/grant-1/ready"
+	for i := 0; i < 10; i++ {
+		if code, tier := serveRouterTier(h, http.MethodPost, ready, nil); code == http.StatusTooManyRequests {
+			t.Fatalf("ready poll %d was throttled by the %q tier", i+1, tier)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if code, tier := serveRouterTier(h, http.MethodPost, "/api/v1/auth/login", nil); code == http.StatusTooManyRequests {
+			t.Fatalf("login %d was throttled by the %q tier after ready polls", i+1, tier)
+		}
+	}
+	for _, target := range []string{
+		"/api/v1/student/device-recovery/grant-1/claim",
+		"/api/v1/student/device-recovery/grant-1/begin",
+	} {
+		if code, tier := serveRouterTier(h, http.MethodPost, target, nil); code != http.StatusTooManyRequests || tier != httpx.TierAnonAuth {
+			t.Fatalf("%s must stay on the exhausted anon-auth tier, got %d (%q)", target, code, tier)
+		}
+	}
+}
+
 // Cookieless session checks never reach the DB, so a room's first page loads
 // are not counted; a presented cookie costs a lookup and stays limited.
 func TestTierSessionCheckWithoutCookieIsNotCounted(t *testing.T) {
