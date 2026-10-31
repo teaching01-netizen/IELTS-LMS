@@ -287,65 +287,83 @@ func deliveryModuleEntryStateHandler(app *App) http.HandlerFunc {
 
 func deliveryStartBreakHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
-		if !ok {
-			return
-		}
-		// The optional body carries the control epoch the client believed it
-		// held, so a break armed across a pause/resume boundary is refused
-		// instead of entering under a frozen clock (mirrors EnterBreak).
-		var req delivery.BreakStartRequest
-		if err := httpx.DecodeLimitedOptional(r, httpx.MaxStudentBodyBytes, &req); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		out, err := app.Delivery.StartBreak(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "breakID"), &req, claims.ClientSessionID, claims.TokenID)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		withQueryTimeout(w, r, DefaultEntryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			deliveryStartBreakInner(app, w, r)
+		})
 	}
+}
+
+func deliveryStartBreakInner(app *App, w http.ResponseWriter, r *http.Request) {
+	claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+	if !ok {
+		return
+	}
+	// The optional body carries the control epoch the client believed it
+	// held, so a break armed across a pause/resume boundary is refused
+	// instead of entering under a frozen clock (mirrors EnterBreak).
+	var req delivery.BreakStartRequest
+	if err := httpx.DecodeLimitedOptional(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := app.Delivery.StartBreak(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), chi.URLParam(r, "breakID"), &req, claims.ClientSessionID, claims.TokenID)
+	if err != nil {
+		writeEntryError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func deliveryEnterBreakHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
-		if !ok {
-			return
-		}
-		var req delivery.BreakEntryRequest
-		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		out, err := app.Delivery.EnterBreak(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		withQueryTimeout(w, r, DefaultEntryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			deliveryEnterBreakInner(app, w, r)
+		})
 	}
+}
+
+func deliveryEnterBreakInner(app *App, w http.ResponseWriter, r *http.Request) {
+	claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+	if !ok {
+		return
+	}
+	var req delivery.BreakEntryRequest
+	if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := app.Delivery.EnterBreak(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+	if err != nil {
+		writeEntryError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 func deliveryMarkBreakVisibleHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		claims, ok := verifiedDeliveryWriterClaims(app, w, r)
-		if !ok {
-			return
-		}
-		var req delivery.BreakEntryRequest
-		if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		out, err := app.Delivery.MarkBreakVisible(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		withQueryTimeout(w, r, DefaultEntryTimeout, func(w http.ResponseWriter, r *http.Request) {
+			deliveryMarkBreakVisibleInner(app, w, r)
+		})
 	}
+}
+
+func deliveryMarkBreakVisibleInner(app *App, w http.ResponseWriter, r *http.Request) {
+	claims, ok := verifiedDeliveryWriterClaims(app, w, r)
+	if !ok {
+		return
+	}
+	var req delivery.BreakEntryRequest
+	if err := httpx.DecodeLimited(r, httpx.MaxStudentBodyBytes, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := app.Delivery.MarkBreakVisible(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), req, claims.ClientSessionID, claims.TokenID)
+	if err != nil {
+		writeEntryError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // deliveryCloseModuleHandler confirms a timed-out personal SAT module's final

@@ -125,12 +125,13 @@ import { deriveSatTemporalSnapshot, type SatTemporalModel } from "../timing/satT
  */
 const SAT_BREAK_END_PULL_WINDOW_MS = 2_000;
 /**
- * Personal break end: refresh at once, then sequentially at the pull window's
+ * Personal break end: refresh after a small random delay, then sequentially at the pull window's
  * cadence for at most this many reads or this long. Afterward ordinary
  * recovery polling continues and the break screen reports the retry state.
  */
 const SAT_BREAK_END_MAX_READS = 8;
 const SAT_BREAK_END_MAX_MS = 20_000;
+const SAT_BREAK_END_FIRST_READ_JITTER_MS = 1_500;
 /**
  * Section-boundary break recovery (docs/plans/2026-10-29-sat-break-boundary-
  * low-level.md): the close ack already carries the break this boundary creates,
@@ -2104,6 +2105,11 @@ export function useSatExamController({
             (candidate) => candidate.id === breakId && candidate.state !== "completed",
           ) ?? false;
         void (async () => {
+          // Every break in a wave ends within seconds and each read completes
+          // the break under row locks; spread the first read so the wave
+          // does not land in one second.
+          await new Promise((resolve) => window.setTimeout(resolve, Math.random() * SAT_BREAK_END_FIRST_READ_JITTER_MS));
+          if (identityGenerationRef.current !== generation || !breakStillOpen()) return;
           for (let read = 1; ; read += 1) {
             await refresh(false);
             if (identityGenerationRef.current !== generation || !breakStillOpen()) return;

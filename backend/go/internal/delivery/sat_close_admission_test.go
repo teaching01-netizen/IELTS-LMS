@@ -10,7 +10,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-func TestSATCloseActiveLimitReservesHalfOfFinitePool(t *testing.T) {
+func TestSATCloseActiveLimitTakesQuarterOfFinitePool(t *testing.T) {
 	for _, tc := range []struct {
 		maxOpen int
 		want    int
@@ -18,8 +18,8 @@ func TestSATCloseActiveLimitReservesHalfOfFinitePool(t *testing.T) {
 		{maxOpen: 0, want: satCloseDefaultActiveLimit},
 		{maxOpen: 1, want: 1},
 		{maxOpen: 2, want: 1},
-		{maxOpen: 100, want: 50},
-		{maxOpen: 120, want: 60},
+		{maxOpen: 40, want: 10},
+		{maxOpen: 100, want: 25},
 	} {
 		if got := satCloseActiveLimit(tc.maxOpen); got != tc.want {
 			t.Errorf("satCloseActiveLimit(%d) = %d, want %d", tc.maxOpen, got, tc.want)

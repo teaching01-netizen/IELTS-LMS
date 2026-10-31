@@ -30,11 +30,18 @@ var (
 )
 
 type satStartAdmission struct {
-	mu                  sync.Mutex
-	schedules           map[string]*satStartAdmissionSchedule
-	activeStartWorkers  chan struct{}
-	startWorkersChanged chan struct{}
-	totalWaiters        int
+	mu                 sync.Mutex
+	schedules          map[string]*satStartAdmissionSchedule
+	activeStartWorkers chan struct{}
+	startWorkerWaiters []*satStartWorkerWaiter
+	totalWaiters       int
+}
+
+// satStartWorkerWaiter receives a released worker slot directly, so queued
+// starts are admitted in arrival order instead of racing a broadcast wakeup.
+type satStartWorkerWaiter struct {
+	ready   chan struct{}
+	granted bool
 }
 
 type satStartAdmissionSchedule struct {
@@ -53,12 +60,14 @@ func newSATStartAdmissionWithLimit(activeLimit int) *satStartAdmission {
 		activeLimit = 1
 	}
 	return &satStartAdmission{
-		schedules:           make(map[string]*satStartAdmissionSchedule),
-		activeStartWorkers:  make(chan struct{}, activeLimit),
-		startWorkersChanged: make(chan struct{}),
+		schedules:          make(map[string]*satStartAdmissionSchedule),
+		activeStartWorkers: make(chan struct{}, activeLimit),
 	}
 }
 
+// satStartActiveWorkerLimit gives starts half of the pool. Close admission
+// takes a quarter (satCloseActiveLimit), so a start wave overlapping a close
+// wave still leaves a quarter for saves, heartbeats, and bootstrap reads.
 func satStartActiveWorkerLimit(db any) int {
 	statsProvider, ok := db.(interface{ Stats() sql.DBStats })
 	if !ok {
@@ -68,15 +77,10 @@ func satStartActiveWorkerLimit(db any) int {
 	if maxOpen < 1 {
 		return startCodeActiveStartDefault
 	}
-	reserved := maxOpen / 4
-	if reserved < 1 {
-		reserved = 1
+	if limit := maxOpen / 2; limit > 1 {
+		return limit
 	}
-	limit := maxOpen - reserved
-	if limit < 1 {
-		return 1
-	}
-	return limit
+	return 1
 }
 
 func (s *Service) startCodeAdmission() *satStartAdmission {
@@ -92,49 +96,101 @@ func (s *Service) startCodeAdmission() *satStartAdmission {
 // process-local active-work cap. Waiters hold no database connection; the
 // durable slot table remains the cross-process authority.
 func (a *satStartAdmission) acquireStartWorker(ctx context.Context, scheduleID string, deadline time.Time, timing *SATStartCodeAdmissionTiming) (func(), error) {
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		a.mu.Lock()
-		if !time.Now().Before(deadline) {
-			a.mu.Unlock()
-			return nil, errStartCodeAdmissionDeadline
-		}
-		state := a.scheduleLocked(scheduleID)
-		if len(a.activeStartWorkers) < cap(a.activeStartWorkers) {
-			a.activeStartWorkers <- struct{}{}
-			a.deleteIdleScheduleLocked(scheduleID, state)
-			a.mu.Unlock()
-			var once sync.Once
-			return func() {
-				once.Do(a.releaseStartWorker)
-			}, nil
-		}
-		_, ok := a.enterWaitLocked(state)
-		if !ok {
-			a.mu.Unlock()
-			return nil, errStartCodeAdmissionWaiterLimit
-		}
-		changed := a.startWorkersChanged
-		waitBegan := time.Now()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	a.mu.Lock()
+	if !time.Now().Before(deadline) {
 		a.mu.Unlock()
-		telemetry.IncCounter(telemetry.MSATStartCodeAdmissionWaitTotal, "stage", "start_worker", "outcome", "waiting")
-		waitErr := waitForSATStartAdmission(ctx, deadline, changed, 0)
-		timing.record("start_worker_wait", time.Since(waitBegan))
-		a.leaveWaiter(scheduleID)
-		if waitErr != nil {
-			return nil, waitErr
-		}
+		return nil, errStartCodeAdmissionDeadline
+	}
+	state := a.scheduleLocked(scheduleID)
+	if len(a.startWorkerWaiters) == 0 && len(a.activeStartWorkers) < cap(a.activeStartWorkers) {
+		a.activeStartWorkers <- struct{}{}
+		a.deleteIdleScheduleLocked(scheduleID, state)
+		a.mu.Unlock()
+		return a.startWorkerReleaseFunc(), nil
+	}
+	if _, ok := a.enterWaitLocked(state); !ok {
+		a.deleteIdleScheduleLocked(scheduleID, state)
+		a.mu.Unlock()
+		return nil, errStartCodeAdmissionWaiterLimit
+	}
+	waiter := &satStartWorkerWaiter{ready: make(chan struct{})}
+	a.startWorkerWaiters = append(a.startWorkerWaiters, waiter)
+	waitBegan := time.Now()
+	a.mu.Unlock()
+	telemetry.IncCounter(telemetry.MSATStartCodeAdmissionWaitTotal, "stage", "start_worker", "outcome", "waiting")
+
+	deadlineTimer := time.NewTimer(time.Until(deadline))
+	defer deadlineTimer.Stop()
+	var waitErr error
+	select {
+	case <-waiter.ready:
+	case <-ctx.Done():
+		waitErr = ctx.Err()
+	case <-deadlineTimer.C:
+		waitErr = errStartCodeAdmissionDeadline
+	}
+	timing.record("start_worker_wait", time.Since(waitBegan))
+	if waitErr != nil {
+		a.cancelStartWorkerWaiter(waiter)
+	}
+	a.leaveWaiter(scheduleID)
+	if waitErr != nil {
+		return nil, waitErr
+	}
+	return a.startWorkerReleaseFunc(), nil
+}
+
+func (a *satStartAdmission) startWorkerReleaseFunc() func() {
+	var once sync.Once
+	return func() {
+		once.Do(a.releaseStartWorker)
 	}
 }
 
 func (a *satStartAdmission) releaseStartWorker() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.releaseStartWorkerLocked()
+}
+
+// releaseStartWorkerLocked hands the slot to the oldest waiter, keeping the
+// active count unchanged, or frees it when nobody is queued.
+func (a *satStartAdmission) releaseStartWorkerLocked() {
+	for len(a.startWorkerWaiters) > 0 {
+		waiter := a.startWorkerWaiters[0]
+		a.startWorkerWaiters[0] = nil
+		a.startWorkerWaiters = a.startWorkerWaiters[1:]
+		if waiter == nil {
+			continue
+		}
+		waiter.granted = true
+		close(waiter.ready)
+		return
+	}
 	<-a.activeStartWorkers
-	close(a.startWorkersChanged)
-	a.startWorkersChanged = make(chan struct{})
+}
+
+// cancelStartWorkerWaiter removes a timed-out waiter, or passes on a slot that
+// was granted in the same instant the wait gave up.
+func (a *satStartAdmission) cancelStartWorkerWaiter(waiter *satStartWorkerWaiter) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if waiter.granted {
+		a.releaseStartWorkerLocked()
+		return
+	}
+	for i, queued := range a.startWorkerWaiters {
+		if queued != waiter {
+			continue
+		}
+		copy(a.startWorkerWaiters[i:], a.startWorkerWaiters[i+1:])
+		a.startWorkerWaiters[len(a.startWorkerWaiters)-1] = nil
+		a.startWorkerWaiters = a.startWorkerWaiters[:len(a.startWorkerWaiters)-1]
+		return
+	}
 }
 
 // acquireInitializer admits one cold-runtime initializer per schedule in this

@@ -6,8 +6,15 @@ import type {
 import type { SatDeliveryGateway } from "../application/ports/SatDeliveryGateway";
 import { isWriterSupersededRejection } from "../application/satSubmitConflicts";
 
-/** The server's default offer lead; a first offer omits leadSeconds. */
+/** The server's default offer lead, the replacement fallback before a measured round trip. */
 const DEFAULT_LEAD_MS = 3_000;
+/**
+ * First-offer lead. The break arms on the Module 2 close wave, the busiest
+ * moment of the exam, where the 3s server default is easily missed and four
+ * missed offers need a proctor re-arm. The break clock starts at the offered
+ * start, so the longer lead costs no break time.
+ */
+const FIRST_OFFER_LEAD_SECONDS = 6;
 const MIN_LEAD_SECONDS = 3;
 const MAX_LEAD_SECONDS = 12;
 /** Confirmation must be able to land before the offered start. */
@@ -53,7 +60,7 @@ export function decideSatBreakEntryStep(
     return { kind: "visible" };
   }
   const offerAt = brk.state === "armed" && brk.entryStartsAt ? Date.parse(brk.entryStartsAt) : Number.NaN;
-  if (!Number.isFinite(offerAt)) return { kind: "arm" };
+  if (!Number.isFinite(offerAt)) return { kind: "arm", leadSeconds: FIRST_OFFER_LEAD_SECONDS };
   const remaining = offerAt - serverNowMs;
   if (remaining <= 0) {
     // Only an unconfirmed, expired offer is replaced.

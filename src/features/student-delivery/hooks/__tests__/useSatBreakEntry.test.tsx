@@ -82,8 +82,8 @@ describe("break stage and entry gating", () => {
 });
 
 describe("decideSatBreakEntryStep", () => {
-  it("arms a pending break with the default lead and confirms a viable offer", () => {
-    expect(decideSatBreakEntryStep(brk(), NOW, null)).toEqual({ kind: "arm" });
+  it("arms a pending break with the first-offer lead and confirms a viable offer", () => {
+    expect(decideSatBreakEntryStep(brk(), NOW, null)).toEqual({ kind: "arm", leadSeconds: 6 });
     expect(decideSatBreakEntryStep(armed(NOW + 3_000), NOW, 200)).toEqual({ kind: "confirm" });
   });
   it("waits out an offer with too little lead left, then replaces it with a measured lead", () => {
@@ -147,7 +147,7 @@ describe("useSatBreakEntry", () => {
     await flush();
     await flush();
     expect(gateway.startBreak).toHaveBeenCalledTimes(1);
-    expect(gateway.startBreak).toHaveBeenCalledWith("s", "a", "break-1", { controlEpoch: 4 });
+    expect(gateway.startBreak).toHaveBeenCalledWith("s", "a", "break-1", { controlEpoch: 4, leadSeconds: 6 });
     expect(gateway.enterBreak).toHaveBeenCalledWith("s", "a", { breakId: "break-1", generation: 1, controlEpoch: 4 });
     expect(gateway.markBreakVisible).not.toHaveBeenCalled();
     await act(async () => { await vi.advanceTimersByTimeAsync(3_100); });

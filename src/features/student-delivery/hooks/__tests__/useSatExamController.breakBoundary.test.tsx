@@ -360,7 +360,7 @@ describe("SAT section-boundary break projection", () => {
       hook.result.current.setBreakSurfaceMounted(true);
     });
     await waitFor(() => expect(gatewayMocks.startBreak).toHaveBeenCalled());
-    expect(gatewayMocks.startBreak).toHaveBeenCalledWith("schedule", ATTEMPT_ID, BREAK_ID, {});
+    expect(gatewayMocks.startBreak).toHaveBeenCalledWith("schedule", ATTEMPT_ID, BREAK_ID, { leadSeconds: 6 });
 
     // The whole boundary — route + break row + arm — came from the close ack.
     expect(gatewayMocks.bootstrap).toHaveBeenCalledTimes(1);

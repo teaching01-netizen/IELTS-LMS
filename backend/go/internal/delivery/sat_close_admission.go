@@ -27,13 +27,15 @@ func hasSATCloseAdmission(ctx context.Context) bool {
 	return ok
 }
 
-// satCloseActiveLimit reserves half of a finite API DB pool for saves,
-// lifecycle reads, and staff controls during a synchronized transition wave.
+// satCloseActiveLimit bounds closes so saves, lifecycle reads, and staff
+// controls keep connections during a synchronized transition wave.
 func satCloseActiveLimit(maxOpen int) int {
 	if maxOpen < 1 {
 		return satCloseDefaultActiveLimit
 	}
-	limit := maxOpen / 2
+	// Starts take half of the pool (satStartActiveWorkerLimit); closes take a
+	// quarter so both waves together still leave a quarter for other traffic.
+	limit := maxOpen / 4
 	if limit < 1 {
 		return 1
 	}

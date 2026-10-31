@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -309,5 +310,85 @@ func TestSATStartAdmissionRejectsExpiredDeadlineBeforeGrantOrQueue(t *testing.T)
 	if len(a.activeStartWorkers) != 0 || a.totalWaiters != 0 || len(a.schedules) != 0 {
 		t.Fatalf("expired requests mutated admission state: workers=%d waiters=%d schedules=%d",
 			len(a.activeStartWorkers), a.totalWaiters, len(a.schedules))
+	}
+}
+
+func TestSATStartAndCloseLimitsShareFinitePool(t *testing.T) {
+	for _, maxOpen := range []int{4, 10, 20, 40, 50, 100} {
+		db := fakeSATDBStats{maxOpen: maxOpen}
+		start := satStartActiveWorkerLimit(db)
+		closeLimit := satCloseActiveLimit(maxOpen)
+		if reserved := maxOpen - start - closeLimit; reserved < maxOpen/4 {
+			t.Errorf("maxOpen=%d start=%d close=%d leaves %d connections, want >= %d", maxOpen, start, closeLimit, reserved, maxOpen/4)
+		}
+	}
+}
+
+type fakeSATDBStats struct{ maxOpen int }
+
+func (f fakeSATDBStats) Stats() sql.DBStats { return sql.DBStats{MaxOpenConnections: f.maxOpen} }
+
+func TestSATStartWorkerWaitersAreAdmittedFIFO(t *testing.T) {
+	a := newSATStartAdmissionWithLimit(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	deadline := time.Now().Add(5 * time.Second)
+	release, err := a.acquireStartWorker(ctx, "s", deadline, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const waiters = 5
+	order := make(chan int, waiters)
+	for i := 0; i < waiters; i++ {
+		go func(i int) {
+			r, err := a.acquireStartWorker(ctx, "s", deadline, nil)
+			if err != nil {
+				t.Errorf("waiter %d: %v", i, err)
+				order <- -1
+				return
+			}
+			order <- i
+			r()
+		}(i)
+		// Wait until waiter i is queued before starting the next one.
+		for {
+			a.mu.Lock()
+			queued := len(a.startWorkerWaiters)
+			a.mu.Unlock()
+			if queued == i+1 {
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	release()
+	for want := 0; want < waiters; want++ {
+		if got := <-order; got != want {
+			t.Fatalf("admission order: got waiter %d, want %d", got, want)
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.activeStartWorkers) != 0 || len(a.startWorkerWaiters) != 0 || a.totalWaiters != 0 || len(a.schedules) != 0 {
+		t.Fatalf("leaked state: active=%d queued=%d waiters=%d schedules=%d",
+			len(a.activeStartWorkers), len(a.startWorkerWaiters), a.totalWaiters, len(a.schedules))
+	}
+}
+
+func TestSATStartWorkerTimedOutWaiterDoesNotLeakSlot(t *testing.T) {
+	a := newSATStartAdmissionWithLimit(1)
+	ctx := context.Background()
+	release, err := a.acquireStartWorker(ctx, "s", time.Now().Add(time.Second), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err := a.acquireStartWorker(ctx, "s", time.Now().Add(20*time.Millisecond), nil); r != nil || !errors.Is(err, errStartCodeAdmissionDeadline) {
+		t.Fatalf("queued waiter returned release=%v err=%v", r != nil, err)
+	}
+	release()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.activeStartWorkers) != 0 || len(a.startWorkerWaiters) != 0 || a.totalWaiters != 0 {
+		t.Fatalf("leaked state: active=%d queued=%d waiters=%d", len(a.activeStartWorkers), len(a.startWorkerWaiters), a.totalWaiters)
 	}
 }
