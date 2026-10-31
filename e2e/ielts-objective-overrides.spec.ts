@@ -19,7 +19,8 @@ const ids = {
   schedule: randomUUID(),
   attempts: [randomUUID(), randomUUID()],
 };
-const questionId = `override-q-${suffix}`;
+// Slot ids carry ":" (sent as %3A), which the API must decode before keying.
+const questionId = `override-blk-${suffix}:lbl-1`;
 // The worker's projection cursor is (updated_at, id) at second precision, so a
 // row sharing the global seed's second with a smaller id can be skipped. Seed
 // rows one second later so the worker always picks them up.

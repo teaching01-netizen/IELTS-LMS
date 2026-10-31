@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -195,7 +196,7 @@ func gradingOverridePutHandler(app *App) http.HandlerFunc {
 			return
 		}
 		row, report, err := app.Grading.UpsertScheduleObjectiveOverride(r.Context(),
-			chi.URLParam(r, "scheduleID"), chi.URLParam(r, "questionID"), req,
+			chi.URLParam(r, "scheduleID"), questionIDParam(r), req,
 			sess.UserID, gradingActorName(r, app, sess.UserID))
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -203,6 +204,18 @@ func gradingOverridePutHandler(app *App) http.HandlerFunc {
 		}
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"overrideRow": row, "regradeReport": report})
 	}
+}
+
+// questionIDParam decodes the {questionID} path segment. Slot question ids
+// contain ":" ("blk-…:lbl-…"), which the client sends as %3A; chi routes on the
+// escaped path, so the raw param would key overrides under "%3A" and never
+// match the graded question.
+func questionIDParam(r *http.Request) string {
+	raw := chi.URLParam(r, "questionID")
+	if decoded, err := url.PathUnescape(raw); err == nil {
+		return decoded
+	}
+	return raw
 }
 
 // gradingOverrideDeleteHandler removes one schedule answer-key override and
@@ -228,7 +241,7 @@ func gradingOverrideDeleteHandler(app *App) http.HandlerFunc {
 			return
 		}
 		report, err := app.Grading.DeleteScheduleObjectiveOverride(r.Context(),
-			chi.URLParam(r, "scheduleID"), chi.URLParam(r, "questionID"), req.Reason,
+			chi.URLParam(r, "scheduleID"), questionIDParam(r), req.Reason,
 			sess.UserID, gradingActorName(r, app, sess.UserID))
 		if err != nil {
 			httpx.WriteError(w, r, err)
@@ -548,7 +561,7 @@ func gradingOverrideQuestionHandler(app *App) http.HandlerFunc {
 		}
 		submissionID := chi.URLParam(r, "submissionID")
 		section := chi.URLParam(r, "section")
-		questionID := chi.URLParam(r, "questionID")
+		questionID := questionIDParam(r)
 		if err := app.Grading.OverrideObjectiveQuestion(r.Context(), submissionID, section, questionID, req.Points, sess.UserID, req.TeacherName); err != nil {
 			httpx.WriteError(w, r, err)
 			return
