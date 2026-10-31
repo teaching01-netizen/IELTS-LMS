@@ -68,7 +68,6 @@ import { ensureBrowserClientSessionIdForAttempt } from "@student/api/studentAtte
 import { useIeltsCohortReadiness } from "@student/hooks/useIeltsCohortReadiness";
 import { useIeltsSectionPreparation } from "@student/hooks/useIeltsSectionPreparation";
 import { useIeltsOfflineCleanup } from "@student/hooks/useIeltsOfflineCleanup";
-import { IeltsSharedSaveStatus } from "@student/ui/IeltsSharedSaveStatus";
 import { emitStudentObservabilityMetric } from "../../utils/studentObservability";
 import {
   IELTS_FAST_TRANSITIONS,
@@ -202,9 +201,6 @@ export function StudentApp({
   });
   const personalTransitionClockSeconds = useStudentRuntimeClock();
   const usesPersonalIeltsTiming = isIeltsPersonalTimingModel(
-    runtimeState.runtimeSnapshot?.timingModel
-  );
-  const sharedScheduleRoom = isIeltsSharedScheduleTimingModel(
     runtimeState.runtimeSnapshot?.timingModel
   );
   const readinessSectionKey = runtimeState.runtimeSnapshot?.currentSectionKey;
@@ -1338,12 +1334,6 @@ export function StudentApp({
           isExamActive={effectivePhase === "exam"}
         />
       )}
-      {sharedScheduleRoom && effectivePhase === 'exam' ? (
-        <IeltsSharedSaveStatus
-          status={autoSaveStatus}
-          needsReview={attemptState.quarantinedCount > 0}
-        />
-      ) : null}
       <StudentExamViewport>
         <StudentHighlightSelectionManagerProvider>
           <StudentExamWorkspaceSession
