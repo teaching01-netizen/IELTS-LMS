@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Bookmark, Check, MapPin, X } from "lucide-react";
+import { AlertTriangle, Bookmark, Check, MapPin, X } from "lucide-react";
 import { SAT_COPY } from "../../domain/satCopy";
 import { AnimatePresence } from "motion/react";
 import type { SatQuestionNavigationItem } from "../../domain/satSelectors";
@@ -122,6 +122,15 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
           Unanswered
         </span>
         <span className="inline-flex items-center gap-1.5">
+          <span
+            className="grid h-4 w-4 place-items-center border border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]"
+            aria-hidden="true"
+          >
+            <AlertTriangle className="h-3 w-3" />
+          </span>{" "}
+          {SAT_COPY.review.invalidStatus}
+        </span>
+        <span className="inline-flex items-center gap-1.5">
           <Bookmark
             className="h-4 w-4 fill-[var(--sat-review)] text-[var(--sat-review)]"
             aria-hidden="true"
@@ -132,27 +141,43 @@ export function SatQuestionNavigator(props: SatQuestionNavigatorProps) {
       <div className="grid grid-cols-5 justify-center gap-2 py-4 min-[360px]:grid-cols-6 sm:grid-cols-9 sm:gap-3">
         {props.items.map((item) => {
           const answered = item.status === "answered";
+          const invalid = item.status === "invalid";
           const current = item.current;
           const stateClass = current
             ? "border-[var(--sat-accent)] bg-[var(--sat-surface)] text-[var(--sat-accent-strong)] underline decoration-2 underline-offset-4 ring-2 ring-[var(--sat-accent)]"
+            : invalid
+              ? "border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]"
+              : answered
+                ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]"
+                : "border-dashed border-[var(--sat-text)] bg-[var(--sat-surface)] text-[var(--sat-accent-strong)]";
+          const stateDescription = invalid
+            ? ", answer needs fixing"
             : answered
-              ? "border-[var(--sat-accent)] bg-[var(--sat-accent)] text-[var(--sat-accent-text)]"
-              : "border-dashed border-[var(--sat-text)] bg-[var(--sat-surface)] text-[var(--sat-accent-strong)]";
+              ? ", answered"
+              : ", unanswered";
           return (
             <button
               type="button"
               key={item.id}
               data-sat-navigator-current={current ? true : undefined}
+              data-sat-navigator-invalid={invalid ? true : undefined}
               onClick={() => {
                 props.onSelectQuestion(item.index);
                 props.onClose();
               }}
               aria-current={current ? "step" : undefined}
-              aria-label={`Question ${item.number}${answered ? ", answered" : ", unanswered"}${item.markedForReview ? ", flagged" : ""}${current ? ", current question" : ""}`}
+              aria-label={`Question ${item.number}${stateDescription}${item.markedForReview ? ", flagged" : ""}${current ? ", current question" : ""}`}
               className={`sat-pressable relative h-11 min-w-11 border sat-type-control-secondary font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] focus-visible:ring-offset-2 ${stateClass}`}
             >
               <span className="inline-flex items-center gap-1">
-                {answered ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+                {invalid ? (
+                  <AlertTriangle
+                    className={`h-3.5 w-3.5 ${current ? "text-[var(--sat-danger)]" : ""}`}
+                    aria-hidden="true"
+                  />
+                ) : answered ? (
+                  <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                ) : null}
                 <span aria-hidden="true">{item.number}</span>
               </span>
               {item.markedForReview ? (

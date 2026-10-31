@@ -138,7 +138,11 @@ export function SatPreviewRoute({ examId }: { examId: string }) {
             moduleTitle={preview.module.title}
             remainingLabel={remainingLabel}
             items={preview.navigationItems}
-            answeredCount={answeredSatQuestionCount(preview.questionIds, preview.responses)}
+            answeredCount={answeredSatQuestionCount(
+              preview.questionIds,
+              preview.responses,
+              preview.questions
+            )}
             pendingSaveCount={0}
             saveFailure={null}
             saveFailureKind={null}

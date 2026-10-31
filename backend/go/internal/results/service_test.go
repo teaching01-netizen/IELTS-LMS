@@ -587,6 +587,7 @@ func TestSATQuestionsApplyNullVerdictRule(t *testing.T) {
 	}
 	defer db.Close()
 	singleChoice := `{"kind":"single_choice","correctOptionId":"B"}`
+	spr := `{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeFraction":true,"normalizeDecimal":true,"numericTolerance":null}`
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts ma")).
 		WithArgs("attempt-1").
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -598,14 +599,17 @@ func TestSATQuestionsApplyNullVerdictRule(t *testing.T) {
 			AddRow("reading-writing", "rw-base", 1, 2, "eq-2", "q-wrong", false, true, `"A"`, singleChoice, nil, false, nil, nil).
 			AddRow("reading-writing", "rw-base", 1, 3, "eq-3", "q-blank", false, false, nil, singleChoice, nil, false, nil, nil).
 			AddRow("math", "m-base", 1, 1, "eq-4", "q-pre", true, false, `"B"`, singleChoice, nil, false, nil, nil).
-			AddRow("math", "m-base", 1, 2, "eq-5", "q-nokey", false, false, `"B"`, `{"kind":"single_choice"}`, nil, false, nil, nil))
+			AddRow("math", "m-base", 1, 2, "eq-5", "q-nokey", false, false, `"B"`, `{"kind":"single_choice"}`, nil, false, nil, nil).
+			AddRow("math", "m-base", 1, 3, "eq-6", "q-spr-valid", false, false, `"12"`, spr, nil, false, nil, nil).
+			AddRow("math", "m-base", 1, 4, "eq-7", "q-spr-malformed", false, false, `"12%"`, spr, nil, false, nil, nil).
+			AddRow("math", "m-base", 1, 5, "eq-8", "q-spr-over-budget", false, false, `"123456"`, spr, nil, false, nil, nil))
 	svc := NewService(db)
 	questions, err := svc.satQuestions(context.Background(), "attempt-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(questions) != 5 {
-		t.Fatalf("expected 5 question rows, got %+v", questions)
+	if len(questions) != 8 {
+		t.Fatalf("expected 8 question rows, got %+v", questions)
 	}
 	byID := map[string]SATQuestion{}
 	for _, question := range questions {
@@ -617,10 +621,13 @@ func TestSATQuestionsApplyNullVerdictRule(t *testing.T) {
 	if byID["q-wrong"].IsCorrect == nil || *byID["q-wrong"].IsCorrect {
 		t.Fatalf("expected q-wrong false, got %+v", byID["q-wrong"])
 	}
+	if byID["q-spr-valid"].IsCorrect == nil || !*byID["q-spr-valid"].IsCorrect {
+		t.Fatalf("expected q-spr-valid true, got %+v", byID["q-spr-valid"])
+	}
 	if !byID["q-wrong"].MarkedForReview {
 		t.Fatal("expected marked_for_review to survive")
 	}
-	for _, id := range []string{"q-blank", "q-pre", "q-nokey"} {
+	for _, id := range []string{"q-blank", "q-pre", "q-nokey", "q-spr-malformed", "q-spr-over-budget"} {
 		if byID[id].IsCorrect != nil {
 			t.Fatalf("expected %s verdict null, got %+v", id, byID[id])
 		}

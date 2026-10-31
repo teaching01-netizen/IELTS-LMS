@@ -43,7 +43,7 @@ export function SatRoomWorkspace({
     >
       {header}
       {summary}
-      {notices ? <div className="sat-room__notices grid min-w-0 gap-2">{notices}</div> : null}
+      {notices}
       <div className="sat-room__body">
         {students}
         {context}

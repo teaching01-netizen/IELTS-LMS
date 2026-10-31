@@ -217,6 +217,10 @@ export default defineConfig({
       env: {
         ...process.env,
         ...backendFeatureEnv,
+        // Keep the unsynced-answer E2E fast without changing product defaults
+        // (10 s / 30 s) for real sittings.
+        VITE_SAT_UNSYNCED_NOTICE_MS: "1500",
+        VITE_SAT_UNSYNCED_OFFLINE_MS: "4500",
       },
       url: frontendUrl,
       timeout: 120_000,

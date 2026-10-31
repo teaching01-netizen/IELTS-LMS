@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { emptySatQuestionResponse } from './satResponses';
-import { buildSatQuestionNavigationItems } from './satSelectors';
+import { buildSatQuestionNavigationItems, answeredSatQuestionCount, invalidSatQuestionCount } from './satSelectors';
 import { breakRemainingSeconds, formatSatTime, mergeAuthoritativeTiming, snapshotRemainingSeconds, timingForAttempt } from './satTiming';
 import { resolveAuthoritativeRemainingSeconds } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { resolveSatToolCapabilities, toggleSatActiveTool } from './satTools';
@@ -29,9 +29,29 @@ describe('SAT delivery domain', () => {
   it('keeps current and answer status independent in the shared navigator model', () => {
     const q1 = { ...emptySatQuestionResponse('q1'), answer: 'A' };
     const q2 = emptySatQuestionResponse('q2');
-    const items = buildSatQuestionNavigationItems(['q1', 'q2'], 1, { q1, q2 });
+    const questions = [
+      { examQuestionId: 'q1', questionType: 'single_choice' as const },
+      { examQuestionId: 'q2', questionType: 'single_choice' as const },
+    ];
+    const items = buildSatQuestionNavigationItems(['q1', 'q2'], 1, { q1, q2 }, questions);
     expect(items[0]).toMatchObject({ status: 'answered', current: false });
     expect(items[1]).toMatchObject({ status: 'unanswered', current: true });
+  });
+
+  it('marks a malformed SPR as invalid, never as answered', () => {
+    const valid = { ...emptySatQuestionResponse('q1'), answer: '3/4' };
+    const invalid = { ...emptySatQuestionResponse('q2'), answer: '12%' };
+    const empty = emptySatQuestionResponse('q3');
+    const questions = [
+      { examQuestionId: 'q1', questionType: 'student_produced_response' as const },
+      { examQuestionId: 'q2', questionType: 'student_produced_response' as const },
+      { examQuestionId: 'q3', questionType: 'student_produced_response' as const },
+    ];
+    const responses = { q1: valid, q2: invalid, q3: empty };
+    const items = buildSatQuestionNavigationItems(['q1', 'q2', 'q3'], 0, responses, questions);
+    expect(items.map((item) => item.status)).toEqual(['answered', 'invalid', 'unanswered']);
+    expect(answeredSatQuestionCount(['q1', 'q2', 'q3'], responses, questions)).toBe(1);
+    expect(invalidSatQuestionCount(items)).toBe(1);
   });
 
 

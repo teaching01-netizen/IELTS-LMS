@@ -156,6 +156,11 @@ const DevSatAuthoringRoute = lazy(() =>
     default: module.SatAuthoringDebugRoute,
   }))
 );
+const DevSatBannersRoute = lazy(() =>
+  import("./dev/SatBannerGalleryRoute").then((module) => ({
+    default: module.SatBannerGalleryRoute,
+  }))
+);
 
 function RouteLoadingFallback() {
   return <AppLoadingSkeleton />;
@@ -661,6 +666,15 @@ const devRoutes = import.meta.env.DEV
         element: (
           <Suspense fallback={<RouteLoadingFallback />}>
             <DevSatAuthoringRoute />
+          </Suspense>
+        ),
+      },
+      {
+        path: "/__dev/sat-banners",
+        errorElement: <RouteErrorBoundary />,
+        element: (
+          <Suspense fallback={<RouteLoadingFallback />}>
+            <DevSatBannersRoute />
           </Suspense>
         ),
       },

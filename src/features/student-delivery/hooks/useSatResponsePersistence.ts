@@ -49,6 +49,13 @@ export interface SatResponsePersistenceOptions {
 
 export type SatResponseFailureKind = 'offline' | 'retryable' | 'terminal' | 'expired' | 'superseded' | 'module_closed';
 
+/**
+ * Grace after a scope closes before held writes are posted as late evidence.
+ * A close acknowledgement that arrives in this window prunes them first, so an
+ * already-scored write is never recorded as evidence for a lost HTTP ack.
+ */
+const EVIDENCE_SETTLE_MS = 3_000;
+
 export interface SatResponseSaveContext {
   moduleAttemptId: string;
   stageKey: string | null;
@@ -59,6 +66,11 @@ export interface SatResponseSaveContext {
 
 export interface SatResponsePersistence {
   pendingCount: number;
+  /**
+   * When the current unsynced window began, or null when every accepted change
+   * is acknowledged. One timestamp per window; a new keystroke does not reset it.
+   */
+  unsyncedSince: number | null;
   pendingDrafts: Readonly<Record<string, SatQuestionResponseDraft>>;
   visibleDrafts: Readonly<Record<string, SatQuestionResponseDraft>>;
   /** Question ids whose visible drafts need attention (blocked, never sent). Additive; defaults to []. */
@@ -105,13 +117,17 @@ export interface SatResponsePersistence {
     commands: ResponseCommandV2[],
   ) => Promise<void>;
   acknowledgeScopeClose?: (moduleAttemptId: string, closeId: string, acknowledgements: readonly ResponseAcknowledgementV2[]) => Promise<void>;
+  settleScopeClose?: (
+    moduleAttemptId: string,
+    settled: ReadonlyArray<{ questionId: string; writeId: string; clientVersion: number }>,
+  ) => Promise<void>;
   failure: string | null;
   failureKind: SatResponseFailureKind | null;
   tombstoneCount: number;
   hydrateRevisions: (responses: readonly AssessmentResponseSnapshot[]) => void;
   hydrateBootstrap: (payload: AssessmentDeliveryBootstrap) => void;
   save: (response: SatQuestionResponseDraft, context?: SatResponseSaveContext) => void;
-  flush: () => Promise<void>;
+  flush: (options?: { forceRetry?: boolean }) => Promise<void>;
   submit: () => Promise<SubmitAttemptV2Response>;
   retryFailed: () => Promise<void>;
   takeOverLease: (reason?: string) => Promise<void>;
@@ -180,7 +196,11 @@ export function useSatResponsePersistence({
   const questionScopeRef = useRef(new Map<string, string>());
   const moduleIdByAttemptRef = useRef(new Map<string, string>());
   const evidenceSentRef = useRef(new Set<string>());
-  const evidenceUploadsRef = useRef(new Map<string, { engine: DurableResponseEngine; timer: number | null }>());
+  const evidenceUploadsRef = useRef(new Map<string, {
+    engine: DurableResponseEngine;
+    timer: number | null;
+    settleObserved: boolean;
+  }>());
   const [evidenceTail, setEvidenceTail] = useState('');
   const [closedModuleAttemptIds, setClosedModuleAttemptIds] = useState<string[]>([]);
   const [v2ModePendingDrafts, setV2ModePendingDrafts] = useState<
@@ -193,6 +213,34 @@ export function useSatResponsePersistence({
   const [failureKind, setFailureKind] = useState<SatResponseFailureKind | null>(null);
   const [isTakingOver, setIsTakingOver] = useState(false);
   const [tombstoneCount, setTombstoneCount] = useState(0);
+  const [unsyncedSince, setUnsyncedSince] = useState<number | null>(null);
+  const unsyncedMetricRef = useRef<{ attemptId: string; since: number | null }>({
+    attemptId,
+    since: null,
+  });
+  const failureKindRef = useRef<SatResponseFailureKind | null>(null);
+  failureKindRef.current = failureKind;
+  // One lifecycle event per window, not per tick: start and cleared only.
+  // The ref carries the attempt id so an identity change never attributes the
+  // previous attempt's window to the new one.
+  useEffect(() => {
+    const previous = unsyncedMetricRef.current;
+    if (previous.attemptId !== attemptId) {
+      unsyncedMetricRef.current = { attemptId, since: unsyncedSince };
+      return;
+    }
+    if (previous.since === null && unsyncedSince !== null) {
+      emitStudentObservabilityMetric("sat_unsynced_window_started", { scheduleId, attemptId });
+    } else if (previous.since !== null && unsyncedSince === null) {
+      emitStudentObservabilityMetric("sat_unsynced_window_cleared", {
+        scheduleId,
+        attemptId,
+        durationMs: Math.max(0, Date.now() - previous.since),
+        failureKind: failureKindRef.current,
+      });
+    }
+    unsyncedMetricRef.current = { attemptId, since: unsyncedSince };
+  }, [attemptId, scheduleId, unsyncedSince]);
   // Per-question "needs attention" ids. Refreshed from the engine on every
   // status/state publish; additive only (exposed as blockedDrafts, the
   // visibleDrafts path is untouched).
@@ -245,6 +293,7 @@ export function useSatResponsePersistence({
     setFailure(null);
     setFailureKind(null);
     setTombstoneCount(0);
+    setUnsyncedSince(null);
     questionScopeRef.current.clear();
     moduleIdByAttemptRef.current.clear();
     evidenceSentRef.current.clear();
@@ -290,6 +339,7 @@ export function useSatResponsePersistence({
         ),
       onStateChange: (states) => {
         if (v2EngineRef.current !== engine) return;
+        setUnsyncedSince(engine.getUnsyncedSince());
         publishV2EngineState(states);
       },
       onStatusChange: (status, error) => {
@@ -300,6 +350,7 @@ export function useSatResponsePersistence({
         )
           return;
         setTombstoneCount(engine.getQuarantined().length);
+        setUnsyncedSince(engine.getUnsyncedSince());
         // Shared WP4/WP5 vocabulary via the shared mapper (same as IELTS).
         // blocked_attention => retryable failure with exam-stress-safe copy,
         // explicitly NOT terminal/superseded: the draft is kept on this
@@ -446,6 +497,11 @@ export function useSatResponsePersistence({
   // Every immutable held write is uploaded, including writes arriving after
   // the first close upload. One stream per closed module; bounded batches,
   // stable per-write identity, and no automatic retry of policy conflicts.
+  //
+  // A 3 s settle delay gives the module close acknowledgement time to prune a
+  // write the server already holds. Evidence is durable in quarantine, so a
+  // page death inside the delay uploads it on the next load instead of losing
+  // it; the delay only prevents a duplicate row for a lost HTTP ack.
   useEffect(() => {
     const engine = v2EngineRef.current;
     if (!engine || !gateway.recordLateEvidence) return;
@@ -455,11 +511,12 @@ export function useSatResponsePersistence({
       const moduleId = moduleIdByAttemptRef.current.get(moduleAttemptId);
       const reason = engine.getClosedScopes().get(moduleAttemptId);
       if (!moduleId || !reason) continue;
-      const flight = { engine, timer: null as number | null };
+      const flight = { engine, timer: null as number | null, settleObserved: false };
       evidenceUploadsRef.current.set(moduleAttemptId, flight);
       const current = () => mountedRef.current &&
         identityGenerationRef.current === generation && v2EngineRef.current === engine;
-      const upload = async (retry: number): Promise<void> => {
+      const upload = async (retry: number, fromSettleDelay = false): Promise<void> => {
+        flight.timer = null;
         if (!current()) return;
         const answers = engine.getQuarantined()
           .filter((entry) => entry.reason === reason &&
@@ -475,6 +532,16 @@ export function useSatResponsePersistence({
             clientReceivedAt: entry.quarantinedAt,
           }));
         if (answers.length === 0) {
+          // The settle delay exists for this case: a close ack pruned a write
+          // the server already holds. Count the avoided duplicate once.
+          if (fromSettleDelay && !flight.settleObserved) {
+            flight.settleObserved = true;
+            emitStudentObservabilityMetric("sat_evidence_upload_skipped", {
+              scheduleId,
+              attemptId,
+              reason: "settled_by_close",
+            });
+          }
           evidenceUploadsRef.current.delete(moduleAttemptId);
           return;
         }
@@ -496,7 +563,7 @@ export function useSatResponsePersistence({
             Math.min(30_000, 1_000 * 2 ** Math.min(retry, 5)));
         }
       };
-      void upload(0);
+      flight.timer = window.setTimeout(() => void upload(0, true), EVIDENCE_SETTLE_MS);
     }
   }, [attemptId, closedModuleAttemptIds, controlEpoch, credentialAttempt?.candidateId,
       credentialAttempt?.id, credentialAttempt?.scheduleId, evidenceTail, gateway,
@@ -533,6 +600,19 @@ export function useSatResponsePersistence({
       await engine.uploadScopeCloseChunk(moduleAttemptId, closeId, manifestHash, commands);
     },
     [],
+  );
+
+  const settleScopeClose = useCallback(
+    async (
+      moduleAttemptId: string,
+      settled: ReadonlyArray<{ questionId: string; writeId: string; clientVersion: number }>,
+    ) => {
+      const engine = v2EngineRef.current;
+      if (!engine) throw new Error('V2 response durability engine is not ready.');
+      await engine.settleScopeFromManifest(moduleAttemptId, settled);
+      setUnsyncedSince(engine.getUnsyncedSince());
+    },
+    []
   );
 
   const acknowledgeScopeClose = useCallback(
@@ -593,13 +673,14 @@ export function useSatResponsePersistence({
     []
   );
 
-  const flush = useCallback(async () => {
+  const flush = useCallback(async (options?: { forceRetry?: boolean }) => {
     await waitForV2Acceptances();
     const ready = v2ReadyRef.current;
     if (ready) await ready;
     const engine = v2EngineRef.current;
     if (!engine) throw new Error('V2 response durability engine is not ready.');
-    await engine.flush();
+    await engine.flush(options);
+    setUnsyncedSince(engine.getUnsyncedSince());
     if (engine.getPendingCount() > 0) {
       throw new Error(
         engine.getLastError() ?? 'One or more responses have not been durably saved.'
@@ -857,6 +938,7 @@ export function useSatResponsePersistence({
   // checkpoints make that window safe. Kept as-is; do not restructure.
   return {
     pendingCount: Object.keys(v2ModePendingDrafts).length,
+    unsyncedSince,
     pendingDrafts: v2ModePendingDrafts,
     visibleDrafts: v2ModeVisibleDrafts,
     blockedDrafts,
@@ -871,6 +953,7 @@ export function useSatResponsePersistence({
     prepareScopeClose,
     uploadScopeCloseChunk,
     acknowledgeScopeClose,
+    settleScopeClose,
     failure,
     failureKind,
     tombstoneCount,

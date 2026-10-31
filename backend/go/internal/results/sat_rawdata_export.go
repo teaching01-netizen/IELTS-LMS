@@ -3,6 +3,7 @@ package results
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
@@ -311,6 +312,7 @@ const (
 //
 //   - missing answer key           -> "" (cannot determine safely)
 //   - response row unreadable      -> "" (cannot determine safely)
+//   - present but unusable (SPR)   -> "" (cannot determine safely)
 //   - key present, no answer       -> "No answer"
 //   - answered                     -> "1"/"0"
 //
@@ -324,8 +326,19 @@ func satRawdataAnswerCellWithPolicy(answerJSON string, v2Canonical sql.NullStrin
 		return ""
 	}
 	response, state := satRawdataResponse(v2Canonical, legacy)
-	if state == satRawdataResponseAnswered && !assessscore.SATResponsePresent(response) {
-		state = satRawdataResponseNone
+	if state == satRawdataResponseAnswered {
+		var shape struct {
+			Kind string `json:"kind"`
+		}
+		_ = json.Unmarshal([]byte(answerJSON), &shape)
+		if !assessscore.SATResponsePresent(response) {
+			state = satRawdataResponseNone
+		} else if !assessscore.SATResponseUsable(shape.Kind, response) {
+			// Present but unusable (for example malformed SPR text) is not
+			// "No answer" and not "0": the cell is indeterminate, so it stays
+			// blank rather than asserting something about the candidate.
+			state = satRawdataResponseUnreadable
+		}
 	}
 	switch state {
 	case satRawdataResponseNone:

@@ -1,6 +1,10 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { ADMIN_STORAGE_STATE_PATH } from "./support/backendE2e";
 import { closeDb, executeUpdate, queryDb } from "./support/db";
+import {
+  installSatTransitionTrace,
+  readSatTransitionTrace,
+} from "./support/satTransitionTrace";
 import { stubScreenDetails } from "./support/studentUi";
 import { buildCompleteSatSample } from "../src/features/exam-authoring/providers/sat/sampleExam";
 import type { AssessmentAuthoringShellResult } from "../src/features/exam-authoring/contracts/assessment";
@@ -63,6 +67,15 @@ interface BreakRow {
   state: string;
   starts_at: string | null;
   deadline_at: string | null;
+  entry_starts_at: string | null;
+  entry_confirmed_at: string | null;
+  entry_entered_at: string | null;
+}
+
+interface ModuleAttemptRow {
+  section_title: string;
+  state: string;
+  started_at: string | null;
 }
 
 interface BreakTrace {
@@ -412,11 +425,13 @@ async function joinStudent(
   link: AccessLinkSnapshot,
   scheduleId: string,
   name: string,
-  email: string
+  email: string,
+  options: { traceRandom?: number } = {}
 ): Promise<JoinedStudent> {
   const context = await browser.newContext();
   await stubScreenDetails(context);
   await context.addInitScript(installBreakTrace);
+  await context.addInitScript(installSatTransitionTrace, { random: options.traceRandom });
   const studentPage = await context.newPage();
   // The route's last segment is the STUDENT key, not the attempt id. Take the
   // attempt id from the delivery bootstrap, which is the server's authority.
@@ -494,7 +509,9 @@ test.describe("SAT section-boundary break handoff", () => {
         room.link,
         room.scheduleId,
         `Break A ${room.stamp}`,
-        `sat-break-a-${room.stamp}@example.com`
+        `sat-break-a-${room.stamp}@example.com`,
+        // Pin the break-end jitter so the expected first-read delay is exact.
+        { traceRandom: 0.75 }
       );
       const studentPage = student.page;
       // The close ack owns routing: exactly one close so far means the
@@ -571,6 +588,58 @@ test.describe("SAT section-boundary break handoff", () => {
       const metrics = (await readTrace(studentPage)).metrics;
       expect(metrics.some((metric) => metric.name === "sat_break_boundary_ready")).toBe(true);
 
+      // E2E-BRK-01: the first offer asks for the 6 s lead, and the arm →
+      // confirm → visible protocol runs exactly once. The lead is measured
+      // against the arm request's own timestamp, not a later poll.
+      const transition = await readSatTransitionTrace(studentPage);
+      const breakCalls = transition.requests.filter((request) => /\/breaks\//.test(request.path));
+      const starts = breakCalls.filter(
+        (request) => request.method === "POST" && request.path.endsWith("/start")
+      );
+      const enters = breakCalls.filter(
+        (request) => request.method === "POST" && request.path.endsWith("/enter")
+      );
+      const visibles = breakCalls.filter(
+        (request) => request.method === "POST" && request.path.endsWith("/visible")
+      );
+      expect(starts, JSON.stringify(breakCalls)).toHaveLength(1);
+      expect(starts[0]!.body).toMatchObject({ leadSeconds: 6 });
+      expect(starts[0]!.status).toBe(200);
+      expect(enters).toHaveLength(1);
+      expect(enters[0]!.status).toBe(200);
+      expect(visibles).toHaveLength(1);
+      expect(visibles[0]!.status).toBe(200);
+      // A break endpoint that sheds load must say so with a retryable 5xx,
+      // never leak a 500 into the happy path.
+      expect(breakCalls.filter((request) => (request.status ?? 0) >= 500)).toEqual([]);
+
+      const [confirmedRow] = await queryDb<BreakRow>(
+        `SELECT id, after_section_id, duration_seconds, state, starts_at, deadline_at,
+                entry_starts_at, entry_confirmed_at, entry_entered_at
+           FROM assessment_attempt_breaks
+          WHERE attempt_id = ?`,
+        [student.attemptId]
+      );
+      expect(confirmedRow?.entry_confirmed_at).toBeTruthy();
+      const offeredLeadMs =
+        Date.parse(confirmedRow?.entry_starts_at ?? "") - (starts[0]?.at ?? 0);
+      expect(offeredLeadMs, "the first offer must carry the 6 s lead").toBeGreaterThan(5_400);
+      expect(offeredLeadMs).toBeLessThan(6_600);
+      await expect
+        .poll(
+          async () =>
+            (
+              await queryDb<{ entry_entered_at: string | null }>(
+                `SELECT entry_entered_at FROM assessment_attempt_breaks WHERE attempt_id = ?`,
+                [student.attemptId]
+              )
+            )[0]?.entry_entered_at ?? null,
+          { timeout: 10_000, intervals: [100, 250, 500] }
+        )
+        .toBeTruthy();
+      // Confirming copies the offered start; nothing may move the clock later.
+      expect(confirmedRow?.starts_at).toBe(confirmedRow?.entry_starts_at);
+
       // A reload mid-break resumes the same break, never "Preparing Math…".
       await studentPage.reload({ waitUntil: "domcontentloaded" });
       const resumedSurface = studentPage.getByTestId("sat-scheduled-break");
@@ -602,6 +671,72 @@ test.describe("SAT section-boundary break handoff", () => {
         if ((await beginModule.count()) > 0) await beginModule.click();
         await expect(examShell).toBeVisible({ timeout: 45_000 });
         await expect(studentPage.getByRole("timer").first()).toBeVisible({ timeout: 30_000 });
+
+        // E2E-BRK-02: break end schedules its first read after a 0–1.5 s
+        // jitter (0.75 × 1.5 s = 1 125 ms with the pinned random). The
+        // metric is emitted before the wait, so it proves the scheduler ran
+        // even when a socket frame wins the race and the read is skipped.
+        const settled = await readSatTransitionTrace(studentPage);
+        const breakEndReads = settled.metrics.filter(
+          (metric) => metric["name"] === "sat_break_end_first_read"
+        );
+        expect(breakEndReads.length, JSON.stringify(settled.metrics)).toBeGreaterThan(0);
+        const scheduledRead = breakEndReads.find(
+          (metric) => metric["outcome"] === "scheduled"
+        );
+        expect(scheduledRead, JSON.stringify(breakEndReads)).toBeTruthy();
+        const firstReadDelayMs = Number(scheduledRead?.["delayMs"]);
+        expect(firstReadDelayMs).toBeGreaterThanOrEqual(800);
+        expect(firstReadDelayMs).toBeLessThanOrEqual(1_500);
+
+        // If the jittered read actually reached the network, it must land
+        // after the delay, never at the deadline itself.
+        const stateAfterDeadline = settled.requests
+          .filter(
+            (request) =>
+              request.path.endsWith("/state") &&
+              request.at >= deadlineAt + firstReadDelayMs - 250
+          )
+          .sort((left, right) => left.at - right.at)[0];
+        if (stateAfterDeadline) {
+          expect(stateAfterDeadline.at - deadlineAt).toBeGreaterThanOrEqual(
+            firstReadDelayMs - 250
+          );
+          expect(stateAfterDeadline.at - deadlineAt).toBeLessThanOrEqual(
+            firstReadDelayMs + 1_200
+          );
+        }
+
+        await expect
+          .poll(
+            async () =>
+              (
+                await queryDb<{ state: string }>(
+                  `SELECT state FROM assessment_attempt_breaks WHERE attempt_id = ?`,
+                  [student.attemptId]
+                )
+              )[0]?.state ?? null,
+            { timeout: 15_000, intervals: [250, 500, 1_000] }
+          )
+          .toBe("completed");
+
+        const moduleRows = await queryDb<ModuleAttemptRow>(
+          `SELECT section_row.title AS section_title,
+                  module_attempt.state,
+                  module_attempt.started_at
+             FROM assessment_module_attempts module_attempt
+             JOIN assessment_modules module_row ON module_row.id = module_attempt.module_id
+             JOIN assessment_sections section_row ON section_row.id = module_row.section_id
+            WHERE module_attempt.attempt_id = ?
+            ORDER BY module_attempt.started_at`,
+          [student.attemptId]
+        );
+        const mathModules = moduleRows.filter((row) => row.section_title === "Math");
+        expect(mathModules.length).toBeGreaterThan(0);
+        expect(
+          mathModules.filter((row) => row.state === "active" && row.started_at !== null),
+          JSON.stringify(moduleRows)
+        ).toHaveLength(1);
       } catch (error) {
         const body = await studentPage
           .locator("body")
@@ -609,7 +744,7 @@ test.describe("SAT section-boundary break handoff", () => {
           .catch(() => "<unreadable student page>");
         const trace = await readTrace(studentPage).catch(() => null);
         throw new Error(
-          `The break did not hand over to Math. Budget ${handoffBudgetMs} ms.\n` +
+          `The break boundary flow failed after the handoff window. Budget ${handoffBudgetMs} ms.\n` +
             `Trace: ${JSON.stringify(trace)}\nStudent page:\n${body}`,
           { cause: error }
         );
@@ -741,6 +876,243 @@ test.describe("SAT section-boundary break handoff", () => {
         }
         // The room artifacts above are already removed and the E2E database is
         // disposable, so cleanup must not mask the flow's result.
+        if (deleted.status !== 200) {
+          console.warn(
+            `[sat-break-boundary] exam cleanup skipped: ${deleted.status} ${JSON.stringify(deleted.payload)}`
+          );
+        }
+      }
+      await closeDb();
+    }
+  });
+
+  test("retries a retryable 503 on break start without a proctor lockout", async ({
+    page,
+    browser,
+  }) => {
+    let examId: string | undefined;
+    let scheduleId: string | undefined;
+    let student: JoinedStudent | undefined;
+
+    try {
+      const room = await seedSatRoom(page);
+      examId = room.examId;
+      scheduleId = room.scheduleId;
+
+      student = await joinStudent(
+        browser,
+        page,
+        room.link,
+        room.scheduleId,
+        `Break C ${room.stamp}`,
+        `sat-break-c-${room.stamp}@example.com`,
+        { traceRandom: 0.75 }
+      );
+      const studentPage = student.page;
+
+      // The first two offers are shed with the exact contract the API renders
+      // under saturation: 503 + Retry-After + details.retryAfterSeconds.
+      let startAttempts = 0;
+      await studentPage.route(
+        "**/v1/assessment-delivery/schedules/*/breaks/*/start",
+        async (route) => {
+          startAttempts += 1;
+          if (startAttempts <= 2) {
+            await route.fulfill({
+              status: 503,
+              headers: { "content-type": "application/json", "retry-after": "1" },
+              body: JSON.stringify({
+                code: "SERVICE_UNAVAILABLE",
+                message: "Entry capacity is temporarily unavailable; please retry.",
+                details: { retryAfterSeconds: 1 },
+              }),
+            });
+            return;
+          }
+          await route.continue();
+        }
+      );
+
+      const examTimer = studentPage.getByRole("timer").first();
+      await expect(examTimer).toBeVisible({ timeout: 30_000 });
+      // Reading & Writing Module 1 -> Module 2, then the boundary.
+      await expect
+        .poll(() => examTimer.innerText().then(timerSeconds), {
+          timeout: 90_000,
+          intervals: [500, 1_000],
+        })
+        .toBeLessThanOrEqual(5);
+      await expect
+        .poll(() => examTimer.innerText().then(timerSeconds), {
+          timeout: 30_000,
+          intervals: [250, 500],
+        })
+        .toBeGreaterThan(30);
+
+      const breakSurface = studentPage.getByTestId("sat-scheduled-break");
+      await expect(breakSurface).toBeVisible({ timeout: 120_000 });
+      await expect(breakSurface).toHaveAttribute("data-sat-break-phase", "preparing");
+
+      // The first retry lands after the 1 s backoff, not in a tight loop.
+      await expect
+        .poll(() => startAttempts, { timeout: 10_000, intervals: [100, 250, 500] })
+        .toBeGreaterThanOrEqual(2);
+      expect(
+        await studentPage.getByText(/ask your proctor for help/i).count(),
+        "two shed offers must not surface the terminal proctor message"
+      ).toBe(0);
+
+      await expect(breakSurface).toHaveAttribute("data-sat-break-phase", "active", {
+        timeout: 30_000,
+      });
+      expect(startAttempts).toBeGreaterThanOrEqual(3);
+      expect(await studentPage.getByText(/ask your proctor for help/i).count()).toBe(0);
+
+      const trace = await readSatTransitionTrace(studentPage);
+      const startCalls = trace.requests.filter(
+        (request) =>
+          request.method === "POST" &&
+          /\/breaks\/[^/]+\/start$/.test(request.path)
+      );
+      const shed = startCalls.filter((request) => request.status === 503);
+      const accepted = startCalls.filter((request) => request.status === 200);
+      expect(shed).toHaveLength(2);
+      expect(shed.every((request) => request.retryAfter === "1")).toBe(true);
+      expect(accepted).toHaveLength(1);
+      expect(startCalls.every((request) => request.body !== null)).toBe(true);
+      expect(startCalls.map((request) => (request.body as { leadSeconds?: number }).leadSeconds))
+        .toEqual([6, 6, 6]);
+      // Every offer asks for the same lead, and the retry is spaced by the
+      // hook's 1 s backoff rather than fired immediately.
+      const retryGapMs = startCalls[1]!.at - startCalls[0]!.at;
+      expect(retryGapMs).toBeGreaterThanOrEqual(900);
+    } finally {
+      await student?.context.close().catch(() => undefined);
+      if (examId) {
+        let deleted = await writeApi(page, "DELETE", `/api/v1/exams/${examId}`);
+        if (deleted.status !== 200 && scheduleId) {
+          await removeStartedStudentArtifacts(scheduleId);
+          deleted = await writeApi(page, "DELETE", `/api/v1/exams/${examId}`);
+        }
+        if (deleted.status !== 200) {
+          console.warn(
+            `[sat-break-boundary] exam cleanup skipped: ${deleted.status} ${JSON.stringify(deleted.payload)}`
+          );
+        }
+      }
+      await closeDb();
+    }
+  });
+
+  test("carries three simultaneous students across the same boundary", async ({
+    page,
+    browser,
+  }) => {
+    let examId: string | undefined;
+    let scheduleId: string | undefined;
+    const students: JoinedStudent[] = [];
+
+    try {
+      const room = await seedSatRoom(page);
+      examId = room.examId;
+      scheduleId = room.scheduleId;
+
+      // Three distinct browsers, joined within a few seconds of each other,
+      // each with a different pinned break-end jitter. Their Module 2 windows
+      // expire close together, which is the wave the 6 s lead is sized for.
+      for (let index = 0; index < 3; index += 1) {
+        students.push(
+          await joinStudent(
+            browser,
+            page,
+            room.link,
+            room.scheduleId,
+            `Break W${index} ${room.stamp}`,
+            `sat-break-w${index}-${room.stamp}@example.com`,
+            { traceRandom: 0.1 + index * 0.4 }
+          )
+        );
+      }
+
+      await Promise.all(
+        students.map(async (student) => {
+          const studentPage = student.page;
+          const examTimer = studentPage.getByRole("timer").first();
+          await expect(examTimer).toBeVisible({ timeout: 30_000 });
+          // Module 1 (base) -> adaptive Module 2 inside Reading & Writing.
+          await expect
+            .poll(() => examTimer.innerText().then(timerSeconds), {
+              timeout: 90_000,
+              intervals: [500, 1_000],
+            })
+            .toBeLessThanOrEqual(5);
+          await expect
+            .poll(() => examTimer.innerText().then(timerSeconds), {
+              timeout: 30_000,
+              intervals: [250, 500],
+            })
+            .toBeGreaterThan(30);
+          // Module 2 expires: the shared boundary. Every student must arm and
+          // confirm the authored break without a replacement offer.
+          const breakSurface = studentPage.getByTestId("sat-scheduled-break");
+          await expect(breakSurface).toBeVisible({ timeout: 120_000 });
+          await expect(breakSurface).toHaveAttribute("data-sat-break-phase", "active", {
+            timeout: 25_000,
+          });
+          await expect(breakSurface.getByRole("timer")).toBeVisible({ timeout: 15_000 });
+        })
+      );
+
+      const armTimes: number[] = [];
+      for (const student of students) {
+        const studentPage = student.page;
+        const trace = await readSatTransitionTrace(studentPage);
+        const breakCalls = trace.requests.filter((request) =>
+          /\/breaks\//.test(request.path)
+        );
+        const starts = breakCalls.filter(
+          (request) => request.method === "POST" && request.path.endsWith("/start")
+        );
+        expect(starts, JSON.stringify(breakCalls)).toHaveLength(1);
+        expect(starts[0]!.body).toMatchObject({ leadSeconds: 6 });
+        expect(starts[0]!.status).toBe(200);
+        expect(
+          breakCalls.filter((request) => (request.status ?? 0) >= 500),
+          "a shed offer must never leak a 5xx in the happy path"
+        ).toEqual([]);
+        expect(trace.phases.map((phase) => phase.phase)).toContain("active");
+        expect(
+          await studentPage.getByText(/ask your proctor for help/i).count(),
+          "no student may be locked out of the break"
+        ).toBe(0);
+        armTimes.push(starts[0]!.at);
+      }
+
+      // The arms really were a wave, not three isolated runs. The join spread
+      // bounds this; the assertion is deliberately loose so a slow CI host
+      // does not fail on scheduling noise.
+      expect(Math.max(...armTimes) - Math.min(...armTimes)).toBeLessThan(20_000);
+
+      const rows = await queryDb<BreakRow>(
+        `SELECT id, after_section_id, duration_seconds, state, starts_at, deadline_at,
+                entry_starts_at, entry_confirmed_at, entry_entered_at
+           FROM assessment_attempt_breaks
+          WHERE attempt_id IN (?, ?, ?)`,
+        students.map((student) => student.attemptId)
+      );
+      expect(rows).toHaveLength(3);
+      expect(rows.every((row) => row.entry_confirmed_at !== null)).toBe(true);
+      expect(rows.every((row) => row.state !== "completed")).toBe(true);
+    } finally {
+      await Promise.all(
+        students.map((student) => student.context.close().catch(() => undefined))
+      );
+      if (examId) {
+        let deleted = await writeApi(page, "DELETE", `/api/v1/exams/${examId}`);
+        if (deleted.status !== 200 && scheduleId) {
+          await removeStartedStudentArtifacts(scheduleId);
+          deleted = await writeApi(page, "DELETE", `/api/v1/exams/${examId}`);
+        }
         if (deleted.status !== 200) {
           console.warn(
             `[sat-break-boundary] exam cleanup skipped: ${deleted.status} ${JSON.stringify(deleted.payload)}`

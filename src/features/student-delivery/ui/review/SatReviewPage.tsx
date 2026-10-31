@@ -73,7 +73,8 @@ function SatReviewTimer({
 
 /** Review answers and return to a question; module completion stays server-owned. */
 export function SatReviewPage(props: SatReviewPageProps) {
-  const unanswered = Math.max(0, props.items.length - props.answeredCount);
+  const invalidCount = props.items.filter((item) => item.status === "invalid").length;
+  const unanswered = Math.max(0, props.items.length - props.answeredCount - invalidCount);
   const flagged = props.items.filter((item) => item.markedForReview).length;
   const reasonId = useId();
   const timerVisible = props.timerVisible ?? true;
@@ -137,6 +138,11 @@ export function SatReviewPage(props: SatReviewPageProps) {
           <div className="mt-6 flex flex-wrap gap-x-6 gap-y-2 border-y border-[var(--sat-divider-soft)] py-3 text-[14px] text-[var(--sat-text)]">
             <span>{props.answeredCount} answered</span>
             <span>{unanswered} unanswered</span>
+            {invalidCount > 0 ? (
+              <span className="font-semibold text-[var(--sat-danger)]">
+                {SAT_COPY.review.invalidSummary(invalidCount)}
+              </span>
+            ) : null}
             <span className="inline-flex items-center gap-1.5">
               <Bookmark className="h-4 w-4 fill-[var(--sat-review)] text-[var(--sat-review)]" aria-hidden="true" />{" "}
               {flagged} flagged
@@ -147,7 +153,11 @@ export function SatReviewPage(props: SatReviewPageProps) {
             <SatQuestionStatusGrid items={props.items} onSelectQuestion={props.onSelectQuestion} showLegend />
           </div>
 
-          {unanswered > 0 ? (
+          {invalidCount > 0 ? (
+            <p className="mt-6 border-l-4 border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] px-4 py-3 text-[14px] leading-6 text-[var(--sat-text)]">
+              {SAT_COPY.review.invalidNotice}
+            </p>
+          ) : unanswered > 0 ? (
             <p className="mt-6 border-l-4 border-[var(--sat-accent)] bg-[var(--sat-accent-soft)] px-4 py-3 text-[14px] leading-6 text-[var(--sat-text)]">
               {SAT_COPY.review.unansweredNotice}
             </p>

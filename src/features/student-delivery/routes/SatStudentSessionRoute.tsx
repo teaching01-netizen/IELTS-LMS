@@ -30,8 +30,9 @@ import {
   sectionForModule,
   studentModuleTitle,
 } from "../application/satRuntimeSelectors";
-import { responseForQuestion } from "../domain/satResponses";
+import { responseForQuestion, satQuestionResponseStatus } from "../domain/satResponses";
 import { SAT_COPY } from "../domain/satCopy";
+import { satUnsyncedDismissKey, satUnsyncedSeverity } from "../domain/satUnsyncedNotice";
 import { satAnnotationEducationKey } from "../infrastructure/satAnnotationEducationStore";
 import {
   loadSatNotesColumnOpen,
@@ -94,6 +95,29 @@ function assertNever(surface: never): never {
 function sectionLabel(displayOrder: number, title: string): string {
   return `Section ${displayOrder + 1}: ${title}`;
 }
+
+/**
+ * The unsynced warning is deliberately two-stage. The first stage appears well
+ * before the 15 s batch timeout is exhausted, so it must not claim failure; the
+ * second stage is the actionable one. Vite env overrides exist for E2E timing
+ * only; production uses the defaults.
+ */
+function envMilliseconds(key: string, fallback: number): number {
+  const raw = Number((import.meta.env as Record<string, unknown>)[key]);
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
+
+const SAT_UNSYNCED_SLOW_MS = envMilliseconds("VITE_SAT_UNSYNCED_NOTICE_MS", 10_000);
+const SAT_UNSYNCED_OFFLINE_MS = Math.max(
+  SAT_UNSYNCED_SLOW_MS,
+  envMilliseconds("VITE_SAT_UNSYNCED_OFFLINE_MS", 30_000),
+);
+/** UI rollback switch. Correctness fixes (settlement, forced flush) stay on. */
+const SAT_UNSYNCED_NOTICE_ENABLED =
+  String((import.meta.env as Record<string, unknown>)["VITE_SAT_UNSYNCED_NOTICE"] ?? "on").toLowerCase() !== "off";
+
+/** Save failures that already own a banner and must not double-report. */
+const SAT_TERMINAL_SAVE_FAILURES = new Set(["terminal", "superseded", "expired", "module_closed"]);
 
 export function SatStudentSessionRoute({
   scheduleId,
@@ -169,6 +193,63 @@ export function SatStudentSessionRoute({
   const [breakVeilOpen, setBreakVeilOpen] = useState(false);
 
   const { state, data, result, error, commands, persistence } = exam;
+  // A banner the student closed stays closed until its message changes: a new
+  // proctor note or a new error opens the strip again. Dismissal lives here,
+  // above the phase branches, so it survives module ↔ review transitions.
+  const [dismissedNotices, setDismissedNotices] = useState<{ warning: string | null; error: string | null; lease: string | null }>({
+    warning: null,
+    error: null,
+    lease: null,
+  });
+  useEffect(() => {
+    setDismissedNotices({ warning: null, error: null, lease: null });
+  }, [attemptId, scheduleId]);
+  useEffect(() => {
+    if (exam.warning) return;
+    setDismissedNotices((current) => (current.warning === null ? current : { ...current, warning: null }));
+  }, [exam.warning]);
+  useEffect(() => {
+    if (error) return;
+    setDismissedNotices((current) => (current.error === null ? current : { ...current, error: null }));
+  }, [error]);
+  useEffect(() => {
+    if (persistence.failureKind === "superseded") return;
+    setDismissedNotices((current) => (current.lease === null ? current : { ...current, lease: null }));
+  }, [persistence.failureKind]);
+  // Unsynced-answer warning. The age is computed from the engine's one
+  // timestamp per window, so typing does not restart it; the interval only
+  // exists while there is pending work.
+  const unsyncedSince = persistence.unsyncedSince ?? null;
+  const [unsyncedAgeMs, setUnsyncedAgeMs] = useState(0);
+  useEffect(() => {
+    if (unsyncedSince === null) {
+      setUnsyncedAgeMs(0);
+      return;
+    }
+    const update = () => setUnsyncedAgeMs(Math.max(0, Date.now() - unsyncedSince));
+    update();
+    const timer = window.setInterval(update, 1_000);
+    return () => window.clearInterval(timer);
+  }, [unsyncedSince]);
+  const [dismissedUnsynced, setDismissedUnsynced] = useState<string | null>(null);
+  useEffect(() => {
+    setDismissedUnsynced(null);
+  }, [attemptId, scheduleId]);
+  const unsyncedSeverity = satUnsyncedSeverity(
+    unsyncedAgeMs,
+    SAT_UNSYNCED_SLOW_MS,
+    SAT_UNSYNCED_OFFLINE_MS,
+  );
+  const unsyncedReplacedByFailure = persistence.failureKind !== null &&
+    SAT_TERMINAL_SAVE_FAILURES.has(persistence.failureKind);
+  const unsyncedKey = unsyncedReplacedByFailure || !SAT_UNSYNCED_NOTICE_ENABLED
+    ? null
+    : satUnsyncedDismissKey(unsyncedSince, unsyncedSeverity);
+  const visibleUnsynced = unsyncedKey !== null && dismissedUnsynced !== unsyncedKey
+    ? unsyncedSeverity
+    : null;
+  const visibleWarning = exam.warning && exam.warning !== dismissedNotices.warning ? exam.warning : null;
+  const visibleError = error && error !== dismissedNotices.error ? error : null;
   const loadMediaUrl = useCallback(async (assetId: string, options?: { fresh?: boolean }): Promise<string | null> => {
     try {
       return await loadAssessmentDeliveryMedia(scheduleId, attemptId, assetId, options);
@@ -563,17 +644,14 @@ export function SatStudentSessionRoute({
       );
     });
   };
-  const leaseConflictNotice = persistence.failureKind === "superseded" ? (
+  const leaseNoticeKey = persistence.failure ?? "superseded";
+  const leaseConflictNotice = persistence.failureKind === "superseded" && dismissedNotices.lease !== leaseNoticeKey ? (
     <SatLeaseConflictNotice
       error={persistence.failure}
       isTakingOver={persistence.isTakingOver}
       onTakeOver={takeOverDurabilityLease}
+      onDismiss={() => setDismissedNotices((current) => ({ ...current, lease: leaseNoticeKey }))}
     />
-  ) : null;
-  // A closed earlier module's late answer: informational only. It must never
-  // block the module the student is in now.
-  const closedModuleNotice = (persistence.closedModuleAttemptIds?.length ?? 0) > 0 ? (
-    <SatControlBanner tone="warning">{SAT_COPY.timeout.previousModuleUnconfirmed}</SatControlBanner>
   ) : null;
   const withCalculatorHost = (content: ReactNode) => (
     <>
@@ -803,9 +881,14 @@ export function SatStudentSessionRoute({
   const navigationItems = buildSatQuestionNavigationItems(
     state.questionIds,
     state.questionIndex,
-    state.responses
+    state.responses,
+    stateModule.questions
   );
-  const answeredCount = answeredSatQuestionCount(state.questionIds, state.responses);
+  const answeredCount = answeredSatQuestionCount(
+    state.questionIds,
+    state.responses,
+    stateModule.questions
+  );
   const activeSectionLabel = sectionLabel(stateSection.displayOrder, stateSection.title);
 
   if (state.phase === "review") {
@@ -847,10 +930,23 @@ export function SatStudentSessionRoute({
           currentQuestionIndex={state.questionIndex}
           notices={
             <>
-              {exam.warning ? <SatControlBanner tone="warning">Proctor message: {exam.warning}</SatControlBanner> : null}
-              {error ? <SatControlBanner tone="error">{error}</SatControlBanner> : null}
+              {visibleUnsynced ? (
+                <SatControlBanner
+                  tone="warning"
+                  testId="sat-unsynced-notice"
+                  onDismiss={() => {
+                    setDismissedUnsynced(unsyncedKey);
+                    emitStudentObservabilityMetric("sat_unsynced_notice_dismissed", {
+                      scheduleId, attemptId, severity: visibleUnsynced,
+                    });
+                  }}
+                >
+                  {visibleUnsynced === "offline" ? SAT_COPY.notice.unsyncedOffline : SAT_COPY.notice.unsyncedSlow}
+                </SatControlBanner>
+              ) : null}
+              {visibleWarning ? <SatControlBanner tone="warning" onDismiss={() => setDismissedNotices((current) => ({ ...current, warning: exam.warning }))}>Proctor message: {visibleWarning}</SatControlBanner> : null}
+              {visibleError ? <SatControlBanner tone="error" onDismiss={() => setDismissedNotices((current) => ({ ...current, error }))}>{visibleError}</SatControlBanner> : null}
               {leaseConflictNotice}
-              {closedModuleNotice}
             </>
           }
           onSelectQuestion={commands.returnToQuestion}
@@ -892,7 +988,9 @@ export function SatStudentSessionRoute({
       ? stateSection.instructions
       : null;
   const saveState =
-    persistence.failureKind === "offline"
+    unsyncedKey !== null
+      ? ("stalled" as const)
+      : persistence.failureKind === "offline"
       ? ("offline" as const)
       : persistence.failureKind === "retryable"
         ? ("retrying" as const)
@@ -950,9 +1048,22 @@ export function SatStudentSessionRoute({
         saveFailure={persistence.failure}
         notices={
           <>
-            {exam.warning ? <SatControlBanner tone="warning">Proctor message: {exam.warning}</SatControlBanner> : null}
-            {error ? <SatControlBanner tone="error">{error}</SatControlBanner> : null}
-            {closedModuleNotice}
+            {visibleUnsynced ? (
+              <SatControlBanner
+                tone="warning"
+                testId="sat-unsynced-notice"
+                onDismiss={() => {
+                  setDismissedUnsynced(unsyncedKey);
+                  emitStudentObservabilityMetric("sat_unsynced_notice_dismissed", {
+                    scheduleId, attemptId, severity: visibleUnsynced,
+                  });
+                }}
+              >
+                {visibleUnsynced === "offline" ? SAT_COPY.notice.unsyncedOffline : SAT_COPY.notice.unsyncedSlow}
+              </SatControlBanner>
+            ) : null}
+            {visibleWarning ? <SatControlBanner tone="warning" onDismiss={() => setDismissedNotices((current) => ({ ...current, warning: exam.warning }))}>Proctor message: {visibleWarning}</SatControlBanner> : null}
+            {visibleError ? <SatControlBanner tone="error" onDismiss={() => setDismissedNotices((current) => ({ ...current, error }))}>{visibleError}</SatControlBanner> : null}
           </>
         }
         questionNote={response.annotations.legacyQuestionNote}
@@ -968,7 +1079,7 @@ export function SatStudentSessionRoute({
         annotations={response.annotations}
         onAnnotationsChange={(annotations) => commands.setAnnotations(questionId, annotations)}
         onFlushAnnotations={flushAnnotations}
-        answered={Boolean(response.answer.trim())}
+        answered={satQuestionResponseStatus(response, question.questionType) === "answered"}
         educationKey={satAnnotationEducationKey(scheduleId, attemptId)}
         onToggleMarkForReview={() => commands.toggleReview(questionId)}
         onToggleEliminationMode={toggleEliminationMode}

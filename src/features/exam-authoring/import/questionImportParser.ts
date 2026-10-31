@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { BatchQuestionDraft, Difficulty } from "../contracts/assessment";
 import { plainContentFromText } from "../editor/richContent";
 import { isSatDomain, isSatSkill } from "../providers/sat/taxonomy";
-import { validateSatAnswerKey } from "../providers/sat/studentResponse";
+import { validateSatAnswerKey } from "@shared/sat/studentResponse";
 
 export interface QuestionImportIssue {
   row: number;

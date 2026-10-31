@@ -1,5 +1,7 @@
 import { RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { SatBannerDismissButton } from '../ui/SatBannerDismissButton';
 import { useSatAttemptAnswersQuery } from '../../../features/results/api/satResultsQueries';
 import { SatButton, SatPageError, SatPageLoading, SatSectionCard, type SatStatusTone } from '../ui/SatPage';
 import { SatQuestionResponseTable } from '../ui/SatQuestionResponseTable';
@@ -59,6 +61,12 @@ export interface SatAttemptAnswersContentProps {
 
 export function SatAttemptAnswersContent({ attemptId, onBack, embedded = false }: SatAttemptAnswersContentProps) {
   const query = useSatAttemptAnswersQuery(attemptId);
+  const [dismissedPollError, setDismissedPollError] = useState(false);
+  // Re-arm the close control only after a successful check; a retry that fails
+  // again keeps the same message dismissed.
+  useEffect(() => {
+    if (!query.error) setDismissedPollError(false);
+  }, [query.error]);
 
   if (query.isLoading) return <SatPageLoading label="Opening saved answers…" />;
   if (!query.data) {
@@ -78,7 +86,12 @@ export function SatAttemptAnswersContent({ attemptId, onBack, embedded = false }
       <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Last save: {formatSavedAt(detail.lastSavedAt)}{detail.responseRevision !== null ? ` · Revision ${detail.responseRevision}` : ' · Legacy attempt'}</p>
       <p className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Only answers accepted by the server appear here. A score is not available for this attempt.</p>
       <p role="status" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{query.isFetching ? 'Checking for newer answers…' : `Checks every 15 seconds while visible${query.dataUpdatedAt ? ` · Last checked ${formatTestClock(query.dataUpdatedAt)}` : ''}`}</p>
-      {query.error ? <p className="mt-2 text-[14px] font-medium leading-5 text-[var(--sat-staff-warning-text,#92400e)]" role="alert">Could not check for newer answers. Showing the last successful check; try again or wait for the next check.</p> : null}
+      {query.error && !dismissedPollError ? (
+        <div className="mt-2 flex items-start justify-between gap-3 text-[14px] font-medium leading-5 text-[var(--sat-staff-warning-text,#92400e)]" role="alert">
+          <p className="min-w-0 flex-1">Could not check for newer answers. Showing the last successful check; try again or wait for the next check.</p>
+          <SatBannerDismissButton onClick={() => setDismissedPollError(true)} />
+        </div>
+      ) : null}
       <SatButton variant="secondary" onClick={() => void query.refetch()} pending={query.isFetching} icon={<RefreshCw size={16} aria-hidden="true" />} className="mt-3">{query.isFetching ? 'Checking…' : 'Check now'}</SatButton>
     </div>
   );

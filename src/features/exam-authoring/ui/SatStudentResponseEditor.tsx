@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { CheckCircle2, Plus, X } from "lucide-react";
-import { validateSatAnswerKey } from "../providers/sat/studentResponse";
+import { validateSatAnswerKey } from "@shared/sat/studentResponse";
 
 export interface SatStudentResponseEditorProps {
   acceptedResponses: string[];

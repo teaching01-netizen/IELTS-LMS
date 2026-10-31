@@ -12,6 +12,35 @@ func strictKey(values ...string) string {
 	return string(raw)
 }
 
+func TestSATResponseUsable(t *testing.T) {
+	cases := []struct {
+		name string
+		kind string
+		raw  string
+		want bool
+	}{
+		{"valid integer", "student_produced_response", `"12"`, true},
+		{"valid fraction", "student_produced_response", `"3/4"`, true},
+		{"trimmed", "student_produced_response", `" 12 "`, true},
+		{"malformed characters", "student_produced_response", `"12%"`, false},
+		{"over student budget", "student_produced_response", `"123456"`, false},
+		{"over negative budget", "student_produced_response", `"-123456"`, false},
+		{"zero denominator", "student_produced_response", `"1/0"`, false},
+		{"whitespace only", "student_produced_response", `"   "`, false},
+		{"null", "student_produced_response", `null`, false},
+		{"non-string", "student_produced_response", `12`, false},
+		{"single choice present", "single_choice", `"A"`, true},
+		{"single choice absent", "single_choice", `null`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SATResponseUsable(tc.kind, tc.raw); got != tc.want {
+				t.Fatalf("SATResponseUsable(%q, %s) = %v, want %v", tc.kind, tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStrictSATSPRGrading(t *testing.T) {
 	cases := []struct {
 		key, response string

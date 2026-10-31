@@ -507,6 +507,12 @@ export class DurableResponseEngine {
   private terminalState = false;
   private syncStatus: DurabilitySyncStatus = "synced";
   private lastError: string | null = null;
+  /**
+   * First moment this attempt had accepted work that was not yet acknowledged.
+   * One timestamp per unsynced window: typing again must not restart the clock,
+   * or a continuously typing student would never see the stall warning.
+   */
+  private unsyncedSince: number | null = null;
 
   private onStatusChange:
     ((status: DurabilitySyncStatus, error?: string | null) => void) | undefined;
@@ -536,6 +542,21 @@ export class DurableResponseEngine {
 
   public getLastError(): string | null {
     return this.lastError;
+  }
+
+  /**
+   * When the current unsynced window began, or null when every accepted change
+   * is confirmed. The UI uses the age of this instant to decide when "still
+   * saving" becomes actionable; the engine never invents a window without an
+   * accepted, unconfirmed write.
+   */
+  public getUnsyncedSince(): number | null {
+    if (this.unsyncedSince === null) return null;
+    if (!this.hasUnconfirmedWork()) {
+      this.unsyncedSince = null;
+      return null;
+    }
+    return this.unsyncedSince;
   }
 
   public getAttemptRevision(): number {
@@ -796,6 +817,63 @@ export class DurableResponseEngine {
     }
   }
 
+  /**
+   * Settle a non-recovery close from the compact identity set the server
+   * proved durable. The local pending payload is promoted to confirmed, which
+   * clears the write before `sealScope` can quarantine it as late evidence.
+   * A manifest entry that no longer matches the live pending (or quarantine)
+   * is ignored: it is stale, or genuinely unsent.
+   */
+  public async settleScopeFromManifest(
+    scope: string,
+    settled: readonly { questionId: string; writeId: string; clientVersion: number }[],
+  ): Promise<void> {
+    const byQuestion = new Map(settled.map((entry) => [entry.questionId, entry]));
+    for (const [questionId, state] of this.states) {
+      if (this.scopeOf?.(questionId) !== scope) continue;
+      const entry = byQuestion.get(questionId);
+      if (!entry) continue;
+      const pending = state.pending;
+      const quarantined = this.quarantined.find((item) =>
+        item.questionId === questionId && item.writeId === entry.writeId);
+      if (pending && pending.writeId !== entry.writeId) continue;
+      const payload = pending && pending.clientVersion === entry.clientVersion
+        ? pending.payload
+        : quarantined?.payload;
+      if (!payload) continue;
+      const contentHash = await hashResponsePayload(payload);
+      if (this.outbox.get(questionId)?.writeId === entry.writeId) this.outbox.delete(questionId);
+      if (this.inFlight.get(questionId)?.writeId === entry.writeId) this.inFlight.delete(questionId);
+      this.issuedCommands.delete(entry.writeId);
+      this.commandEpochs.delete(entry.writeId);
+      this.versionTrackers.set(questionId, Math.max(this.versionTrackers.get(questionId) ?? 0, entry.clientVersion));
+      const alreadyNewer = (this.confirmedVersions.get(questionId) ?? 0) > entry.clientVersion;
+      if (!alreadyNewer) {
+        this.confirmedVersions.set(questionId, entry.clientVersion);
+        this.confirmedWriteIds.set(questionId, entry.writeId);
+        this.states.set(questionId, {
+          confirmed: {
+            payload: clonePayload(payload),
+            // This scope is closed; no later version comparison can reopen it.
+            // Keeping the last known revision preserves the local ordering.
+            serverRevision: state.confirmed?.serverRevision ?? 0,
+            contentHash,
+          },
+          pending: null,
+        });
+      } else if (state.pending) {
+        this.states.set(questionId, { confirmed: state.confirmed, pending: null });
+      }
+      this.clearCheckpoint(questionId);
+      this.pruneQuarantined(questionId, "ack-superseded");
+    }
+    this.frozenScopes.add(scope);
+    this.closedScopes.set(scope, "MODULE_CLOSED");
+    this.settleUnsyncedWindow(scope);
+    this.notifyStateChange();
+    this.notifyStatusChange();
+  }
+
   /** Install acknowledgements only when they match the durable close envelope. */
   public async applyScopeCloseAcknowledgement(
     scope: string,
@@ -817,7 +895,17 @@ export class DurableResponseEngine {
       }
       const alreadyInstalled = this.confirmedWriteIds.get(acknowledgement.questionId) === acknowledgement.writeId &&
         (this.confirmedVersions.get(acknowledgement.questionId) ?? 0) >= acknowledgement.clientVersion;
-      if (!alreadyInstalled) throw new Error("The SAT recovery acknowledgement could not be applied to this device.");
+      if (alreadyInstalled) continue;
+      // A poll can seal the module before the close reply lands. The write is
+      // then already in the quarantine ledger, not in issuedCommands. A close
+      // ack is proof the server holds the exact write, so settle that ledger
+      // entry instead of refusing the whole acknowledgement.
+      if (this.quarantined.some((entry) => entry.writeId === acknowledgement.writeId &&
+          entry.questionId === acknowledgement.questionId)) {
+        this.settleQuarantinedAcknowledgement(acknowledgement);
+        continue;
+      }
+      throw new Error("The SAT recovery acknowledgement could not be applied to this device.");
     }
     this.frozenScopes.add(scope);
     this.closedScopes.set(scope, "MODULE_CLOSED");
@@ -832,6 +920,42 @@ export class DurableResponseEngine {
 
   public getPendingCount(): number {
     return this.outbox.size + this.inFlight.size;
+  }
+
+  /**
+   * Any accepted work not yet acknowledged. Counts the visible pending draft
+   * too: the outbox is only populated after the durable acceptance finishes,
+   * and the stall warning must start from the student's first keystroke.
+   */
+  private hasUnconfirmedWork(): boolean {
+    if (this.outbox.size > 0 || this.inFlight.size > 0) return true;
+    for (const state of this.states.values()) {
+      if (state.pending) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Close the window as soon as nothing actionable remains unconfirmed.
+   * `excludeScope` ends the window for drafts a closed module just sealed;
+   * other scopes' pending work keeps the same window alive.
+   */
+  private settleUnsyncedWindow(excludeScope?: string): void {
+    if (this.unsyncedSince === null) return;
+    if (!this.hasUnconfirmedWorkOutside(excludeScope)) {
+      this.unsyncedSince = null;
+    }
+  }
+
+  private hasUnconfirmedWorkOutside(scope?: string): boolean {
+    const outside = (questionId: string): boolean =>
+      scope === undefined || this.scopeOf?.(questionId) !== scope;
+    for (const [questionId] of this.outbox) if (outside(questionId)) return true;
+    for (const [questionId] of this.inFlight) if (outside(questionId)) return true;
+    for (const [questionId, state] of this.states) {
+      if (state.pending && outside(questionId)) return true;
+    }
+    return false;
   }
 
   /** True once a snapshot (or explicit offline seeding) has initialized versions. */
@@ -1103,6 +1227,10 @@ export class DurableResponseEngine {
       confirmed: existing?.confirmed ?? null,
       pending: pendingState,
     });
+    // One timestamp per unsynced window. A second keystroke must not restart
+    // the age the UI is judging; only a confirmed ack (or a sealed scope) ends
+    // the window.
+    if (this.unsyncedSince === null) this.unsyncedSince = Date.now();
     // Teardown-safe intent checkpoint runs inline — never behind the async
     // acceptance chain — so teardown/reload always sees the latest keystroke.
     const checkpointStored = this.checkpointIntentSync(questionId, pendingState);
@@ -1641,9 +1769,20 @@ export class DurableResponseEngine {
     this.scheduleDrain();
   }
 
-  /** Flush pending outbox entries. A missing acknowledgement is not treated as success. */
-  public async flush(): Promise<void> {
+  /**
+   * Flush pending outbox entries. A missing acknowledgement is not treated as
+   * success.
+   *
+   * `forceRetry` is for lifecycle/close edges: it clears a scheduled backoff
+   * and drains now. Ordinary flushes leave the backoff alone, so a caller
+   * cannot turn a retry storm into a busy loop.
+   */
+  public async flush(options: { forceRetry?: boolean } = {}): Promise<void> {
     if (this.isDestroyed) return;
+    if (options.forceRetry && this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
     if (this.drainTimer) { clearTimeout(this.drainTimer); this.drainTimer = null; }
 
     // A durable acceptance may begin while an earlier drain is awaiting the
@@ -1690,6 +1829,7 @@ export class DurableResponseEngine {
 
   public destroy(): void {
     this.isDestroyed = true;
+    this.unsyncedSince = null;
     // Archive windows (BUG-15/16/17, F-A5): async archive/tombstone work
     // captured the prior generation aborts instead of writing for a dead engine.
     this.engineGeneration += 1;
@@ -2629,6 +2769,54 @@ export class DurableResponseEngine {
     return true;
   }
 
+  /**
+   * A close acknowledgement for a write that a poll already sealed into the
+   * quarantine ledger. The close proves the server holds the exact write, so
+   * promote it to confirmed, clear the blocked pending draft, and prune the
+   * evidence entry that would otherwise become a duplicate "late answer".
+   */
+  private settleQuarantinedAcknowledgement(acknowledgement: ResponseAcknowledgementV2): void {
+    const questionId = acknowledgement.questionId;
+    this.versionTrackers.set(
+      questionId,
+      Math.max(this.versionTrackers.get(questionId) ?? 0, acknowledgement.clientVersion),
+    );
+    if (this.outbox.get(questionId)?.writeId === acknowledgement.writeId) {
+      this.outbox.delete(questionId);
+    }
+    if (this.inFlight.get(questionId)?.writeId === acknowledgement.writeId) {
+      this.inFlight.delete(questionId);
+    }
+    this.issuedCommands.delete(acknowledgement.writeId);
+    this.commandEpochs.delete(acknowledgement.writeId);
+
+    const confirmedVersion = this.confirmedVersions.get(questionId) ?? 0;
+    if (acknowledgement.clientVersion >= confirmedVersion) {
+      this.confirmedVersions.set(questionId, acknowledgement.clientVersion);
+      const existing = this.states.get(questionId);
+      if (acknowledgement.outcome === "superseded") {
+        if (existing?.confirmed?.serverRevision !== acknowledgement.serverRevision ||
+            existing.confirmed.contentHash !== acknowledgement.contentHash) {
+          this.confirmedWriteIds.delete(questionId);
+        }
+      } else if (!existing?.confirmed || acknowledgement.serverRevision >= existing.confirmed.serverRevision) {
+        this.confirmedWriteIds.set(questionId, acknowledgement.writeId);
+      }
+      this.states.set(questionId, {
+        confirmed: {
+          payload: clonePayload(acknowledgement.canonicalResponse),
+          serverRevision: acknowledgement.serverRevision,
+          contentHash: acknowledgement.contentHash,
+        },
+        pending: null,
+      });
+      this.persistConfirmedAnswer(acknowledgement);
+    }
+    this.pruneQuarantined(questionId, "ack-superseded");
+    this.clearConflictOnExplicitResolution();
+    this.notifyStateChange();
+  }
+
   private fenceTerminalSnapshot(serverResponses: readonly ResponseAcknowledgementV2[]): void {
     if (this.retryTimer) {
       clearTimeout(this.retryTimer);
@@ -3364,6 +3552,7 @@ export class DurableResponseEngine {
     this.syncStatus = "saved_locally";
     this.lastError = `MODULE_CLOSED:${scope}`;
     this.emitDurabilityEvent("module_scope_closed", { scope, reason, count: commands.size });
+    this.settleUnsyncedWindow(scope);
     this.notifyStatusChange();
     // IELTS: hand the closed section's drafts to staff review now, while this
     // credential is live. Evidence never becomes a scored answer.
@@ -3727,6 +3916,7 @@ export class DurableResponseEngine {
   }
 
   private notifyStateChange(): void {
+    this.settleUnsyncedWindow();
     this.onStateChange?.(new Map(this.states));
   }
 
@@ -3736,7 +3926,9 @@ export class DurableResponseEngine {
   }
 
   private lifecycleDrainHandler = (): void => {
-    void this.flush().catch(() => undefined);
+    // The lifecycle edge is the last chance to move accepted work. A pending
+    // backoff would otherwise make this call a no-op.
+    void this.flush({ forceRetry: true }).catch(() => undefined);
   };
 
   private setupLifecycleListeners(): void {
@@ -3746,6 +3938,9 @@ export class DurableResponseEngine {
     }
     window.addEventListener("pagehide", this.lifecycleDrainHandler);
     window.addEventListener("freeze", this.lifecycleDrainHandler);
+    // Resume is also an edge: the first drain after a suspended tab should not
+    // wait out a backoff scheduled before the suspension.
+    window.addEventListener("pageshow", this.lifecycleDrainHandler);
   }
 
   private removeLifecycleListeners(): void {
@@ -3755,5 +3950,6 @@ export class DurableResponseEngine {
     }
     window.removeEventListener("pagehide", this.lifecycleDrainHandler);
     window.removeEventListener("freeze", this.lifecycleDrainHandler);
+    window.removeEventListener("pageshow", this.lifecycleDrainHandler);
   }
 }

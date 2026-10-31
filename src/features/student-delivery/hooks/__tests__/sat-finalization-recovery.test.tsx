@@ -22,6 +22,8 @@ const persistenceMock = vi.hoisted(() => ({
   hydrateBootstrap: vi.fn(),
   save: vi.fn(),
   flush: vi.fn().mockResolvedValue(undefined),
+  acknowledgeScopeClose: vi.fn().mockResolvedValue(undefined),
+  settleScopeClose: vi.fn().mockResolvedValue(undefined),
   submit: vi.fn(),
   retryFailed: vi.fn(),
   takeOverLease: vi.fn(),
@@ -130,8 +132,12 @@ describe("SAT finalization recovery", () => {
     gatewayMocks.submitAssessment.mockReset();
     gatewayMocks.closeModule = null;
     persistenceMock.flush.mockReset();
+    persistenceMock.acknowledgeScopeClose.mockReset();
+    persistenceMock.settleScopeClose.mockReset();
     persistenceMock.submit.mockReset();
     persistenceMock.flush.mockResolvedValue(undefined);
+    persistenceMock.acknowledgeScopeClose.mockResolvedValue(undefined);
+    persistenceMock.settleScopeClose.mockResolvedValue(undefined);
     persistenceMock.submit.mockResolvedValue({} as never);
   });
 
@@ -162,15 +168,20 @@ describe("SAT finalization recovery", () => {
       const done = expiredPayload(p);
       if (source === "close acknowledgement") {
         gatewayMocks.bootstrap.mockRejectedValue(new Error("State read unavailable"));
+        const settledWrite = { questionId: "q1", writeId: "write-1", clientVersion: 1 };
         gatewayMocks.closeModule = vi.fn().mockResolvedValue({
           closed: true, controlEpoch: 1, scheduleId: "schedule", attemptId: "attempt-a",
           moduleId: module.id, moduleAttemptId: "ma", alreadyClosed: false,
           moduleAttempts: done.attempt.moduleAttempts, nextModuleId: null,
           serverNow: done.serverNow, routeBasis: "client_confirmed",
+          settledWrites: [settledWrite],
         });
         await act(async () => { await vi.advanceTimersByTimeAsync(61_000); });
         expect(gatewayMocks.closeModule).toHaveBeenCalledTimes(1);
-        expect(persistenceMock.flush).toHaveBeenCalledTimes(1);
+        expect(persistenceMock.flush).toHaveBeenCalledWith({ forceRetry: true });
+        // Non-recovery close must settle the writes it proved durable, not
+        // leave them to be sealed as late evidence.
+        expect(persistenceMock.settleScopeClose).toHaveBeenCalledWith("ma", [settledWrite]);
       } else {
         const seam = hook.result.current as unknown as {
           commitForTest: (payload: AssessmentDeliveryBootstrap) => boolean;

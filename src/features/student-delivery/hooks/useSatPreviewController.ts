@@ -6,6 +6,7 @@ import type {
   DeliveredAssessmentSection,
 } from "../../exam-authoring/api/assessmentContracts";
 import { resolveSatExamToolPolicy, toSatSectionKey, toSatToolCapabilities } from "../domain/satToolPolicy";
+import { capSatStudentResponseInput } from "@shared/sat/studentResponse";
 import {
   applySatResponseDraftChange,
   emptySatQuestionResponse,
@@ -129,7 +130,12 @@ export function useSatPreviewController(examId: string) {
     [questions]
   );
   const response = question ? responseForQuestion(responses, question.examQuestionId) : null;
-  const navigationItems = buildSatQuestionNavigationItems(questionIds, questionIndex, responses);
+  const navigationItems = buildSatQuestionNavigationItems(
+    questionIds,
+    questionIndex,
+    responses,
+    questions
+  );
   const toolPolicy = resolveSatExamToolPolicy(toSatSectionKey(section?.sectionKey), module?.toolPolicy ?? []);
   const tools = toSatToolCapabilities(toolPolicy);
 
@@ -227,6 +233,7 @@ export function useSatPreviewController(examId: string) {
     modules,
     module,
     question,
+    questions,
     questionIndex,
     questionIds,
     response,
@@ -285,7 +292,13 @@ export function useSatPreviewController(examId: string) {
       setAnswer: (answer: string) =>
         question &&
         setResponse(question.examQuestionId, (current) =>
-          applySatResponseDraftChange(current, { kind: "setAnswer", answer }),
+          applySatResponseDraftChange(current, {
+            kind: "setAnswer",
+            answer:
+              question.questionType === "student_produced_response"
+                ? capSatStudentResponseInput(answer)
+                : answer,
+          }),
         ),
       toggleReview: () =>
         question &&

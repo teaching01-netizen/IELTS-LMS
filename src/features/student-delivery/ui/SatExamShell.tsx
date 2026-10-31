@@ -58,7 +58,7 @@ export interface SatExamShellProps {
   /** Annotation surface (highlight/underline/notes). Hidden when false. */
   notesAvailable?: boolean | undefined;
   blocked: boolean;
-  saveState: "idle" | "saving" | "offline" | "retrying" | "failed" | "superseded";
+  saveState: "idle" | "saving" | "offline" | "retrying" | "stalled" | "failed" | "superseded";
   saveFailure?: string | null;
   questionNote: string;
   readingPreferences: SatReadingPreferences;

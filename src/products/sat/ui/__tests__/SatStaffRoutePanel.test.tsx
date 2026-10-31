@@ -52,6 +52,14 @@ describe('SatStaffRoutePanel', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('dismisses a queue load failure with the banner close control', async () => {
+    gateway.backendGet.mockRejectedValue(new Error('offline'));
+    render(<SatStaffRoutePanel scheduleId="s1" blocked={false} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Module 2 assignments could not load.');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss message' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('keeps the selected action focused and busy until the server confirms the assignment', async () => {
     gateway.backendGet.mockResolvedValue(waiting);
     let finish!: () => void;

@@ -1,21 +1,43 @@
+import { X } from "lucide-react";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { SAT_COPY } from "../../domain/satCopy";
 
 export function SatControlBanner({
   children,
   tone,
+  onDismiss,
+  testId,
 }: {
   children: ReactNode;
   tone: "warning" | "error";
+  /**
+   * When provided, the banner carries a close control. The caller owns the
+   * dismissal state so a new message re-opens the strip; the banner itself
+   * stays stateless and re-renders with the exam clock.
+   */
+  onDismiss?: (() => void) | undefined;
+  /** Stable hook for the exam-level banner tests. */
+  testId?: string | undefined;
 }) {
   const warning = tone === "warning";
   return (
     <div
-      className={`sat-ui sat-surface-enter mx-auto my-1 w-full max-w-[680px] border px-4 py-2 text-center text-[14px] font-medium ${warning ? "border-[var(--sat-warning)] bg-[var(--sat-warning-soft)] text-[var(--sat-warning)]" : "border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]"}`}
+      className={`sat-ui sat-surface-enter mx-auto my-1 flex w-full max-w-[680px] items-center gap-3 border px-4 py-1 text-[14px] font-medium ${warning ? "border-[var(--sat-warning)] bg-[var(--sat-warning-soft)] text-[var(--sat-warning)]" : "border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]"}`}
       role={warning ? "status" : "alert"}
       aria-live={warning ? "polite" : undefined}
+      {...(testId ? { "data-testid": testId } : {})}
     >
-      {children}
+      <p className="min-w-0 flex-1 text-center">{children}</p>
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={SAT_COPY.notice.dismiss}
+          className={`sat-touch-target sat-pressable -mr-2 grid shrink-0 place-items-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${warning ? "text-[var(--sat-warning)] focus-visible:ring-[var(--sat-warning)]" : "text-[var(--sat-danger)] focus-visible:ring-[var(--sat-danger)]"}`}
+        >
+          <X size={16} aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -24,10 +46,13 @@ export function SatLeaseConflictNotice({
   error,
   isTakingOver,
   onTakeOver,
+  onDismiss,
 }: {
   error: string | null;
   isTakingOver: boolean;
   onTakeOver: () => void;
+  /** Optional close control; the caller re-opens it when the conflict changes. */
+  onDismiss?: (() => void) | undefined;
 }) {
   return (
     <div
@@ -35,7 +60,7 @@ export function SatLeaseConflictNotice({
       role="alert"
       aria-live="assertive"
     >
-      <div>
+      <div className="min-w-0">
         <p className="text-[14px] font-semibold text-[var(--sat-text)]">
           {SAT_COPY.deviceTransfer.blockedTitle}.
         </p>
@@ -43,14 +68,26 @@ export function SatLeaseConflictNotice({
           {error ?? SAT_COPY.saveStatus.superseded}
         </p>
       </div>
-      <button
-        type="button"
-        className="shrink-0 rounded-[6px] border border-[var(--sat-text)] px-3 py-2 text-[13px] font-semibold text-[var(--sat-text)] hover:bg-[var(--sat-text)] hover:text-[var(--sat-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-wait disabled:opacity-60"
-        onClick={onTakeOver}
-        disabled={isTakingOver}
-      >
-        {isTakingOver ? SAT_COPY.deviceTransfer.writerChecking : SAT_COPY.saveStatus.takeOver}
-      </button>
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          className="shrink-0 rounded-[6px] border border-[var(--sat-text)] px-3 py-2 text-[13px] font-semibold text-[var(--sat-text)] hover:bg-[var(--sat-text)] hover:text-[var(--sat-surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-wait disabled:opacity-60"
+          onClick={onTakeOver}
+          disabled={isTakingOver}
+        >
+          {isTakingOver ? SAT_COPY.deviceTransfer.writerChecking : SAT_COPY.saveStatus.takeOver}
+        </button>
+        {onDismiss ? (
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label={SAT_COPY.notice.dismiss}
+            className="sat-touch-target sat-pressable -my-1 -mr-2 grid shrink-0 place-items-center rounded-full text-[var(--sat-text-secondary)] hover:bg-[var(--sat-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-danger)]"
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

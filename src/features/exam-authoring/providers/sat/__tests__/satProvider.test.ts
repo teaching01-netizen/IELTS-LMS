@@ -175,7 +175,7 @@ describe("SAT frontend validation parity", () => {
       },
       answer: {
         kind: "student_produced_response",
-        acceptedResponses: ["12%", "1/0"],
+        acceptedResponses: ["12%", "1/0", "123456"],
         normalizeFraction: true,
         normalizeDecimal: true,
         numericTolerance: null,
@@ -184,6 +184,7 @@ describe("SAT frontend validation parity", () => {
     const codes = validateSatQuestion("math", value).map((issue) => issue.code);
     expect(codes).toContain("sat.spr.characters");
     expect(codes).toContain("sat.spr.denominator_zero");
+    expect(codes).toContain("sat.spr.entry");
   });
 });
 

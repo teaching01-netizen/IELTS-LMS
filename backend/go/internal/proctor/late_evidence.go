@@ -30,10 +30,14 @@ type LateEvidenceRow struct {
 	ServerReceivedAt   time.Time       `json:"serverReceivedAt"`
 	WouldChangeRoute   bool            `json:"wouldChangeRoute"`
 	ProvenanceConflict bool            `json:"provenanceConflict"`
-	ReviewedAt         *time.Time      `json:"reviewedAt"`
-	ReviewedBy         *string         `json:"reviewedBy"`
-	ReviewOutcome      *string         `json:"reviewOutcome"`
-	ReviewNote         *string         `json:"reviewNote"`
+	// AlreadyScored is true when this exact write is also the canonical answer
+	// in attempt_responses_v2. A lost HTTP ack can make one write both scored
+	// and quarantined; the review screen must say so instead of implying loss.
+	AlreadyScored bool       `json:"alreadyScored"`
+	ReviewedAt    *time.Time `json:"reviewedAt"`
+	ReviewedBy    *string    `json:"reviewedBy"`
+	ReviewOutcome *string    `json:"reviewOutcome"`
+	ReviewNote    *string    `json:"reviewNote"`
 }
 
 type LateEvidencePage struct {
@@ -75,7 +79,7 @@ func (s *Service) ListLateEvidence(ctx context.Context, actor Actor, scheduleID,
 			}
 			return err
 		}
-		rows, err := q.QueryContext(ctx, `SELECT e.id, e.evidence_seq, e.module_id, e.question_id, e.write_id, CAST(e.response AS CHAR), e.origin_lease_epoch, e.client_version, e.response_hash, e.request_hash, CAST(e.client_metadata AS CHAR), e.server_received_at, (e.would_change_route OR COALESCE(f.would_change_route, FALSE)), (e.provenance_conflict OR COALESCE(f.provenance_conflict, FALSE)), e.reviewed_at, e.reviewed_by, e.review_outcome, e.review_note FROM assessment_late_answer_evidence e LEFT JOIN assessment_late_evidence_frontiers f ON f.module_attempt_id = e.module_attempt_id AND f.question_id = e.question_id WHERE e.attempt_id = ? AND e.evidence_seq > ? ORDER BY e.evidence_seq ASC LIMIT ?`, attemptID, after, limit+1)
+		rows, err := q.QueryContext(ctx, `SELECT e.id, e.evidence_seq, e.module_id, e.question_id, e.write_id, CAST(e.response AS CHAR), e.origin_lease_epoch, e.client_version, e.response_hash, e.request_hash, CAST(e.client_metadata AS CHAR), e.server_received_at, (e.would_change_route OR COALESCE(f.would_change_route, FALSE)), (e.provenance_conflict OR COALESCE(f.provenance_conflict, FALSE)), e.reviewed_at, e.reviewed_by, e.review_outcome, e.review_note, EXISTS(SELECT 1 FROM attempt_responses_v2 v WHERE v.attempt_id = e.attempt_id AND v.question_id = e.question_id AND v.client_write_id = e.write_id) FROM assessment_late_answer_evidence e LEFT JOIN assessment_late_evidence_frontiers f ON f.module_attempt_id = e.module_attempt_id AND f.question_id = e.question_id WHERE e.attempt_id = ? AND e.evidence_seq > ? ORDER BY e.evidence_seq ASC LIMIT ?`, attemptID, after, limit+1)
 		if err != nil {
 			return err
 		}
@@ -86,7 +90,8 @@ func (s *Service) ListLateEvidence(ctx context.Context, actor Actor, scheduleID,
 			var lease, version sql.NullInt64
 			var hash, requestHash, metadata, reviewedBy, outcome, note sql.NullString
 			var reviewedAt sql.NullTime
-			if err := rows.Scan(&row.ID, &row.Sequence, &row.ModuleID, &row.QuestionID, &row.WriteID, &response, &lease, &version, &hash, &requestHash, &metadata, &row.ServerReceivedAt, &row.WouldChangeRoute, &row.ProvenanceConflict, &reviewedAt, &reviewedBy, &outcome, &note); err != nil {
+			var alreadyScored int64
+			if err := rows.Scan(&row.ID, &row.Sequence, &row.ModuleID, &row.QuestionID, &row.WriteID, &response, &lease, &version, &hash, &requestHash, &metadata, &row.ServerReceivedAt, &row.WouldChangeRoute, &row.ProvenanceConflict, &reviewedAt, &reviewedBy, &outcome, &note, &alreadyScored); err != nil {
 				return err
 			}
 			if len(page.Rows) == limit {
@@ -130,6 +135,7 @@ func (s *Service) ListLateEvidence(ctx context.Context, actor Actor, scheduleID,
 				row.ReviewNote = &v
 			}
 			row.ServerReceivedAt = row.ServerReceivedAt.UTC()
+			row.AlreadyScored = alreadyScored != 0
 			page.Rows = append(page.Rows, row)
 			page.NextCursor = row.Sequence
 		}

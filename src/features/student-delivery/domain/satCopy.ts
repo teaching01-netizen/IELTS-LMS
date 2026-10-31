@@ -123,6 +123,10 @@ export const SAT_COPY = {
     eyebrow: "Review your answers",
     instructions: "Answers save automatically. You can review and change answers until time ends.",
     unansweredNotice: "Some questions are still unanswered. You can return to them while time remains.",
+    invalidNotice:
+      "Some answers are not in a valid SAT format. Open each marked question and correct or clear it while time remains. Invalid answers are not counted as answered.",
+    invalidStatus: "Needs fixing",
+    invalidSummary: (count: number) => `${count} ${count === 1 ? "needs" : "need"} fixing`,
     allAnswered: "Every question in this module has an answer.",
     savingAnswers: "Saving answers" + "\u2026",
     saveOffline: "You are offline. Your latest answers may still be pending.",
@@ -140,11 +144,6 @@ export const SAT_COPY = {
     // The server has not confirmed the module closed well past the deadline.
     stalled: "This module has not finished closing. Your saved answers are safe. Try again, or tell your proctor.",
     retryClose: "Try Again",
-    // A previous module closed before one of its answers reached the server.
-    // The answer is kept on this device for the proctor; it never blocks the
-    // current module.
-    previousModuleUnconfirmed:
-      "An answer from the previous module reached the exam after that module closed. It is kept on this device for your proctor to review.",
   },
   transitions: {
     waitingForBreak: "Waiting for the break to start",
@@ -190,6 +189,17 @@ export const SAT_COPY = {
     takeOver: "Continue on this device",
     retryNow: "Retry now",
     retry: "Retry",
+  },
+  // The close control on an informational banner. Dismissal is per message:
+  // a new proctor note or error opens the strip again.
+  notice: {
+    dismiss: "Dismiss message",
+    // Deliberately does not claim failure: a slow request may still succeed.
+    unsyncedSlow: "Still saving your last answers \u2014 keep this screen open.",
+    // The answers are safe locally; the copy asks for the only useful action
+    // (reconnect / keep the screen open) without claiming they were lost.
+    unsyncedOffline:
+      "Your last answers are only on this device. Reconnect to send them.",
   },
   // SAT session ownership: one device answers at a time. A second browser is
   // blocked before any exam content, and moving requires an approval (the

@@ -1,4 +1,6 @@
 import { QrCode } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { SatBannerDismissButton } from '../SatBannerDismissButton';
 import { SatButton } from '../SatPage';
 import { SatStudentLinkCard } from '../SatStudentLink';
 import { SatRoomSectionHeader } from './SatRoomSectionHeader';
@@ -29,6 +31,11 @@ export function SatRoomEntryPanel({
   onOpenShare: () => void;
   onPresent: () => void;
 }) {
+  const [dismissedError, setDismissedError] = useState(false);
+  // A later success/failure cycle is a new message: re-arm the close control.
+  useEffect(() => {
+    if (status !== 'error') setDismissedError(false);
+  }, [status]);
   return (
     <SatRoomSurface aria-label="Student joining" className="p-4" data-sat-room-entry>
       <SatRoomSectionHeader
@@ -53,10 +60,15 @@ export function SatRoomEntryPanel({
       ) : status === 'loading' ? (
         <p role="status" className="mt-3 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">Loading student joining details…</p>
       ) : status === 'error' ? (
-        <div role="alert" className="mt-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] p-3 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
-          <p>Student joining details could not load. Sharing is paused until the room's correct link is confirmed.</p>
-          <SatButton variant="secondary" onClick={onRetry} className="mt-2 px-3">Retry</SatButton>
-        </div>
+        dismissedError ? null : (
+          <div role="alert" className="mt-3 flex items-start justify-between gap-3 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] p-3 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
+            <div className="min-w-0">
+              <p>Student joining details could not load. Sharing is paused until the room's correct link is confirmed.</p>
+              <SatButton variant="secondary" onClick={onRetry} className="mt-2 px-3">Retry</SatButton>
+            </div>
+            <SatBannerDismissButton onClick={() => setDismissedError(true)} />
+          </div>
+        )
       ) : (
         <p role="status" className="mt-3 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">Student joining details are unavailable for this account.</p>
       )}

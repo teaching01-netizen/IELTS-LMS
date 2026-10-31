@@ -112,7 +112,7 @@ test("SAT Math preserves responses through saving, navigation, reload and routin
     }
     const input = studentPage.getByRole("textbox", { name: "Enter your answer" });
     await expect(input).toBeVisible();
-    expect(await input.getAttribute("maxlength")).toBeNull();
+    expect(await input.getAttribute("maxlength")).toBe("64");
     const storedAnswer = async () => {
       const rows = await queryDb<{ answer: string }>(
         `

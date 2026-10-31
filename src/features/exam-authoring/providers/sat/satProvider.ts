@@ -5,7 +5,7 @@ import type {
   StructuredContent,
 } from "../../contracts/assessment";
 import { isSatDomain, isSatSkill } from "./taxonomy";
-import { validateSatAnswerKey } from "./studentResponse";
+import { validateSatAnswerKey } from "@shared/sat/studentResponse";
 
 export interface SatBlueprintModule {
   key: string;

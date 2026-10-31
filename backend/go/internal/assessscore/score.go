@@ -215,6 +215,26 @@ func SATResponsePresent(responseRaw string) bool {
 	return true
 }
 
+// SATResponseUsable reports whether a stored response is usable as an answer
+// for the delivered answer kind. A malformed or over-budget SPR is present
+// text, but it is not an answer: callers must keep its verdict null rather
+// than claiming the candidate answered incorrectly (and must never render a
+// CSV "0"/incorrect for it).
+func SATResponseUsable(kind, responseRaw string) bool {
+	if !SATResponsePresent(responseRaw) {
+		return false
+	}
+	if kind != "student_produced_response" {
+		return true
+	}
+	var text string
+	if json.Unmarshal([]byte(responseRaw), &text) != nil {
+		return false
+	}
+	_, ok := parseSATSPR(text, true)
+	return ok
+}
+
 func answerField(def map[string]json.RawMessage, camel, snake string) (json.RawMessage, bool) {
 	if raw, ok := def[camel]; ok {
 		return raw, true

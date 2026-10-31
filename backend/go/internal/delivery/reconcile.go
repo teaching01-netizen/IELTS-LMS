@@ -484,6 +484,16 @@ func (s *Service) timeoutCandidates(ctx context.Context, batchSize int64) ([]tim
 		  AND a.submitted_at IS NULL
 		  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
 		  AND r.status IN ('live', 'paused', 'completed', 'cancelled')
+		  -- Mirrors reconcileSteady so drained attempts never become candidates:
+		  -- otherwise every never-started or receipted attempt in a finished
+		  -- schedule costs a probe round trip on every tick, forever.
+		  AND (
+		    EXISTS (SELECT 1 FROM assessment_module_attempts om WHERE om.attempt_id = a.id AND om.state IN ('not_started', 'active', 'review'))
+		    OR (
+		      EXISTS (SELECT 1 FROM assessment_module_attempts tm WHERE tm.attempt_id = a.id AND tm.state IN ('submitted', 'locked'))
+		      AND NOT EXISTS (SELECT 1 FROM attempt_terminalizations rt WHERE rt.attempt_id = a.id AND rt.terminal_generation = a.terminal_generation)
+		    )
+		  )
 		  AND a.id > ?
 		ORDER BY a.id ASC
 		LIMIT ?`, afterID, batchSize)

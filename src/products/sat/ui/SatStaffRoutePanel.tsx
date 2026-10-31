@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { assignModuleRoute, fetchRouteQueue } from '../../../features/proctor/api/proctorRoomApi';
+import { SatBannerDismissButton } from './SatBannerDismissButton';
 import { SatButton } from './SatPage';
 
 interface Waiting { attemptId: string; studentName: string; sectionKey: string; rawCorrect: number | null; total: number | null }
@@ -25,6 +26,7 @@ export function SatStaffRoutePanel({ scheduleId, blocked, onPendingAssignmentsCh
   const [queue, setQueue] = useState<Queue | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [dismissedLoadError, setDismissedLoadError] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -51,10 +53,16 @@ export function SatStaffRoutePanel({ scheduleId, blocked, onPendingAssignmentsCh
     setQueue(null);
     setLoading(true);
     setLoadError(null);
+    setDismissedLoadError(false);
     setError(null);
     setStatus(null);
     onPendingAssignmentsChange?.([]);
   }, [onPendingAssignmentsChange, scheduleId]);
+  // A successful refresh re-arms the close control: the next failure is a new
+  // message and must not stay silently dismissed.
+  useEffect(() => {
+    if (!loadError) setDismissedLoadError(false);
+  }, [loadError]);
   useEffect(() => {
     if (!status) return;
     const timer = window.setTimeout(() => setStatus(null), 4000);
@@ -91,9 +99,12 @@ export function SatStaffRoutePanel({ scheduleId, blocked, onPendingAssignmentsCh
   return <section aria-label="Module 2 assignments" className="mt-3 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-3">
     <h3 className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Module 2 assignments</h3>
     {loading && !queue ? <p role="status" className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">Loading students waiting for a Module 2 choice…</p> : null}
-    {loadError ? <div role="alert" className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
+    {loadError && !dismissedLoadError ? <div role="alert" className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-[var(--sat-staff-radius-control,10px)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-3 py-2 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
       <span className="min-w-0 flex-1 basis-48">{queue ? 'Could not refresh assignments. The displayed list may be out of date; retry before assigning.' : loadError}</span>
-      <button type="button" className="sat-btn sat-btn--quiet sat-press px-3" onClick={() => void load()}>Retry</button>
+      <span className="flex shrink-0 items-center gap-2">
+        <button type="button" className="sat-btn sat-btn--quiet sat-press px-3" onClick={() => void load()}>Retry</button>
+        <SatBannerDismissButton onClick={() => setDismissedLoadError(true)} />
+      </span>
     </div> : null}
     {items.length ? <ul className="mt-2 space-y-2">
       {items.map((item) => {

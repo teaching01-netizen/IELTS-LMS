@@ -237,6 +237,38 @@ func TestAlreadyClosedAckReusesTheBreakProjection(t *testing.T) {
 	}
 }
 
+func TestSettledManifestWritesMatchExactWriteAndVersion(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("SELECT question_id, client_write_id, client_version").WithArgs("attempt-1", "module-1", "q1", "q2").WillReturnRows(
+		sqlmock.NewRows([]string{"question_id", "client_write_id", "client_version"}).
+			AddRow("q1", "w1", 3).
+			// Same question, but a different write than the manifest: never settled.
+			AddRow("q2", "w2-old", 2),
+	)
+	manifest := []ModuleCloseAnswer{
+		{QuestionID: "q1", WriteID: "w1", ClientVersion: 3},
+		{QuestionID: "q2", WriteID: "w2", ClientVersion: 3},
+	}
+	settled, err := settledManifestWritesTx(context.Background(), db, "attempt-1", "module-1", manifest)
+	if err != nil {
+		t.Fatalf("settledManifestWritesTx: %v", err)
+	}
+	if len(settled) != 1 {
+		t.Fatalf("expected only the exact durable write to settle, got %#v", settled)
+	}
+	if settled[0].WriteID != "w1" || settled[0].QuestionID != "q1" || settled[0].ClientVersion != 3 {
+		t.Fatalf("settlement identity changed: %#v", settled[0])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSelectedModuleSectionMetadataEnforcesPublishedSectionScope(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

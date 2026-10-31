@@ -26,8 +26,9 @@ import { validateSatQuestion } from "../../../providers/sat/satProvider";
 import {
   SAT_SPR_MAX_NEGATIVE_CHARACTERS,
   SAT_SPR_MAX_POSITIVE_CHARACTERS,
+  validateSatAnswerKey,
   validateSatStudentResponse,
-} from "../../../providers/sat/studentResponse";
+} from "@shared/sat/studentResponse";
 
 function revision(overrides: Partial<QuestionRevision> = {}): QuestionRevision {
   return {
@@ -301,13 +302,14 @@ describe("baseline SPR rules (every error code)", () => {
     }
   });
 
-  it("covers empty / characters / length / format / denominator_zero", () => {
+  it("covers empty / characters / length / format / denominator_zero / entry", () => {
     expect(validateSatStudentResponse("")).toMatchObject({ valid: false, code: "empty" });
     expect(validateSatStudentResponse("12%")).toMatchObject({ valid: false, code: "characters" });
     expect(validateSatStudentResponse("123456")).toMatchObject({ valid: false, code: "length" });
     expect(validateSatStudentResponse("1/2.5")).toMatchObject({ valid: false, code: "format" });
     expect(validateSatStudentResponse("1/0")).toMatchObject({ valid: false, code: "denominator_zero" });
     expect(validateSatStudentResponse("1--2")).toMatchObject({ valid: false, code: "format" });
+    expect(validateSatAnswerKey("123456")).toMatchObject({ valid: false, code: "entry" });
   });
 });
 

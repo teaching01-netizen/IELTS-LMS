@@ -44,7 +44,7 @@ describe("SatStudentProducedAnswer (validate-then-announce)", () => {
     expect(input).toHaveAttribute("aria-describedby", expect.stringContaining("help"));
     expect(input).toHaveAttribute("inputmode", "text");
     expect(input).toHaveAttribute("enterkeyhint", "done");
-    expect(input).not.toHaveAttribute("maxlength");
+    expect(input).toHaveAttribute("maxlength", "64");
     expect(input).toHaveClass("h-12");
     expect(input).not.toHaveAttribute("aria-invalid");
     expect(screen.getByText(/Fractions use a\/b/)).toBeInTheDocument();
@@ -125,5 +125,77 @@ describe("SatStudentProducedAnswer (validate-then-announce)", () => {
     expect(screen.getByRole("alert")).toBeInTheDocument();
     fireEvent.change(input, { target: { value: "3/4" } });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("normalizes pasted lookalike glyphs before reporting the answer", () => {
+    const onChange = vi.fn();
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <SatStudentProducedAnswer
+          questionId="q1"
+          value={draft}
+          disabled={false}
+          onChange={(next) => {
+            onChange(next);
+            setDraft(next);
+          }}
+        />
+      );
+    }
+    render(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Enter your answer" });
+
+    fireEvent.change(input, { target: { value: "\u221212.5" } });
+    expect(onChange).toHaveBeenLastCalledWith("-12.5");
+    expect(input).toHaveValue("-12.5");
+
+    fireEvent.change(input, { target: { value: "\uFF11\uFF12\uFF0E\uFF15" } });
+    expect(onChange).toHaveBeenLastCalledWith("12.5");
+    expect(input).toHaveValue("12.5");
+  });
+
+  it("bounds a huge paste without silently turning an over-budget entry into a valid answer", () => {
+    const onChange = vi.fn();
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <SatStudentProducedAnswer
+          questionId="q1"
+          value={draft}
+          disabled={false}
+          onChange={(next) => {
+            onChange(next);
+            setDraft(next);
+          }}
+        />
+      );
+    }
+    render(<Harness />);
+    const input = screen.getByRole("textbox", { name: "Enter your answer" });
+
+    fireEvent.change(input, { target: { value: "-123456" } });
+    expect(onChange).toHaveBeenLastCalledWith("-123456");
+    expect(input).toHaveValue("-123456");
+
+    fireEvent.change(input, { target: { value: "1".repeat(100) } });
+    expect(onChange).toHaveBeenLastCalledWith("1".repeat(64));
+    expect(input).toHaveValue("1".repeat(64));
+  });
+
+  it("does not carry a validation error onto the next SPR question", () => {
+    const props = { disabled: false, onChange: vi.fn() };
+    const { rerender } = render(
+      <SatStudentProducedAnswer questionId="q1" value="12%" {...props} />
+    );
+    fireEvent.blur(screen.getByRole("textbox", { name: "Enter your answer" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/only digits/i);
+
+    rerender(<SatStudentProducedAnswer questionId="q2" value="3/4" {...props} />);
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Enter your answer" })).not.toHaveAttribute(
+      "aria-invalid"
+    );
   });
 });

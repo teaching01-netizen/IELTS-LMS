@@ -47,21 +47,26 @@ type ModuleCloseAnswer struct {
 // waits for the browser (client_start) that section is metadata only; its
 // questions arrive with StartModule(needContent), which starts its clock.
 type SatModuleCloseAck struct {
-	Closed           bool             `json:"closed"`
-	ControlEpoch     int              `json:"controlEpoch"`
-	ScheduleID       string           `json:"scheduleId"`
-	AttemptID        string           `json:"attemptId"`
-	ModuleID         string           `json:"moduleId"`
-	ModuleAttemptID  string           `json:"moduleAttemptId"`
-	RouteBasis       string           `json:"routeBasis,omitempty"`
-	AlreadyClosed    bool             `json:"alreadyClosed"`
-	ModuleAttempts   []ModuleAttempt  `json:"moduleAttempts"`
-	NextModuleID     *string          `json:"nextModuleId"`
-	SelectedSection  *DeliverySection `json:"selectedSection,omitempty"`
-	ServerNow        time.Time        `json:"serverNow"`
-	FinalAcks        []attempts.Ack   `json:"finalAcks,omitempty"`
-	ResponseRevision uint64           `json:"responseRevision,omitempty"`
-	BoundaryPhase    string           `json:"boundaryPhase,omitempty"`
+	Closed          bool             `json:"closed"`
+	ControlEpoch    int              `json:"controlEpoch"`
+	ScheduleID      string           `json:"scheduleId"`
+	AttemptID       string           `json:"attemptId"`
+	ModuleID        string           `json:"moduleId"`
+	ModuleAttemptID string           `json:"moduleAttemptId"`
+	RouteBasis      string           `json:"routeBasis,omitempty"`
+	AlreadyClosed   bool             `json:"alreadyClosed"`
+	ModuleAttempts  []ModuleAttempt  `json:"moduleAttempts"`
+	NextModuleID    *string          `json:"nextModuleId"`
+	SelectedSection *DeliverySection `json:"selectedSection,omitempty"`
+	ServerNow       time.Time        `json:"serverNow"`
+	FinalAcks       []attempts.Ack   `json:"finalAcks,omitempty"`
+	// SettledWrites is the compact proof set for a non-recovery close: every
+	// manifest write the server holds under the exact write id and version.
+	// It carries identity only (no canonical payload), so a synchronized
+	// transition does not ship hundreds of answers back to every browser.
+	SettledWrites    []ModuleCloseAnswer `json:"settledWrites,omitempty"`
+	ResponseRevision uint64              `json:"responseRevision,omitempty"`
+	BoundaryPhase    string              `json:"boundaryPhase,omitempty"`
 	// PersonalBreaks is the attempt's full break projection at commit time
 	// (pending/armed/active/completed). The close transaction creates this
 	// boundary's break, so the browser can render and arm the break without a
@@ -179,6 +184,7 @@ func (s *Service) closeModule(ctx context.Context, bearerScheduleID, bearerAttem
 		sealCreated         bool
 		needsComplete       bool
 		finalAcks           []attempts.Ack
+		settledWrites       []ModuleCloseAnswer
 		responseRevision    uint64
 		boundaryPhase       string
 		boundaryRecoveryErr error
@@ -188,7 +194,7 @@ func (s *Service) closeModule(ctx context.Context, bearerScheduleID, bearerAttem
 	scope := lifecycle.Scope{ScheduleID: scheduleID, AttemptID: bearerAttemptID}
 	err = s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, t tx.Tx) error {
 		hubEvents, nextModuleID, alreadyClosed, sealed, sealCreated, needsComplete = nil, "", false, false, false, false
-		finalAcks, responseRevision, boundaryPhase, boundaryRecoveryErr = nil, 0, "", nil
+		finalAcks, settledWrites, responseRevision, boundaryPhase, boundaryRecoveryErr = nil, nil, 0, "", nil
 		recoveryTransitions = nil
 		committedAck = nil
 		var runtimeSnapshot moduleTimingRuntimeSnapshot
@@ -211,6 +217,16 @@ func (s *Service) closeModule(ctx context.Context, bearerScheduleID, bearerAttem
 			if err := json.Unmarshal(stored, &committedAck); err != nil {
 				return err
 			}
+			// Receipts written before settlement shipped carry no final acks.
+			// The manifest still proves which writes are durable, so fill them
+			// for the retrying browser without changing the stored receipt.
+			if committedAck != nil && len(committedAck.SettledWrites) == 0 && len(req.Answers) > 0 {
+				settled, settleErr := settledManifestWritesTx(ctx, t, bearerAttemptID, req.ModuleID, req.Answers)
+				if settleErr != nil {
+					return settleErr
+				}
+				committedAck.SettledWrites = settled
+			}
 			alreadyClosed = true
 			return nil
 		}
@@ -222,6 +238,7 @@ func (s *Service) closeModule(ctx context.Context, bearerScheduleID, bearerAttem
 				return err
 			}
 			committedAck.FinalAcks = append([]attempts.Ack(nil), finalAcks...)
+			committedAck.SettledWrites = append([]ModuleCloseAnswer(nil), settledWrites...)
 			committedAck.ResponseRevision = responseRevision
 			committedAck.BoundaryPhase = boundaryPhase
 			return lifecycle.Store(ctx, t, scope, req.CloseID, "close_module", requestHash, committedAck)
@@ -258,6 +275,14 @@ func (s *Service) closeModule(ctx context.Context, bearerScheduleID, bearerAttem
 		switch module.state {
 		case "locked", "submitted":
 			alreadyClosed = true
+			// The module was closed by the reconciler or another request first.
+			// Settle every manifest write that is already durable; a missing one
+			// is genuinely unsent and must stay evidence.
+			settled, settleErr := settledManifestWritesTx(ctx, t, bearerAttemptID, module.moduleID, req.Answers)
+			if settleErr != nil {
+				return settleErr
+			}
+			settledWrites = settled
 			return storeClose()
 		case "active", "review":
 		default:
@@ -335,6 +360,15 @@ func (s *Service) closeModule(ctx context.Context, bearerScheduleID, bearerAttem
 			conflict := assessmentConflict("CLOSE_WRITES_PENDING", "Some answers have not reached the server yet.")
 			conflict.Details = map[string]any{"reason": "CLOSE_WRITES_PENDING", "questionIds": pending}
 			return conflict
+		}
+		// The manifest is durable: return the exact acknowledgements so a
+		// browser whose HTTP save reply was lost can settle its pending drafts
+		// instead of later sealing them as late evidence. Recovery closes
+		// already have their final-command acks above.
+		if recoveryPolicy == nil {
+			// A successful durability check proves every manifest write at the
+			// exact version; return the compact identity set, not full acks.
+			settledWrites = append([]ModuleCloseAnswer(nil), req.Answers...)
 		}
 		if recoveryPolicy != nil {
 			manifestBytes, err := json.Marshal(req.Answers)
@@ -548,6 +582,53 @@ func pendingCloseWritesTx(ctx context.Context, t tx.Tx, attemptID, moduleID stri
 		}
 	}
 	return pending, nil
+}
+
+// settledManifestWritesTx returns the manifest entries the server already
+// holds under the exact write id and client version. It is deliberately
+// identity-only: the browser already has the payload, so a synchronized close
+// must not ship hundreds of canonical answers back with every acknowledgement.
+func settledManifestWritesTx(ctx context.Context, t tx.Tx, attemptID, moduleID string, manifest []ModuleCloseAnswer) ([]ModuleCloseAnswer, error) {
+	if len(manifest) == 0 {
+		return nil, nil
+	}
+	args := make([]any, 0, len(manifest)+2)
+	args = append(args, attemptID, moduleID)
+	for _, entry := range manifest {
+		args = append(args, entry.QuestionID)
+	}
+	rows, err := t.QueryContext(ctx,
+		"SELECT question_id, client_write_id, client_version FROM attempt_responses_v2 WHERE attempt_id = ? AND module_id = ? AND question_id IN ("+sqlPlaceholders(len(manifest))+")",
+		args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type storedWrite struct {
+		write   string
+		version int64
+	}
+	stored := make(map[string]storedWrite, len(manifest))
+	for rows.Next() {
+		var questionID string
+		var entry storedWrite
+		if err := rows.Scan(&questionID, &entry.write, &entry.version); err != nil {
+			return nil, err
+		}
+		stored[questionID] = entry
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	settled := make([]ModuleCloseAnswer, 0, len(manifest))
+	for _, manifestEntry := range manifest {
+		entry, exists := stored[manifestEntry.QuestionID]
+		if !exists || entry.write != manifestEntry.WriteID || entry.version != manifestEntry.ClientVersion {
+			continue
+		}
+		settled = append(settled, manifestEntry)
+	}
+	return settled, nil
 }
 
 // closeAck projects the attempt's module rows and the close-specific facts in

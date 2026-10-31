@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssessmentDeliveryBootstrap } from "../../contracts/assessmentDelivery";
+import { SAT_COPY } from "../../domain/satCopy";
 import { SatStudentSessionRoute } from "../SatStudentSessionRoute";
 
 /**
@@ -410,6 +411,75 @@ describe("SatStudentSessionRoute module handoff", () => {
     expect(screen.getByText("Math Module 2 marker")).toBeInTheDocument();
     expect(screen.getByTestId("sat-exam-shell").closest("[inert]")).toBeNull();
     expect(screen.getAllByRole("radio")[0]).toBeEnabled();
+  });
+
+  it("no longer shows a banner for a closed module's late answer", () => {
+    seed(moduleState("math-m2-higher", "math-m2-higher-q1"), mathModuleTwoRouted());
+    const controller = controllerMock.current as { persistence: Record<string, unknown> };
+    Object.assign(controller.persistence, {
+      failureKind: "module_closed", failure: "MODULE_CLOSED:ma-m1",
+      closedModuleAttemptIds: ["ma-m1"],
+    });
+    render(routeElement());
+    expect(screen.getByText("Math Module 2 marker")).toBeInTheDocument();
+    expect(screen.queryByText(/previous module/i)).not.toBeInTheDocument();
+  });
+
+  it("dismisses a proctor warning and re-opens it for a new message", () => {
+    seed(moduleState("math-m1", "math-m1-q1"), mathModuleOneLive());
+    const controller = controllerMock.current as { warning: string | null };
+    controller.warning = "Keep your eyes on your own screen.";
+    const view = render(routeElement());
+    expect(screen.getByText("Proctor message: Keep your eyes on your own screen.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss message" }));
+    expect(screen.queryByText(/Keep your eyes on your own screen/)).not.toBeInTheDocument();
+    controller.warning = "Second warning.";
+    view.rerender(routeElement());
+    expect(screen.getByText("Proctor message: Second warning.")).toBeInTheDocument();
+  });
+
+  it("dismisses an exam error banner until the error changes", () => {
+    seed(moduleState("math-m1", "math-m1-q1"), mathModuleOneLive());
+    const controller = controllerMock.current as { error: string | null };
+    controller.error = "The save could not be confirmed.";
+    const view = render(routeElement());
+    expect(screen.getByText("The save could not be confirmed.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss message" }));
+    expect(screen.queryByText("The save could not be confirmed.")).not.toBeInTheDocument();
+    controller.error = "A different error.";
+    view.rerender(routeElement());
+    expect(screen.getByText("A different error.")).toBeInTheDocument();
+  });
+
+  it("shows the unsynced warning, dismisses it, and reopens on escalation", () => {
+    seed(moduleState("math-m1", "math-m1-q1"), mathModuleOneLive());
+    const controller = controllerMock.current as { persistence: Record<string, unknown> };
+    controller.persistence.unsyncedSince = Date.now() - 10_001;
+    const view = render(routeElement());
+
+    const notice = screen.getByTestId("sat-unsynced-notice");
+    expect(notice).toHaveTextContent(SAT_COPY.notice.unsyncedSlow);
+    expect(notice).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("sat-exam-shell")).toHaveAttribute("data-sat-save-state", "stalled");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss message" }));
+    expect(screen.queryByTestId("sat-unsynced-notice")).not.toBeInTheDocument();
+
+    // Same window, escalated severity: the dismissed slow strip must reopen.
+    controller.persistence.unsyncedSince = Date.now() - 30_001;
+    view.rerender(routeElement());
+    expect(screen.getByTestId("sat-unsynced-notice")).toHaveTextContent(SAT_COPY.notice.unsyncedOffline);
+
+    // A terminal save failure owns its own banner; the stall strip stays out.
+    controller.persistence.failureKind = "module_closed";
+    view.rerender(routeElement());
+    expect(screen.queryByTestId("sat-unsynced-notice")).not.toBeInTheDocument();
+  });
+
+  it("does not show the unsynced warning while saving is healthy", () => {
+    renderLiveModule();
+    expect(screen.queryByTestId("sat-unsynced-notice")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sat-exam-shell")).toHaveAttribute("data-sat-save-state", "idle");
   });
 
   it("swaps Module 1 to Module 2 directly with no handoff surface", () => {

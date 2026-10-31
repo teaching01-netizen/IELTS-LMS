@@ -184,7 +184,7 @@ describe("SatExamShell", () => {
     expect(status.closest("[data-sat-exam-overlay-root]")).toBeNull();
     expect(status.parentElement?.className).toContain("row-start-4");
     expect(status.closest("[inert]")).toBeNull();
-    expect(within(status).getByRole("button")).toBeEnabled();
+    expect(within(status).getByRole("button", { name: "Retry" })).toBeEnabled();
   });
 
   it("publishes the stable viewport height and keyboard state without remounting the shell", () => {

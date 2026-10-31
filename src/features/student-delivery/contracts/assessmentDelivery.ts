@@ -416,6 +416,11 @@ export interface AssessmentModuleCloseAck {
   selectedSection?: AssessmentDeliverySection;
   serverNow: string;
   finalAcks?: ResponseAcknowledgementV2[];
+  /**
+   * Compact proof that these manifest writes are durable. Identity only; the
+   * browser still holds the payload, so the close reply stays small at scale.
+   */
+  settledWrites?: Array<{ questionId: string; writeId: string; clientVersion: number }>;
   responseRevision?: number;
   boundaryPhase?: string;
   /**

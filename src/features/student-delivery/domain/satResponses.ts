@@ -1,3 +1,6 @@
+import type { DeliveredQuestion } from '../contracts/assessmentDelivery';
+import { validateSatStudentResponse } from '@shared/sat/studentResponse';
+
 export type SatTextAnnotationKind = 'highlight' | 'underline';
 
 /**
@@ -583,8 +586,31 @@ export function responseForQuestion(
   return responses[questionId] ?? emptySatQuestionResponse(questionId);
 }
 
-export function isSatResponseAnswered(response: SatQuestionResponseDraft | undefined): boolean {
-  return Boolean(response?.answer.trim());
+export type SatQuestionResponseStatus = 'answered' | 'unanswered' | 'invalid';
+
+/**
+ * Classify a response for navigation and review. An SPR is answered only when
+ * the text is a legal SAT entry: malformed text can be saved (filtering it
+ * would silently change what the student meant) but must never be presented as
+ * an answer or handed to grading as one.
+ */
+export function satQuestionResponseStatus(
+  response: SatQuestionResponseDraft | undefined,
+  questionType?: DeliveredQuestion['questionType'],
+): SatQuestionResponseStatus {
+  const answer = response?.answer ?? '';
+  if (!answer.trim()) return 'unanswered';
+  if (questionType === 'student_produced_response' && !validateSatStudentResponse(answer).valid) {
+    return 'invalid';
+  }
+  return 'answered';
+}
+
+export function isSatResponseAnswered(
+  response: SatQuestionResponseDraft | undefined,
+  questionType?: DeliveredQuestion['questionType'],
+): boolean {
+  return satQuestionResponseStatus(response, questionType) === 'answered';
 }
 
 /**

@@ -16,6 +16,20 @@ describe("SAT student response authoring", () => {
     expect(screen.getByText(/Use only digits/)).toBeVisible();
   });
 
+  it("rejects a key no student can enter even though it is numeric", () => {
+    render(<Harness />);
+    fireEvent.change(screen.getByLabelText("Primary answer"), { target: { value: "123456" } });
+    expect(screen.getByLabelText("Primary answer")).toHaveValue("123456");
+    expect(screen.getByText(/needs a form a student can enter/i)).toBeVisible();
+    expect(screen.queryByText("Valid numeric answer key")).not.toBeInTheDocument();
+  });
+
+  it("accepts a canonical key when a legal student entry form exists", () => {
+    render(<Harness />);
+    fireEvent.change(screen.getByLabelText("Primary answer"), { target: { value: "100/333" } });
+    expect(screen.getByText("Valid numeric answer key")).toBeVisible();
+  });
+
   it("adds and removes validated equivalent responses", () => {
     render(<Harness />);
     fireEvent.change(screen.getByLabelText("Primary answer"), { target: { value: "12" } });

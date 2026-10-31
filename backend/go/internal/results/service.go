@@ -1435,10 +1435,12 @@ func satQuestionsQ(ctx context.Context, db rowQuerier, attemptID string) ([]SATQ
 				question.CorrectLabel = correct
 			}
 		}
-		// Null-verdict rule: pretest, unanswered, or key-less rows never
-		// claim incorrect. Only a answered, keyed, operational row gets a
-		// true/false verdict from the seal-time comparison.
-		answered := response.Valid && assessscore.SATResponsePresent(response.String)
+		// Null-verdict rule: pretest, unanswered, unusable, or key-less rows
+		// never claim incorrect. Only an answered, keyed, operational row gets
+		// a true/false verdict from the seal-time comparison. A malformed SPR
+		// is present text but is not an answer; claiming it "incorrect" would
+		// assert the candidate's entry was a usable wrong answer.
+		answered := response.Valid && assessscore.SATResponseUsable(answerShape.Kind, response.String)
 		policy := assessscore.SATSPRPolicy(config.String)
 		if !isPretest && answered && assessscore.SATHasKeyWithPolicy(answerJSON, policy) {
 			verdict := assessscore.SATResponseCorrectWithPolicy(answerJSON, response.Valid, response.String, policy)

@@ -38,6 +38,7 @@ import { useSatRoomEntryInfo } from '../api/satRoomEntryInfo';
 import { isCommandConfirmed, type CommandOutcome } from '../../../features/proctor/api/proctorRoomApi';
 import { SatRoomEntryPanel } from '../ui/room/SatRoomEntryPanel';
 import { SatRoomHeader } from '../ui/room/SatRoomHeader';
+import { SatRoomNotices } from '../ui/SatRoomNotices';
 import { SatRoomWorkspace } from '../ui/room/SatRoomWorkspace';
 import '../ui/sat-session-room.css';
 
@@ -532,33 +533,6 @@ export function SatSessionRoomRoute() {
   const roomPanels = roomMode === 'prestart'
     ? [startCodePanel, entryPanel, attentionPanel]
     : [startCodePanel, attentionPanel, entryPanel];
-  const notices = isStale || message || (createdRoom && !creationDismissed) ? (
-    <>
-      {createdRoom && !creationDismissed ? (
-        <div role="status" className="flex min-w-0 items-center justify-between gap-3 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-surface)] px-4 py-2 text-[14px]">
-          <p><span className="font-semibold">Room created.</span> Your room is ready to manage.</p>
-          <SatButton variant="quiet" onClick={() => setDismissedCreation(scheduleId ?? null)} aria-label="Dismiss room creation confirmation">Dismiss</SatButton>
-        </div>
-      ) : null}
-      {isStale ? (
-        <div role="alert" className="sat-banner-enter flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-[var(--sat-staff-radius-card,14px)] bg-[var(--sat-staff-warning-tint,rgba(217,119,6,0.1))] px-4 py-2 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
-          <p className="min-w-0 flex-1 basis-60"><span className="font-semibold">Data may be out of date.</span> Risky room actions are paused until reconnection.</p>
-          <SatButton variant="secondary" onClick={() => void controller.reload()}>Retry</SatButton>
-        </div>
-      ) : null}
-      {message ? (
-        <div
-          role={message.kind === 'error' ? 'alert' : 'status'}
-          className={`sat-banner-enter rounded-[var(--sat-staff-radius-card,14px)] px-4 py-2.5 text-[14px] font-medium leading-5 ${message.kind === 'error'
-            ? 'bg-[var(--sat-staff-danger-tint,rgba(217,45,32,0.08))] text-[var(--sat-staff-danger,#b42318)]'
-            : 'border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] text-[var(--sat-staff-text-secondary,#515154)]'}`}
-        >
-          {message.text}
-        </div>
-      ) : null}
-    </>
-  ) : null;
-
   return (
     <>
       <SatRoomWorkspace
@@ -611,7 +585,16 @@ export function SatSessionRoomRoute() {
             onNeedsAttention={() => setAttentionFilter('needs')}
           />
         )}
-        notices={notices}
+        notices={(
+          <SatRoomNotices
+            createdRoom={createdRoom && !creationDismissed}
+            isStale={isStale}
+            staleKey={controller.error ?? null}
+            message={message}
+            onRetry={() => void controller.reload()}
+            onDismissCreation={() => setDismissedCreation(scheduleId ?? null)}
+          />
+        )}
         students={(
           <SatSessionRoomRoster
             students={students}

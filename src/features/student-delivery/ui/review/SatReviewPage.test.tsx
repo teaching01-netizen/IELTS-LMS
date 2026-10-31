@@ -94,11 +94,30 @@ describe("SatReviewPage", () => {
     expect(screen.getByRole("button", { name: "Back to question 2" })).toBeInTheDocument();
   });
 
-  it("renders the status legend with answered, unanswered, and flagged", () => {
+  it("renders the status legend with answered, unanswered, needs fixing, and flagged", () => {
     renderReview();
     expect(screen.getByText("Answered")).toBeInTheDocument();
     expect(screen.getByText("Unanswered")).toBeInTheDocument();
+    expect(screen.getByText(SAT_COPY.review.invalidStatus)).toBeInTheDocument();
     expect(screen.getByText("Flagged")).toBeInTheDocument();
+  });
+
+  it("counts a malformed answer as needing fixing, never as unanswered or answered", () => {
+    const invalidItems: readonly SatQuestionNavigationItem[] = [
+      { id: "q1", index: 0, number: 1, status: "answered", current: false, markedForReview: false },
+      { id: "q2", index: 1, number: 2, status: "invalid", current: false, markedForReview: false },
+      { id: "q3", index: 2, number: 3, status: "unanswered", current: false, markedForReview: false },
+    ];
+    renderReview({ items: invalidItems, answeredCount: 1 });
+
+    expect(screen.getByText("1 answered")).toBeInTheDocument();
+    expect(screen.getByText("1 unanswered")).toBeInTheDocument();
+    expect(screen.getByText("1 needs fixing")).toBeInTheDocument();
+    expect(screen.getByText(SAT_COPY.review.invalidNotice)).toBeInTheDocument();
+    expect(screen.queryByText(SAT_COPY.review.unansweredNotice)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Question 2, answer needs fixing" })
+    ).toBeInTheDocument();
   });
 
   it("places recovery notices in their own row above review content", () => {

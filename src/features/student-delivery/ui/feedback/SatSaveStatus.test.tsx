@@ -1,11 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SAT_COPY } from "../../domain/satCopy";
 import { SatSaveStatus } from "./SatSaveStatus";
 
 describe("SatSaveStatus (failure-only surface)", () => {
   it("stays silent through every healthy state", () => {
-    for (const state of ["idle", "saving", "offline", "retrying"] as const) {
+    // `stalled` is drawn by the notice row below the timer, not this row.
+    for (const state of ["idle", "saving", "offline", "retrying", "stalled"] as const) {
       const { container, unmount } = render(<SatSaveStatus state={state} onRetrySave={vi.fn()} />);
       expect(container, state).toBeEmptyDOMElement();
       unmount();
@@ -25,6 +26,21 @@ describe("SatSaveStatus (failure-only surface)", () => {
   it("falls back to the canonical failure sentence with no server detail", () => {
     render(<SatSaveStatus state="failed" />);
     expect(screen.getByTestId("sat-save-status")).toHaveTextContent(SAT_COPY.saveStatus.failed);
+  });
+
+  it("dismisses one failure and reopens when the state or detail changes", () => {
+    const onRetrySave = vi.fn();
+    const { rerender } = render(<SatSaveStatus state="failed" saveFailure="Gateway timeout" onRetrySave={onRetrySave} />);
+    fireEvent.click(screen.getByRole("button", { name: SAT_COPY.notice.dismiss }));
+    expect(screen.queryByTestId("sat-save-status")).not.toBeInTheDocument();
+
+    rerender(<SatSaveStatus state="failed" saveFailure="Different failure" onRetrySave={onRetrySave} />);
+    expect(screen.getByTestId("sat-save-status")).toHaveTextContent("Different failure");
+
+    fireEvent.click(screen.getByRole("button", { name: SAT_COPY.notice.dismiss }));
+    rerender(<SatSaveStatus state="saving" onRetrySave={onRetrySave} />);
+    rerender(<SatSaveStatus state="failed" saveFailure="Different failure" onRetrySave={onRetrySave} />);
+    expect(screen.getByTestId("sat-save-status")).toBeInTheDocument();
   });
 
   it("merges the lease conflict into the superseded banner with take-over inline", () => {

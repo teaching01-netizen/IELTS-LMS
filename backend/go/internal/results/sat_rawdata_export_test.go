@@ -593,6 +593,7 @@ func TestExportSATRawdataRejectsMissingScopeBeforeDatabaseAccess(t *testing.T) {
 
 func TestSATRawdataAnswerCellResolution(t *testing.T) {
 	key := singleChoice("B")
+	spr := `{"kind":"student_produced_response","acceptedResponses":["12"],"normalizeFraction":true,"normalizeDecimal":true}`
 	cases := []struct {
 		name     string
 		answer   string
@@ -612,6 +613,14 @@ func TestSATRawdataAnswerCellResolution(t *testing.T) {
 		// the cell stays blank instead of asserting "No answer" or "0".
 		{"v2 payload that cannot be decoded stays blank", key, `{"answer":`, `"B"`, ""},
 		{"v2 non-JSON payload stays blank", key, `not-json`, `"B"`, ""},
+		// Malformed SPR text is present but unusable: the cell is
+		// indeterminate, so it stays blank — never "No answer" (which asserts
+		// the candidate left it empty) and never "0" (which asserts it wrong).
+		{"malformed SPR stays blank", spr, nil, `"12%"`, ""},
+		{"over-budget SPR stays blank", spr, nil, `"123456"`, ""},
+		{"whitespace SPR is No answer", spr, nil, `"  "`, "No answer"},
+		{"valid SPR is correct", spr, nil, `"12"`, "1"},
+		{"valid SPR is incorrect", spr, nil, `"13"`, "0"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

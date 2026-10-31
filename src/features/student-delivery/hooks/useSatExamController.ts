@@ -1,6 +1,7 @@
 import { useSatSectionEntry } from "./useSatSectionEntry";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { resolveAuthoritativeRemainingSeconds } from "@shared/hooks/useAuthoritativeDeadlineClock";
+import { capSatStudentResponseInput } from "@shared/sat/studentResponse";
 import { emitStudentObservabilityMetric } from "../../../utils/studentObservability";
 import {
   isCohortTimingModel,
@@ -727,7 +728,9 @@ export function useSatExamController({
           // prepare its recovery envelope. A retry can reuse the local draft.
         }
       } else {
-        await persistenceRef.current.flush().catch(() => undefined);
+        // The close edge is the last chance to turn an accepted draft into a
+        // durable write. A pending backoff must not consume the save window.
+        await persistenceRef.current.flush({ forceRetry: true }).catch(() => undefined);
       }
       if (recoveryClose && live()) {
         // Spread synchronized classroom deadlines so every browser does not
@@ -815,12 +818,30 @@ export function useSatExamController({
           }
           if (!ack) throw new Error("The SAT close did not return a completion receipt.");
           if (!live()) return;
-          if (preparedClose) {
+          // A close is proof that every write it listed is durable. Settle them
+          // even when this was a manifest-only close (no recovery envelope):
+          // otherwise an HTTP ack lost before the close is mistaken for a late
+          // answer and uploaded as evidence for an answer that is already scored.
+          const settledWrites = ack.settledWrites ?? [];
+          if (settledWrites.length > 0) {
+            await persistenceRef.current.settleScopeClose?.(moduleAttemptId, settledWrites);
+          }
+          const finalAcks = ack.finalAcks ?? [];
+          if (preparedClose || finalAcks.length > 0) {
             await persistenceRef.current.acknowledgeScopeClose?.(
               moduleAttemptId,
-              preparedClose.closeId,
-              ack.finalAcks ?? [],
+              preparedClose?.closeId ?? closeId,
+              finalAcks,
             );
+          }
+          const settledCount = settledWrites.length + finalAcks.length;
+          if (settledCount > 0) {
+            emitStudentObservabilityMetric("sat_close_settled_pending", {
+              scheduleId,
+              attemptId,
+              moduleId,
+              count: settledCount,
+            });
           }
           const base = dataRef.current;
           const merged = base ? applyCloseAck(base, ack) : null;
@@ -876,7 +897,7 @@ export function useSatExamController({
             );
           }
           if (!live()) return;
-          if (!recoveryClose) await persistenceRef.current.flush().catch(() => undefined);
+          if (!recoveryClose) await persistenceRef.current.flush({ forceRetry: true }).catch(() => undefined);
         }
       }
       for (let read = 0; read < SAT_CLOSE_FALLBACK_READS && live(); read += 1) {
@@ -2108,8 +2129,23 @@ export function useSatExamController({
           // Every break in a wave ends within seconds and each read completes
           // the break under row locks; spread the first read so the wave
           // does not land in one second.
-          await new Promise((resolve) => window.setTimeout(resolve, Math.random() * SAT_BREAK_END_FIRST_READ_JITTER_MS));
-          if (identityGenerationRef.current !== generation || !breakStillOpen()) return;
+          const firstReadDelayMs = Math.round(
+            Math.random() * SAT_BREAK_END_FIRST_READ_JITTER_MS
+          );
+          // Observability for the wave: a delivery that spreads the read but
+          // still starts late is indistinguishable from one that never did.
+          emitStudentObservabilityMetric("sat_break_end_first_read", {
+            delayMs: firstReadDelayMs,
+            outcome: "scheduled",
+          });
+          await new Promise((resolve) => window.setTimeout(resolve, firstReadDelayMs));
+          if (identityGenerationRef.current !== generation || !breakStillOpen()) {
+            emitStudentObservabilityMetric("sat_break_end_first_read", {
+              delayMs: firstReadDelayMs,
+              outcome: "skipped",
+            });
+            return;
+          }
           for (let read = 1; ; read += 1) {
             await refresh(false);
             if (identityGenerationRef.current !== generation || !breakStillOpen()) return;
@@ -2154,7 +2190,7 @@ export function useSatExamController({
     }
     // Cohort/legacy clocks close on the shared section boundary: flush, then
     // one recovery read. Server reconciliation finalizes the module.
-    void persistenceRef.current.flush().catch(() => undefined).then(() => {
+    void persistenceRef.current.flush({ forceRetry: true }).catch(() => undefined).then(() => {
       if (identityGenerationRef.current !== generation) return;
       void refresh(true);
     });
@@ -2248,7 +2284,11 @@ export function useSatExamController({
       );
       const interactionType =
         question?.questionType === "student_produced_response" ? "typing" : "discrete";
-      commitResponseChange(questionId, { kind: "setAnswer", answer }, interactionType);
+      const nextAnswer =
+        question?.questionType === "student_produced_response"
+          ? capSatStudentResponseInput(answer)
+          : answer;
+      commitResponseChange(questionId, { kind: "setAnswer", answer: nextAnswer }, interactionType);
     },
     [commitResponseChange, stateModule]
   );

@@ -1,6 +1,10 @@
 /* eslint-disable jsx-a11y/control-has-associated-label -- wrapping label + htmlFor double-associates the input; the rule misreads the nested-input pattern (same as the pre-existing notes/annotation editors). */
-import { useId, useState } from "react";
-import { validateSatStudentResponse } from "../../../exam-authoring/api/renderingPublic";
+import { useEffect, useId, useState } from "react";
+import {
+  SAT_SPR_MAX_INPUT_CHARACTERS,
+  capSatStudentResponseInput,
+  validateSatStudentResponse,
+} from "@shared/sat/studentResponse";
 
 export interface SatStudentProducedAnswerProps {
   questionId: string;
@@ -11,13 +15,25 @@ export interface SatStudentProducedAnswerProps {
   onBlur?: (() => void) | undefined;
 }
 
+interface SatStudentResponseError {
+  questionId: string;
+  value: string;
+  message: string;
+}
+
 /**
- * Student-produced response input (Phase 6a: validate-then-announce).
+ * Student-produced response input (validate-then-announce).
  *
  * Typing stays forgiving (preserve text on change — never error mid-key).
- * Validation runs on BLUR against the committed draft and announces through
- * a single describedby chain: format help + error (role=alert when present).
- * Single label source: the wrapping label; no redundant aria-label.
+ * The one boundary change is lookalike-glyph normalization plus a 64-character
+ * safety bound: longer text can never be a legal SAT entry, and a pasted
+ * Unicode minus must become the ASCII minus the server stores. The 5/6 rule is
+ * validation-only; the input is never truncated into a different number.
+ * Validation runs on BLUR against the committed draft and announces through a
+ * single describedby chain: format help + error (role=alert when present).
+ *
+ * The error carries its question id so switching between two SPR questions
+ * cannot paint the previous question's error onto the next one.
  */
 export function SatStudentProducedAnswer({
   questionId,
@@ -29,7 +45,17 @@ export function SatStudentProducedAnswer({
   const inputId = `sat-spr-${questionId}`;
   const helpId = `${inputId}-help`;
   const errorId = useId();
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SatStudentResponseError | null>(null);
+  const visibleError =
+    error?.questionId === questionId && error.value === value ? error.message : null;
+
+  // A draft restored from the server or the durable outbox may predate glyph
+  // normalization or the input cap. Rewrite it through the same boundary as a
+  // keystroke so validation, review status, and the stored value agree.
+  useEffect(() => {
+    const normalized = capSatStudentResponseInput(value);
+    if (normalized !== value) onChange(normalized);
+  }, [onChange, value]);
 
   const commitOnBlur = (): void => {
     // Empty is not an error (unanswered is a legal review state); only
@@ -40,7 +66,7 @@ export function SatStudentProducedAnswer({
       return;
     }
     const verdict = validateSatStudentResponse(value);
-    setError(verdict.valid ? null : verdict.message);
+    setError(verdict.valid ? null : { questionId, value, message: verdict.message });
     onBlur?.();
   };
 
@@ -57,7 +83,7 @@ export function SatStudentProducedAnswer({
           value={value}
           onChange={(event) => {
             if (error !== null) setError(null);
-            onChange(event.target.value);
+            onChange(capSatStudentResponseInput(event.target.value));
           }}
           onBlur={commitOnBlur}
           disabled={disabled}
@@ -65,8 +91,9 @@ export function SatStudentProducedAnswer({
           enterKeyHint="done"
           autoComplete="off"
           spellCheck={false}
-          aria-invalid={error !== null ? true : undefined}
-          aria-describedby={error !== null ? helpId + " " + errorId : helpId}
+          maxLength={SAT_SPR_MAX_INPUT_CHARACTERS}
+          aria-invalid={visibleError !== null ? true : undefined}
+          aria-describedby={visibleError !== null ? helpId + " " + errorId : helpId}
           // Bluebook SPR input (Phase 6): answer-grade border + 8px
           // radius from component tokens; focus ring keeps the 3px focus
           // token (existing behavior — tokenize only).
@@ -79,9 +106,9 @@ export function SatStudentProducedAnswer({
       >
         Fractions use a/b, max 5 characters (6 with a leading minus).
       </p>
-      {error !== null ? (
+      {visibleError !== null ? (
         <p id={errorId} role="alert" className="mt-2 text-[14px] font-medium text-[var(--sat-danger)]">
-          {error}
+          {visibleError}
         </p>
       ) : null}
     </div>
