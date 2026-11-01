@@ -29,6 +29,7 @@
     "playwright:ui": "playwright test --ui",
     "playwright:debug": "playwright test --debug",
     "e2e:sat-a11y": "playwright test --config playwright.sat-a11y.config.ts",
+    "e2e:sat-calculator-touch": "playwright test --config playwright.sat-calculator-touch.config.ts",
     "e2e:sat-forms": "playwright test --config playwright.sat-forms.config.ts",
     "e2e:sat-spectrum": "playwright test --config playwright.sat-spectrum.config.ts",
     "sat:rail": "node scripts/sat-rail-pattern.mjs",

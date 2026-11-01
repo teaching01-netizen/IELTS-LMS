@@ -1282,6 +1282,12 @@ func resultsACTScienceDetailHandler(app *App) http.HandlerFunc {
 // Access group. It reuses the SAT result read roles plus the shared export
 // rate limiter, and exports from student_attempts rather than assessment_results
 // so pending/unscored/active attempts are included.
+//
+// The xlsx workbook always carries SAT Math and SAT Verbal. Admins,
+// admin_observers and proctors additionally receive a SAT Forms sheet with the
+// candidate's form answers and per-form status when the room configures forms;
+// graders never do (no answer access), so the sheet count varies by role under
+// the same filename.
 func resultsSATRawdataExportHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor) == nil {

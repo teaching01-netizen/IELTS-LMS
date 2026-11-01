@@ -211,4 +211,40 @@ test.describe("SAT staff response review", () => {
     expect(recording.answerRequests).toBeGreaterThanOrEqual(2);
     expect(recording.pageErrors).toEqual([]);
   });
+
+  // Browser-side half of the RAWDATA end-to-end chain: the room export button
+  // must request the real endpoint (format=xlsx) and hand the response to the
+  // browser as a workbook download. The workbook contents themselves are
+  // asserted over the same production route against real MySQL in
+  // backend/go/cmd/api/sat_forms_export_e2e_mysql_test.go.
+  test("downloads the room response workbook from the export endpoint", async ({ page }) => {
+    const recording = await installResultsTransport(page);
+    let exportRequest: URL | undefined;
+    await page.route("**/api/v1/results/sat/export/rawdata?**", async (route) => {
+      exportRequest = new URL(route.request().url());
+      await route.fulfill({
+        status: 200,
+        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers: { "content-disposition": 'attachment; filename="sat-rawdata.xlsx"' },
+        // Zip local-file header: enough for a binary workbook body decision.
+        body: Buffer.from("PK\u0003\u0004SAT Forms", "binary"),
+      });
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    const roomUrl = new URL("/sat/results", "http://127.0.0.1:3000");
+    roomUrl.searchParams.set("exam", EXAM_ID);
+    roomUrl.searchParams.set("access", SCHEDULE_ID);
+    await page.goto(roomUrl.pathname + roomUrl.search);
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Download room responses (.xlsx)" }).click();
+    const download = await downloadPromise;
+
+    expect(download.suggestedFilename()).toMatch(/^sat-rawdata-morning-room-\d{4}-\d{2}-\d{2}\.xlsx$/);
+    expect(exportRequest?.searchParams.get("examId")).toBe(EXAM_ID);
+    expect(exportRequest?.searchParams.get("scheduleId")).toBe(SCHEDULE_ID);
+    expect(exportRequest?.searchParams.get("format")).toBe("xlsx");
+    await expect(page.getByRole("status")).toHaveText("Export downloaded.");
+    expect(recording.pageErrors).toEqual([]);
+  });
 });

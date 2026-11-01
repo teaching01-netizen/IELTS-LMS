@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
@@ -46,6 +47,11 @@ func TestSATRawdataExportAgainstMySQL(t *testing.T) {
 
 	if out.SchemaVersion != results.SATRawdataSchemaVersion || out.ColumnCount != results.SATRawdataColumns {
 		t.Fatalf("unexpected schema metadata: %+v", out)
+	}
+	// This room configures no forms: the forms sheet must be omitted entirely
+	// rather than shipped as a status-only sheet.
+	if len(out.Sheets) != 2 {
+		t.Fatalf("room without forms must keep two sheets, got %d", len(out.Sheets))
 	}
 	if len(out.HeaderRows) != 2 {
 		t.Fatalf("expected 2 header rows, got %d", len(out.HeaderRows))
@@ -401,6 +407,129 @@ func TestSATRawdataExportConcurrentReadersAgree(t *testing.T) {
 	}
 	if !reflect.DeepEqual(outs[0].Rows, outs[1].Rows) {
 		t.Fatal("concurrent exports produced different rows for the same snapshot")
+	}
+}
+
+// TestSATRawdataExportFormsSheetAgainstMySQL covers the SAT Forms worksheet end
+// to end: the version snapshot drives the columns and labels, stored answers
+// render as values (single_choice by label, number as a number), and the four
+// status columns come from the shared assessmentforms expression rather than
+// local SQL. The room is verbal-only, so math_entry must be not_applicable.
+func TestSATRawdataExportFormsSheetAgainstMySQL(t *testing.T) {
+	f := newAdaptiveExam(t)
+	ctx := context.Background()
+
+	// Schema 2 assigns timing to the form, so fields carry no scope. Math entry
+	// has no questions: that is what makes a verbal-only sitting report
+	// math_entry = not_applicable. Eva stays disabled (also not_applicable).
+	const formsSnapshot = `{"forms":{"schemaVersion":2,` +
+		`"registration":{"fields":[` +
+		`{"id":"sat_seat_number","type":"text","label":"Seat number","maxLength":255},` +
+		`{"id":"sat_expected_class","type":"single_choice","label":"Expected Class","options":[` +
+		`{"id":"rank_4","label":"Rank 4"},{"id":"rank_1","label":"Rank 1"}]}]},` +
+		`"sectionEntry":{"reading-writing":{"fields":[{"id":"vwpm","type":"number","label":"VWPM"}]},"math":{"fields":[]}},` +
+		`"evaSim":{"enabled":false,"mode":"native"}}}`
+	if _, err := f.db.ExecContext(ctx,
+		`UPDATE exam_versions SET config_snapshot = ? WHERE id = ?`, formsSnapshot, f.versionID); err != nil {
+		t.Fatalf("seed forms snapshot: %v", err)
+	}
+
+	attemptID := f.seedStudent(f.rw, 2, false)
+	// Two answers for the same attempt prove one row per attempt, not per form.
+	now := time.Now().UTC()
+	insertResponse := func(formKey, answers string) {
+		t.Helper()
+		if _, err := f.db.ExecContext(ctx, `INSERT INTO assessment_form_responses (
+			attempt_id, form_key, answers, revision, first_submitted_at, updated_at
+		) VALUES (?, ?, ?, 1, ?, ?)`, attemptID, formKey, answers, now, now); err != nil {
+			t.Fatalf("seed %s response: %v", formKey, err)
+		}
+	}
+	insertResponse("registration", `{"sat_seat_number":"A-007","sat_expected_class":"rank_1"}`)
+	insertResponse("verbal_entry", `{"vwpm":510}`)
+
+	out, err := results.NewService(f.db).ExportSATRawdata(ctx,
+		auth.NewActorContext("integration-admin", auth.RoleAdmin), f.examID, f.scheduleID)
+	if err != nil {
+		t.Fatalf("ExportSATRawdata: %v", err)
+	}
+	// The frozen rawdata projection is untouched by the new sheet.
+	if out.SchemaVersion != results.SATRawdataSchemaVersion || out.ColumnCount != results.SATRawdataColumns {
+		t.Fatalf("unexpected schema metadata: schema=%d columns=%d", out.SchemaVersion, out.ColumnCount)
+	}
+	if len(out.Sheets) != 3 || out.Sheets[2].Name != results.SATFormsSheetName {
+		names := make([]string, len(out.Sheets))
+		for i, sheet := range out.Sheets {
+			names[i] = sheet.Name
+		}
+		t.Fatalf("admin sheets = %v, want a third SAT Forms sheet", names)
+	}
+	// Two form responses for one attempt must still produce exactly one row.
+	if rows := len(out.Sheets[2].Rows); rows != 1 {
+		t.Fatalf("forms rows = %d, want one row per attempt", rows)
+	}
+
+	data, err := results.BuildSATRawdataXLSX(out)
+	if err != nil {
+		t.Fatalf("BuildSATRawdataXLSX: %v", err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("open workbook: %v", err)
+	}
+	defer func() { _ = book.Close() }()
+	if got, want := book.GetSheetList(), []string{"SAT Math", "SAT Verbal", results.SATFormsSheetName}; len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("sheet list = %v, want %v", got, want)
+	}
+
+	// Identity (A-E) + reg fields (F-G) + verbal entry (H) + statuses (I-L) +
+	// attempt_id (M). Literal addresses keep the contract independent of the
+	// exporter's index constants.
+	wantHeader := map[string]string{
+		"A1": "cm_user_id", "B1": "wcode", "C1": "candidate_name", "D1": "email", "E1": "version",
+		"F1": "reg.sat_seat_number", "G1": "reg.sat_expected_class", "H1": "verbal.vwpm",
+		"I1": "status.registration", "J1": "status.verbal_entry", "K1": "status.math_entry",
+		"L1": "status.eva_sim", "M1": "attempt_id",
+		"F2": "Registration · Seat number", "G2": "Registration · Expected Class",
+		"H2": "Verbal entry · VWPM", "I2": "Registration status", "M2": "attempt_id",
+	}
+	for cell, want := range wantHeader {
+		got, err := book.GetCellValue(results.SATFormsSheetName, cell)
+		if err != nil || got != want {
+			t.Fatalf("%s = %q, %v; want %q", cell, got, err, want)
+		}
+	}
+
+	wantRow := map[string]string{
+		"B3": "W-" + attemptID, // attempt wcode, verbatim
+		"F3": "A-007",          // text answer
+		"G3": "Rank 1",         // single_choice rendered by pinned label
+		"H3": "510",            // number answer
+		"I3": "submitted",      // registration response exists
+		"J3": "submitted",      // verbal entry response exists
+		"K3": "not_applicable", // math entry has no questions
+		"L3": "not_applicable", // Eva disabled
+		"M3": attemptID,
+	}
+	for cell, want := range wantRow {
+		got, err := book.GetCellValue(results.SATFormsSheetName, cell)
+		if err != nil || got != want {
+			t.Fatalf("%s = %q, %v; want %q", cell, got, err, want)
+		}
+	}
+	if kind, err := book.GetCellType(results.SATFormsSheetName, "H3"); err != nil || kind != excelize.CellTypeUnset {
+		t.Fatalf("number answer type = %v, %v; want a numeric cell", kind, err)
+	}
+
+	// Role scoping: the grader keeps the two section sheets and never reads
+	// form answers.
+	grader, err := results.NewService(f.db).ExportSATRawdata(ctx,
+		auth.NewActorContext("integration-grader", auth.RoleGrader), f.examID, f.scheduleID)
+	if err != nil {
+		t.Fatalf("grader ExportSATRawdata: %v", err)
+	}
+	if len(grader.Sheets) != 2 {
+		t.Fatalf("grader sheets = %d, want the two section sheets", len(grader.Sheets))
 	}
 }
 

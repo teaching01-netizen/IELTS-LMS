@@ -251,3 +251,157 @@ func TestBuildSATRawdataXLSXLargeExportOpens(t *testing.T) {
 		t.Fatalf("empty Math tab lost its header: %q, %v", got, err)
 	}
 }
+
+// sampleSATFormsExport appends a SAT Forms sheet to the two-sheet fixture. The
+// column set mirrors what assembleSATForms produces: identity, one text field,
+// one number field, four statuses, attempt_id.
+func sampleSATFormsExport() *SATRawdataExport {
+	export := sampleSATRawdataExport("Candidate Name")
+	export.Sheets = append(export.Sheets, SATRawdataSheet{
+		Name: SATFormsSheetName,
+		HeaderRows: [][]string{
+			{"cm_user_id", "wcode", "candidate_name", "email", "version", "reg.sat_seat_number", "reg.sat_admission_year", "status.registration", "status.verbal_entry", "status.math_entry", "status.eva_sim", "attempt_id"},
+			{"cm_user_id", "wcode", "Candidate name", "email", "Version", "Registration · Seat number", "Registration · Admission year", "Registration status", "Verbal entry status", "Math entry status", "Eva SIM status", "attempt_id"},
+		},
+		Rows: [][]string{
+			{"000123", "W123456", `=HYPERLINK("https://example.invalid"), "Ada"`, "candidate@example.com", "2", "A-007", "2027", "submitted", "not_submitted", "not_applicable", "not_tracked", "attempt-1"},
+		},
+		ColumnCount:    12,
+		NumericColumns: []int{6},
+	})
+	return export
+}
+
+func TestBuildSATRawdataXLSXIncludesFormsSheet(t *testing.T) {
+	export := sampleSATFormsExport()
+	data, err := BuildSATRawdataXLSX(export)
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("generated workbook is not readable: %v", err)
+	}
+	defer func() { _ = book.Close() }()
+
+	if got, want := book.GetSheetList(), []string{"SAT Math", "SAT Verbal", SATFormsSheetName}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("sheet names = %v, want %v", got, want)
+	}
+	formsSheet := export.Sheets[2]
+	for rowIndex, headerRow := range formsSheet.HeaderRows {
+		for column, expected := range headerRow {
+			cell, err := excelize.CoordinatesToCellName(column+1, rowIndex+1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := book.GetCellValue(SATFormsSheetName, cell); err != nil || got != expected {
+				t.Fatalf("forms header %s = %q, %v; want %q", cell, got, err, expected)
+			}
+		}
+	}
+
+	// Identity block: cm_user_id keeps its leading zeroes as text.
+	if got, err := book.GetCellValue(SATFormsSheetName, "A3"); err != nil || got != "000123" {
+		t.Fatalf("cm_user_id = %q, %v", got, err)
+	}
+	if kind, err := book.GetCellType(SATFormsSheetName, "A3"); err != nil || kind != excelize.CellTypeInlineString {
+		t.Fatalf("cm_user_id type = %v, %v; want inline string", kind, err)
+	}
+	// A number field is a real numeric cell.
+	if got, err := book.GetCellValue(SATFormsSheetName, "G3"); err != nil || got != "2027" {
+		t.Fatalf("number field = %q, %v", got, err)
+	}
+	if kind, err := book.GetCellType(SATFormsSheetName, "G3"); err != nil || kind != excelize.CellTypeUnset {
+		t.Fatalf("number field type = %v, %v; want numeric", kind, err)
+	}
+	// A text field stays an inline string, including a formula-looking value.
+	if got, err := book.GetCellValue(SATFormsSheetName, "F3"); err != nil || got != "A-007" {
+		t.Fatalf("text field = %q, %v", got, err)
+	}
+	if kind, err := book.GetCellType(SATFormsSheetName, "C3"); err != nil || kind != excelize.CellTypeInlineString {
+		t.Fatalf("formula-looking name type = %v, %v; want inline string", kind, err)
+	}
+	if formula, err := book.GetCellFormula(SATFormsSheetName, "C3"); err != nil || formula != "" {
+		t.Fatalf("formula-looking name formula = %q, %v; want none", formula, err)
+	}
+	// Statuses are exported verbatim.
+	if got, err := book.GetCellValue(SATFormsSheetName, "H3"); err != nil || got != "submitted" {
+		t.Fatalf("registration status = %q, %v", got, err)
+	}
+	if got, err := book.GetCellValue(SATFormsSheetName, "K3"); err != nil || got != "not_tracked" {
+		t.Fatalf("eva status = %q, %v", got, err)
+	}
+	if got, err := book.GetCellValue(SATFormsSheetName, "L3"); err != nil || got != "attempt-1" {
+		t.Fatalf("attempt_id = %q, %v", got, err)
+	}
+
+	panes, err := book.GetPanes(SATFormsSheetName)
+	if err != nil || !panes.Freeze || panes.YSplit != 2 {
+		t.Fatalf("forms frozen panes = %#v, %v; want two frozen header rows", panes, err)
+	}
+}
+
+func TestBuildSATRawdataXLSXRejectsUnexpectedSheets(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*SATRawdataExport)
+	}{
+		{"missing verbal sheet", func(e *SATRawdataExport) { e.Sheets = e.Sheets[:1] }},
+		{"unexpected third sheet", func(e *SATRawdataExport) {
+			e.Sheets = append(e.Sheets, SATRawdataSheet{Name: "SAT Extra"})
+		}},
+		{"too many sheets", func(e *SATRawdataExport) {
+			e.Sheets = append(e.Sheets, SATRawdataSheet{Name: SATFormsSheetName}, SATRawdataSheet{Name: SATFormsSheetName})
+		}},
+		{"short forms row", func(e *SATRawdataExport) {
+			e.Sheets = append(e.Sheets, SATRawdataSheet{
+				Name: SATFormsSheetName,
+				HeaderRows: [][]string{
+					{"a", "b"},
+					{"a", "b"},
+				},
+				Rows:        [][]string{{"only-one"}},
+				ColumnCount: 2,
+			})
+		}},
+		{"numeric column outside the sheet", func(e *SATRawdataExport) {
+			e.Sheets = append(e.Sheets, SATRawdataSheet{
+				Name: SATFormsSheetName,
+				HeaderRows: [][]string{
+					{"a", "b"},
+					{"a", "b"},
+				},
+				Rows:           [][]string{{"1", "2"}},
+				ColumnCount:    2,
+				NumericColumns: []int{2},
+			})
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			export := sampleSATRawdataExport("Candidate")
+			c.mutate(export)
+			if _, err := BuildSATRawdataXLSX(export); err == nil {
+				t.Fatal("expected BuildSATRawdataXLSX to reject the sheet layout")
+			}
+		})
+	}
+}
+
+func TestBuildSATRawdataXLSXRawdataSheetsIgnoreFormsNumericList(t *testing.T) {
+	// The rawdata sheets carry no ColumnCount, so the legacy numeric rule must
+	// still apply even when a forms sheet exists with a different list.
+	export := sampleSATFormsExport()
+	data, err := BuildSATRawdataXLSX(export)
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = book.Close() }()
+	if kind, err := book.GetCellType("SAT Math", "E3"); err != nil || kind != excelize.CellTypeUnset {
+		t.Fatalf("Math points cell type = %v, %v; want numeric", kind, err)
+	}
+}

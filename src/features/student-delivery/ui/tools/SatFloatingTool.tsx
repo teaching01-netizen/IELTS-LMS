@@ -376,12 +376,17 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   }, [clampGeometry, props.geometryKey, props.defaultGeometry, geometryScale, isReference, props.open]);
 
   useEffect(() => {
-    if (!isReference || !props.open) return;
+    if (!props.open) return;
+    // Every open window re-clamps when the viewport changes: an iPad rotation
+    // (or a Split View resize) must never leave the window — or, on touch, the
+    // outside resize bands — hanging off-screen. Only the Reference sheet
+    // persists the clamped rect, matching its existing contract; Calculator
+    // keeps its saved position and is re-clamped again on the next open.
     const onResize = () => {
       const next = clampGeometry(lastCommittedRef.current);
       lastCommittedRef.current = next;
       setGeometry(next);
-      if (props.geometryKey) saveSatToolGeometry(props.geometryKey, next);
+      if (isReference && props.geometryKey) saveSatToolGeometry(props.geometryKey, next);
     };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
@@ -825,8 +830,17 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       finishResize(true);
     }
     const interrupt = () => { finishDrag(true); finishResize(true); };
+    // iOS backgrounding can hide the document without a window blur; cancel
+    // there too so a half-finished gesture never resumes on return.
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") interrupt();
+    };
     window.addEventListener("blur", interrupt);
-    return () => window.removeEventListener("blur", interrupt);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("blur", interrupt);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [props.open, props.disabled, compact, finishDrag, finishResize]);
 
   useEffect(() => () => {
@@ -1085,10 +1099,6 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           </button>
         </div>
       )}
-      <div id={isReference ? "reference-sheet-content" : undefined} hidden={collapsedSettled ? true : undefined} onAnimationEnd={isReference ? handleCollapseAnimationEnd : undefined} className={"relative min-h-0 flex-1 overflow-hidden" + (isReference && !compact ? " sat-ref-collapsible sat-ref-fade sat-ref-clip" : "")}>
-        {props.children}
-        {showHint ? <SatToolDiscoveryHint cornerOnly={isReference && coarsePointer} onAnimationEnd={handleHintAnimationEnd} /> : null}
-      </div>
       {props.resizable && !compact ? (
         // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- separator is the ARIA resize-handle role; keyboard support is provided via tabIndex + Arrow keys (Wave B R-09).
         <div
@@ -1101,7 +1111,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           aria-valuenow={Math.round(geometry.w)}
           aria-valuetext={`${Math.round(geometry.w)} by ${Math.round(renderedH)} pixels`}
           data-sat-resize-handle="se"
-          className="sat-tool-tip-anchor absolute bottom-0 right-0 grid h-11 w-11 cursor-nwse-resize touch-none select-none place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+          className="sat-tool-tip-anchor absolute bottom-0 right-0 z-10 grid h-11 w-11 cursor-nwse-resize touch-none select-none place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
           onPointerDown={handleResizePointerDown}
           onPointerMove={handleResizePointerMove}
           onPointerUp={handleEndResize}
@@ -1117,6 +1127,10 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           <span className="sat-tool-tip" aria-hidden="true">Resize {props.title}</span>
         </div>
       ) : null}
+      <div id={isReference ? "reference-sheet-content" : undefined} hidden={collapsedSettled ? true : undefined} onAnimationEnd={isReference ? handleCollapseAnimationEnd : undefined} className={"relative min-h-0 flex-1 overflow-hidden" + (isReference && !compact ? " sat-ref-collapsible sat-ref-fade sat-ref-clip" : "")}>
+        {props.children}
+        {showHint ? <SatToolDiscoveryHint cornerOnly={isReference && coarsePointer} onAnimationEnd={handleHintAnimationEnd} /> : null}
+      </div>
       {props.resizable && !compact && !(isReference && coarsePointer) ? SAT_RESIZE_EDGES.map((edge) => (
         <div
           key={edge}

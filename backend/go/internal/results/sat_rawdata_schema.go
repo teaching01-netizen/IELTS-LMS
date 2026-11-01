@@ -22,7 +22,10 @@ import (
 
 const (
 	// SATRawdataSchemaVersion is bumped whenever the column contract changes.
-	SATRawdataSchemaVersion = 2
+	// 3 adds the optional "SAT Forms" worksheet (see sat_form_export.go); the
+	// top-level headerRows/rows/columnCount projection remains the fixed
+	// 50-column rawdata view.
+	SATRawdataSchemaVersion = 3
 	// SATRawdataColumns is the exact width of every exported row. The
 	// template is a fixed-width contract; missing values are "".
 	SATRawdataColumns = 50
@@ -238,6 +241,40 @@ func validateSATRawdataHeaders(headerRows [][]string) error {
 	for i, row := range headerRows {
 		if err := validateSATRawdataRow(row); err != nil {
 			return fmt.Errorf("header row %d: %w", i+1, err)
+		}
+	}
+	return nil
+}
+
+// validateSATSheet enforces one worksheet's own width.
+//
+// A zero ColumnCount means the fixed rawdata template: the sheet must be
+// SATRawdataColumns wide, exactly like validateSATRawdataHeaders/Rows. Any
+// other width comes from the sheet itself (the SAT Forms column set depends on
+// the forms configured for the room) and every header/data row must match it.
+func validateSATSheet(sheet SATRawdataSheet) error {
+	width := sheet.ColumnCount
+	if width <= 0 {
+		width = SATRawdataColumns
+	}
+	if len(sheet.HeaderRows) != 2 {
+		return fmt.Errorf("sheet %s requires exactly two header rows", sheet.Name)
+	}
+	for i, row := range sheet.HeaderRows {
+		if len(row) != width {
+			return fmt.Errorf("sheet %s header row %d has %d columns, want %d", sheet.Name, i+1, len(row), width)
+		}
+	}
+	for i, row := range sheet.Rows {
+		if len(row) != width {
+			return fmt.Errorf("sheet %s row %d has %d columns, want %d", sheet.Name, i, len(row), width)
+		}
+	}
+	// A numeric column outside the sheet would silently fall back to text when
+	// the workbook writer iterates cells; reject the layout instead.
+	for _, column := range sheet.NumericColumns {
+		if column < 0 || column >= width {
+			return fmt.Errorf("sheet %s numeric column %d is outside 0..%d", sheet.Name, column, width-1)
 		}
 	}
 	return nil

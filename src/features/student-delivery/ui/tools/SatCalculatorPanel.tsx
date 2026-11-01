@@ -151,7 +151,14 @@ export function SatCalculatorPanel({
   );
   // Window dimensions are physical pixels, converted once into the zoom plane.
   const viewport = logicalSize({ width: window.innerWidth, height: window.innerHeight });
-  const bodyWidth = viewport.width - safeArea.left - safeArea.right;
+  // Touch resize targets live in a 20px band OUTSIDE the window (see the
+  // `pointer: coarse` block in index.css). A window flush against the screen
+  // edge would push most of that band — and the corner bracket that advertises
+  // it — off-screen, which is also where iOS keeps its edge gestures. Inflate
+  // the clamp area by the band depth so first open, drags and zooms all leave
+  // the band reachable. Fine pointers keep the tight 8px inset.
+  const coarsePointer = useSatMediaQuery("(pointer: coarse)");
+  const edgeGutter = coarsePointer ? viewportToLogicalLength(20) : 0;
   // Bluebook layout: the window may cover the exam header and footer. First open
   // stays full height from the top inset down to the body so the expression list
   // stays visible above the keypad; afterwards it moves and resizes screen-wide.
@@ -161,16 +168,33 @@ export function SatCalculatorPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [safeArea, viewportToLogicalLength]
   );
-  const bodyHeight = Math.max(1, viewport.height - dragArea.top - safeArea.bottom);
-  const dragWidth = Math.max(1, viewport.width - dragArea.left - dragArea.right);
-  const dragHeight = Math.max(1, viewport.height - dragArea.top - dragArea.bottom);
+  const clampArea = useMemo(
+    () => coarsePointer
+      ? {
+          top: dragArea.top + edgeGutter,
+          right: dragArea.right + edgeGutter,
+          bottom: dragArea.bottom + edgeGutter,
+          left: dragArea.left + edgeGutter,
+        }
+      : dragArea,
+    [coarsePointer, dragArea, edgeGutter]
+  );
+  const bodyWidth = Math.max(1, viewport.width - safeArea.left - safeArea.right - edgeGutter * 2);
+  const bodyHeight = Math.max(1, viewport.height - dragArea.top - safeArea.bottom - edgeGutter * 2);
+  const dragWidth = Math.max(1, viewport.width - clampArea.left - clampArea.right);
+  const dragHeight = Math.max(1, viewport.height - clampArea.top - clampArea.bottom);
   const firstOpenSize = {
     w: Math.min(bodyWidth, Math.max(400 / scale, Math.min(440 / scale, bodyWidth * 0.36))),
     h: bodyHeight,
   };
   const defaultGeometry = useMemo(
-    () => ({ x: safeArea.left, y: dragArea.top, w: firstOpenSize.w, h: firstOpenSize.h }),
-    [safeArea.left, dragArea.top, firstOpenSize.w, firstOpenSize.h]
+    () => ({
+      x: safeArea.left + edgeGutter,
+      y: dragArea.top + edgeGutter,
+      w: firstOpenSize.w,
+      h: firstOpenSize.h,
+    }),
+    [safeArea.left, dragArea.top, edgeGutter, firstOpenSize.w, firstOpenSize.h]
   );
   const minimumSize = useMemo(
     () => ({ w: Math.min(400 / scale, dragWidth), h: Math.min(400 / scale, dragHeight) }),
@@ -190,7 +214,7 @@ export function SatCalculatorPanel({
       viewStateKey={satToolViewKey(scheduleId, attemptId, moduleAttemptId)}
       defaultGeometry={defaultGeometry}
       geometryScale={scale}
-      safeArea={dragArea}
+      safeArea={clampArea}
       minSize={minimumSize}
       maxSize={maximumSize}
       style={

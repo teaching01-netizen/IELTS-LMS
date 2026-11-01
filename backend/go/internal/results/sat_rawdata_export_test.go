@@ -81,6 +81,7 @@ func TestExportSATRawdataMixedStatesQuestionRangesAndV2Priority(t *testing.T) {
 	}
 	mock.ExpectQuery(satRawdataCellQueryPattern).
 		WithArgs("exam-1", "schedule-1").WillReturnRows(cells)
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -228,6 +229,7 @@ func TestExportSATRawdataFullMixedCohort(t *testing.T) {
 			AddRow("attempt-H", "h-m1", "q1", 0, singleChoice("B"), nil, `"B"`, nil).
 			AddRow("attempt-H", "h-m1", "q2", 1, singleChoice("B"), nil, `"A"`, nil).
 			AddRow("attempt-H", "h-m1", "q3", 2, singleChoice("B"), nil, nil, nil))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -292,6 +294,7 @@ func TestExportSATRawdataProjectionIsPaginationIndependent(t *testing.T) {
 	mock.ExpectQuery(satRawdataAttemptQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(attempts)
 	mock.ExpectQuery(satRawdataModuleQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(modules)
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(cells)
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -333,6 +336,7 @@ func TestExportSATRawdataIgnoresModulesFromAnotherVersion(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
 			AddRow("attempt-v12", "mod-v12", "q-v12", 0, singleChoice("B"), nil, `"B"`, nil).
 			AddRow("attempt-v12", "mod-v20", "q-v20", 0, singleChoice("B"), nil, `"B"`, nil))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -375,6 +379,7 @@ func TestExportSATRawdataKeepsBlankRowForUnmappedSection(t *testing.T) {
 			AddRow("attempt-science", "mod-sci", "science", "sci-m1", "base", "submitted", satRawdataTestVersion, 1, 1))
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -422,6 +427,7 @@ func TestExportSATRawdataCandidateNamesAndNoModuleIdentity(t *testing.T) {
 	mock.ExpectQuery(satRawdataAttemptQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(attempts)
 	mock.ExpectQuery(satRawdataModuleQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns))
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(sqlmock.NewRows(satRawdataCellColumns))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -478,13 +484,14 @@ func TestExportSATRawdataDoesNotFilterPretestQuestions(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns))
 	mock.ExpectQuery("cells").WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	if _, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1"); err != nil {
 		t.Fatal(err)
 	}
-	if len(captured) != 3 {
-		t.Fatalf("expected three bulk queries, captured %d", len(captured))
+	if len(captured) != 6 {
+		t.Fatalf("expected three bulk queries plus three form queries, captured %d", len(captured))
 	}
 	for _, query := range captured {
 		if strings.Contains(query, "is_pretest") {
@@ -526,6 +533,7 @@ func TestExportSATRawdataTreatsLockedModuleAsAdministered(t *testing.T) {
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns).
 			AddRow("attempt-locked", "mod-locked", "eq-1", 0, singleChoice("B"), nil, `"B"`, nil))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -551,6 +559,7 @@ func TestExportSATRawdataEmptyScheduleKeepsHeaders(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns))
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1")
@@ -682,6 +691,7 @@ func TestExportSATRawdataQuestionlessModulePoints(t *testing.T) {
 	// The entered module has no administered questions at all.
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -759,6 +769,7 @@ func TestExportSATRawdataDeduplicatesV2AliasMatches(t *testing.T) {
 			AddRow("attempt-1", "mod-rw", "eq-1", 0, singleChoice("B"), `{"answer":"A"}`, nil, nil).
 			// Q2: an unrelated question must be unaffected by the fold.
 			AddRow("attempt-1", "mod-rw", "eq-2", 1, singleChoice("B"), nil, `"B"`, nil))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -874,8 +885,8 @@ func TestExportSATRawdataPinsReadOnlyRepeatableReadSnapshot(t *testing.T) {
 	if !opts.ReadOnly {
 		t.Fatal("export transaction must be read-only")
 	}
-	if queries != 3 {
-		t.Fatalf("expected the 3 bulk reads inside the snapshot, got %d", queries)
+	if queries != 6 {
+		t.Fatalf("expected the 3 bulk reads and the 3 form reads inside the snapshot, got %d", queries)
 	}
 	if out.RowCount != 0 || len(out.Rows) != 0 {
 		t.Fatalf("expected an empty body, got %#v", out.Rows)
@@ -950,6 +961,7 @@ func TestExportSATRawdataDoesNotFilterAttemptState(t *testing.T) {
 	mock.ExpectQuery("").WillReturnRows(attempts)
 	mock.ExpectQuery("").WillReturnRows(modules)
 	mock.ExpectQuery("").WillReturnRows(cells)
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -987,15 +999,18 @@ func TestExportSATRawdataDoesNotFilterAttemptState(t *testing.T) {
 		t.Fatalf("active attempt points drifted: %q/%q", active[satRawdataColPointsReceived], active[satRawdataColPointsAvailable])
 	}
 
-	if len(log.queries) != 3 {
-		t.Fatalf("expected the 3 bulk reads, got %d", len(log.queries))
+	if len(log.queries) != 6 {
+		t.Fatalf("expected the 3 bulk reads plus the 3 form reads, got %d", len(log.queries))
 	}
 	banned := []string{
 		"delivery_status", "proctor_status", "assessment_results", "student_results",
 		"outcome_status", "release_status", "grading_status", "submission_id",
 		"LIMIT", "OFFSET",
 	}
-	for i, query := range log.queries {
+	// Only the three rawdata statements make the "does not filter on attempt
+	// state" claim. The trailing statements derive FORM status, which must
+	// report delivery state (pending_completion) without filtering on it.
+	for i, query := range log.queries[:3] {
 		upper := strings.ToUpper(query)
 		for _, fragment := range banned {
 			if strings.Contains(upper, strings.ToUpper(fragment)) {
@@ -1045,6 +1060,7 @@ func TestExportSATRawdataMapsCellsByDisplayOrderNotRowOrder(t *testing.T) {
 		cells.AddRow("attempt-1", "mod-rw", "uuid-q"+itoa(q+1), q, nil, nil, nil, nil)
 	}
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(cells)
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -1155,6 +1171,7 @@ func TestExportSATRawdataLeavesMissingFinalQuestionBlank(t *testing.T) {
 		cells.AddRow("attempt-1", "mod-rw", "q"+itoa(q+1), q, singleChoice("B"), nil, `"B"`, nil)
 	}
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").WillReturnRows(cells)
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -1204,6 +1221,7 @@ func TestExportSATRawdataModuleCodeIgnoresScore(t *testing.T) {
 			AddRow("attempt-1", "mod-h", "h1", 0, singleChoice("B"), nil, `"A"`, nil).
 			// ...and the Lower branch got everything right.
 			AddRow("attempt-1", "mod-l", "l1", 0, singleChoice("B"), nil, `"B"`, nil))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -1277,6 +1295,7 @@ func TestExportSATRawdataBindsTenantScopeToEveryQuery(t *testing.T) {
 	mock2.ExpectQuery("").WillReturnRows(sqlmock.NewRows(satRawdataAttemptColumns))
 	mock2.ExpectQuery("").WillReturnRows(sqlmock.NewRows(satRawdataModuleColumns))
 	mock2.ExpectQuery("").WillReturnRows(sqlmock.NewRows(satRawdataCellColumns))
+	expectNoSATForms(mock2, satRawdataArgs())
 	mock2.ExpectCommit()
 	if _, err := NewService(db2).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1"); err != nil {
 		t.Fatal(err)
@@ -1318,6 +1337,7 @@ func TestExportSATRawdataTenThousandAttempts(t *testing.T) {
 	mock.ExpectQuery("").WillReturnRows(attempts)
 	mock.ExpectQuery("").WillReturnRows(modules)
 	mock.ExpectQuery("").WillReturnRows(cells)
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")
@@ -1327,8 +1347,8 @@ func TestExportSATRawdataTenThousandAttempts(t *testing.T) {
 	if out.RowCount != students || len(out.Rows) != students {
 		t.Fatalf("expected %d rows regardless of page size, got %d", students, out.RowCount)
 	}
-	if len(log.queries) != 3 {
-		t.Fatalf("expected exactly 3 bulk reads for %d attempts (no N+1), got %d", students, len(log.queries))
+	if len(log.queries) != 6 {
+		t.Fatalf("expected 3 bulk reads plus 3 form reads for %d attempts (no N+1), got %d", students, len(log.queries))
 	}
 	if out.Rows[0][satRawdataColEmail] != "0@example.com" ||
 		out.Rows[students-1][satRawdataColEmail] != itoa(students-1)+"@example.com" {
@@ -1370,6 +1390,7 @@ func TestExportSATRawdataTransportKeepsCellsVerbatim(t *testing.T) {
 			AddRow("attempt-1", "mod-rw", "reading-writing", "rw-m1", "base", "submitted", satRawdataTestVersion, 1, 1))
 	mock.ExpectQuery(satRawdataCellQueryPattern).WithArgs("exam-1", "schedule-1").
 		WillReturnRows(sqlmock.NewRows(satRawdataCellColumns))
+	expectNoSATForms(mock, satRawdataArgs())
 	mock.ExpectCommit()
 
 	out, err := NewService(db).ExportSATRawdata(context.Background(), auth.NewActorContext("admin-1", auth.RoleAdmin), "exam-1", "schedule-1")

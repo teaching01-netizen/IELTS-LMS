@@ -32,11 +32,17 @@ type SATRawdataExport struct {
 }
 
 // SATRawdataSheet is one section-specific sheet in the RAWDATA workbook.
+//
+// ColumnCount and NumericColumns are optional: zero/empty means the frozen
+// SATRawdataColumns template (SAT Math, SAT Verbal). The SAT Forms sheet sets
+// both because its column set depends on the forms configured for the room.
 type SATRawdataSheet struct {
-	Name       string     `json:"name"`
-	SectionKey string     `json:"sectionKey"`
-	HeaderRows [][]string `json:"headerRows"`
-	Rows       [][]string `json:"rows"`
+	Name           string     `json:"name"`
+	SectionKey     string     `json:"sectionKey"`
+	HeaderRows     [][]string `json:"headerRows"`
+	Rows           [][]string `json:"rows"`
+	ColumnCount    int        `json:"columnCount,omitempty"`
+	NumericColumns []int      `json:"numericColumns,omitempty"`
 }
 
 // satRawdataModuleStateNotStarted: a module that exists but was never entered.
@@ -108,6 +114,11 @@ type satRawdataCell struct {
 // All reads run in a single read-only repeatable-read transaction so the file
 // describes one committed snapshot instead of a moving target while students
 // are still answering.
+//
+// The workbook carries the two section sheets for every permitted role, plus a
+// third SAT Forms sheet (one row per attempt: identity, form answers, four
+// derived statuses) for admin, admin_observer and proctor when the room
+// configures at least one form field.
 func (s *Service) ExportSATRawdata(ctx context.Context, actor auth.ActorContext, examID, scheduleID string) (*SATRawdataExport, error) {
 	examID = strings.TrimSpace(examID)
 	scheduleID = strings.TrimSpace(scheduleID)
@@ -135,6 +146,17 @@ func (s *Service) ExportSATRawdata(ctx context.Context, actor auth.ActorContext,
 	}
 
 	out := assembleSATRawdata(attempts, modules, cells, examID, scheduleID)
+	// The forms sheet is appended only for roles that may read candidate form
+	// answers, and only when a version in the room actually configures fields.
+	if satFormsVisibleTo(actor) {
+		formsSheet, err := loadSATFormsSheet(ctx, tx, actor, examID, scheduleID)
+		if err != nil {
+			return nil, err
+		}
+		if formsSheet != nil {
+			out.Sheets = append(out.Sheets, *formsSheet)
+		}
+	}
 	if err := validateSATRawdataHeaders(out.HeaderRows); err != nil {
 		return nil, err
 	}
@@ -142,10 +164,7 @@ func (s *Service) ExportSATRawdata(ctx context.Context, actor auth.ActorContext,
 		return nil, err
 	}
 	for _, sheet := range out.Sheets {
-		if err := validateSATRawdataHeaders(sheet.HeaderRows); err != nil {
-			return nil, err
-		}
-		if err := validateSATRawdataRows(sheet.Rows); err != nil {
+		if err := validateSATSheet(sheet); err != nil {
 			return nil, err
 		}
 	}

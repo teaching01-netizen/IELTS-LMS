@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ const (
 	StatusSubmitted         = "submitted"
 	StatusNotSubmitted      = "not_submitted"
 	StatusPendingCompletion = "pending_completion"
+	StatusPendingSection    = "pending_section"
 	StatusNotTracked        = "not_tracked"
 	StatusNotApplicable     = "not_applicable"
 )
@@ -78,9 +80,50 @@ const (
 	completedSQL    = `(a.delivery_status = 'submitted' AND COALESCE(a.proctor_status, 'active') <> 'terminated' AND s.status <> 'cancelled')`
 )
 
-func statusSQL(formKey string) string {
+// statusAliasPattern bounds the response-join alias a caller may inject into
+// the status expression: a lower-case SQL identifier, never an expression.
+var statusAliasPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+
+// StatusSQL returns the derived status CASE expression for one form key, bound
+// to the assessment_form_responses join aliased respAlias.
+//
+// It exists so a read-only report (the SAT RAWDATA "SAT Forms" sheet) selects
+// the exact vocabulary the staff forms screen derives, instead of a second
+// implementation that could drift (INV-2 of
+// docs/plans/2026-11-01-sat-forms-xlsx-export-low-level.md).
+//
+// The caller must supply these joins in its FROM clause:
+//
+//	student_attempts a
+//	exam_schedules s
+//	exam_versions v
+//	LEFT JOIN assessment_access_links l ON l.schedule_id = a.schedule_id
+//	LEFT JOIN assessment_form_responses <respAlias>
+//	       ON <respAlias>.attempt_id = a.id AND <respAlias>.form_key = '<formKey>'
+//
+// An unknown form key or a non-identifier alias is rejected rather than
+// silently mapped to the Eva SIM branch.
+func StatusSQL(formKey, respAlias string) (string, error) {
+	switch formKey {
+	case definition.FormRegistration, definition.FormVerbalEntry, definition.FormMathEntry, definition.FormEvaSim:
+	default:
+		return "", apperrors.New(apperrors.CodeValidation, "Unknown form key.")
+	}
+	if !statusAliasPattern.MatchString(respAlias) {
+		return "", apperrors.New(apperrors.CodeValidation, "Invalid response alias.")
+	}
+	return statusSQLFor(formKey, respAlias), nil
+}
+
+func statusSQL(formKey string) string { return statusSQLFor(formKey, "r") }
+
+func statusSQLFor(formKey, respAlias string) string {
+	// Every branch keys on the response row's attempt id; the alias is the only
+	// caller-controlled fragment and has already been validated by StatusSQL
+	// (or is the fixed "r" for the staff list).
+	response := respAlias + ".attempt_id"
 	if formKey == definition.FormRegistration {
-		return `CASE WHEN r.attempt_id IS NOT NULL THEN 'submitted' WHEN NOT ` + hasFormsSQL + ` OR NOT ` + hasRegSQL + ` THEN 'not_applicable' ELSE 'not_submitted' END`
+		return `CASE WHEN ` + response + ` IS NOT NULL THEN 'submitted' WHEN NOT ` + hasFormsSQL + ` OR NOT ` + hasRegSQL + ` THEN 'not_applicable' ELSE 'not_submitted' END`
 	}
 	if formKey == definition.FormVerbalEntry || formKey == definition.FormMathEntry {
 		section := definition.SectionReadingWriting
@@ -90,11 +133,11 @@ func statusSQL(formKey string) string {
 		hasSection := `COALESCE(JSON_EXTRACT(v.config_snapshot,'$.forms.schemaVersion')=2,FALSE) AND NOT (JSON_EXTRACT(v.config_snapshot,'$.forms.sectionEntry."` + section + `".enabled') <=> CAST('false' AS JSON)) AND COALESCE(JSON_LENGTH(v.config_snapshot,'$.forms.sectionEntry."` + section + `".fields'),0)>0`
 		applies := `(COALESCE(v.sat_publish_scope,'') IN ('','full','` + section + `') AND (l.enabled_sections IS NULL OR JSON_CONTAINS(l.enabled_sections,'"` + section + `"')))`
 		ready := `EXISTS (SELECT 1 FROM assessment_module_attempts ma JOIN assessment_modules m ON m.id=ma.module_id JOIN assessment_sections sec ON sec.id=m.section_id WHERE ma.attempt_id=a.id AND sec.section_key='` + section + `') AND NOT EXISTS (SELECT 1 FROM assessment_attempt_breaks b WHERE b.attempt_id=a.id AND b.state<>'completed')`
-		return `CASE WHEN NOT (` + hasSection + `) OR NOT ` + applies + ` THEN 'not_applicable' WHEN r.attempt_id IS NOT NULL THEN 'submitted' WHEN NOT (` + ready + `) THEN 'pending_section' ELSE 'not_submitted' END`
+		return `CASE WHEN NOT (` + hasSection + `) OR NOT ` + applies + ` THEN 'not_applicable' WHEN ` + response + ` IS NOT NULL THEN 'submitted' WHEN NOT (` + ready + `) THEN 'pending_section' ELSE 'not_submitted' END`
 	}
 	return `CASE WHEN NOT ` + hasFormsSQL + ` OR NOT ` + evaEnabledSQL + ` OR NOT ` + includesMathSQL + ` THEN 'not_applicable'
 	WHEN ` + evaModeSQL + ` = 'embed' THEN 'not_tracked'
-	WHEN r.attempt_id IS NOT NULL THEN 'submitted'
+	WHEN ` + response + ` IS NOT NULL THEN 'submitted'
 	WHEN NOT ` + completedSQL + ` THEN 'pending_completion'
 	ELSE 'not_submitted' END`
 }
@@ -235,7 +278,7 @@ func (s *Service) ListResponses(ctx context.Context, viewer Viewer, f ListFilter
 	switch f.Status {
 	case "":
 		query += " AND t.form_status <> 'not_applicable'"
-	case StatusSubmitted, StatusNotSubmitted, StatusPendingCompletion, StatusNotTracked, StatusNotApplicable, "pending_section":
+	case StatusSubmitted, StatusNotSubmitted, StatusPendingCompletion, StatusNotTracked, StatusNotApplicable, StatusPendingSection:
 		query += " AND t.form_status = ?"
 		args = append(args, f.Status)
 	default:

@@ -5948,6 +5948,68 @@ textarea.sat-input {
 .sat-tool-calculator .sat-tool-resize-edge-ne::after { inset: var(--sat-tool-edge-outside) var(--sat-tool-edge-outside) auto auto; width: 16px; height: 16px; border-top-width: 2px; border-right-width: 2px; }
 .sat-tool-calculator .sat-tool-resize-edge-nw::after { inset: var(--sat-tool-edge-outside) auto auto var(--sat-tool-edge-outside); width: 16px; height: 16px; border-top-width: 2px; border-left-width: 2px; }
 .sat-tool-calculator .sat-tool-resize-edge-sw::after { inset: auto auto var(--sat-tool-edge-outside) var(--sat-tool-edge-outside); width: 16px; height: 16px; border-bottom-width: 2px; border-left-width: 2px; }
+/* Touch: every resize target lives in a band OUTSIDE the window so Desmos
+   keeps all of its pixels; corners are L-shaped (clip-path) and always show
+   a bracket telling the student where to grab. */
+@media (pointer: coarse) {
+  .sat-ui.sat-tool-calculator[data-sat-tool-resizable="true"] {
+    /* Physical pixels, not zoom-plane pixels: --sat-tool-unit is 1/scale, so
+       these stay 20px/28px on screen at every Display zoom. Without this the
+       band doubles at 200% and creeps inside Desmos, and shrinks to 10px at
+       50% — a fingertip target that is no longer a fingertip target. */
+    --sat-tool-edge-zone: 0px;
+    --sat-tool-edge-outside: calc(20 * var(--sat-tool-unit, 1px));
+    --sat-tool-corner-zone: calc(28 * var(--sat-tool-unit, 1px));
+    overflow: visible;
+  }
+  .sat-tool-calculator :is(.sat-tool-resize-edge-ne, .sat-tool-resize-edge-nw, .sat-tool-resize-edge-sw, [data-sat-resize-handle]) {
+    width: calc(var(--sat-tool-edge-outside) + var(--sat-tool-corner-zone));
+    height: calc(var(--sat-tool-edge-outside) + var(--sat-tool-corner-zone));
+    padding: 0;
+    background: transparent;
+    opacity: 1;
+  }
+  .sat-tool-calculator [data-sat-resize-handle] {
+    right: calc(var(--sat-tool-edge-outside) * -1);
+    bottom: calc(var(--sat-tool-edge-outside) * -1);
+    clip-path: polygon(var(--sat-tool-corner-zone) 0, 100% 0, 100% 100%, 0 100%, 0 var(--sat-tool-corner-zone), var(--sat-tool-corner-zone) var(--sat-tool-corner-zone));
+  }
+  .sat-tool-calculator .sat-tool-resize-edge-ne {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, var(--sat-tool-corner-zone) 100%, var(--sat-tool-corner-zone) var(--sat-tool-edge-outside), 0 var(--sat-tool-edge-outside));
+  }
+  .sat-tool-calculator .sat-tool-resize-edge-nw {
+    clip-path: polygon(0 0, 100% 0, 100% var(--sat-tool-edge-outside), var(--sat-tool-edge-outside) var(--sat-tool-edge-outside), var(--sat-tool-edge-outside) 100%, 0 100%);
+  }
+  .sat-tool-calculator .sat-tool-resize-edge-sw {
+    clip-path: polygon(0 0, var(--sat-tool-edge-outside) 0, var(--sat-tool-edge-outside) var(--sat-tool-corner-zone), 100% var(--sat-tool-corner-zone), 100% 100%, 0 100%);
+  }
+  .sat-tool-calculator [data-sat-resize-handle] > span { display: none; }
+  /* Edge feedback lines sit just outside the window and never take touches. */
+  .sat-tool-calculator :is(.sat-tool-resize-edge, [data-sat-resize-handle])::after { pointer-events: none; }
+  .sat-tool-calculator .sat-tool-resize-edge-n::after { inset: calc(var(--sat-tool-edge-outside) - 2 * var(--sat-tool-unit, 1px)) 0 auto; }
+  .sat-tool-calculator .sat-tool-resize-edge-s::after { inset: auto 0 calc(var(--sat-tool-edge-outside) - 2 * var(--sat-tool-unit, 1px)); }
+  .sat-tool-calculator .sat-tool-resize-edge-e::after { inset: 0 calc(var(--sat-tool-edge-outside) - 2 * var(--sat-tool-unit, 1px)) 0 auto; }
+  .sat-tool-calculator .sat-tool-resize-edge-w::after { inset: 0 auto 0 calc(var(--sat-tool-edge-outside) - 2 * var(--sat-tool-unit, 1px)); }
+  /* Bracket: 4px stroke, 4px gap from the window edge, 24px arms. */
+  .sat-tool-calculator :is(.sat-tool-resize-edge-ne, .sat-tool-resize-edge-nw, .sat-tool-resize-edge-sw, [data-sat-resize-handle])::after {
+    content: "";
+    position: absolute;
+    inset: auto;
+    width: calc(24 * var(--sat-tool-unit, 1px));
+    height: calc(24 * var(--sat-tool-unit, 1px));
+    opacity: 1;
+    border: 0 solid var(--sat-ref-header-bg);
+    transition: border-color var(--sat-tool-edge-reveal) var(--sat-tool-motion-ease);
+  }
+  .sat-tool-calculator [data-sat-resize-handle]::after { right: calc(12 * var(--sat-tool-unit, 1px)); bottom: calc(12 * var(--sat-tool-unit, 1px)); border-right-width: calc(4 * var(--sat-tool-unit, 1px)); border-bottom-width: calc(4 * var(--sat-tool-unit, 1px)); border-bottom-right-radius: calc(6 * var(--sat-tool-unit, 1px)); }
+  .sat-tool-calculator .sat-tool-resize-edge-ne::after { inset: calc(12 * var(--sat-tool-unit, 1px)) calc(12 * var(--sat-tool-unit, 1px)) auto auto; width: calc(24 * var(--sat-tool-unit, 1px)); height: calc(24 * var(--sat-tool-unit, 1px)); border-top-width: calc(4 * var(--sat-tool-unit, 1px)); border-right-width: calc(4 * var(--sat-tool-unit, 1px)); border-top-right-radius: calc(6 * var(--sat-tool-unit, 1px)); }
+  .sat-tool-calculator .sat-tool-resize-edge-nw::after { inset: calc(12 * var(--sat-tool-unit, 1px)) auto auto calc(12 * var(--sat-tool-unit, 1px)); width: calc(24 * var(--sat-tool-unit, 1px)); height: calc(24 * var(--sat-tool-unit, 1px)); border-top-width: calc(4 * var(--sat-tool-unit, 1px)); border-left-width: calc(4 * var(--sat-tool-unit, 1px)); border-top-left-radius: calc(6 * var(--sat-tool-unit, 1px)); }
+  .sat-tool-calculator .sat-tool-resize-edge-sw::after { inset: auto auto calc(12 * var(--sat-tool-unit, 1px)) calc(12 * var(--sat-tool-unit, 1px)); width: calc(24 * var(--sat-tool-unit, 1px)); height: calc(24 * var(--sat-tool-unit, 1px)); border-bottom-width: calc(4 * var(--sat-tool-unit, 1px)); border-left-width: calc(4 * var(--sat-tool-unit, 1px)); border-bottom-left-radius: calc(6 * var(--sat-tool-unit, 1px)); }
+  .sat-tool-calculator :is(.sat-tool-resize-edge-ne, .sat-tool-resize-edge-nw, .sat-tool-resize-edge-sw, [data-sat-resize-handle]):is(:active, :focus-visible)::after,
+  .sat-tool-calculator[data-sat-resizing="true"] [data-sat-resize-handle]::after {
+    border-color: var(--sat-focus);
+  }
+}
 /* Compact chrome leaves a readable tool viewport on short or narrow screens. */
 @media (max-width: 719px), (max-height: 560px) {
   .sat-exam-topbar,
