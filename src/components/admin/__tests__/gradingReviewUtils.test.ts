@@ -477,7 +477,7 @@ describe('gradingReviewUtils', () => {
     expect(exportData.rows[0]?.['maxScore']).toBe(2);
   });
 
-  test('recomputes legacy MULTI_MCQ result rows from the marked option set', () => {
+  test('keeps a legacy MULTI_MCQ saved score until the submission is regraded', () => {
     const examState = createInitialExamState('Exam', 'Academic');
     examState.reading.passages[0]!.blocks = [{
       id: 'multi-legacy-score',
@@ -501,8 +501,8 @@ describe('gradingReviewUtils', () => {
 
     const groups = buildQuestionTracebackGroups(examState, sectionSubmission, 'reading');
     expect(groups[0]?.items[0]?.correctness).toBe(false);
-    expect(groups[0]?.items[0]?.awardedScore).toBe(1);
-    expect(groups[0]?.items[0]?.maxScore).toBe(2);
+    expect(groups[0]?.items[0]?.awardedScore).toBe(0);
+    expect(groups[0]?.items[0]?.maxScore).toBe(1);
 
     const exportData = buildWideObjectiveExport({
       session: { sessionId: 'session-legacy', examTitle: 'Exam' },
@@ -512,9 +512,9 @@ describe('gradingReviewUtils', () => {
       moduleType: 'reading',
     });
 
-    expect(exportData.rows[0]?.['score:multi-legacy-score']).toBe(1);
-    expect(exportData.rows[0]?.['totalScore']).toBe(1);
-    expect(exportData.rows[0]?.['maxScore']).toBe(2);
+    expect(exportData.rows[0]?.['score:multi-legacy-score']).toBe(0);
+    expect(exportData.rows[0]?.['totalScore']).toBe(0);
+    expect(exportData.rows[0]?.['maxScore']).toBe(1);
   });
 
   test('exports every accepted answer for a table-completion cell', () => {
@@ -1271,7 +1271,7 @@ describe('gradingReviewUtils', () => {
 
     expect(exportData.rows[0]?.['answer:q-2']).toBe('');
     expect(exportData.rows[0]?.['rightAnswer:q-2']).toBe('Beta');
-    expect(exportData.rows[0]?.['score:q-2']).toBe('');
+    expect(exportData.rows[0]?.['score:q-2']).toBe(0);
   });
 
   test('falls back to the nearest lower threshold when deriving IELTS band score', () => {

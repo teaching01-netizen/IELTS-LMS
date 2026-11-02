@@ -42,6 +42,8 @@ import {
   ObjectiveOverrideMutationResponse,
   ObjectiveLatestDraftRegradeRequest,
   ObjectiveLatestDraftRegradeResponse,
+  ObjectiveRegradePreview,
+  ObjectiveRegradeReleasedResponse,
   ObjectiveOverrideUpsertRequest,
   ObjectiveQuestionOverrideRequest,
   ObjectiveIntegrityOverview,
@@ -332,6 +334,35 @@ export class GradingService {
       return { success: true, data: response };
     } catch (error) {
       return { success: false, error: gradingServiceError('Failed to regrade objective sections', error) };
+    }
+  }
+
+  async previewObjectiveRegrade(
+    scheduleId: string,
+    scope: 'all' | 'released' | 'unreleased' = 'all',
+  ): Promise<GradingServiceResult<ObjectiveRegradePreview>> {
+    try {
+      const response = await backendGet<ObjectiveRegradePreview>(
+        `/v1/grading/schedules/${scheduleId}/objective-regrade-preview?scope=${encodeURIComponent(scope)}`,
+      );
+      return { success: true, data: response };
+    } catch (error) {
+      return { success: false, error: gradingServiceError('Failed to preview objective regrade', error) };
+    }
+  }
+
+  async regradeReleasedObjective(
+    scheduleId: string,
+    request: { reason: string; previewToken: string },
+  ): Promise<GradingServiceResult<ObjectiveRegradeReleasedResponse>> {
+    try {
+      const response = await backendPost<ObjectiveRegradeReleasedResponse>(
+        `/v1/grading/schedules/${scheduleId}/objective-regrade-released`,
+        request,
+      );
+      return { success: true, data: response };
+    } catch (error) {
+      return { success: false, error: gradingServiceError('Failed to regrade released objective results', error) };
     }
   }
 

@@ -1,0 +1,86 @@
+name: grading parity
+
+on:
+  pull_request:
+    paths:
+      - "src/components/admin/grading**"
+      - "src/features/grading/**"
+      - "src/utils/acceptedAnswers.ts"
+      - "src/utils/sentenceCompletionAnswerPool.ts"
+      - "src/utils/subAnswerTree.ts"
+      - "src/utils/subAnswerTreeSlots.ts"
+      - "src/utils/multiSelectMcq.ts"
+      - "src/services/examAdapterService.ts"
+      - "backend/go/internal/grading/**"
+      - "backend/go/internal/exams/**"
+      - "backend/go/cmd/grading-parity-grade/**"
+      - "backend/scripts/grading-parity.ts"
+      - "testdata/objective-grading-parity/**"
+      - "package.json"
+      - "bun.lock"
+      - "backend/go/go.mod"
+      - "backend/go/go.sum"
+      - ".github/workflows/grading-parity.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**/grading**"
+      - "backend/go/internal/grading/**"
+      - "testdata/objective-grading-parity/**"
+      - ".github/workflows/grading-parity.yml"
+
+jobs:
+  go-grading:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go/go.mod
+      - name: Go grading + publish-key tests
+        working-directory: backend/go
+        run: go test -count=1 ./internal/grading ./internal/exams
+
+  website-grading:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: bun install --frozen-lockfile
+      - name: Shared answer-cleaning fixture
+        run: bunx vitest run src/utils/__tests__/answerCleaningParity.test.ts src/utils/__tests__/acceptedAnswers.test.ts
+      - name: Key-source table + objective scoring
+        run: bunx vitest run src/components/admin/__tests__/gradingKeySources.test.ts src/features/grading/__tests__/objectiveScoring.test.ts
+
+  parity-report:
+    runs-on: ubuntu-latest
+    needs: [go-grading, website-grading]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go/go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: bun install --frozen-lockfile
+      - name: Replay the full-coverage exam through both graders
+        run: |
+          bun backend/scripts/grading-parity.ts \
+            --fixture testdata/objective-grading-parity/full-coverage-exam.json \
+            --label ci \
+            --out /tmp/grading-parity-report.json \
+            --fail-on-mismatch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: grading-parity-report
+          path: /tmp/grading-parity-report.json

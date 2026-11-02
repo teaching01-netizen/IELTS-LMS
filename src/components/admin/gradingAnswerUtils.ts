@@ -4,7 +4,8 @@ import type {
 import { getQuestionAnswer } from '../../features/exam-authoring/api/examAuthoringGateway';
 import type { StudentAnswerValue } from '../../types/answers';
 import type { SentenceCompletionQuestion } from '../../types';
-import { normalizeAnswerForMatching, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
+import { answersMatch, normalizeAnswerForMatching, resolveAcceptedAnswers, sanitizeAcceptedAnswers } from '../../utils/acceptedAnswers';
+import { flattenSubAnswerTree } from '../../utils/subAnswerTree';
 import { getSharedSentenceAnswerPool, matchSharedSentenceAnswers } from '../../utils/sentenceCompletionAnswerPool';
 
 type UnknownRecord = Record<string, unknown>;
@@ -455,6 +456,9 @@ export function getMultiSelectAnswerScore(
   }
 
   const studentSet = exactIdSetFromUnknown(getQuestionAnswer(descriptor, answerMap));
+  if (studentSet.size > correctSet.size) {
+    return { awardedScore: 0, maxScore: correctSet.size };
+  }
   const awardedScore = Array.from(studentSet).filter((id) => correctSet.has(id)).length;
 
   return {
@@ -463,22 +467,118 @@ export function getMultiSelectAnswerScore(
   };
 }
 
+function resolveKeyFields(entry: unknown, fields: readonly string[]): string[] {
+  if (!entry || typeof entry !== 'object') {
+    return [];
+  }
+  const record = entry as Record<string, unknown>;
+  for (const field of fields) {
+    const raw = record[field];
+    if (Array.isArray(raw)) {
+      const list = sanitizeAcceptedAnswers(raw.filter((value): value is string => typeof value === 'string'));
+      if (list.length > 0) return list;
+    } else if (typeof raw === 'string') {
+      const list = sanitizeAcceptedAnswers([raw]);
+      if (list.length > 0) return list;
+    }
+  }
+  return [];
+}
+
+const KEY_SOURCE_FIELDS: Record<string, readonly string[]> = {
+  TFNG: ['correctAnswer', 'acceptedAnswers'],
+  CLOZE: ['acceptedAnswers', 'correctAnswer'],
+  MATCHING: ['acceptedAnswers', 'correctHeading', 'correctAnswer'],
+  MAP: ['correctAnswer', 'acceptedAnswers'],
+  SHORT_ANSWER: ['acceptedAnswers', 'correctAnswer'],
+  SENTENCE_COMPLETION: ['acceptedAnswers', 'correctAnswer'],
+  NOTE_COMPLETION: ['acceptedAnswers', 'correctAnswer'],
+  DIAGRAM_LABELING: ['acceptedAnswers', 'correctAnswer'],
+  FLOW_CHART: ['acceptedAnswers', 'correctAnswer'],
+  TABLE_COMPLETION: ['acceptedAnswers', 'correctAnswer'],
+  CLASSIFICATION: ['acceptedAnswers', 'correctCategory', 'correctAnswer'],
+  MATCHING_FEATURES: ['acceptedAnswers', 'correctMatch', 'correctAnswer'],
+};
+
+/**
+ * The website side of the key-source table. This is the only function grading
+ * should use to decide which accepted answers apply to a descriptor.
+ */
+export function getEffectiveAcceptedAnswersForGrading(
+  descriptor: StudentQuestionDescriptor,
+): string[] {
+  const { block, question, answerIndex } = descriptor;
+
+  if (block.type === 'MULTI_MCQ') {
+    const options = Array.isArray(block.options) ? block.options : [];
+    return options.filter((option) => option.isCorrect).map((option) => option.id);
+  }
+
+  if (descriptor.isSubAnswerTreeLeaf) {
+    const tree = (block as { answerTree?: Parameters<typeof flattenSubAnswerTree>[1] }).answerTree;
+    const leaf = flattenSubAnswerTree(block.id, tree, 1).leaves.find((entry) => entry.id === descriptor.id);
+    return leaf ? sanitizeAcceptedAnswers(leaf.acceptedAnswers) : [];
+  }
+
+  const fields = KEY_SOURCE_FIELDS[block.type] ?? ['acceptedAnswers', 'correctAnswer'];
+
+  if (block.type === 'SENTENCE_COMPLETION') {
+    if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return [];
+    const sentenceQuestion = question as SentenceCompletionQuestion;
+    if (sentenceQuestion.acceptAnyAnswerKey === true) {
+      return getSharedSentenceAnswerPool(sentenceQuestion);
+    }
+    if (typeof answerIndex !== 'number') return [];
+    return resolveKeyFields(question.blanks[answerIndex], fields);
+  }
+
+  if (block.type === 'NOTE_COMPLETION') {
+    if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return [];
+    if (typeof answerIndex !== 'number') return [];
+    return resolveKeyFields(question.blanks[answerIndex], fields);
+  }
+
+  if (block.type === 'TABLE_COMPLETION') {
+    if (!Array.isArray(block.cells) || typeof answerIndex !== 'number') return [];
+    return resolveKeyFields(block.cells[answerIndex], fields);
+  }
+
+  if (block.type === 'DIAGRAM_LABELING') {
+    if (!Array.isArray(block.labels) || typeof answerIndex !== 'number') return [];
+    return resolveKeyFields(block.labels[answerIndex], fields);
+  }
+
+  if (block.type === 'FLOW_CHART') {
+    if (!Array.isArray(block.steps) || typeof answerIndex !== 'number') return [];
+    return resolveKeyFields(block.steps[answerIndex], fields);
+  }
+
+  if (block.type === 'CLASSIFICATION') {
+    if (!Array.isArray(block.items) || typeof answerIndex !== 'number') return [];
+    return resolveKeyFields(block.items[answerIndex], fields);
+  }
+
+  if (block.type === 'MATCHING_FEATURES') {
+    if (!Array.isArray(block.features) || typeof answerIndex !== 'number') return [];
+    return resolveKeyFields(block.features[answerIndex], fields);
+  }
+
+  return resolveKeyFields(question, fields);
+}
+
 export function isStudentAnswerCorrect(
   descriptor: StudentQuestionDescriptor,
   answerMap: Record<string, StudentAnswerValue | undefined>,
 ): boolean | null {
   const correct = getCorrectAnswerValue(descriptor);
   const student = getQuestionAnswer(descriptor, answerMap);
-  const acceptedAnswers = getAcceptedAnswersForDescriptor(descriptor);
+  const acceptedAnswers = descriptor.block.type === 'MULTI_MCQ'
+    ? null
+    : getEffectiveAcceptedAnswersForGrading(descriptor);
 
   if (acceptedAnswers && acceptedAnswers.length > 0) {
-    const studentText = normalizeComparable(formatAnswerValue(student));
-    if (studentText === '') {
-      return false;
-    }
-    return acceptedAnswers.some(
-      (answer) => normalizeComparable(answer) === studentText,
-    );
+    const studentText = formatAnswerValue(student);
+    return acceptedAnswers.some((answer) => answersMatch(studentText, answer));
   }
 
   if (correct === null || correct === undefined) {

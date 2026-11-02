@@ -16,6 +16,7 @@ import { ConfirmModal } from '../ConfirmModal';
 import { Dialog } from '@components/ui/Dialog';
 import { StudentReportPreview } from './StudentReportPreview';
 import { QuestionTracebackPanel } from './QuestionTracebackPanel';
+import { deriveIeltsBandScore } from './gradingReviewUtils';
 import { SectionLoadingSkeleton } from '@components/ui';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
@@ -393,13 +394,20 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             ? task1Band
             : Math.round(((task1Band + task2Band) / 2) * 2) / 2;
 
+    const savedObjectiveBand = (module: 'listening' | 'reading'): number => {
+      const saved = sectionSubmissions.find((entry) => entry.section === module)?.autoGradingResults;
+      if (!saved || typeof saved.totalScore !== 'number') return 0;
+      const band = deriveIeltsBandScore(examState, module, saved.totalScore);
+      return typeof band === 'number' ? band : 0;
+    };
+
     return {
-      listening: reviewDraft.sectionDrafts.listening?.overallBand ?? 0,
-      reading: reviewDraft.sectionDrafts.reading?.overallBand ?? 0,
+      listening: savedObjectiveBand('listening') || reviewDraft.sectionDrafts.listening?.overallBand || 0,
+      reading: savedObjectiveBand('reading') || reviewDraft.sectionDrafts.reading?.overallBand || 0,
       writing: writingBand,
       speaking: reviewDraft.sectionDrafts.speaking?.overallBand ?? 0,
     };
-  }, [reviewDraft]);
+  }, [examState, reviewDraft, sectionSubmissions]);
 
   const previewOverallBand = useMemo(() => {
     if (!reviewDraft) {

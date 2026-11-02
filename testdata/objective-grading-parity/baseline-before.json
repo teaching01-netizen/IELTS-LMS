@@ -1,0 +1,270 @@
+{
+  "generatedAt": "2026-11-02T16:11:20.832Z",
+  "label": "before",
+  "mode": "fixture",
+  "summary": {
+    "submissions": 1,
+    "released": 0,
+    "unreleased": 1,
+    "cases": 1,
+    "affectedStudents": 1,
+    "affectedQuestions": 10,
+    "mismatches": 10,
+    "mismatchesReleased": 0,
+    "mismatchesUnreleased": 10
+  },
+  "mismatches": [
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "block-classification:ci1",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": false,
+        "awardedScore": 0,
+        "maxScore": 1,
+        "status": "verified_incorrect"
+      },
+      "website": {
+        "correctness": true,
+        "awardedScore": 1,
+        "maxScore": 1,
+        "status": "verified_correct"
+      },
+      "reasons": [
+        "correctness",
+        "awardedScore"
+      ]
+    },
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "block-diagram:l1",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": true,
+        "awardedScore": 1,
+        "maxScore": 1,
+        "status": "verified_correct"
+      },
+      "website": {
+        "correctness": false,
+        "awardedScore": 0,
+        "maxScore": 1,
+        "status": "verified_incorrect"
+      },
+      "reasons": [
+        "correctness",
+        "awardedScore"
+      ]
+    },
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "block-multi",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": false,
+        "awardedScore": 0,
+        "maxScore": 1,
+        "status": "verified_incorrect"
+      },
+      "website": {
+        "correctness": false,
+        "awardedScore": 1,
+        "maxScore": 2,
+        "status": "verified_incorrect"
+      },
+      "reasons": [
+        "awardedScore",
+        "maxScore"
+      ]
+    },
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "block-tree::tree::r1::lf1",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": true,
+        "awardedScore": 1,
+        "maxScore": 1,
+        "status": "verified_correct"
+      },
+      "website": {
+        "correctness": null,
+        "awardedScore": null,
+        "maxScore": null,
+        "status": "invalid"
+      },
+      "reasons": [
+        "correctness",
+        "awardedScore",
+        "maxScore"
+      ]
+    },
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "block-tree::tree::r1::lf2",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": true,
+        "awardedScore": 1,
+        "maxScore": 1,
+        "status": "verified_correct"
+      },
+      "website": {
+        "correctness": null,
+        "awardedScore": null,
+        "maxScore": null,
+        "status": "invalid"
+      },
+      "reasons": [
+        "correctness",
+        "awardedScore",
+        "maxScore"
+      ]
+    },
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "q1",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": true,
+        "awardedScore": 1,
+        "maxScore": 1,
+        "status": "verified_correct"
+      },
+      "website": {
+        "correctness": false,
+        "awardedScore": 0,
+        "maxScore": 1,
+        "status": "verified_incorrect"
+      },
+      "reasons": [
+        "correctness",
+        "awardedScore"
+      ]
+    },
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "q3",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": false,
+        "awardedScore": 0,
+        "maxScore": 1,
+        "status": "invalid"
+      },
+      "website": {
+        "correctness": true,
+        "awardedScore": 1,
+        "maxScore": 1,
+        "status": "verified_correct"
+      },
+      "reasons": [
+        "correctness",
+        "awardedScore"
+      ]
+    },
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "q4",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": true,
+        "awardedScore": 1,
+        "maxScore": 1,
+        "status": "verified_correct"
+      },
+      "website": {
+        "correctness": false,
+        "awardedScore": 0,
+        "maxScore": 1,
+        "status": "verified_incorrect"
+      },
+      "reasons": [
+        "correctness",
+        "awardedScore"
+      ]
+    },
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "s1:b1",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": false,
+        "awardedScore": 0,
+        "maxScore": 1,
+        "status": "verified_incorrect"
+      },
+      "website": {
+        "correctness": true,
+        "awardedScore": 1,
+        "maxScore": 1,
+        "status": "verified_correct"
+      },
+      "reasons": [
+        "correctness",
+        "awardedScore"
+      ]
+    },
+    {
+      "caseId": "baseline-reading",
+      "submissionId": "sub-baseline-1",
+      "scheduleId": "sch-baseline-1",
+      "section": "reading",
+      "questionId": "s1:b2",
+      "released": false,
+      "saved": null,
+      "go": {
+        "correctness": false,
+        "awardedScore": 0,
+        "maxScore": 1,
+        "status": "verified_incorrect"
+      },
+      "website": {
+        "correctness": true,
+        "awardedScore": 1,
+        "maxScore": 1,
+        "status": "verified_correct"
+      },
+      "reasons": [
+        "correctness",
+        "awardedScore"
+      ]
+    }
+  ]
+}

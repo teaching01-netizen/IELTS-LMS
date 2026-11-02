@@ -119,7 +119,7 @@ describe('sentence completion shared answer pool', () => {
     expect(mergeSharedSentenceAnswerPool(question)).toEqual([]);
   });
 
-  it('counts exact-case normalized keys once', () => {
+  it('counts normalized keys once, ignoring case', () => {
     const question = buildQuestion({
       acceptAnyAnswerKey: true,
       sharedAcceptedAnswers: ['Physical Chemistry', 'physical-chemistry', 'THERMODYNAMICS'],
@@ -129,7 +129,7 @@ describe('sentence completion shared answer pool', () => {
       ],
     });
 
-    expect(countUniqueSharedSentenceKeys(question)).toBe(3);
+    expect(countUniqueSharedSentenceKeys(question)).toBe(2);
   });
 
   it('allows permutations but consumes one matching key only once', () => {
@@ -138,12 +138,12 @@ describe('sentence completion shared answer pool', () => {
     expect(matchSharedSentenceAnswers(['unknown', 'alpha'], ['alpha', 'beta'])).toEqual([false, true]);
   });
 
-  it('requires answer-key case while normalizing formatting and leaving empty values unmatched', () => {
+  it('ignores answer-key case while normalizing formatting and leaving empty values unmatched', () => {
     expect(
       matchSharedSentenceAnswers(
         ['  ALPHA ', '', null, 'physical-chemistry'],
         ['alpha', 'physical chemistry'],
       ),
-    ).toEqual([false, false, false, true]);
+    ).toEqual([true, false, false, true]);
   });
 });

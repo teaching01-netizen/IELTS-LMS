@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { AlertTriangle, BookOpen, CheckCircle2, FileText, Hash } from 'lucide-react';
 import type { ExamState } from '../../types';
 import type {
@@ -8,8 +8,10 @@ import type {
 } from '../../types/grading';
 import {
   buildQuestionTracebackGroups,
+  findSavedScoreMismatches,
   type ObjectiveTracebackGroup,
 } from './gradingReviewUtils';
+import { logger } from '../../utils/logger';
 import { extractObjectiveAnswerMap } from './gradingAnswerUtils';
 import { describeObjectiveIntegrityIssue } from './ObjectiveIntegrityAuditSection';
 
@@ -360,6 +362,35 @@ export function QuestionTracebackPanel({
     [section, sectionSubmission],
   );
   const groups = schemaGroups.length > 0 || examLoading ? schemaGroups : fallbackGroups;
+  const savedScoreMismatches = useMemo(
+    () => findSavedScoreMismatches(examState, sectionSubmission, section),
+    [examState, section, sectionSubmission],
+  );
+  const loggedMismatchKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!sectionSubmission || savedScoreMismatches.length === 0) {
+      loggedMismatchKey.current = null;
+      return;
+    }
+    const key = [
+      sectionSubmission.id,
+      sectionSubmission.autoGradingResults?.generatedAt ?? '',
+      ...savedScoreMismatches.map((mismatch) => mismatch.questionId),
+    ].join('|');
+    if (loggedMismatchKey.current === key) {
+      return;
+    }
+    loggedMismatchKey.current = key;
+    logger.error('client_server_mismatch', {
+      issueCode: 'client_server_mismatch',
+      submissionId: sectionSubmission.submissionId,
+      sectionId: sectionSubmission.id,
+      section,
+      questionIds: savedScoreMismatches.map((mismatch) => mismatch.questionId),
+      reasons: savedScoreMismatches.map((mismatch) => mismatch.reasons),
+    });
+  }, [section, sectionSubmission, savedScoreMismatches]);
 
   const storedAnswerAudit = sectionSubmission?.autoGradingResults?.integrity;
   const showStoredAnswerAudit = Boolean(
@@ -441,6 +472,25 @@ export function QuestionTracebackPanel({
 
       {showStoredAnswerAudit && storedAnswerAudit ? (
         <StoredAnswerAuditBanner audit={storedAnswerAudit} />
+      ) : null}
+
+      {savedScoreMismatches.length > 0 ? (
+        <div
+          role="alert"
+          aria-live="assertive"
+          tabIndex={0}
+          className="mx-4 mt-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2 md:mx-6"
+        >
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
+          <div>
+            <p className="font-semibold">Saved score is out of date — regrade</p>
+            <p className="mt-1">
+              {savedScoreMismatches.length} question
+              {savedScoreMismatches.length === 1 ? '' : 's'} disagree with the saved result. The saved
+              score is shown as the official score until this submission is regraded.
+            </p>
+          </div>
+        </div>
       ) : null}
 
       {examError ? (

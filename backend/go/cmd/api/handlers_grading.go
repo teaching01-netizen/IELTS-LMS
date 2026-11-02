@@ -1434,3 +1434,76 @@ func resultsGetHandler(app *App) http.HandlerFunc {
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
 }
+
+// gradingRegradePreviewHandler plans a regrade without writing anything.
+// Graders are fenced to their assigned schedules before the preview runs.
+func gradingRegradePreviewHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess := requireRole(w, r, auth.RoleAdmin, auth.RoleGrader)
+		if sess == nil {
+			return
+		}
+		if !requireGradingDB(w, r, app) {
+			return
+		}
+		if app.Grading == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Grading service not configured."))
+			return
+		}
+		scheduleID := chi.URLParam(r, "scheduleID")
+		if sess.Role == auth.RoleGrader {
+			if err := requireGraderSchedule(r.Context(), app.DB, sess.UserID, scheduleID); err != nil {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Resource not found."))
+				return
+			}
+		}
+		preview, err := app.Grading.PreviewScheduleObjectiveRegrade(r.Context(), scheduleID, r.URL.Query().Get("scope"))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, preview)
+	}
+}
+
+// gradingRegradeReleasedHandler applies a released-only preview through the
+// audited action. Normal regrade still skips released results.
+func gradingRegradeReleasedHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess := requireRole(w, r, auth.RoleAdmin, auth.RoleGrader)
+		if sess == nil {
+			return
+		}
+		if !requireGradingDB(w, r, app) {
+			return
+		}
+		if app.Grading == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "Grading service not configured."))
+			return
+		}
+		scheduleID := chi.URLParam(r, "scheduleID")
+		if sess.Role == auth.RoleGrader {
+			if err := requireGraderSchedule(r.Context(), app.DB, sess.UserID, scheduleID); err != nil {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeNotFound, "Resource not found."))
+				return
+			}
+		}
+		var req struct {
+			Reason       string `json:"reason"`
+			PreviewToken string `json:"previewToken"`
+		}
+		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		preview, report, err := app.Grading.RegradeReleasedScheduleObjectives(r.Context(),
+			scheduleID, req.PreviewToken, req.Reason, sess.UserID, gradingActorName(r, app, sess.UserID))
+		if err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"preview": preview, "regradeReport": report,
+		})
+	}
+}

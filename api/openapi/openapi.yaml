@@ -1565,6 +1565,63 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /grading/schedules/{scheduleId}/objective-regrade-preview:
+    get:
+      tags: [grading]
+      summary: Preview an objective regrade without saving
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, released, unreleased]
+      responses:
+        "200":
+          description: Regrade preview
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /grading/schedules/{scheduleId}/objective-regrade-released:
+    post:
+      tags: [grading]
+      summary: Apply a previewed regrade to released results
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - name: scheduleId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, previewToken]
+              properties:
+                reason: { type: string }
+                previewToken: { type: string }
+      responses:
+        "200":
+          description: Released results regraded
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /grading/export:
     post:
       tags: [grading]

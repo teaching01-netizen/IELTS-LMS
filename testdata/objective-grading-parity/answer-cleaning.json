@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "description": "Shared answer-cleaning rule. Read by backend/go/internal/grading/normalize_test.go and src/utils/__tests__/answerCleaningParity.test.ts.",
+  "matchPairs": [
+    {
+      "name": "dots",
+      "student": "Dr. Smith",
+      "key": "Dr Smith",
+      "match": true
+    },
+    {
+      "name": "commas",
+      "student": "red, blue",
+      "key": "red blue",
+      "match": true
+    },
+    {
+      "name": "curly quotes",
+      "student": "“hello”",
+      "key": "hello",
+      "match": true
+    },
+    {
+      "name": "apostrophe",
+      "student": "don't",
+      "key": "dont",
+      "match": true
+    },
+    {
+      "name": "invisible zero width space",
+      "student": "waiter\u200b",
+      "key": "waiter",
+      "match": true
+    },
+    {
+      "name": "invisible soft hyphen and word joiner",
+      "student": "Gar\u00adden\u2060 hall",
+      "key": "garden hall",
+      "match": true
+    },
+    {
+      "name": "full width letters",
+      "student": "ＡＢＣ",
+      "key": "ABC",
+      "match": true
+    },
+    {
+      "name": "thai text",
+      "student": "ภาษาไทย",
+      "key": "ภาษาไทย",
+      "match": true
+    },
+    {
+      "name": "accented letters stay distinct",
+      "student": "café",
+      "key": "cafe",
+      "match": false
+    },
+    {
+      "name": "accented letters match exactly",
+      "student": "CAFÉ",
+      "key": "café",
+      "match": true
+    },
+    {
+      "name": "en dash becomes a space",
+      "student": "half–way",
+      "key": "half way",
+      "match": true
+    },
+    {
+      "name": "em dash becomes a space",
+      "student": "one—two",
+      "key": "one two",
+      "match": true
+    },
+    {
+      "name": "line breaks collapse",
+      "student": "line one\nline two",
+      "key": "line one line two",
+      "match": true
+    },
+    {
+      "name": "empty student never matches",
+      "student": "",
+      "key": "",
+      "match": false
+    },
+    {
+      "name": "whitespace-only student never matches",
+      "student": "   ",
+      "key": "",
+      "match": false
+    },
+    {
+      "name": "mixed case",
+      "student": "GARDEN HALL",
+      "key": "Garden hall",
+      "match": true
+    },
+    {
+      "name": "extra spaces",
+      "student": "  half   way  ",
+      "key": "half way",
+      "match": true
+    },
+    {
+      "name": "punctuation-only never matches",
+      "student": "...",
+      "key": "...",
+      "match": false
+    }
+  ],
+  "caseExactPairs": [
+    {
+      "name": "exclusion is case exact",
+      "student": "28 june",
+      "excluded": "28 June",
+      "match": false
+    },
+    {
+      "name": "exclusion matches exact case",
+      "student": "28 June",
+      "excluded": "28 June",
+      "match": true
+    },
+    {
+      "name": "exclusion still ignores punctuation",
+      "student": "28, June",
+      "excluded": "28 June",
+      "match": true
+    }
+  ],
+  "idempotent": [
+    "  Garden   Hall ",
+    "waiter\u200b",
+    "ＡＢＣ",
+    "ภาษาไทย",
+    "café",
+    "half–way",
+    "line one\nline two"
+  ]
+}

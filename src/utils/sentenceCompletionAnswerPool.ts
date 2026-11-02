@@ -12,7 +12,7 @@ export function getSharedSentenceAnswerPool(question: SentenceCompletionQuestion
   }
 
   if (question.sharedAcceptedAnswers !== undefined) {
-    return [...question.sharedAcceptedAnswers];
+    return sanitizeAcceptedAnswers(question.sharedAcceptedAnswers);
   }
 
   const seen = new Set<string>();

@@ -1154,6 +1154,9 @@ func (s *Service) publishDraftTx(ctx context.Context, q tx.Tx, actorID, examID s
 		if issues := validateContentShape(content, config, provider); len(issues) > 0 {
 			return Version{}, validationError("Draft content is invalid: " + issues[0].Message)
 		}
+		if err := validateObjectiveKeysForPublish(provider, content); err != nil {
+			return Version{}, err
+		}
 	}
 	if provider == ProviderSAT {
 		// New releases score every question. Clear legacy pretest flags on

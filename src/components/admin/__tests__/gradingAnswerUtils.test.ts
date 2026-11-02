@@ -155,7 +155,7 @@ describe('gradingAnswerUtils', () => {
     expect(isStudentAnswerCorrect(descriptor, { q1: 'T' })).toBe(true);
   });
 
-  test('CLOZE: requires answer-key case for correctness indicator', () => {
+  test('CLOZE: ignores answer-key case for correctness indicator', () => {
     const descriptor = {
       id: 'q1',
       blockId: 'b1',
@@ -175,7 +175,7 @@ describe('gradingAnswerUtils', () => {
     } as unknown as StudentQuestionDescriptor;
 
     expect(getCorrectAnswerDisplay(descriptor)).toBe('daily');
-    expect(isStudentAnswerCorrect(descriptor, { q1: 'Daily' })).toBe(false);
+    expect(isStudentAnswerCorrect(descriptor, { q1: 'Daily' })).toBe(true);
     expect(isStudentAnswerCorrect(descriptor, { q1: 'daily' })).toBe(true);
   });
 
@@ -212,7 +212,7 @@ describe('gradingAnswerUtils', () => {
 
     expect(getCorrectAnswerDisplay(descriptor)).toBe('state-of-the-art | advanced');
     expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'state of the art' })).toBe(true);
-    expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'State of the art' })).toBe(false);
+    expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'State of the art' })).toBe(true);
     expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'advanced' })).toBe(true);
     expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'different' })).toBe(false);
   });

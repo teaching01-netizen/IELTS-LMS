@@ -363,6 +363,16 @@ type projectionQuestion struct {
 	HasOverride bool
 	Excluded    []string
 	Points      int
+
+	// Group scoring. A group shares one question number and one mark:
+	// grouped table/sentence slots (GroupKind "required"), sub-answer tree
+	// roots (GroupKind "tree"), and shared sentence answer pools
+	// (GroupKind "pool", where slots keep their own mark but consume keys).
+	GroupKey        string
+	GroupKind       string
+	GroupIndex      int
+	RequiredCorrect int
+	TreeRequired    bool
 }
 
 type projectionSectionModel struct {
@@ -423,7 +433,7 @@ func collectProjectionBlock(model *projectionSectionModel, block map[string]any,
 	case "TFNG", "CLOZE", "MATCHING", "MAP", "SHORT_ANSWER":
 		for _, raw := range questions {
 			if question, ok := raw.(map[string]any); ok {
-				addProjectionQuestion(model, question, fallbackRule, false)
+				addProjectionQuestion(model, question, fallbackRule, false, blockType)
 			}
 		}
 	case "SENTENCE_COMPLETION", "NOTE_COMPLETION":
@@ -441,6 +451,8 @@ func collectProjectionBlock(model *projectionSectionModel, block map[string]any,
 				rule = fallbackRule
 			}
 			blanks, _ := question["blanks"].([]any)
+			acceptAny, _ := question["acceptAnyAnswerKey"].(bool)
+			pool := sentenceAnswerPool(question, blanks)
 			for index, rawBlank := range blanks {
 				blank, ok := rawBlank.(map[string]any)
 				if !ok {
@@ -450,11 +462,27 @@ func collectProjectionBlock(model *projectionSectionModel, block map[string]any,
 				if !ok {
 					continue
 				}
-				addProjectionQuestionWithID(model, questionID+":"+blankID, blank, rule, false)
+				spec := projectionQuestion{
+					ID:       questionID + ":" + blankID,
+					Rule:     rule,
+					Accepted: projectionAcceptedAnswers(blank, "SENTENCE_COMPLETION"),
+				}
+				if acceptAny {
+					spec.Accepted = pool
+					spec.GroupKey = questionID
+					spec.GroupKind = "pool"
+					spec.GroupIndex = index
+				} else if groupKey := sentenceScoreGroupKey(blockID, questionID, blank); groupKey != "" {
+					spec.GroupKey = groupKey
+					spec.GroupKind = "required"
+					spec.GroupIndex = index
+					spec.RequiredCorrect = requiredCorrectForSlot(blank)
+				}
+				addProjectionQuestionWithValues(model, spec)
 				model.Aliases = append(model.Aliases, projectionAnswerAlias{ArrayKey: questionID, Index: index, SlotKey: questionID + ":" + blankID})
 			}
 			if len(blanks) == 0 {
-				addProjectionQuestion(model, question, rule, false)
+				addProjectionQuestion(model, question, rule, false, blockType)
 			}
 		}
 	case "MULTI_MCQ":
@@ -472,11 +500,11 @@ func collectProjectionBlock(model *projectionSectionModel, block map[string]any,
 			addProjectionOptionQuestion(model, blockID, block["options"], fallbackRule, false)
 		}
 	case "DIAGRAM_LABELING":
-		collectProjectionSlots(model, blockID, block["labels"], fallbackRule, "")
+		collectProjectionSlots(model, blockID, block["labels"], fallbackRule, blockType)
 	case "FLOW_CHART":
-		collectProjectionSlots(model, blockID, block["steps"], fallbackRule, "")
+		collectProjectionSlots(model, blockID, block["steps"], fallbackRule, blockType)
 	case "TABLE_COMPLETION":
-		collectProjectionSlots(model, blockID, block["cells"], fallbackRule, "")
+		collectProjectionSlots(model, blockID, block["cells"], fallbackRule, blockType)
 	// CLASSIFICATION items and MATCHING_FEATURES features are answered by one
 	// array under the block id, exactly like the slot blocks above: the stored
 	// key is the block, the slot is the array index. Registering the slots
@@ -484,35 +512,61 @@ func collectProjectionBlock(model *projectionSectionModel, block map[string]any,
 	// the section filter drop every saved answer of both block types, so a
 	// student's selections read as unanswered in review and scoring.
 	case "CLASSIFICATION":
-		collectProjectionSlots(model, blockID, block["items"], fallbackRule, "correctCategory")
+		collectProjectionSlots(model, blockID, block["items"], fallbackRule, blockType)
 	case "MATCHING_FEATURES":
-		collectProjectionSlots(model, blockID, block["features"], fallbackRule, "correctMatch")
+		collectProjectionSlots(model, blockID, block["features"], fallbackRule, blockType)
 	default:
 		for _, raw := range questions {
 			if question, ok := raw.(map[string]any); ok {
-				addProjectionQuestion(model, question, fallbackRule, false)
+				addProjectionQuestion(model, question, fallbackRule, false, blockType)
 			}
 		}
 		if len(questions) == 0 && blockID != "" && (block["correctAnswer"] != nil || block["acceptedAnswers"] != nil) {
-			addProjectionQuestionWithID(model, blockID, block, fallbackRule, false)
+			addProjectionQuestionWithID(model, blockID, block, fallbackRule, false, blockType)
 		}
 	}
 	_ = section
 }
 
 func collectProjectionTree(model *projectionSectionModel, node map[string]any, blockID, rootID, section string) {
-	children, _ := node["children"].([]any)
-	if len(children) == 0 {
-		if nodeID, ok := stringValue(node["id"]); ok {
-			id := blockID + "::tree::" + rootID + "::" + nodeID
-			addProjectionQuestionWithID(model, id, node, "sub_answer_tree", false)
+	var leaves []projectionQuestion
+	var walk func(current map[string]any)
+	walk = func(current map[string]any) {
+		children, _ := current["children"].([]any)
+		if len(children) == 0 {
+			if nodeID, ok := stringValue(current["id"]); ok {
+				required := true
+				if value, ok := current["required"].(bool); ok {
+					required = value
+				}
+				leaves = append(leaves, projectionQuestion{
+					ID:           blockID + "::tree::" + rootID + "::" + nodeID,
+					Rule:         "sub_answer_tree",
+					Accepted:     projectionAcceptedAnswers(current, "SUB_ANSWER_TREE"),
+					GroupKey:     blockID + "::tree::root::" + rootID,
+					GroupKind:    "tree",
+					GroupIndex:   len(leaves),
+					TreeRequired: required,
+				})
+			}
+			return
 		}
-		return
+		for _, child := range children {
+			if childMap, ok := child.(map[string]any); ok {
+				walk(childMap)
+			}
+		}
 	}
-	for _, child := range children {
-		if childMap, ok := child.(map[string]any); ok {
-			collectProjectionTree(model, childMap, blockID, rootID, section)
+	walk(node)
+	requiredCount := 0
+	for _, leaf := range leaves {
+		if leaf.TreeRequired {
+			requiredCount++
 		}
+	}
+	for _, leaf := range leaves {
+		leaf.RequiredCorrect = requiredCount
+		addProjectionQuestionWithValues(model, leaf)
 	}
 }
 
@@ -521,9 +575,9 @@ func collectProjectionTree(model *projectionSectionModel, node map[string]any, b
 // (via answerField) classification items and matching-features entries. The
 // alias is what turns the stored array back into per-slot answers; a slot
 // block without it can never match a saved answer.
-// answerField names a per-item field that holds the correct answer when the
-// block does not store it as "correctAnswer" ("" for blocks that do).
-func collectProjectionSlots(model *projectionSectionModel, blockID string, raw any, rule string, answerField string) {
+// questionType selects the key-source row (classification reads
+// correctCategory before any legacy correctAnswer, for example).
+func collectProjectionSlots(model *projectionSectionModel, blockID string, raw any, rule string, questionType string) {
 	items, _ := raw.([]any)
 	for index, itemRaw := range items {
 		item, ok := itemRaw.(map[string]any)
@@ -534,11 +588,19 @@ func collectProjectionSlots(model *projectionSectionModel, blockID string, raw a
 		if !ok || blockID == "" {
 			continue
 		}
-		if answerField != "" {
-			copyField(item, answerField, "correctAnswer")
-		}
 		questionID := blockID + ":" + id
-		addProjectionQuestionWithID(model, questionID, item, rule, false)
+		spec := projectionQuestion{
+			ID:       questionID,
+			Rule:     rule,
+			Accepted: projectionAcceptedAnswers(item, questionType),
+		}
+		if groupKey := slotScoreGroupKey(blockID, questionType, item); groupKey != "" {
+			spec.GroupKey = groupKey
+			spec.GroupKind = "required"
+			spec.GroupIndex = index
+			spec.RequiredCorrect = requiredCorrectForSlot(item)
+		}
+		addProjectionQuestionWithValues(model, spec)
 		model.Aliases = append(model.Aliases, projectionAnswerAlias{ArrayKey: blockID, Index: index, SlotKey: questionID})
 	}
 }
@@ -569,7 +631,7 @@ func addProjectionOptionQuestion(model *projectionSectionModel, id string, raw a
 	addProjectionQuestionWithValues(model, projectionQuestion{ID: id, Accepted: accepted, Correct: correct, Rule: rule, Multi: multi})
 }
 
-func addProjectionQuestion(model *projectionSectionModel, question map[string]any, fallbackRule string, multi bool) {
+func addProjectionQuestion(model *projectionSectionModel, question map[string]any, fallbackRule string, multi bool, questionType string) {
 	id, ok := stringValue(question["id"])
 	if !ok {
 		return
@@ -578,11 +640,11 @@ func addProjectionQuestion(model *projectionSectionModel, question map[string]an
 	if rule == "" {
 		rule = fallbackRule
 	}
-	addProjectionQuestionWithID(model, id, question, rule, multi)
+	addProjectionQuestionWithID(model, id, question, rule, multi, questionType)
 }
 
-func addProjectionQuestionWithID(model *projectionSectionModel, id string, question map[string]any, rule string, multi bool) {
-	accepted := projectionAcceptedAnswers(question)
+func addProjectionQuestionWithID(model *projectionSectionModel, id string, question map[string]any, rule string, multi bool, questionType string) {
+	accepted := projectionAcceptedAnswers(question, questionType)
 	correct := any(nil)
 	if len(accepted) > 0 {
 		correct = accepted[0]
@@ -611,7 +673,7 @@ func addProjectionQuestionWithValues(model *projectionSectionModel, question pro
 	model.Specs = append(model.Specs, question)
 }
 
-func projectionAcceptedAnswers(question map[string]any) []string {
+func projectionAcceptedAnswers(question map[string]any, questionType string) []string {
 	seen := map[string]bool{}
 	accepted := make([]string, 0)
 	appendValue := func(raw any) {
@@ -625,7 +687,7 @@ func projectionAcceptedAnswers(question map[string]any) []string {
 				continue
 			}
 			for _, variant := range strings.Split(text, "|") {
-				variant = projectionNormalize(variant)
+				variant = normalizeAnswer(variant)
 				if variant != "" && !seen[strings.ToLower(variant)] {
 					seen[strings.ToLower(variant)] = true
 					accepted = append(accepted, variant)
@@ -633,12 +695,14 @@ func projectionAcceptedAnswers(question map[string]any) []string {
 			}
 		}
 	}
-	if raw, ok := question["acceptedAnswers"]; ok {
+	for _, field := range fieldsForQuestionType(questionType) {
+		raw, ok := question[field]
+		if !ok || raw == nil {
+			continue
+		}
 		appendValue(raw)
-	}
-	if len(accepted) == 0 {
-		if raw, ok := question["correctAnswer"]; ok {
-			appendValue(raw)
+		if len(accepted) > 0 {
+			break
 		}
 	}
 	return accepted
@@ -675,6 +739,21 @@ func projectionEffectiveAnswers(answers map[string]any, aliases []projectionAnsw
 	return out
 }
 
+type objectiveOutcome struct {
+	spec           projectionQuestion
+	given          any
+	blank          bool
+	matched        bool
+	awarded        float64
+	max            float64
+	invalid        bool
+	issueCode      string
+	issueMsg       string
+	status         string
+	displayKeys    []string
+	representative bool
+}
+
 func projectionObjectiveResults(section string, answers map[string]any, specs []projectionQuestion, keys map[string]string, versionID string) map[string]any {
 	// The normalized Go assessment tables are authoritative when present; the
 	// snapshot answer key remains the compatibility path for IELTS builder data.
@@ -682,53 +761,131 @@ func projectionObjectiveResults(section string, answers map[string]any, specs []
 		if len(specs[index].Accepted) == 0 {
 			if definition, ok := keys[specs[index].ID]; ok {
 				if answer, ok := objectiveKeyAnswer(definition); ok {
-					specs[index].Accepted = []string{projectionNormalize(answer)}
+					specs[index].Accepted = []string{normalizeAnswer(answer)}
 					specs[index].Correct = answer
 				}
 			}
 		}
 	}
 
-	questionResults := make([]any, 0, len(specs))
+	outcomes := make([]objectiveOutcome, 0, len(specs))
+	for _, spec := range specs {
+		given, present := answers[spec.ID]
+		blank := !present || len(projectionValueStrings(given)) == 0
+		item := objectiveOutcome{spec: spec, given: given, blank: blank, displayKeys: spec.Accepted}
+		switch {
+		case spec.Rule == "duplicate_question_id":
+			item.invalid = true
+			item.max = 1
+			item.issueCode = "duplicate_question_id"
+			item.issueMsg = "Question id appears more than once in the sealed content."
+		case len(spec.Accepted) == 0:
+			item.invalid = true
+			item.max = 1
+			item.issueCode = "missing_answer_key"
+			item.issueMsg = "The sealed answer key is missing."
+		case spec.Multi:
+			item.matched = false
+			selected := projectionValueStrings(given)
+			correct := map[string]bool{}
+			for _, value := range spec.Accepted {
+				correct[value] = true
+			}
+			if len(selected) <= len(spec.Accepted) {
+				count := 0
+				for _, value := range selected {
+					if correct[value] {
+						count++
+					}
+				}
+				item.awarded = float64(count)
+			}
+			item.max = float64(len(spec.Accepted))
+			if spec.HasOverride && spec.Points > 0 {
+				item.max = float64(spec.Points)
+			}
+			item.matched = item.max > 0 && item.awarded >= item.max
+		case blank:
+			item.max = 1
+			if spec.HasOverride {
+				item.max = float64(spec.Points)
+			}
+		default:
+			item.matched = projectionAnswerMatches(given, spec.Accepted, false) && !projectionAnswerExcluded(given, spec.Excluded)
+			item.max = 1
+			if spec.HasOverride {
+				item.max = float64(spec.Points)
+			}
+			if item.matched {
+				item.awarded = item.max
+			}
+		}
+		outcomes = append(outcomes, item)
+	}
+
+	groups := map[string][]int{}
+	groupOrder := make([]string, 0)
+	for index := range outcomes {
+		key := outcomes[index].spec.GroupKey
+		if key == "" {
+			continue
+		}
+		if _, ok := groups[key]; !ok {
+			groupOrder = append(groupOrder, key)
+		}
+		groups[key] = append(groups[key], index)
+	}
+	for _, key := range groupOrder {
+		indices := groups[key]
+		sort.SliceStable(indices, func(left, right int) bool {
+			return outcomes[indices[left]].spec.GroupIndex < outcomes[indices[right]].spec.GroupIndex
+		})
+		switch outcomes[indices[0]].spec.GroupKind {
+		case "pool":
+			applyPoolGroup(outcomes, indices)
+		case "tree":
+			applyTreeGroup(outcomes, indices)
+		default:
+			applyRequiredGroup(outcomes, indices)
+		}
+	}
+
+	questionResults := make([]any, 0, len(outcomes))
 	unknown := make([]string, 0)
 	known := map[string]bool{}
 	var total, max, correctCount, incorrectCount, unansweredCount, unresolvedCount, invalidCount int
 	issueCodes := map[string]bool{}
-	for _, spec := range specs {
-		known[spec.ID] = true
-		points := 1
-		if spec.HasOverride {
-			points = spec.Points
-		}
-		max += points
-		given, present := answers[spec.ID]
-		blank := !present || len(projectionValueStrings(given)) == 0
-		status := "verified_incorrect"
-		isCorrect := any(false)
-		awarded := any(float64(0))
-		issueCode := any(nil)
-		issueMessage := any(nil)
-		if spec.Rule == "duplicate_question_id" {
-			status, invalidCount = "invalid", invalidCount+1
-			issueCode, issueMessage = "duplicate_question_id", "Question id appears more than once in the sealed content."
-			issueCodes["duplicate_question_id"] = true
-		} else if len(spec.Accepted) == 0 {
-			status, invalidCount = "invalid", invalidCount+1
-			issueCode, issueMessage = "missing_answer_key", "The sealed answer key is missing."
-			issueCodes["invalid_answer_key"] = true
-		} else if blank {
-			status, unansweredCount = "verified_unanswered", unansweredCount+1
-		} else if projectionAnswerMatches(given, spec.Accepted, spec.Multi) && !projectionAnswerExcluded(given, spec.Excluded) {
-			status, correctCount = "verified_correct", correctCount+1
-			isCorrect, awarded, total = true, float64(points), total+points
+	for index := range outcomes {
+		item := &outcomes[index]
+		known[item.spec.ID] = true
+		if item.invalid {
+			item.status = "invalid"
+			item.awarded = 0
+			invalidCount++
+			issueCodes[item.issueCode] = true
+		} else if item.blank {
+			item.status = "verified_unanswered"
+			unansweredCount++
+		} else if item.matched || (item.max > 0 && item.awarded >= item.max) {
+			item.status = "verified_correct"
+			correctCount++
 		} else {
+			item.status = "verified_incorrect"
 			incorrectCount++
 		}
+		total += int(item.awarded)
+		max += int(item.max)
+		isCorrect := item.status == "verified_correct"
+		issueCode := any(nil)
+		issueMessage := any(nil)
+		if item.invalid {
+			issueCode, issueMessage = item.issueCode, item.issueMsg
+		}
 		questionResults = append(questionResults, map[string]any{
-			"questionId": spec.ID, "studentAnswer": projectionDisplayValue(given),
-			"correctAnswer": spec.Correct, "acceptedAnswers": spec.Accepted,
-			"verificationStatus": status, "isCorrect": isCorrect, "awardedScore": awarded,
-			"maxScore": float64(points), "scoringRule": spec.Rule, "hasOverride": spec.HasOverride,
+			"questionId": item.spec.ID, "studentAnswer": projectionDisplayValue(item.given),
+			"correctAnswer": item.spec.Correct, "acceptedAnswers": item.displayKeys,
+			"verificationStatus": item.status, "isCorrect": isCorrect, "awardedScore": item.awarded,
+			"maxScore": item.max, "scoringRule": item.spec.Rule, "hasOverride": item.spec.HasOverride,
 			"issueCode": issueCode, "issueMessage": issueMessage,
 		})
 	}
@@ -779,6 +936,141 @@ func projectionObjectiveResults(section string, answers map[string]any, specs []
 	}
 }
 
+// applyRequiredGroup gives a group of slots (for example two table cells that
+// share one question number) a single mark: the first slot carries the mark
+// and the rest carry maxScore 0 so totals cannot double-count it.
+func applyRequiredGroup(outcomes []objectiveOutcome, indices []int) {
+	required := 1
+	for _, index := range indices {
+		if outcomes[index].spec.RequiredCorrect > required {
+			required = outcomes[index].spec.RequiredCorrect
+		}
+	}
+	correct := 0
+	for _, index := range indices {
+		if outcomes[index].matched {
+			correct++
+		}
+	}
+	groupCorrect := correct >= required
+	anyAnswered := false
+	for _, index := range indices {
+		if !outcomes[index].blank {
+			anyAnswered = true
+			break
+		}
+	}
+	for position, index := range indices {
+		outcomes[index].awarded = 0
+		outcomes[index].max = 0
+		if position == 0 {
+			outcomes[index].representative = true
+			outcomes[index].blank = !anyAnswered
+			outcomes[index].max = 1
+			if outcomes[index].spec.HasOverride && outcomes[index].spec.Points > 0 {
+				outcomes[index].max = float64(outcomes[index].spec.Points)
+			}
+			if groupCorrect {
+				outcomes[index].awarded = outcomes[index].max
+			}
+			outcomes[index].matched = groupCorrect
+		}
+	}
+}
+
+// applyTreeGroup evaluates one sub-answer-tree root: required leaves must be
+// matched to distinct student answers (unordered), and the root carries one
+// mark.
+func applyTreeGroup(outcomes []objectiveOutcome, indices []int) {
+	requiredLeaves := make([]int, 0)
+	studentLeaves := make([]int, 0)
+	for _, index := range indices {
+		if outcomes[index].spec.TreeRequired {
+			requiredLeaves = append(requiredLeaves, index)
+		}
+		if !outcomes[index].blank && len(projectionValueStrings(outcomes[index].given)) > 0 {
+			studentLeaves = append(studentLeaves, index)
+		}
+	}
+	assignedStudent := map[int]bool{}
+	studentToRequired := map[int]int{}
+	var tryAssign func(requiredIndex int, seen map[int]bool) bool
+	tryAssign = func(requiredIndex int, seen map[int]bool) bool {
+		if outcomes[requiredIndex].invalid {
+			return false
+		}
+		for _, studentIndex := range studentLeaves {
+			if seen[studentIndex] {
+				continue
+			}
+			if !projectionAnswerMatches(outcomes[studentIndex].given, outcomes[requiredIndex].spec.Accepted, false) {
+				continue
+			}
+			if projectionAnswerExcluded(outcomes[studentIndex].given, outcomes[requiredIndex].spec.Excluded) {
+				continue
+			}
+			seen[studentIndex] = true
+			if occupied, ok := studentToRequired[studentIndex]; !ok || tryAssign(occupied, seen) {
+				studentToRequired[studentIndex] = requiredIndex
+				return true
+			}
+		}
+		return false
+	}
+	matchedRequired := 0
+	for _, requiredIndex := range requiredLeaves {
+		if tryAssign(requiredIndex, map[int]bool{}) {
+			matchedRequired++
+		}
+	}
+	for studentIndex := range studentToRequired {
+		assignedStudent[studentIndex] = true
+	}
+	groupCorrect := len(requiredLeaves) == 0 || matchedRequired == len(requiredLeaves)
+	for position, index := range indices {
+		individual := assignedStudent[index]
+		outcomes[index].awarded = 0
+		outcomes[index].max = 0
+		outcomes[index].matched = individual
+		if position == 0 {
+			outcomes[index].representative = true
+			outcomes[index].blank = len(studentLeaves) == 0
+			outcomes[index].max = 1
+			if groupCorrect {
+				outcomes[index].awarded = 1
+			}
+			outcomes[index].matched = groupCorrect
+		}
+	}
+}
+
+// applyPoolGroup matches a shared sentence answer pool: blanks consume keys in
+// blank order, so repeating one pool answer in two blanks counts once.
+func applyPoolGroup(outcomes []objectiveOutcome, indices []int) {
+	available := map[string]bool{}
+	for _, value := range outcomes[indices[0]].spec.Accepted {
+		available[normalizeComparable(value)] = true
+	}
+	for _, index := range indices {
+		outcomes[index].awarded = 0
+		outcomes[index].max = 1
+		outcomes[index].matched = false
+		if outcomes[index].blank {
+			continue
+		}
+		values := projectionValueStrings(outcomes[index].given)
+		if len(values) != 1 {
+			continue
+		}
+		key := normalizeComparable(values[0])
+		if key != "" && available[key] {
+			available[key] = false
+			outcomes[index].matched = true
+			outcomes[index].awarded = 1
+		}
+	}
+}
+
 // projectionAnswerExcluded reports whether a typed answer was explicitly kept
 // incorrect by a schedule override. Unlike the accepted-answer match it is
 // case-sensitive: excluding "28 june" must not reject the key's "28 June".
@@ -787,9 +1079,8 @@ func projectionAnswerExcluded(given any, excluded []string) bool {
 	if len(values) == 0 {
 		return false
 	}
-	answer := projectionNormalize(values[0])
 	for _, value := range excluded {
-		if projectionNormalize(value) == answer {
+		if answersMatchCaseExact(values[0], value) {
 			return true
 		}
 	}
@@ -817,7 +1108,7 @@ func projectionAnswerMatches(given any, accepted []string, multi bool) bool {
 		return false
 	}
 	for _, expected := range accepted {
-		if strings.EqualFold(projectionNormalize(values[0]), projectionNormalize(expected)) {
+		if answersMatch(values[0], expected) {
 			return true
 		}
 	}
@@ -954,10 +1245,6 @@ func projectionObjectValue(value any) map[string]any {
 func projectionJSON(value any) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
-}
-
-func projectionNormalize(value string) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
 }
 
 func projectionValueStrings(value any) []string {

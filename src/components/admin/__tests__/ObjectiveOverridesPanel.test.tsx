@@ -20,6 +20,8 @@ vi.mock('../../../services/gradingService', async (importOriginal) => {
       getObjectiveGradingSource: vi.fn(),
       getObjectiveOverrides: vi.fn(),
       regradeObjectiveLatestDraft: vi.fn(),
+      previewObjectiveRegrade: vi.fn(),
+      regradeReleasedObjective: vi.fn(),
       upsertObjectiveOverride: vi.fn(),
       deleteObjectiveOverride: vi.fn(),
     },
@@ -314,5 +316,111 @@ describe('ObjectiveOverridesPanel', () => {
 
     const scoringRuleSelect = screen.getByDisplayValue('exact_match');
     expect(scoringRuleSelect).toBeTruthy();
+  });
+});
+
+describe('ObjectiveOverridesPanel released regrade', () => {
+  it('previews released results before applying the audited action', async () => {
+    const { examRepository } = await import('../../../services/examRepository');
+    const { gradingService } = await import('../../../services/gradingService');
+
+    (examRepository.getVersionById as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      contentSnapshot: {
+        reading: {
+          passages: [
+            {
+              id: 'p1',
+              title: 'Passage 1',
+              blocks: [
+                {
+                  id: 'b1',
+                  type: 'SHORT_ANSWER',
+                  instruction: 'Answer',
+                  questions: [{ id: 'q1', prompt: 'Keyword?', correctAnswer: 'Top', answerRule: 'ONE_WORD' }],
+                },
+              ],
+            },
+          ],
+        },
+        listening: { parts: [] },
+      },
+    });
+    (gradingService.getObjectiveOverrides as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: [],
+    });
+    (gradingService.getObjectiveGradingSource as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: { draftVersionId: null },
+    });
+    (gradingService.previewObjectiveRegrade as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: {
+        scheduleId: 'sched-1',
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        scope: 'released',
+        previewToken: 'token-1',
+        summary: { submissions: 1, released: 1, unreleased: 0, changedSubmissions: 1, questionChanges: 1, scoreDelta: 1 },
+        submissions: [
+          {
+            submissionId: 'sub-1',
+            studentId: 'stu-1',
+            studentName: 'Student One',
+            released: true,
+            oldTotalScore: 0,
+            newTotalScore: 1,
+            oldMaxScore: 1,
+            newMaxScore: 1,
+            changes: [
+              {
+                submissionId: 'sub-1',
+                studentId: 'stu-1',
+                studentName: 'Student One',
+                section: 'reading',
+                questionId: 'q1',
+                released: true,
+                oldCorrectness: false,
+                newCorrectness: true,
+                oldAwardedScore: 0,
+                newAwardedScore: 1,
+                oldMaxScore: 1,
+                newMaxScore: 1,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    (gradingService.regradeReleasedObjective as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: {
+        preview: {
+          scheduleId: 'sched-1',
+          generatedAt: '2026-01-01T00:00:00.000Z',
+          scope: 'released',
+          previewToken: 'token-1',
+          summary: { submissions: 1, released: 1, unreleased: 0, changedSubmissions: 1, questionChanges: 1, scoreDelta: 1 },
+          submissions: [],
+        },
+        regradeReport: { sectionsUpdated: 1, submissionsUpdated: 1 },
+      },
+    });
+
+    render(<ObjectiveOverridesPanel scheduleId="sched-1" publishedVersionId="ver-1" />);
+    fireEvent.click(screen.getByText('Session Settings'));
+    await waitFor(() => expect(screen.getByText(/READING • Q1/i)).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Preview released results'));
+    await waitFor(() => expect(gradingService.previewObjectiveRegrade).toHaveBeenCalledWith('sched-1', 'released'));
+    expect(await screen.findByText(/1 submission\(s\) \/ 1 question\(s\) would change/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByText('Apply released regrade'));
+    await waitFor(() =>
+      expect(gradingService.regradeReleasedObjective).toHaveBeenCalledWith('sched-1', expect.objectContaining({
+        previewToken: 'token-1',
+        reason: expect.stringContaining('Regrade released results'),
+      })),
+    );
+    expect(await screen.findByText(/Released regrade applied/i)).toBeTruthy();
   });
 });

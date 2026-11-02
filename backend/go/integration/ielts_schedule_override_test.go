@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -170,5 +171,182 @@ func TestIELTSScheduleOverrideRegradesStoredSections(t *testing.T) {
 		FROM section_submissions ss JOIN student_submissions s ON s.id = ss.submission_id
 		WHERE s.attempt_id = ? AND ss.section = 'reading'`, ids.attemptID).Scan(&auditVersion); err != nil || auditVersion != draftID {
 		t.Fatalf("audit source version = %q, %v; want %s", auditVersion, err, draftID)
+	}
+}
+
+// Preview lists released changes without writing, normal regrade keeps
+// skipping released rows, and the audited released action applies exactly the
+// previewed change. A second run with the same token is a no-op.
+func TestIELTSReleasedRegradePreviewAndApply(t *testing.T) {
+	db := testDB(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	ids := actFixtureIDs()
+	ids.organizationID, ids.ownerID = "ielts-released-org", "ielts-released-owner"
+	cleanupACTFixture(t, db, ids)
+	t.Cleanup(func() { cleanupACTFixture(t, db, ids) })
+
+	content := `{"reading":{"passages":[{"id":"p1","blocks":[{"id":"blk","type":"CLOZE","questions":[{"id":"q1","prompt":"Date","correctAnswer":"29 June"}]}]}]}}`
+	final := `{"answers":{"q1":"29 June"},"writingAnswers":{}}`
+	mustExec := func(label, query string, args ...any) {
+		t.Helper()
+		if _, err := db.ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+	}
+	mustExec("insert exam", `
+		INSERT INTO exam_entities (
+			id, slug, title, provider_key, provider_exam_type, exam_type,
+			status, visibility, organization_id, owner_id, schema_version, revision
+		) VALUES (?, ?, 'IELTS released', 'ielts', 'Academic', 'Academic', 'published', 'organization', ?, ?, 1, 0)`,
+		ids.examID, ids.examID, ids.organizationID, ids.ownerID)
+	mustExec("insert version", `
+		INSERT INTO exam_versions (
+			id, exam_id, version_number, content_snapshot, config_snapshot, created_by, is_published, revision
+		) VALUES (?, ?, 1, ?, '{}', ?, TRUE, 0)`, ids.versionID, ids.examID, content, ids.ownerID)
+	mustExec("insert schedule", `
+		INSERT INTO exam_schedules (
+			id, exam_id, provider_key, organization_id, exam_title,
+			proctor_display_name, grading_display_name, published_version_id,
+			cohort_name, institution, start_time, end_time, planned_duration_minutes,
+			delivery_mode, status, created_by
+		) VALUES (?, ?, 'ielts', ?, 'IELTS released', 'IELTS released', 'IELTS released', ?,
+			'IELTS released', 'Codex', ?, ?, 60, 'proctor_start', 'completed', ?)`,
+		ids.scheduleID, ids.examID, ids.organizationID, ids.versionID,
+		now.Add(-2*time.Hour), now.Add(-time.Hour), ids.ownerID)
+	mustExec("insert attempt", `
+		INSERT INTO student_attempts (
+			id, schedule_id, student_key, organization_id, exam_id,
+			published_version_id, exam_title, candidate_id, candidate_name,
+			candidate_email, phase, current_module, answers, writing_answers,
+			flags, violations_snapshot, integrity, recovery, revision,
+			protocol_version, delivery_status, lease_epoch, control_epoch, response_revision,
+			submitted_at, final_submission
+		) VALUES (?, ?, ?, ?, ?, ?, 'IELTS released', 'candidate-1', 'Released Candidate',
+			'candidate@example.test', 'post-exam', 'writing', '{}', '{}',
+			'{}', '[]', '{}', '{}', 0, 1, 'submitted', 1, 1, 0, ?, ?)`,
+		ids.attemptID, ids.scheduleID, ids.attemptID, ids.organizationID, ids.examID, ids.versionID, now, final)
+
+	grader := grading.NewService(db, tx.NewRunner(db))
+	if _, err := grader.ProjectIELTSAttempt(ctx, grading.ProjectionAttempt{
+		ID: ids.attemptID, ScheduleID: ids.scheduleID, ExamID: ids.examID,
+		PublishedVersionID: ids.versionID, StudentID: "candidate-1", StudentName: "Released Candidate",
+		CohortName: "IELTS released", SubmittedAt: now,
+		FinalSubmission: json.RawMessage(final),
+		ContentSnapshot: json.RawMessage(content), ConfigSnapshot: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("project attempt: %v", err)
+	}
+
+	mustExec("release submission", `UPDATE student_submissions SET grading_status = 'released' WHERE attempt_id = ?`, ids.attemptID)
+	mustExec("stale saved score", `
+		UPDATE section_submissions ss JOIN student_submissions s ON s.id = ss.submission_id
+		SET ss.auto_grading_results = JSON_SET(ss.auto_grading_results,
+			'$.questionResults[0].isCorrect', FALSE,
+			'$.questionResults[0].awardedScore', 0,
+			'$.totalScore', 0)
+		WHERE s.attempt_id = ? AND ss.section = 'reading'`, ids.attemptID)
+
+	preview, err := grader.PreviewScheduleObjectiveRegrade(ctx, ids.scheduleID, grading.ObjectiveRegradeScopeAll)
+	if err != nil {
+		t.Fatalf("preview regrade: %v", err)
+	}
+	if preview.Summary.Changed != 1 || preview.Summary.Released != 1 || preview.Summary.QuestionChange != 1 {
+		t.Fatalf("preview summary = %+v", preview.Summary)
+	}
+	if len(preview.Submissions) != 1 || !preview.Submissions[0].Released {
+		t.Fatalf("preview submissions = %+v", preview.Submissions)
+	}
+	if preview.PreviewToken == "" {
+		t.Fatal("preview has no token")
+	}
+
+	readCorrect := func() bool {
+		t.Helper()
+		var raw string
+		if err := db.QueryRowContext(ctx, `
+			SELECT CAST(ss.auto_grading_results AS CHAR) FROM section_submissions ss
+			JOIN student_submissions s ON s.id = ss.submission_id
+			WHERE s.attempt_id = ? AND ss.section = 'reading'`, ids.attemptID).Scan(&raw); err != nil {
+			t.Fatalf("read results: %v", err)
+		}
+		var results struct {
+			QuestionResults []struct {
+				IsCorrect bool `json:"isCorrect"`
+			} `json:"questionResults"`
+		}
+		if err := json.Unmarshal([]byte(raw), &results); err != nil || len(results.QuestionResults) != 1 {
+			t.Fatalf("decode results %q: %v", raw, err)
+		}
+		return results.QuestionResults[0].IsCorrect
+	}
+	if readCorrect() {
+		t.Fatal("preview wrote the saved score")
+	}
+
+	// Normal regrade still skips released rows.
+	if _, _, err := grader.RegradeScheduleObjectivesFromLatestDraft(ctx, ids.scheduleID, "normal regrade", ids.ownerID, "Owner"); err == nil {
+		// No draft exists in this fixture; the important assertion is that the
+		// released row stayed stale either way.
+	}
+	if readCorrect() {
+		t.Fatal("normal regrade changed a released result")
+	}
+
+	released := preview
+	if released.Scope != grading.ObjectiveRegradeScopeAll {
+		t.Fatalf("preview scope = %q", released.Scope)
+	}
+	releasedPreview, err := grader.PreviewScheduleObjectiveRegrade(ctx, ids.scheduleID, grading.ObjectiveRegradeScopeReleased)
+	if err != nil {
+		t.Fatalf("released preview: %v", err)
+	}
+	if _, _, err := grader.RegradeReleasedScheduleObjectives(ctx, ids.scheduleID, "wrong-token", "release fix", ids.ownerID, "Owner"); err == nil {
+		t.Fatal("released regrade accepted a stale token")
+	}
+	if _, report, err := grader.RegradeReleasedScheduleObjectives(ctx, ids.scheduleID, releasedPreview.PreviewToken, "release fix", ids.ownerID, "Owner"); err != nil {
+		t.Fatalf("released regrade: %v", err)
+	} else if report.SectionsUpdated != 1 || report.SubmissionsUpdated != 1 {
+		t.Fatalf("released report = %+v", report)
+	}
+	if !readCorrect() {
+		t.Fatal("released regrade did not update the saved score")
+	}
+
+	var events int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM grading_schedule_override_events
+		WHERE schedule_id = ? AND action = 'objective_regrade_released'`, ids.scheduleID).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("released audit events = %d, %v; want 1", events, err)
+	}
+	var payload string
+	if err := db.QueryRowContext(ctx, `
+		SELECT CAST(payload_json AS CHAR) FROM grading_schedule_override_events
+		WHERE schedule_id = ? AND action = 'objective_regrade_released' LIMIT 1`, ids.scheduleID).Scan(&payload); err != nil {
+		t.Fatalf("read audit payload: %v", err)
+	}
+	for _, expected := range []string{`"reason":"release fix"`, `"oldTotalScore":0`, `"newTotalScore":1`} {
+		if !strings.Contains(payload, expected) {
+			t.Fatalf("audit payload missing %s: %s", expected, payload)
+		}
+	}
+
+	// Running again with a fresh preview changes nothing and writes no event.
+	again, err := grader.PreviewScheduleObjectiveRegrade(ctx, ids.scheduleID, grading.ObjectiveRegradeScopeReleased)
+	if err != nil {
+		t.Fatalf("second preview: %v", err)
+	}
+	if again.Summary.Changed != 0 {
+		t.Fatalf("second preview still lists changes: %+v", again.Summary)
+	}
+	if _, report, err := grader.RegradeReleasedScheduleObjectives(ctx, ids.scheduleID, again.PreviewToken, "release fix again", ids.ownerID, "Owner"); err != nil {
+		t.Fatalf("second released regrade: %v", err)
+	} else if report.SectionsUpdated != 0 {
+		t.Fatalf("second released regrade updated %d sections", report.SectionsUpdated)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM grading_schedule_override_events
+		WHERE schedule_id = ? AND action = 'objective_regrade_released'`, ids.scheduleID).Scan(&events); err != nil || events != 1 {
+		t.Fatalf("released audit events after no-op = %d, %v; want 1", events, err)
 	}
 }

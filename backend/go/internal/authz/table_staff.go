@@ -222,6 +222,8 @@ func init() {
 		"PUT /schedules/{scheduleID}/objective-overrides/{questionID}":    {MinRoles: graderRW, Scope: ScopeAssignedSchedule},
 		"DELETE /schedules/{scheduleID}/objective-overrides/{questionID}": {MinRoles: graderRW, Scope: ScopeAssignedSchedule},
 		"POST /schedules/{scheduleID}/objective-regrade-latest-draft":     {MinRoles: graderRW, Scope: ScopeAssignedSchedule},
+		"GET /schedules/{scheduleID}/objective-regrade-preview":           {MinRoles: graderRW, Scope: ScopeAssignedSchedule},
+		"POST /schedules/{scheduleID}/objective-regrade-released":         {MinRoles: graderRW, Scope: ScopeAssignedSchedule},
 		"GET /submissions/{submissionID}":                                 {MinRoles: graderRW, Scope: ScopeAssignedSchedule},
 		"GET /submissions/{submissionID}/sections":                        {MinRoles: graderRW, Scope: ScopeAssignedSchedule},
 		"PUT /submissions/{submissionID}/sections/{section}/questions/{questionID}/override": {

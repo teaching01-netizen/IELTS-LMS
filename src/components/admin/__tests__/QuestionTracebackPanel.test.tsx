@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { createInitialExamState } from '../../../services/examAdapterService';
 import { QuestionTracebackPanel } from '../QuestionTracebackPanel';
 import * as gradingReviewUtils from '../gradingReviewUtils';
+import { logger } from '../../../utils/logger';
 
 vi.mock('../gradingReviewUtils', async () => {
   const actual = await vi.importActual<typeof import('../gradingReviewUtils')>('../gradingReviewUtils');
@@ -528,5 +529,90 @@ describe('QuestionTracebackPanel stored-answer audit', () => {
     renderPanel({ verifiedCorrectCount: 6, verifiedUnansweredCount: 4 });
 
     expect(screen.queryByText(/saved-answer audit/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('QuestionTracebackPanel saved-score warning', () => {
+  test('shows the saved score as official, warns, and logs client_server_mismatch once per load', () => {
+    const warn = vi.spyOn(logger, 'error').mockImplementation(() => undefined);
+    const examState = createInitialExamState('Exam', 'Academic');
+    examState.reading.passages = [
+      {
+        id: 'passage-1',
+        title: 'Passage 1',
+        content: 'Content',
+        blocks: [
+          {
+            id: 'block-1',
+            type: 'SHORT_ANSWER',
+            instruction: 'Answer the question.',
+            questions: [{ id: 'q-1', prompt: 'What is it?', correctAnswer: 'Answer', answerRule: 'ONE_WORD' }],
+          },
+        ],
+        images: [],
+        wordCount: 1,
+      },
+    ];
+    const sectionSubmission = {
+      id: 'sec-mismatch',
+      submissionId: 'sub-mismatch',
+      section: 'reading',
+      answers: { type: 'reading', answers: { 'q-1': 'Answer' } },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [
+          {
+            questionId: 'q-1',
+            studentAnswer: 'Answer',
+            correctAnswer: 'Answer',
+            isCorrect: false,
+            awardedScore: 0,
+            maxScore: 1,
+            scoringRule: 'exact_match',
+            hasOverride: false,
+          },
+        ],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } as any;
+
+    const { rerender } = render(
+      <QuestionTracebackPanel
+        section="reading"
+        examState={examState}
+        sectionSubmission={sectionSubmission}
+        examLoading={false}
+        examError={null}
+      />,
+    );
+
+    const warning = screen.getByRole('alert', { name: '' });
+    expect(screen.getByText('Saved score is out of date — regrade')).toBeInTheDocument();
+    expect(warning).toHaveAttribute('tabindex', '0');
+
+    const panel = (
+      <QuestionTracebackPanel
+        section="reading"
+        examState={examState}
+        sectionSubmission={sectionSubmission}
+        examLoading={false}
+        examError={null}
+      />
+    );
+    rerender(panel);
+    rerender(panel);
+
+    const mismatchCalls = warn.mock.calls.filter((call) => call[0] === 'client_server_mismatch');
+    expect(mismatchCalls).toHaveLength(1);
+    expect(mismatchCalls[0]?.[1]).toMatchObject({
+      issueCode: 'client_server_mismatch',
+      submissionId: 'sub-mismatch',
+      questionIds: ['q-1'],
+    });
+    warn.mockRestore();
   });
 });

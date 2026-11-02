@@ -902,3 +902,51 @@ export interface AnnotationToolState {
   strokeWidth: number;
   visibility: CommentVisibility;
 }
+
+export interface ObjectiveRegradeChange {
+  submissionId: string;
+  studentId: string;
+  studentName: string;
+  section: string;
+  questionId: string;
+  released: boolean;
+  oldCorrectness: boolean | null;
+  newCorrectness: boolean | null;
+  oldAwardedScore: number | null;
+  newAwardedScore: number | null;
+  oldMaxScore: number | null;
+  newMaxScore: number | null;
+}
+
+export interface ObjectiveRegradePreviewSubmission {
+  submissionId: string;
+  studentId: string;
+  studentName: string;
+  released: boolean;
+  oldTotalScore: number;
+  newTotalScore: number;
+  oldMaxScore: number;
+  newMaxScore: number;
+  changes: ObjectiveRegradeChange[];
+}
+
+export interface ObjectiveRegradePreview {
+  scheduleId: string;
+  generatedAt: string;
+  scope: 'all' | 'released' | 'unreleased';
+  previewToken: string;
+  summary: {
+    submissions: number;
+    released: number;
+    unreleased: number;
+    changedSubmissions: number;
+    questionChanges: number;
+    scoreDelta: number;
+  };
+  submissions: ObjectiveRegradePreviewSubmission[];
+}
+
+export interface ObjectiveRegradeReleasedResponse {
+  preview: ObjectiveRegradePreview;
+  regradeReport: ObjectiveAutoGradingBackfillReport;
+}

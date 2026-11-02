@@ -865,6 +865,8 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "PUT", "/schedules/{scheduleID}/objective-overrides/{questionID}", gradingOverridePutHandler(app))
 			authzRoute(r, "DELETE", "/schedules/{scheduleID}/objective-overrides/{questionID}", gradingOverrideDeleteHandler(app))
 			authzRoute(r, "POST", "/schedules/{scheduleID}/objective-regrade-latest-draft", gradingRegradeHandler(app))
+			authzRoute(r, "GET", "/schedules/{scheduleID}/objective-regrade-preview", gradingRegradePreviewHandler(app))
+			authzRoute(r, "POST", "/schedules/{scheduleID}/objective-regrade-released", gradingRegradeReleasedHandler(app))
 			authzRoute(r, "GET", "/submissions/{submissionID}", gradingSubmissionHandler(app))
 			authzRoute(r, "GET", "/submissions/{submissionID}/sections", gradingSectionsHandler(app))
 			authzRoute(r, "PUT", "/submissions/{submissionID}/sections/{section}/questions/{questionID}/override", gradingOverrideQuestionHandler(app))

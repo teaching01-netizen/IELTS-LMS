@@ -134,6 +134,8 @@ var expectedAnnotated = []string{
 	"PUT /schedules/{scheduleID}/objective-overrides/{questionID}",
 	"DELETE /schedules/{scheduleID}/objective-overrides/{questionID}",
 	"POST /schedules/{scheduleID}/objective-regrade-latest-draft",
+	"GET /schedules/{scheduleID}/objective-regrade-preview",
+	"POST /schedules/{scheduleID}/objective-regrade-released",
 	"GET /submissions/{submissionID}", "GET /submissions/{submissionID}/sections",
 	"PUT /submissions/{submissionID}/sections/{section}/questions/{questionID}/override",
 	"GET /submissions/{submissionID}/writing-tasks", "POST /submissions/{submissionID}/start-review",

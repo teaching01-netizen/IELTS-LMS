@@ -70,7 +70,7 @@ func overrideAnswerVariants(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
 		for _, variant := range strings.Split(value, "|") {
-			variant = projectionNormalize(variant)
+			variant = normalizeAnswer(variant)
 			if variant != "" && !seen[variant] {
 				seen[variant] = true
 				out = append(out, variant)
@@ -349,103 +349,14 @@ type regradeSection struct {
 // offcut: one transaction locks the whole schedule's objective rows; batch per
 // submission if schedules grow past a few hundred candidates.
 func regradeScheduleObjectives(ctx context.Context, q tx.Tx, scheduleID, actorID, actorName string) (ObjectiveRegradeReport, error) {
-	var report ObjectiveRegradeReport
-	overrides, err := loadProjectionOverrides(ctx, q, scheduleID)
+	plan, err := planScheduleRegrade(ctx, q, scheduleID, ObjectiveRegradeScopeUnreleased)
 	if err != nil {
-		return report, err
+		return ObjectiveRegradeReport{}, err
 	}
-	rows, err := q.QueryContext(ctx, `
-		SELECT s.id, s.published_version_id, s.grading_status = ?
-		FROM student_submissions s
-		JOIN student_attempts a ON a.id = s.attempt_id
-			AND a.terminal_generation = s.terminal_generation AND a.submitted_at IS NOT NULL
-		WHERE s.schedule_id = ? AND s.provider_key = 'ielts'
-		ORDER BY s.id
-		FOR UPDATE`, SubmissionReleased, scheduleID)
-	if err != nil {
-		return report, err
+	if err := applyRegradePlan(ctx, q, plan, actorID, actorName, "objective_regrade_completed", map[string]any{}); err != nil {
+		return ObjectiveRegradeReport{}, err
 	}
-	var submissions []regradeSubmission
-	for rows.Next() {
-		var sub regradeSubmission
-		if err := rows.Scan(&sub.ID, &sub.VersionID, &sub.Released); err != nil {
-			rows.Close()
-			return report, err
-		}
-		submissions = append(submissions, sub)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return report, err
-	}
-
-	type objectiveSource struct {
-		content   map[string]any
-		versionID string
-		keys      map[string]string
-	}
-	sources := map[string]objectiveSource{}
-	for _, sub := range submissions {
-		report.AttemptsScanned++
-		if sub.Released {
-			continue
-		}
-		report.SubmissionsMatched++
-		source, ok := sources[sub.VersionID]
-		if !ok {
-			var contentRaw, configRaw sql.NullString
-			if err := q.QueryRowContext(ctx,
-				"SELECT CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR) FROM exam_versions WHERE id = ?",
-				sub.VersionID).Scan(&contentRaw, &configRaw); err != nil {
-				return report, err
-			}
-			content, _, versionID, err := loadProjectionObjectiveSource(ctx, q, scheduleID, sub.VersionID,
-				projectionObject(json.RawMessage(contentRaw.String)), projectionObject(json.RawMessage(configRaw.String)))
-			if err != nil {
-				return report, err
-			}
-			keys, err := loadObjectiveAnswerKey(ctx, q, versionID)
-			if err != nil {
-				return report, err
-			}
-			source = objectiveSource{content: content, versionID: versionID, keys: keys}
-			sources[sub.VersionID] = source
-		}
-
-		sections, err := loadRegradeSections(ctx, q, sub.ID)
-		if err != nil {
-			return report, err
-		}
-		updated := false
-		for _, section := range sections {
-			report.SectionsChecked++
-			stored := projectionObjectValue(projectionObject(json.RawMessage(section.Answers))["answers"])
-			_, results := gradeProjectionObjectiveSection(section.Name, stored, source.content, source.keys, overrides, source.versionID)
-			previous := projectionObject(json.RawMessage(section.Results.String))
-			carryTeacherOverrides(previous, results)
-			// integrity carries gradingSourceVersionId, which release checks.
-			if projectionJSON(previous["questionResults"]) == projectionJSON(results["questionResults"]) &&
-				projectionJSON(previous["integrity"]) == projectionJSON(results["integrity"]) {
-				continue
-			}
-			report.SectionsNeedingUpdate++
-			if _, err := q.ExecContext(ctx, `
-				UPDATE section_submissions
-				SET auto_grading_results = ?,
-					grading_status = CASE WHEN grading_status IN ('auto_graded', 'needs_review') THEN ? ELSE grading_status END
-				WHERE id = ?`,
-				projectionJSON(results), projectionObjectiveStatus(results), section.ID); err != nil {
-				return report, err
-			}
-			report.SectionsUpdated++
-			updated = true
-		}
-		if updated {
-			report.SubmissionsUpdated++
-		}
-	}
-	err = appendScheduleOverrideEvent(ctx, q, scheduleID, actorID, actorName, "objective_regrade_completed", map[string]any{"report": report})
-	return report, err
+	return plan.Report, nil
 }
 
 func loadRegradeSections(ctx context.Context, q tx.Tx, submissionID string) ([]regradeSection, error) {

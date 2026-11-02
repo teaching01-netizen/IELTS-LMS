@@ -12,6 +12,8 @@ import type {
   ObjectiveOverrideDeleteRequest,
   ObjectiveLatestDraftRegradeResponse,
   ObjectiveOverrideMutationResponse,
+  ObjectiveRegradePreview,
+  ObjectiveRegradeReleasedResponse,
   ObjectiveOverrideUpsertRequest,
 } from '../../types/grading';
 import type { StudentQuestionDescriptor } from '../../features/exam-authoring/api/examAuthoringGateway';
@@ -209,6 +211,12 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
   const [scheduleRegrading, setScheduleRegrading] = useState(false);
   const [scheduleRegradeError, setScheduleRegradeError] = useState<string | null>(null);
   const [scheduleRegradeResult, setScheduleRegradeResult] = useState<ObjectiveLatestDraftRegradeResponse | null>(null);
+  const [regradePreview, setRegradePreview] = useState<ObjectiveRegradePreview | null>(null);
+  const [regradePreviewLoading, setRegradePreviewLoading] = useState(false);
+  const [regradePreviewError, setRegradePreviewError] = useState<string | null>(null);
+  const [releasedReason, setReleasedReason] = useState('Regrade released results after the grading parity fix');
+  const [releasedApplying, setReleasedApplying] = useState(false);
+  const [releasedResult, setReleasedResult] = useState<ObjectiveRegradeReleasedResponse | null>(null);
   // S2-C16: explicit operator consent for the automatic scoring-rule
   // upgrade proposed when answer variants exceed the current word limit.
   const [ruleUpgradeConsent, setRuleUpgradeConsent] = useState(false);
@@ -398,6 +406,51 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
     }
   };
 
+  const handlePreviewRegrade = async (scope: 'all' | 'released') => {
+    setRegradePreviewError(null);
+    setRegradePreviewLoading(true);
+    setReleasedResult(null);
+    try {
+      const result = await gradingService.previewObjectiveRegrade(scheduleId, scope);
+      if (!result.success || !result.data) {
+        throw new Error(gradingErrorMessage(result.error, 'Failed to preview regrade'));
+      }
+      setRegradePreview(result.data);
+    } catch (error) {
+      setRegradePreviewError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRegradePreviewLoading(false);
+    }
+  };
+
+  const handleApplyReleasedRegrade = async () => {
+    if (!regradePreview || regradePreview.scope !== 'released') return;
+    if (!releasedReason.trim()) {
+      setRegradePreviewError('Reason is required.');
+      return;
+    }
+    setRegradePreviewError(null);
+    setReleasedApplying(true);
+    try {
+      const result = await gradingService.regradeReleasedObjective(scheduleId, {
+        reason: releasedReason.trim(),
+        previewToken: regradePreview.previewToken,
+      });
+      if (!result.success || !result.data) {
+        throw new Error(gradingErrorMessage(result.error, 'Failed to regrade released results'));
+      }
+      setReleasedResult(result.data);
+      setRegradePreview(null);
+      if (props.examId) {
+        notifyObjectiveGradingUpdated(props.examId);
+      }
+    } catch (error) {
+      setRegradePreviewError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setReleasedApplying(false);
+    }
+  };
+
   const handleScheduleRegradeLatestDraft = async () => {
     setScheduleRegradeError(null);
     setScheduleRegradeResult(null);
@@ -475,6 +528,137 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                 </span>
               </div>
             ) : null}
+
+            <div className="mt-3 border-t border-gray-200 pt-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handlePreviewRegrade('all')}
+                  disabled={regradePreviewLoading}
+                  className="inline-flex min-h-9 items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 transition-[background-color,scale] duration-150 ease-out hover:bg-gray-50 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {regradePreviewLoading ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : null}
+                  Preview regrade
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handlePreviewRegrade('released')}
+                  disabled={regradePreviewLoading}
+                  className="inline-flex min-h-9 items-center justify-center rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 transition-[background-color,scale] duration-150 ease-out hover:bg-amber-100 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
+                >
+                  Preview released results
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-gray-600">
+                A preview lists every saved score that would change and writes nothing. Normal regrade keeps
+                skipping released results; correcting released results needs the audited action below.
+              </p>
+
+              {regradePreviewError ? (
+                <div className="mt-2 flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  <span>{regradePreviewError}</span>
+                </div>
+              ) : null}
+
+              {regradePreview ? (
+                <div className="mt-3 rounded-md border border-gray-200 bg-white p-3" role="status" aria-live="polite">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <p className="text-sm font-semibold text-gray-900">
+                      {regradePreview.summary.changedSubmissions === 0
+                        ? 'No saved objective scores would change.'
+                        : `${regradePreview.summary.changedSubmissions} submission(s) / ${regradePreview.summary.questionChanges} question(s) would change.`}
+                    </p>
+                    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                      {regradePreview.scope} scope
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Released: {regradePreview.summary.released}. Unreleased: {regradePreview.summary.unreleased}.
+                    Score delta: {regradePreview.summary.scoreDelta > 0 ? '+' : ''}
+                    {regradePreview.summary.scoreDelta}.
+                  </p>
+                  {regradePreview.submissions.length > 0 ? (
+                    <div className="mt-3 max-h-64 overflow-auto rounded border border-gray-100">
+                      <table className="min-w-full text-left text-xs">
+                        <thead className="sticky top-0 bg-gray-50 text-gray-600">
+                          <tr>
+                            <th scope="col" className="px-2 py-1.5 font-semibold">Student</th>
+                            <th scope="col" className="px-2 py-1.5 font-semibold">Question</th>
+                            <th scope="col" className="px-2 py-1.5 font-semibold">Saved</th>
+                            <th scope="col" className="px-2 py-1.5 font-semibold">New</th>
+                            <th scope="col" className="px-2 py-1.5 font-semibold">Released</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {regradePreview.submissions.flatMap((submission) =>
+                            submission.changes.map((change) => (
+                              <tr key={`${change.submissionId}:${change.section}:${change.questionId}`} className="border-t border-gray-100">
+                                <td className="px-2 py-1.5 text-gray-800">{submission.studentName || submission.studentId}</td>
+                                <td className="px-2 py-1.5 font-mono text-[11px] text-gray-700">
+                                  {change.section}:{change.questionId}
+                                </td>
+                                <td className="px-2 py-1.5 text-gray-700">
+                                  {change.oldAwardedScore ?? '—'}/{change.oldMaxScore ?? '—'}
+                                </td>
+                                <td className="px-2 py-1.5 font-semibold text-gray-900">
+                                  {change.newAwardedScore ?? '—'}/{change.newMaxScore ?? '—'}
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  {change.released ? (
+                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">Released</span>
+                                  ) : (
+                                    <span className="text-gray-500">No</span>
+                                  )}
+                                </td>
+                              </tr>
+                            )),
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+
+                  {regradePreview.scope === 'released' && regradePreview.summary.changedSubmissions > 0 ? (
+                    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+                      <p className="text-xs font-semibold text-amber-900">
+                        Applying this preview updates released results and records who did it, when, and each
+                        old/new score.
+                      </p>
+                      <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-end">
+                        <label className="flex-1 text-xs font-medium text-amber-900">
+                          Reason
+                          <input
+                            value={releasedReason}
+                            onChange={(event) => setReleasedReason(event.target.value)}
+                            className={`mt-1 ${inputClassName}`}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => void handleApplyReleasedRegrade()}
+                          disabled={releasedApplying}
+                          className="inline-flex min-h-9 items-center justify-center rounded-md bg-amber-900 px-3 py-2 text-sm font-semibold text-white transition-[background-color,scale] duration-150 ease-out hover:bg-amber-800 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-amber-600 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {releasedApplying ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : null}
+                          {releasedApplying ? 'Applying…' : 'Apply released regrade'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {releasedResult ? (
+                <div className="mt-2 flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800" role="status" aria-live="polite">
+                  <CheckCircle2 size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    Released regrade applied. {releasedResult.regradeReport.sectionsUpdated} section(s) updated across{' '}
+                    {releasedResult.regradeReport.submissionsUpdated} released submission(s).
+                  </span>
+                </div>
+              ) : null}
+            </div>
           </div>
           {loading ? (
             <div className="px-1 py-4" role="status" aria-live="polite">

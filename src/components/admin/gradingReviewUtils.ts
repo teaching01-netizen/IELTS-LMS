@@ -16,15 +16,13 @@ import type { StudentQuestionDescriptor } from '../../features/exam-authoring/ap
 import {
   extractObjectiveAnswerMap,
   getCorrectAnswerDisplay,
-  getMultiSelectAnswerScore,
   getQuestionPrompt,
   getStudentAnswerDisplay,
-  isStudentAnswerCorrect,
-  resolveSentenceCompletionCorrectness,
 } from './gradingAnswerUtils';
 import type { AnswerDisplayOptions } from './gradingAnswerUtils';
 import type { StudentAnswerValue } from '../../types/answers';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
+import { scoreObjectiveDescriptors, type ObjectiveScoringResult } from '../../features/grading/objectiveScoring';
 
 export type GradingExportSection =
   | 'reading'
@@ -112,6 +110,10 @@ export interface ObjectiveTracebackItem {
   slotManualOverrides?: Array<ObjectiveManualOverride | null>;
   studentAnswerSlots?: string[];
   correctAnswerSlots?: string[];
+  /** Choose-N export: one entry per question number, in selection order. */
+  selectionAnswers?: string[];
+  selectionCorrectAnswers?: string[];
+  selectionScores?: number[];
 }
 
 export interface ObjectiveTracebackGroup {
@@ -470,35 +472,24 @@ function buildTracebackItem(
   descriptors: StudentQuestionDescriptor[],
   answerMap: Record<string, StudentAnswerValue | undefined>,
   results: Map<string, ObjectiveQuestionResult>,
-  correctnessByDescriptor: Map<string, boolean | null>,
+  websiteScoring: ObjectiveScoringResult,
 ): ObjectiveTracebackItem {
   const questionResult = results.get(descriptor.id);
-  const computedCorrectness = correctnessByDescriptor.has(descriptor.id)
-    ? correctnessByDescriptor.get(descriptor.id) ?? null
-    : isStudentAnswerCorrect(descriptor, answerMap);
-  const fallbackScore = descriptor.block.type === 'MULTI_MCQ'
-    ? getMultiSelectAnswerScore(descriptor, answerMap)
-    : {
-      awardedScore: computedCorrectness === null ? null : computedCorrectness ? 1 : 0,
-      maxScore: computedCorrectness === null ? null : 1,
-    };
-  const useMultiSelectFallback =
-    descriptor.block.type === 'MULTI_MCQ' && questionResult?.hasOverride !== true;
-  const persistedCorrectness = questionResult?.hasOverride === true
-    ? questionResult.isCorrect
-    : computedCorrectness;
-  const persistedAwardedScore = questionResult?.hasOverride === true
-    ? questionResult.awardedScore
-    : fallbackScore.awardedScore;
-  const correctness = questionResult?.manualOverride?.isCorrect ?? (
-    useMultiSelectFallback ? computedCorrectness : persistedCorrectness
-  );
-  const awardedScore = questionResult?.manualOverride?.awardedScore ?? (
-    useMultiSelectFallback ? fallbackScore.awardedScore : persistedAwardedScore
-  );
-  const maxScore = useMultiSelectFallback
-    ? fallbackScore.maxScore
-    : questionResult?.maxScore ?? fallbackScore.maxScore;
+  const websiteScore = websiteScoring.byId.get(descriptor.id);
+  // The server's saved result is the official score. The website re-check is
+  // only a fallback for results saved before a question result existed.
+  const correctness = questionResult?.manualOverride?.isCorrect
+    ?? questionResult?.isCorrect
+    ?? websiteScore?.correctness
+    ?? null;
+  const awardedScore = questionResult?.manualOverride?.awardedScore
+    ?? questionResult?.awardedScore
+    ?? websiteScore?.awardedScore
+    ?? null;
+  const maxScore = questionResult?.maxScore ?? websiteScore?.maxScore ?? null;
+  const selection = descriptor.block.type === 'MULTI_MCQ'
+    ? buildMultiSelectExportSelection(descriptor, answerMap, awardedScore)
+    : null;
 
   return {
     numberLabel: getQuestionNumberLabel(descriptors, descriptor.id),
@@ -515,6 +506,44 @@ function buildTracebackItem(
     ...(typeof descriptor.rootNumber === 'number'
       ? { rootNumberLabel: String(descriptor.rootNumber) }
       : {}),
+    ...(selection ?? {}),
+  };
+}
+
+function buildMultiSelectExportSelection(
+  descriptor: StudentQuestionDescriptor,
+  answerMap: Record<string, StudentAnswerValue | undefined>,
+  awardedScore: number | null,
+): Pick<ObjectiveTracebackItem, 'selectionAnswers' | 'selectionCorrectAnswers' | 'selectionScores'> | null {
+  if (descriptor.block.type !== 'MULTI_MCQ') return null;
+  const options = Array.isArray(descriptor.block.options) ? descriptor.block.options : [];
+  const correctOptions = options.filter((option) => option.isCorrect);
+  const optionCount = Math.max(1, correctOptions.length);
+  const given = getQuestionAnswer(descriptor, answerMap);
+  const selectedIds = Array.isArray(given)
+    ? given.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const correctIds = new Set(correctOptions.map((option) => option.id));
+  const optionText = (id: string) => options.find((option) => option.id === id)?.text ?? id;
+  const selectionAnswers = Array.from({ length: optionCount }, (_, index) =>
+    selectedIds[index] ? optionText(selectedIds[index]!) : '',
+  );
+  const selectionScores: number[] = Array.from({ length: optionCount }, (_, index) =>
+    selectedIds[index] && correctIds.has(selectedIds[index]!) ? 1 : 0,
+  );
+  // The saved partial score is authoritative; the per-selection list only
+  // distributes Yes/No across the builder's question numbers.
+  if (awardedScore !== null && awardedScore !== selectionScores.reduce((sum, value) => sum + value, 0)) {
+    let remaining = Math.max(0, awardedScore);
+    for (let index = 0; index < selectionScores.length; index += 1) {
+      selectionScores[index] = remaining > 0 ? 1 : 0;
+      remaining -= selectionScores[index]!;
+    }
+  }
+  return {
+    selectionAnswers,
+    selectionCorrectAnswers: correctOptions.map((option) => option.text),
+    selectionScores,
   };
 }
 
@@ -524,7 +553,7 @@ function buildGroupedTracebackItem(
   allDescriptors: StudentQuestionDescriptor[],
   answerMap: Record<string, StudentAnswerValue | undefined>,
   results: Map<string, ObjectiveQuestionResult>,
-  correctnessByDescriptor: Map<string, boolean | null>,
+  websiteScoring: ObjectiveScoringResult,
 ): ObjectiveTracebackItem {
   const sorted = [...groupDescriptors].sort((left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0));
   const representative = sorted[0];
@@ -545,12 +574,11 @@ function buildGroupedTracebackItem(
 
   const slotCorrectness = sorted.map((descriptor) => {
     const questionResult = results.get(descriptor.id);
-    const computed = correctnessByDescriptor.has(descriptor.id)
-      ? correctnessByDescriptor.get(descriptor.id) ?? null
-      : isStudentAnswerCorrect(descriptor, answerMap);
-    return questionResult?.manualOverride?.isCorrect ?? (
-      questionResult?.hasOverride === true ? questionResult.isCorrect : computed
-    );
+    const websiteScore = websiteScoring.byId.get(descriptor.id);
+    return questionResult?.manualOverride?.isCorrect
+      ?? questionResult?.isCorrect
+      ?? websiteScore?.correctness
+      ?? null;
   });
   const slotManualOverrides = sorted.map(
     (descriptor) => results.get(descriptor.id)?.manualOverride ?? null,
@@ -617,19 +645,7 @@ export function buildQuestionTracebackGroups(
     extractObjectiveAnswerMap(sectionSubmission.answers),
     results,
   );
-  const correctnessByDescriptor = resolveSentenceCompletionCorrectness(descriptors, answerMap);
-  // Some sealed keys live in normalized assessment rows, outside the builder
-  // snapshot. Resolve those verdicts before shared/grouped slot aggregation.
-  for (const descriptor of descriptors) {
-    if (getCorrectAnswerDisplay(descriptor).trim() !== '') continue;
-    const result = results.get(descriptor.id);
-    correctnessByDescriptor.set(descriptor.id,
-      getExportCorrectAnswerDisplay(descriptor, result).trim() !== '' &&
-      hasPersistedAnswer(getQuestionAnswer(descriptor, answerMap))
-        ? result?.isCorrect ?? null
-        : null,
-    );
-  }
+  const websiteScoring = scoreObjectiveDescriptors(descriptors, answerMap);
   const groups = new Map<string, ObjectiveTracebackGroup>();
   const groupedSlotsByGroup = new Map<string, Map<string, StudentQuestionDescriptor[]>>();
 
@@ -662,12 +678,12 @@ export function buildQuestionTracebackGroups(
       const groupKey = getGroupedScoringSlotKey(slotDescriptors[0] ?? ({} as StudentQuestionDescriptor));
       if (groupKey) {
         group.items.push(
-          buildGroupedTracebackItem(slotKey, slotDescriptors, descriptors, answerMap, results, correctnessByDescriptor),
+          buildGroupedTracebackItem(slotKey, slotDescriptors, descriptors, answerMap, results, websiteScoring),
         );
       } else {
         const descriptor = slotDescriptors[0];
         if (!descriptor) continue;
-        group.items.push(buildTracebackItem(descriptor, descriptors, answerMap, results, correctnessByDescriptor));
+        group.items.push(buildTracebackItem(descriptor, descriptors, answerMap, results, websiteScoring));
       }
     }
   }
@@ -728,7 +744,7 @@ export function buildObjectiveExportRows({
 
   for (const group of groups) {
     for (const item of group.items) {
-      rows.push({
+      const baseRow = {
         examTitle: session.examTitle,
         sessionId: session.sessionId,
         scheduleId: submission.scheduleId,
@@ -741,9 +757,28 @@ export function buildObjectiveExportRows({
         cohortName: submission.cohortName,
         section: moduleType,
         groupLabel: group.groupLabel,
-        questionNumber: item.numberLabel,
         questionId: item.rootId ?? item.questionId,
         prompt: item.prompt,
+        submittedAt: sectionSubmission.submittedAt,
+      };
+      if (item.selectionScores && item.selectionScores.length > 0) {
+        const start = Number.parseInt(item.numberLabel, 10);
+        item.selectionScores.forEach((score, index) => {
+          rows.push({
+            ...baseRow,
+            questionNumber: Number.isFinite(start) ? String(start + index) : item.numberLabel,
+            studentAnswer: item.selectionAnswers?.[index] ?? '',
+            correctAnswer: (item.selectionCorrectAnswers ?? []).join(' | '),
+            isCorrect: score > 0 ? 'Correct' : 'Incorrect',
+            autoScore: score,
+            maxScore: 1,
+          });
+        });
+        continue;
+      }
+      rows.push({
+        ...baseRow,
+        questionNumber: item.numberLabel,
         studentAnswer: item.studentAnswer,
         correctAnswer: item.correctAnswer,
         isCorrect:
@@ -754,7 +789,6 @@ export function buildObjectiveExportRows({
               : 'Incorrect',
         autoScore: toOptionalNumber(item.awardedScore),
         maxScore: toOptionalNumber(item.maxScore),
-        submittedAt: sectionSubmission.submittedAt,
       });
     }
   }
@@ -841,7 +875,7 @@ function getObjectiveBandTable(
     ?? null;
 }
 
-function deriveIeltsBandScore(
+export function deriveIeltsBandScore(
   examState: ExamState | null,
   moduleType: 'reading' | 'listening' | 'science',
   totalScore: number | null | undefined,
@@ -1049,10 +1083,13 @@ export function buildWideObjectiveExport({
         );
         if (mode === 'auto') {
           row[`score:${descriptor.id}`] = toOptionalNumber(
-            descriptor.block.type === 'MULTI_MCQ' && scoredResult?.hasOverride !== true
-              ? fallbackItem?.awardedScore
-              : scoredResult?.awardedScore,
+            scoredResult?.awardedScore ?? fallbackItem?.awardedScore,
           );
+          if (fallbackItem?.selectionScores) {
+            row[`selectionScores:${descriptor.id}`] = fallbackItem.selectionScores;
+            row[`selectionAnswers:${descriptor.id}`] = fallbackItem.selectionAnswers ?? [];
+            row[`selectionCorrectAnswers:${descriptor.id}`] = fallbackItem.selectionCorrectAnswers ?? [];
+          }
         } else {
           row[`manualCorrect:${descriptor.id}`] = '';
         }
@@ -1276,4 +1313,74 @@ export function buildCsvFilename(
     .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
     .map(slugifyCsvFilePart);
   return `${parts.join('-') || 'grading-export'}.csv`;
+}
+
+export interface SavedScoreMismatch {
+  questionId: string;
+  savedCorrectness: boolean | null;
+  savedAwardedScore: number | null;
+  savedMaxScore: number | null;
+  websiteCorrectness: boolean | null;
+  websiteAwardedScore: number | null;
+  websiteMaxScore: number | null;
+  reasons: Array<'correctness' | 'awardedScore' | 'maxScore'>;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Compares the server's saved question results with the website's re-check.
+ * The saved result stays official; this list only drives the "saved score is
+ * out of date" warning and the client_server_mismatch log.
+ */
+export function findSavedScoreMismatches(
+  examState: ExamState | null,
+  sectionSubmission: SectionSubmission | null,
+  moduleType: 'reading' | 'listening' | 'science',
+): SavedScoreMismatch[] {
+  if (!examState || !sectionSubmission) return [];
+  const descriptors = getStudentQuestionsForModule(examState, moduleType);
+  const results = buildQuestionResultMap(sectionSubmission.autoGradingResults?.questionResults);
+  if (results.size === 0) return [];
+  const answerMap = mergePersistedResultAnswers(
+    descriptors,
+    extractObjectiveAnswerMap(sectionSubmission.answers),
+    results,
+  );
+  const websiteScoring = scoreObjectiveDescriptors(descriptors, answerMap);
+  const mismatches: SavedScoreMismatch[] = [];
+
+  for (const descriptor of descriptors) {
+    const saved = results.get(descriptor.id);
+    if (!saved) continue;
+    // A schedule answer-key override deliberately differs from the snapshot
+    // the website re-checks; it is not an out-of-date saved score.
+    if (saved.hasOverride === true) continue;
+    const website = websiteScoring.byId.get(descriptor.id);
+    const savedCorrectness = saved.manualOverride?.isCorrect ?? saved.isCorrect ?? null;
+    const savedAwardedScore = saved.manualOverride?.awardedScore ?? numberOrNull(saved.awardedScore);
+    const savedMaxScore = numberOrNull(saved.maxScore);
+    const websiteCorrectness = website?.correctness ?? null;
+    const websiteAwardedScore = website?.awardedScore ?? null;
+    const websiteMaxScore = website?.maxScore ?? null;
+    const reasons: SavedScoreMismatch['reasons'] = [];
+    if (savedCorrectness !== websiteCorrectness) reasons.push('correctness');
+    if (savedAwardedScore !== websiteAwardedScore) reasons.push('awardedScore');
+    if (savedMaxScore !== websiteMaxScore) reasons.push('maxScore');
+    if (reasons.length === 0) continue;
+    mismatches.push({
+      questionId: descriptor.id,
+      savedCorrectness,
+      savedAwardedScore,
+      savedMaxScore,
+      websiteCorrectness,
+      websiteAwardedScore,
+      websiteMaxScore,
+      reasons,
+    });
+  }
+
+  return mismatches;
 }

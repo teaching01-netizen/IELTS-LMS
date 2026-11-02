@@ -1419,7 +1419,7 @@ func scoreObjective(answers map[string]any, overrides map[string]json.RawMessage
 		}
 		if def, ok := keys[qid]; ok && strings.TrimSpace(def) != "" {
 			if key, ok := objectiveKeyAnswer(def); ok {
-				if str, ok := given.(string); ok && objectiveAnswerEqual(key, str) {
+				if str, ok := given.(string); ok && answersMatch(str, key) {
 					out = append(out, ObjectiveResult{QuestionID: qid, Correct: true, Points: 1, MaxPoints: 1})
 				} else {
 					out = append(out, ObjectiveResult{QuestionID: qid, Correct: false, Points: 0, MaxPoints: 1})
@@ -1475,12 +1475,6 @@ func objectiveKeyAnswer(def string) (string, bool) {
 		}
 		return accepted[0], true
 	}
-}
-
-// objectiveAnswerEqual compares a student answer to the sealed key with the
-// delivery scorer's ASCII case-insensitive trimmed equality.
-func objectiveAnswerEqual(key, given string) bool {
-	return strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(given))
 }
 
 func dbNow(ctx context.Context, t tx.Tx) (time.Time, error) {

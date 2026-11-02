@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  answersMatch,
   normalizeAnswerForMatching,
   resolveAcceptedAnswers,
   sanitizeAcceptedAnswers,
@@ -20,12 +21,21 @@ describe('acceptedAnswers', () => {
     ).toEqual(['dog', 'cat', 'CAT']);
   });
 
-  it('normalizes punctuation and keeps case differences significant', () => {
+  it('normalizes punctuation and ignores case', () => {
     expect(normalizeAnswerForMatching('HALF-WAY')).toBe(
       normalizeAnswerForMatching('HALF WAY'),
     );
-    expect(normalizeAnswerForMatching('Garden hall')).not.toBe(
+    expect(normalizeAnswerForMatching('Garden hall')).toBe(
       normalizeAnswerForMatching('GARDEN HALL'),
     );
+  });
+
+  it('removes invisible characters before matching', () => {
+    expect(answersMatch('waiter', 'waiter\u200B')).toBe(true);
+    expect(answersMatch('Gar\u00ADden\u2060 hall', 'garden hall')).toBe(true);
+  });
+
+  it('does not match an empty student answer to an empty key', () => {
+    expect(answersMatch('   ', '')).toBe(false);
   });
 });
