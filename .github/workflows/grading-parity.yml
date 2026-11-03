@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "src/components/admin/grading**"
+      - "src/components/admin/__tests__/keySourceTable.test.ts"
       - "src/features/grading/**"
       - "src/utils/acceptedAnswers.ts"
       - "src/utils/sentenceCompletionAnswerPool.ts"
@@ -55,7 +56,7 @@ jobs:
       - name: Shared answer-cleaning fixture
         run: bunx vitest run src/utils/__tests__/answerCleaningParity.test.ts src/utils/__tests__/acceptedAnswers.test.ts
       - name: Key-source table + objective scoring
-        run: bunx vitest run src/components/admin/__tests__/gradingKeySources.test.ts src/features/grading/__tests__/objectiveScoring.test.ts
+        run: bunx vitest run src/components/admin/__tests__/gradingKeySources.test.ts src/components/admin/__tests__/keySourceTable.test.ts src/features/grading/__tests__/objectiveScoring.test.ts
 
   parity-report:
     runs-on: ubuntu-latest

@@ -145,8 +145,12 @@ describe('parity-consistent saved results', () => {
     ) as {
       examState: ExamState;
       answers: Record<string, unknown>;
-      overrides: Record<string, never>;
-      expected: { questions: Array<{ questionId: string; correctness: boolean | null; awardedScore: number | null; maxScore: number | null }> };
+      overrides: Record<string, unknown>;
+      expected: {
+        totalScore: number;
+        maxScore: number;
+        questions: Array<{ questionId: string; correctness: boolean | null; awardedScore: number | null; maxScore: number | null }>;
+      };
     };
     const savedResults = fixture.expected.questions.map((question) => ({
       questionId: question.questionId,
@@ -156,7 +160,7 @@ describe('parity-consistent saved results', () => {
       awardedScore: question.awardedScore ?? 0,
       maxScore: question.maxScore ?? 0,
       scoringRule: 'exact_match',
-      hasOverride: question.questionId === 'cloze-3',
+      hasOverride: Object.prototype.hasOwnProperty.call(fixture.overrides, question.questionId),
     }));
     const sectionSubmission = {
       id: 'sec-parity',
@@ -165,8 +169,8 @@ describe('parity-consistent saved results', () => {
       answers: { type: 'reading', answers: fixture.answers },
       autoGradingResults: {
         generatedAt: '2026-01-01T00:00:00.000Z',
-        totalScore: 25,
-        maxScore: 29,
+        totalScore: fixture.expected.totalScore,
+        maxScore: fixture.expected.maxScore,
         percentage: 86.21,
         questionResults: savedResults,
       },
