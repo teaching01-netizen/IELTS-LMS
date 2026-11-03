@@ -16,6 +16,8 @@ SESSION_REMEMBER_STAFF_IDLE_HOURS=168
 SESSION_REMEMBER_STAFF_ABSOLUTE_HOURS=720
 SESSION_REMEMBER_ADMIN_IDLE_HOURS=24
 SESSION_REMEMBER_ADMIN_ABSOLUTE_HOURS=168
+SESSION_REMEMBER_MASTER_IDLE_HOURS=2160
+SESSION_REMEMBER_MASTER_ABSOLUTE_HOURS=2160
 ```
 
 Replace the example origin with the public browser origin. It must be HTTPS,
@@ -34,9 +36,12 @@ CI uses MySQL 8.4. Validate the CI result for the deployment revision.
 
 Normal password login with an explicit remembered choice can persist supported
 admin/builder/proctor/grader sessions. Admin uses 24-hour idle / 7-day hard limits;
-other supported staff use 7-day idle / 30-day hard limits. Unchecked or omitted
-choice uses the configured short staff policy. Students, emergency master login,
-practice and recovery scopes are not promoted. Admin-observer remains short until
+other supported staff use 7-day idle / 30-day hard limits. Emergency master-key
+login with a checked box persists on dedicated master windows (default 90-day
+idle / 90-day absolute), never the admin ones. Unchecked or omitted
+choice uses the configured short staff policy. Students, practice and recovery
+scopes are not promoted.
+Admin-observer remains short until
 frontend role parity is separately delivered. Existing sessions are not promoted.
 
 ## Rollout

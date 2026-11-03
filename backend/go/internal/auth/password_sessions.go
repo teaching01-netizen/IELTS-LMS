@@ -215,6 +215,49 @@ func LoginWithPassword(ctx context.Context, db *sql.DB, cfg config.Config, email
 	return created, nil
 }
 
+// LoginWithMasterKey provisions (or repairs) the emergency admin user and
+// opens an account session for an already-verified master-key presentation.
+// remember requests the dedicated master policy (default 90d idle / 90d
+// absolute, persistent cookies); the server decides from configuration
+// whether it applies. Unremembered logins keep the short
+// legacy policy. Session deadlines and the remembered password time come
+// from the database clock read inside the issuance transaction (like
+// LoginWithPassword), never from the API host clock, so fleet clock skew
+// cannot shift expiry. The master-key presentation verified a real
+// credential, so remembered rows stamp it as their password time (the schema
+// requires remembered rows to carry one); legacy rows keep none, as before.
+func LoginWithMasterKey(ctx context.Context, db *sql.DB, cfg config.Config, email string, remember bool, userAgentHash *string) (CreatedSession, error) {
+	userID, err := EnsureMasterKeyUser(ctx, db, email, time.Now().UTC())
+	if err != nil {
+		return CreatedSession{}, err
+	}
+	sqlTx, err := beginAuthTx(ctx, db)
+	if err != nil {
+		return CreatedSession{}, err
+	}
+	defer func() { _ = sqlTx.Rollback() }()
+	now, err := dbNow(ctx, sqlTx)
+	if err != nil {
+		return CreatedSession{}, err
+	}
+	policy, err := policyForMasterKey(cfg, remember)
+	if err != nil {
+		return CreatedSession{}, err
+	}
+	var credentialAt *time.Time
+	if policy.Remembered {
+		credentialAt = &now
+	}
+	created, err := insertSessionInTx(ctx, sqlTx, userID, RoleAdmin, SessionProof{Source: SessionSourceAccount}, policy, credentialAt, userAgentHash, nil, now)
+	if err != nil {
+		return CreatedSession{}, err
+	}
+	if err := commitAuthTx(sqlTx); err != nil {
+		return CreatedSession{}, err
+	}
+	return created, nil
+}
+
 // tokenPasswordFlow describes one single-use token that sets a password.
 type tokenPasswordFlow struct {
 	table         string // password_reset_tokens | account_activation_tokens

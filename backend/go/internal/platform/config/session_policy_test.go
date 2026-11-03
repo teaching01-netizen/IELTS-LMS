@@ -15,7 +15,7 @@ func validRuntimeConfig() Config {
 }
 
 func TestPersistentLoginDefaults(t *testing.T) {
-	for _, key := range []string{"PERSISTENT_LOGIN_ENABLED", "SESSION_REMEMBER_STAFF_IDLE_HOURS", "SESSION_REMEMBER_STAFF_ABSOLUTE_HOURS", "SESSION_REMEMBER_ADMIN_IDLE_HOURS", "SESSION_REMEMBER_ADMIN_ABSOLUTE_HOURS", "AUTH_PUBLIC_ORIGIN"} {
+	for _, key := range []string{"PERSISTENT_LOGIN_ENABLED", "SESSION_REMEMBER_STAFF_IDLE_HOURS", "SESSION_REMEMBER_STAFF_ABSOLUTE_HOURS", "SESSION_REMEMBER_ADMIN_IDLE_HOURS", "SESSION_REMEMBER_ADMIN_ABSOLUTE_HOURS", "SESSION_REMEMBER_MASTER_IDLE_HOURS", "SESSION_REMEMBER_MASTER_ABSOLUTE_HOURS", "AUTH_PUBLIC_ORIGIN"} {
 		t.Setenv(key, "")
 	}
 	cfg := Load()
@@ -25,6 +25,9 @@ func TestPersistentLoginDefaults(t *testing.T) {
 	if cfg.SessionRememberStaffIdleHours != 168 || cfg.SessionRememberStaffAbsoluteHours != 720 ||
 		cfg.SessionRememberAdminIdleHours != 24 || cfg.SessionRememberAdminAbsoluteHours != 168 {
 		t.Fatalf("unexpected defaults: %+v", cfg)
+	}
+	if cfg.SessionRememberMasterIdleHours != 2160 || cfg.SessionRememberMasterAbsoluteHours != 2160 {
+		t.Fatalf("unexpected master defaults: %+v", cfg)
 	}
 }
 
@@ -38,6 +41,11 @@ func TestSessionPolicyValidation(t *testing.T) {
 		"origin with path":       func(c *Config) { c.AuthPublicOrigin = "https://exams.example.com/app" },
 		"origin with user info":  func(c *Config) { c.AuthPublicOrigin = "https://u:p@exams.example.com" },
 		"origin non-http scheme": func(c *Config) { c.AuthPublicOrigin = "ftp://exams.example.com" },
+		"zero master idle":       func(c *Config) { c.SessionRememberMasterIdleHours = 0 },
+		"master idle above absolute": func(c *Config) {
+			c.SessionRememberMasterIdleHours, c.SessionRememberMasterAbsoluteHours = 3000, 100
+		},
+		"master absolute above cap": func(c *Config) { c.SessionRememberMasterAbsoluteHours = MaxMasterKeySessionHours + 1 },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

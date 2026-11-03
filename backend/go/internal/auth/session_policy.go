@@ -68,3 +68,29 @@ func policyForPassword(cfg config.Config, role string, remember bool) (SessionPo
 		snapshot:         true,
 	}, nil
 }
+
+// policyForMasterKey chooses the policy for an emergency master-key login.
+// A checked sign-in with issuance enabled gets the dedicated master windows
+// (default 90d idle / 90d absolute), never the admin windows: a months-long
+// emergency bearer must stay visibly distinct from a 24h admin session.
+// Anything else keeps the short snapshot policy, exactly like an
+// unremembered password login.
+func policyForMasterKey(cfg config.Config, remember bool) (SessionPolicy, error) {
+	if !remember || !cfg.PersistentLoginEnabled {
+		p := legacyPolicy(cfg, RoleAdmin)
+		p.snapshot = true
+		return p, nil
+	}
+	idle, total := cfg.SessionRememberMasterIdleHours, cfg.SessionRememberMasterAbsoluteHours
+	// Config validation bounds these; refuse to issue on a config that was
+	// never validated instead of minting an unbounded or inverted window.
+	if idle <= 0 || total <= 0 || idle > total || total > config.MaxMasterKeySessionHours {
+		return SessionPolicy{}, apperrors.New(apperrors.CodeServiceUnavailable, "Session policy is not configured.")
+	}
+	return SessionPolicy{
+		Remembered:       true,
+		IdleWindow:       time.Duration(idle) * time.Hour,
+		AbsoluteLifetime: time.Duration(total) * time.Hour,
+		snapshot:         true,
+	}, nil
+}

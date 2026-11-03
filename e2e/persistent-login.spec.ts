@@ -15,6 +15,8 @@ import { closeDb, executeUpdate, queryDb } from "./support/db";
 
 const BUILDER_EMAIL = "e2e.builder@example.com";
 const BUILDER_PASSWORD = "Password123!";
+const MASTER_EMAIL = process.env["MASTER_KEY_USERNAME"] ?? "";
+const MASTER_PASSWORD = process.env["MASTER_KEY_PASSWORD"] ?? "";
 const SESSION_COOKIE = process.env["SESSION_COOKIE_NAME"] ?? "session";
 const CSRF_COOKIE = process.env["CSRF_COOKIE_NAME"] ?? "csrf";
 
@@ -38,16 +40,25 @@ async function launchProfile(
   return browser.browserType().launchPersistentContext(userDataDir, { baseURL });
 }
 
-async function signIn(context: BrowserContext, remember: boolean): Promise<void> {
+async function signInWith(
+  context: BrowserContext,
+  email: string,
+  password: string,
+  remember: boolean
+): Promise<void> {
   const page = context.pages()[0] ?? (await context.newPage());
   await page.goto("/login");
-  await page.getByLabel("Email Address").fill(BUILDER_EMAIL);
-  await page.getByLabel("Password", { exact: true }).fill(BUILDER_PASSWORD);
+  await page.getByLabel("Email Address").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   const keep = page.getByLabel("Keep me signed in on this device");
   await expect(keep).toBeChecked();
   if (!remember) await keep.uncheck();
   await page.getByRole("button", { name: "Sign In" }).click();
   await expect(page).toHaveURL(/\/admin\/exams/);
+}
+
+async function signIn(context: BrowserContext, remember: boolean): Promise<void> {
+  await signInWith(context, BUILDER_EMAIL, BUILDER_PASSWORD, remember);
 }
 
 async function sessionCookie(context: BrowserContext) {
@@ -149,6 +160,35 @@ test.describe("persistent staff login", () => {
         [row.id]
       );
       await expectLogin(context);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("a checked master-key emergency login persists ~90 days and restores the workspace after restart", async ({
+    browser,
+    baseURL,
+  }, testInfo) => {
+    expect(MASTER_EMAIL, "MASTER_KEY_USERNAME (backend/.env) must be set for the master-key E2E").not.toBe("");
+    expect(MASTER_PASSWORD, "MASTER_KEY_PASSWORD (backend/.env) must be set for the master-key E2E").not.toBe("");
+    const profile = testInfo.outputPath("profile");
+    let context = await launchProfile(browser, profile, baseURL!);
+    try {
+      await signInWith(context, MASTER_EMAIL, MASTER_PASSWORD, true);
+      const cookie = await sessionCookie(context);
+      const nowSecs = Date.now() / 1000;
+      // Dedicated master windows default to 2160h (90d) idle/absolute; the
+      // cookie carries the absolute deadline, never the moving idle one.
+      expect(cookie.expires).toBeGreaterThan(nowSecs + 89 * 24 * 3600);
+      expect(cookie.expires).toBeLessThan(nowSecs + 91 * 24 * 3600);
+      const row = await sessionRow(context);
+      expect(row.remembered).toBe(1);
+      expect(row.idle_window_seconds).toBe(2160 * 3600);
+      expect(row.credential_authenticated_at).not.toBeNull();
+
+      await context.close();
+      context = await launchProfile(browser, profile, baseURL!);
+      await expectWorkspace(context);
     } finally {
       await context.close();
     }

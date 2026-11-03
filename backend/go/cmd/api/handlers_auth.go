@@ -104,18 +104,6 @@ func sessionPayload(user auth.SessionUser, csrfToken string, expiresAt, idleTime
 	}
 }
 
-// writeCreatedSession answers a legacy CreateSession issuance (master key).
-func writeCreatedSession(w http.ResponseWriter, r *http.Request, app *App, userID, role, sessionToken, csrfToken string, now time.Time) {
-	expiresAt, idleTimeoutAt := auth.SessionExpiry(app.Config, role, now)
-	payload, err := buildSessionResponse(r.Context(), app, userID, role, csrfToken, expiresAt, idleTimeoutAt)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	setCreatedSessionCookies(w, app, role, sessionToken, csrfToken, expiresAt, now)
-	httpx.WriteJSON(w, http.StatusOK, payload)
-}
-
 // writeAccountSession answers a committed password workflow. Deadlines and
 // the remembered choice come from the persisted row, never recomputed here,
 // and cookies are only written after the workflow's commit was acknowledged.
@@ -192,22 +180,17 @@ func loginHandler(app *App) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		now := time.Now().UTC()
 		// Master-key emergency admin login: checked BEFORE the users-table
-		// lookup (mirrors Rust login() dispatch). It always issues the short
-		// legacy policy with no password freshness, whatever rememberMe says.
+		// lookup (mirrors Rust login() dispatch). A checked "keep me signed
+		// in" issues the dedicated remembered master policy with persistent
+		// cookies; unchecked or disabled persistence keeps the short policy.
 		if auth.IsMasterKeyLogin(app.Config, email, req.Password) {
-			userID, err := auth.EnsureMasterKeyUser(ctx, app.DB, email, now)
+			created, err := auth.LoginWithMasterKey(ctx, app.DB, app.Config, email, remember, userAgentHash(r))
 			if err != nil {
-				httpx.WriteError(w, r, err)
+				httpx.WriteError(w, r, authStoreError("login", err))
 				return
 			}
-			_, sessionToken, csrfToken, err := auth.CreateSession(ctx, app.DB, app.Config, userID, auth.RoleAdmin, auth.SessionProof{Source: auth.SessionSourceAccount}, userAgentHash(r), nil, now)
-			if err != nil {
-				httpx.WriteError(w, r, err)
-				return
-			}
-			writeCreatedSession(w, r, app, userID, auth.RoleAdmin, sessionToken, csrfToken, now)
+			writeAccountSession(w, r, app, created)
 			return
 		}
 		created, err := auth.LoginWithPassword(ctx, app.DB, app.Config, email, req.Password, remember, userAgentHash(r))

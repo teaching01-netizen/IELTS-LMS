@@ -432,6 +432,12 @@ type Config struct {
 	SessionRememberStaffAbsoluteHours int
 	SessionRememberAdminIdleHours     int
 	SessionRememberAdminAbsoluteHours int
+	// Remembered emergency master-key idle/absolute windows, in hours.
+	// Separate from the admin windows so a months-long emergency bearer
+	// stays visibly distinct from a 24h admin session. Validated positive,
+	// idle <= absolute, <= MaxMasterKeySessionHours.
+	SessionRememberMasterIdleHours     int
+	SessionRememberMasterAbsoluteHours int
 	// AuthPublicOrigin is the exact browser origin (scheme://host[:port]) that
 	// credential and logout requests must come from. Required (https) for
 	// production-like API startup; empty in development derives it from the
@@ -954,6 +960,8 @@ func Load() Config {
 		SessionRememberStaffAbsoluteHours: getenvInt("SESSION_REMEMBER_STAFF_ABSOLUTE_HOURS", 720),
 		SessionRememberAdminIdleHours:     getenvInt("SESSION_REMEMBER_ADMIN_IDLE_HOURS", 24),
 		SessionRememberAdminAbsoluteHours: getenvInt("SESSION_REMEMBER_ADMIN_ABSOLUTE_HOURS", 168),
+		SessionRememberMasterIdleHours:     getenvInt("SESSION_REMEMBER_MASTER_IDLE_HOURS", 2160),
+		SessionRememberMasterAbsoluteHours: getenvInt("SESSION_REMEMBER_MASTER_ABSOLUTE_HOURS", 2160),
 		AuthPublicOrigin:                  strings.TrimRight(strings.TrimSpace(os.Getenv("AUTH_PUBLIC_ORIGIN")), "/"),
 
 		MaxMutationsPerBatch:  getenvInt("MAX_MUTATIONS_PER_BATCH", 200),
@@ -1245,8 +1253,14 @@ func (c Config) ValidateForRuntime() error {
 	return nil
 }
 
-// MaxRememberedSessionHours caps every remembered idle/absolute window.
+// MaxRememberedSessionHours caps every remembered staff/admin idle/absolute window.
 const MaxRememberedSessionHours = 720
+
+// MaxMasterKeySessionHours caps the remembered emergency master-key
+// idle/absolute windows. Deliberately separate from
+// MaxRememberedSessionHours so a months-long emergency bearer never loosens
+// the staff/admin bounds by accident.
+const MaxMasterKeySessionHours = 4320
 
 // validateSessionPolicy rejects remembered windows that are not
 // positive, exceed the caps, or put the idle window beyond the hard maximum.
@@ -1265,6 +1279,13 @@ func (c Config) validateSessionPolicy() error {
 		if pair.idle > pair.total {
 			return fmt.Errorf("%s_IDLE_HOURS must not exceed %s_ABSOLUTE_HOURS", pair.name, pair.name)
 		}
+	}
+	masterIdle, masterTotal := c.SessionRememberMasterIdleHours, c.SessionRememberMasterAbsoluteHours
+	if masterIdle <= 0 || masterTotal <= 0 || masterIdle > MaxMasterKeySessionHours || masterTotal > MaxMasterKeySessionHours {
+		return fmt.Errorf("SESSION_REMEMBER_MASTER_IDLE_HOURS and SESSION_REMEMBER_MASTER_ABSOLUTE_HOURS must be between 1 and %d", MaxMasterKeySessionHours)
+	}
+	if masterIdle > masterTotal {
+		return fmt.Errorf("SESSION_REMEMBER_MASTER_IDLE_HOURS must not exceed SESSION_REMEMBER_MASTER_ABSOLUTE_HOURS")
 	}
 	if c.AuthPublicOrigin != "" {
 		if _, err := ParseAuthOrigin(c.AuthPublicOrigin); err != nil {
