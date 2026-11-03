@@ -5,7 +5,10 @@ package grading
 // The website's getEffectiveAcceptedAnswers in src/components/admin/
 // gradingAnswerUtils.ts mirrors these rows; a test per row exists on both sides.
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // keySourceFields is the read order per question type. "acceptedAnswers" is
 // always the explicit list; the specific field comes before any legacy
@@ -32,7 +35,24 @@ func fieldsForQuestionType(questionType string) []string {
 	if fields, ok := keySourceFields[strings.ToUpper(strings.TrimSpace(questionType))]; ok {
 		return fields
 	}
-	return keySourceFields["CLOZE"]
+	return keySourceDefaultFields
+}
+
+var keySourceDefaultFields = []string{"acceptedAnswers", "correctAnswer"}
+
+// KeySourceFields is the test-facing view of one table row.
+func KeySourceFields(questionType string) []string {
+	return append([]string(nil), fieldsForQuestionType(questionType)...)
+}
+
+// KeySourceTypes returns every explicit row in the table.
+func KeySourceTypes() []string {
+	types := make([]string, 0, len(keySourceFields))
+	for questionType := range keySourceFields {
+		types = append(types, questionType)
+	}
+	sort.Strings(types)
+	return types
 }
 
 // sentenceAnswerPool is the shared "accept any key" pool: explicit

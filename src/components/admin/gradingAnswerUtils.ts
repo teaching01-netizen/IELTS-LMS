@@ -485,7 +485,9 @@ function resolveKeyFields(entry: unknown, fields: readonly string[]): string[] {
   return [];
 }
 
-const KEY_SOURCE_FIELDS: Record<string, readonly string[]> = {
+export const OBJECTIVE_KEY_SOURCE_DEFAULT = ['acceptedAnswers', 'correctAnswer'] as const;
+
+export const OBJECTIVE_KEY_SOURCE_FIELDS: Record<string, readonly string[]> = {
   TFNG: ['correctAnswer', 'acceptedAnswers'],
   CLOZE: ['acceptedAnswers', 'correctAnswer'],
   MATCHING: ['acceptedAnswers', 'correctHeading', 'correctAnswer'],
@@ -498,7 +500,13 @@ const KEY_SOURCE_FIELDS: Record<string, readonly string[]> = {
   TABLE_COMPLETION: ['acceptedAnswers', 'correctAnswer'],
   CLASSIFICATION: ['acceptedAnswers', 'correctCategory', 'correctAnswer'],
   MATCHING_FEATURES: ['acceptedAnswers', 'correctMatch', 'correctAnswer'],
+  SUB_ANSWER_TREE: ['acceptedAnswers', 'correctAnswer'],
+  SINGLE_MCQ: ['acceptedAnswers', 'correctAnswer'],
 };
+
+export function getKeySourceFieldsForType(questionType: string): readonly string[] {
+  return OBJECTIVE_KEY_SOURCE_FIELDS[questionType] ?? OBJECTIVE_KEY_SOURCE_DEFAULT;
+}
 
 /**
  * The website side of the key-source table. This is the only function grading
@@ -520,7 +528,7 @@ export function getEffectiveAcceptedAnswersForGrading(
     return leaf ? sanitizeAcceptedAnswers(leaf.acceptedAnswers) : [];
   }
 
-  const fields = KEY_SOURCE_FIELDS[block.type] ?? ['acceptedAnswers', 'correctAnswer'];
+  const fields = getKeySourceFieldsForType(block.type);
 
   if (block.type === 'SENTENCE_COMPLETION') {
     if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return [];

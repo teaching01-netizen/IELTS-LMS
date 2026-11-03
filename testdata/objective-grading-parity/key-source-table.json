@@ -1,0 +1,20 @@
+{
+  "description": "Shared key-source table. The Go table and the website table must both match every row and field order.",
+  "rows": {
+    "TFNG": ["correctAnswer", "acceptedAnswers"],
+    "CLOZE": ["acceptedAnswers", "correctAnswer"],
+    "MATCHING": ["acceptedAnswers", "correctHeading", "correctAnswer"],
+    "MAP": ["correctAnswer", "acceptedAnswers"],
+    "SHORT_ANSWER": ["acceptedAnswers", "correctAnswer"],
+    "SENTENCE_COMPLETION": ["acceptedAnswers", "correctAnswer"],
+    "NOTE_COMPLETION": ["acceptedAnswers", "correctAnswer"],
+    "DIAGRAM_LABELING": ["acceptedAnswers", "correctAnswer"],
+    "FLOW_CHART": ["acceptedAnswers", "correctAnswer"],
+    "TABLE_COMPLETION": ["acceptedAnswers", "correctAnswer"],
+    "CLASSIFICATION": ["acceptedAnswers", "correctCategory", "correctAnswer"],
+    "MATCHING_FEATURES": ["acceptedAnswers", "correctMatch", "correctAnswer"],
+    "SUB_ANSWER_TREE": ["acceptedAnswers", "correctAnswer"],
+    "SINGLE_MCQ": ["acceptedAnswers", "correctAnswer"]
+  },
+  "default": ["acceptedAnswers", "correctAnswer"]
+}
