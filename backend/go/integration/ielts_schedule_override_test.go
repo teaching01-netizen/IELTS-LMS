@@ -3,7 +3,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -349,8 +348,9 @@ func TestIELTSReleasedRegradePreviewAndApply(t *testing.T) {
 	if overall != 7 || resultVersion != 2 || previousID == "" {
 		t.Fatalf("released result overall=%v version=%d previous=%q, want 7 / 2 / set", overall, resultVersion, previousID)
 	}
-	if !strings.Contains(bands, `"reading":7`) {
-		t.Fatalf("released result reading band not corrected: %s", bands)
+	var parsedBands map[string]float64
+	if err := json.Unmarshal([]byte(bands), &parsedBands); err != nil || parsedBands["reading"] != 7 {
+		t.Fatalf("released result reading band not corrected: %s (%v)", bands, err)
 	}
 	if writing != "{}" || summary != "{}" {
 		t.Fatalf("released result writing/summary changed: writing=%s summary=%s", writing, summary)
@@ -374,10 +374,20 @@ func TestIELTSReleasedRegradePreviewAndApply(t *testing.T) {
 		WHERE schedule_id = ? AND action = 'objective_regrade_released' LIMIT 1`, ids.scheduleID).Scan(&payload); err != nil {
 		t.Fatalf("read audit payload: %v", err)
 	}
-	for _, expected := range []string{`"reason":"release fix"`, `"oldTotalScore":0`, `"newTotalScore":1`} {
-		if !strings.Contains(payload, expected) {
-			t.Fatalf("audit payload missing %s: %s", expected, payload)
-		}
+	var auditPayload map[string]any
+	if err := json.Unmarshal([]byte(payload), &auditPayload); err != nil {
+		t.Fatalf("decode audit payload: %v", err)
+	}
+	if auditPayload["reason"] != "release fix" {
+		t.Fatalf("audit reason = %v, want release fix", auditPayload["reason"])
+	}
+	auditSubmissions, _ := auditPayload["submissions"].([]any)
+	if len(auditSubmissions) != 1 {
+		t.Fatalf("audit submissions = %v, want 1", auditPayload["submissions"])
+	}
+	auditSubmission, _ := auditSubmissions[0].(map[string]any)
+	if auditSubmission["oldTotalScore"] != float64(0) || auditSubmission["newTotalScore"] != float64(1) {
+		t.Fatalf("audit totals = %v -> %v, want 0 -> 1", auditSubmission["oldTotalScore"], auditSubmission["newTotalScore"])
 	}
 
 	// Running again with a fresh preview changes nothing and writes no event.

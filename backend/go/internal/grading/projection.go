@@ -469,6 +469,9 @@ func collectProjectionBlock(model *projectionSectionModel, block map[string]any,
 				}
 				if acceptAny {
 					spec.Accepted = pool
+					if len(pool) > 0 {
+						spec.Correct = strings.Join(pool, " | ")
+					}
 					spec.GroupKey = questionID
 					spec.GroupKind = "pool"
 					spec.GroupIndex = index
@@ -658,6 +661,9 @@ func addProjectionQuestionWithID(model *projectionSectionModel, id string, quest
 func addProjectionQuestionWithValues(model *projectionSectionModel, question projectionQuestion) {
 	if strings.TrimSpace(question.ID) == "" {
 		return
+	}
+	if question.Correct == nil && !question.Multi && len(question.Accepted) > 0 {
+		question.Correct = question.Accepted[0]
 	}
 	model.AnswerKeys[question.ID] = true
 	for i := range model.Specs {
