@@ -3,21 +3,96 @@
  *
  * The fixture covers every row of the key-source table, grouped slots,
  * sub-answer trees, choose-N partial credit, shared answer pools, schedule
- * overrides and exclusions. The expected block is a snapshot of the website
- * scorer; the Go and TypeScript parity tests both compare against it.
+ * overrides and exclusions.
  *
- * Run: bun backend/scripts/build-grading-parity-fixture.ts
+ * The expected block is a reviewed golden file regenerated from the Go grader.
+ * The website test compares against it independently, so the two graders
+ * cannot drift together. Without --update-expected the script preserves the
+ * checked-in golden file; --check fails CI when it is missing or stale.
+ *
+ * Run: bun backend/scripts/build-grading-parity-fixture.ts [--update-expected|--check]
  */
 
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInitialExamState, getStudentQuestionsForModule } from '../../src/services/examAdapterService';
-import { scoreObjectiveDescriptors } from '../../src/features/grading/objectiveScoring';
+import { createInitialExamState } from '../../src/services/examAdapterService';
 import type { QuestionBlock, SubAnswerTreeNode } from '../../src/types';
+
+declare const Bun: {
+  spawn: (
+    command: string[],
+    options: Record<string, unknown>,
+  ) => {
+    stdin: { write: (value: string) => void; end: () => Promise<void> };
+    stdout: ReadableStream<Uint8Array>;
+    stderr: ReadableStream<Uint8Array>;
+    exited: Promise<number>;
+  };
+};
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, '../../testdata/objective-grading-parity/full-coverage-exam.json');
+const GO_ROOT = resolve(HERE, '../../backend/go');
+const SECTION = 'reading' as const;
+const VERSION_ID = 'parity-full-coverage';
+
+interface GoQuestionResult {
+  questionId: string;
+  correctness: boolean | null;
+  awardedScore: number | null;
+  maxScore: number | null;
+}
+
+interface GoSectionResult {
+  totalScore: number;
+  maxScore: number;
+  questions: GoQuestionResult[];
+}
+
+interface GoldenExpected {
+  totalScore: number;
+  maxScore: number;
+  questions: GoQuestionResult[];
+}
+
+async function runGoExpected(): Promise<GoldenExpected> {
+  const proc = Bun.spawn(['go', 'run', './cmd/grading-parity-grade'], {
+    cwd: GO_ROOT,
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  proc.stdin.write(JSON.stringify([{
+    section: SECTION,
+    content: examState,
+    answers,
+    keys: {},
+    overrides,
+    versionId: VERSION_ID,
+  }]));
+  await proc.stdin.end();
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode !== 0) {
+    throw new Error(`Go parity grader failed (exit ${exitCode}): ${stderr.slice(0, 2000)}`);
+  }
+  const [result] = JSON.parse(stdout) as GoSectionResult[];
+  if (!result) throw new Error('Go parity grader returned no result.');
+  return {
+    totalScore: result.totalScore,
+    maxScore: result.maxScore,
+    questions: result.questions.map((question) => ({
+      questionId: question.questionId,
+      correctness: question.correctness,
+      awardedScore: question.awardedScore,
+      maxScore: question.maxScore,
+    })),
+  };
+}
 
 const tree: SubAnswerTreeNode[] = [
   {
@@ -281,29 +356,50 @@ const overrides = {
   },
 };
 
-const descriptors = getStudentQuestionsForModule(examState, 'reading');
-const scoring = scoreObjectiveDescriptors(descriptors, answers as never, overrides);
-const expected = {
-  totalScore: scoring.totalScore,
-  maxScore: scoring.maxScore,
-  questions: descriptors.map((descriptor) => {
-    const score = scoring.byId.get(descriptor.id);
-    return {
-      questionId: descriptor.id,
-      correctness: score?.correctness ?? null,
-      awardedScore: score?.awardedScore ?? null,
-      maxScore: score?.maxScore ?? null,
-    };
-  }),
-};
+const updateExpected = process.argv.includes('--update-expected');
+const check = process.argv.includes('--check');
+if (updateExpected && check) {
+  throw new Error('Use either --update-expected or --check, not both.');
+}
+
+const existing = existsSync(OUT)
+  ? (JSON.parse(readFileSync(OUT, 'utf8')) as { expected?: GoldenExpected })
+  : null;
+const computed = await runGoExpected();
+let expected: GoldenExpected;
+
+if (check) {
+  if (!existing?.expected) {
+    throw new Error(`Golden expected results are missing from ${OUT}. Run with --update-expected and review the diff.`);
+  }
+  if (JSON.stringify(existing.expected) !== JSON.stringify(computed)) {
+    process.stderr.write(
+      `Golden expected results are stale. Run ${'`'}bun backend/scripts/build-grading-parity-fixture.ts --update-expected${'`'} and review the diff.\n`,
+    );
+    process.exitCode = 1;
+    process.exit(1);
+  }
+  process.stdout.write(`golden expected results are current (${computed.totalScore}/${computed.maxScore})\n`);
+  process.exit(0);
+}
+
+if (updateExpected) {
+  expected = computed;
+} else {
+  if (!existing?.expected) {
+    throw new Error(`Golden expected results are missing from ${OUT}. Run with --update-expected and review the diff.`);
+  }
+  expected = existing.expected;
+}
 
 writeFileSync(
   OUT,
   JSON.stringify(
     {
-      description: 'Full-coverage objective grading parity exam. Shared by the Go and TypeScript tests.',
-      section: 'reading',
-      versionId: 'parity-full-coverage',
+      description:
+        'Full-coverage objective grading parity exam. The expected block is a reviewed golden file regenerated from the Go grader; the website test compares against it independently.',
+      section: SECTION,
+      versionId: VERSION_ID,
       examState,
       answers,
       keys: {},

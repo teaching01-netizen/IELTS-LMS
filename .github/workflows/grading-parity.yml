@@ -72,6 +72,8 @@ jobs:
         with:
           node-version: 20
       - run: bun install --frozen-lockfile
+      - name: Golden expected results are current
+        run: bun backend/scripts/build-grading-parity-fixture.ts --check
       - name: Replay the full-coverage exam through both graders
         run: |
           bun backend/scripts/grading-parity.ts \

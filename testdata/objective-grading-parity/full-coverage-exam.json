@@ -1,5 +1,5 @@
 {
-  "description": "Full-coverage objective grading parity exam. Shared by the Go and TypeScript tests.",
+  "description": "Full-coverage objective grading parity exam. The expected block is a reviewed golden file regenerated from the Go grader; the website test compares against it independently.",
   "section": "reading",
   "versionId": "parity-full-coverage",
   "examState": {
