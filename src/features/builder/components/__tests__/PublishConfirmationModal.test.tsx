@@ -143,4 +143,19 @@ describe('PublishConfirmationModal', () => {
     expect(screen.getByText(/warning:/i)).toBeTruthy();
     expect(screen.getByText(/publishing creates an immutable version/i)).toBeTruthy();
   });
+
+  it('shows the server refusal message naming the section and question', async () => {
+    const onConfirm = vi.fn().mockRejectedValue(
+      new Error('Reading question 2 (q2): no answer key the server can read.'),
+    );
+    render(<PublishConfirmationModal {...defaultProps} onConfirm={onConfirm} />);
+
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /confirm publish/i }));
+
+    expect(
+      await screen.findByText('Reading question 2 (q2): no answer key the server can read.'),
+    ).toBeInTheDocument();
+    expect(onConfirm).toHaveBeenCalled();
+  });
 });
