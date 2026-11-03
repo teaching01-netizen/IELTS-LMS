@@ -76,8 +76,9 @@ export function buildObjectiveQuestionTableRows(
       correct = scoreNum > 0 ? 'Yes' : 'No';
     } else if (studentAnswer.trim() !== '' && rightAnswer.trim() !== '') {
       // Compare each accepted answer separately; the joined display string
-      // ("a | b") is not itself an accepted answer.
-      const alternatives = rightAnswer.split(' | ').map((value) => value.trim()).filter(Boolean);
+      // ("a | b") is not itself an accepted answer. Split on any pipe
+      // spacing ("a|b", "a |b", "a| b") to match sanitizeAcceptedAnswers.
+      const alternatives = rightAnswer.split('|').map((value) => value.trim()).filter(Boolean);
       correct = alternatives.some((alternative) => answersMatch(studentAnswer, alternative))
         ? 'Yes'
         : 'No';

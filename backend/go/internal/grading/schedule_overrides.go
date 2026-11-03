@@ -382,6 +382,49 @@ func loadRegradeSections(ctx context.Context, q tx.Tx, submissionID string) ([]r
 	return out, rows.Err()
 }
 
+// loadRegradeTerminalAnswers returns the raw terminal answers map for one
+// attempt generation (final_submission.answers). Section rows already passed
+// through projectionSectionAnswers, which dropped array keys; when a
+// flag-only null slot shadowed its array the section row kept only the null.
+// Merging the terminal map back lets the fixed alias expansion restore those
+// slots. Missing/invalid payloads yield an empty map (regrade falls back to
+// stored section answers).
+func loadRegradeTerminalAnswers(ctx context.Context, q tx.Tx, attemptID string, terminalGeneration uint64) map[string]any {
+	var raw sql.NullString
+	if err := q.QueryRowContext(ctx, `
+		SELECT CAST(final_submission AS CHAR)
+		FROM student_attempts
+		WHERE id = ? AND terminal_generation = ?`, attemptID, terminalGeneration).Scan(&raw); err != nil || !raw.Valid || raw.String == "" {
+		return map[string]any{}
+	}
+	return projectionObjectValue(projectionObject(json.RawMessage(raw.String))["answers"])
+}
+
+// mergeRegradeStoredWithTerminal unions filtered section answers with raw
+// terminal answers. Array keys lost by the old filter come back from the
+// terminal map; meaningful slot values win over null/empty ones so a
+// flag-only null never shadows a real answer again.
+func mergeRegradeStoredWithTerminal(stored, terminal map[string]any) map[string]any {
+	if len(terminal) == 0 {
+		return stored
+	}
+	merged := make(map[string]any, len(stored)+len(terminal))
+	for key, value := range stored {
+		merged[key] = value
+	}
+	for key, value := range terminal {
+		existing, exists := merged[key]
+		if !exists {
+			merged[key] = value
+			continue
+		}
+		if len(projectionValueStrings(existing)) == 0 && len(projectionValueStrings(value)) > 0 {
+			merged[key] = value
+		}
+	}
+	return merged
+}
+
 // carryTeacherOverrides keeps per-submission teacher decisions across a
 // regrade: the section-level "overrides" map and any per-question manual
 // override fields stored on the previous results.

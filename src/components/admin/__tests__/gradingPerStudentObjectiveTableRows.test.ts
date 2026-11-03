@@ -50,6 +50,18 @@ describe('buildObjectiveQuestionTableRows', () => {
     expect(rows[0]?.correct).toBe('Yes');
   });
 
+  test('splits pipe variants without surrounding spaces', () => {
+    const columns: CsvColumn[] = [{ key: 'answer:q1', label: 'Q1 Answer' }];
+
+    const rows = buildObjectiveQuestionTableRows(columns, {
+      'answer:q1': 'waiters',
+      'rightAnswer:q1': 'waiter|waiters',
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.correct).toBe('Yes');
+  });
+
   test('renders one row per question number for choose-N with saved partial score', () => {
     const columns: CsvColumn[] = [
       { key: 'answer:multi', label: 'Q21-22 Answer' },

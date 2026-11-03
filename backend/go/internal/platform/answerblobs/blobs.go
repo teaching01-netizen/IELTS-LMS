@@ -41,10 +41,12 @@ func Assemble(cells []Cell) (Blobs, error) {
 	flags := map[string]json.RawMessage{}
 	for _, c := range cells {
 		ans, fset := Project(c.ModuleID, c.SectionKey, c.Canonical)
-		if ans.IsAnswer {
-			answers[c.QuestionID] = ans.Value
-		} else {
-			writing[c.QuestionID] = ans.Value
+		if len(ans.Value) > 0 && strings.TrimSpace(string(ans.Value)) != "null" {
+			if ans.IsAnswer {
+				answers[c.QuestionID] = ans.Value
+			} else {
+				writing[c.QuestionID] = ans.Value
+			}
 		}
 		if fset.Set {
 			flags[c.QuestionID] = fset.Value
@@ -86,6 +88,12 @@ type payload struct {
 // Project applies the legacy mergeProjection semantics to one stored
 // canonical payload: extract the "answer" field, split answers vs
 // writing_answers by module, set flags iff markedForReview.
+//
+// A flag-only operation stores {"answer":null,"markedForReview":true}. The
+// null answer must not create an answers entry: otherwise a student flag on
+// one slot (e.g. "blk:feat-x": null) would shadow the real array answer
+// ("blk": [...]) during projection and the slot would grade as unanswered
+// while the student answer is intact in attempt_responses_v2.
 func Project(moduleID, sectionKey string, canonical json.RawMessage) (Answer, Flag) {
 	var p payload
 	if err := json.Unmarshal(canonical, &p); err != nil || len(p.Answer) == 0 {
@@ -93,6 +101,13 @@ func Project(moduleID, sectionKey string, canonical json.RawMessage) (Answer, Fl
 			return Answer{Value: canonical}, Flag{}
 		}
 		return Answer{IsAnswer: true, Value: canonical}, Flag{}
+	}
+	if strings.TrimSpace(string(p.Answer)) == "null" {
+		var flag Flag
+		if p.MarkedForReview {
+			flag = Flag{Set: true, Value: json.RawMessage("true")}
+		}
+		return Answer{}, flag
 	}
 	ans := Answer{Value: p.Answer}
 	if !IsWritingResponse(moduleID, sectionKey) {

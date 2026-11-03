@@ -270,7 +270,7 @@ func planScheduleRegrade(ctx context.Context, q tx.Tx, scheduleID, scope string)
 	plan.ExamType = examType
 	plan.Config = projectionObject(json.RawMessage(configRaw.String))
 	rows, err := q.QueryContext(ctx, `
-		SELECT s.id, s.student_id, s.student_name, s.published_version_id, s.grading_status
+		SELECT s.id, s.student_id, s.student_name, s.published_version_id, s.grading_status, s.attempt_id, s.terminal_generation
 		FROM student_submissions s
 		JOIN student_attempts a ON a.id = s.attempt_id
 			AND a.terminal_generation = s.terminal_generation AND a.submitted_at IS NOT NULL
@@ -281,12 +281,13 @@ func planScheduleRegrade(ctx context.Context, q tx.Tx, scheduleID, scope string)
 		return plan, err
 	}
 	type submissionRow struct {
-		ID, StudentID, StudentName, VersionID, Status string
+		ID, StudentID, StudentName, VersionID, Status, AttemptID string
+		TerminalGeneration                                       uint64
 	}
 	var submissions []submissionRow
 	for rows.Next() {
 		var row submissionRow
-		if err := rows.Scan(&row.ID, &row.StudentID, &row.StudentName, &row.VersionID, &row.Status); err != nil {
+		if err := rows.Scan(&row.ID, &row.StudentID, &row.StudentName, &row.VersionID, &row.Status, &row.AttemptID, &row.TerminalGeneration); err != nil {
 			rows.Close()
 			return plan, err
 		}
@@ -338,6 +339,12 @@ func planScheduleRegrade(ctx context.Context, q tx.Tx, scheduleID, scope string)
 		if err != nil {
 			return plan, err
 		}
+		// Recover answers lost when a flag-only null slot shadowed its array
+		// (e.g. "blk:feat-x": null alongside "blk": [...]). Section rows
+		// already filtered the array away, so merge the raw terminal answers
+		// back in; meaningful values win and the fixed alias expansion
+		// restores flagged slots from their arrays.
+		rawTerminal := loadRegradeTerminalAnswers(ctx, q, row.AttemptID, row.TerminalGeneration)
 		planned := plannedSubmission{
 			ID: row.ID, StudentID: row.StudentID, StudentName: row.StudentName, Released: released,
 			Changes: []ObjectiveRegradeChange{}, Sections: []plannedSectionUpdate{},
@@ -345,6 +352,7 @@ func planScheduleRegrade(ctx context.Context, q tx.Tx, scheduleID, scope string)
 		for _, section := range sections {
 			plan.Report.SectionsChecked++
 			stored := projectionObjectValue(projectionObject(json.RawMessage(section.Answers))["answers"])
+			stored = mergeRegradeStoredWithTerminal(stored, rawTerminal)
 			_, results := gradeProjectionObjectiveSection(section.Name, stored, source.content, source.keys, overrides, source.versionID)
 			previous := projectionObject(json.RawMessage(section.Results.String))
 			carryTeacherOverrides(previous, results)

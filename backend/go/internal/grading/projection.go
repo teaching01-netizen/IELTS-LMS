@@ -734,11 +734,20 @@ func projectionEffectiveAnswers(answers map[string]any, aliases []projectionAnsw
 		out[key] = value
 	}
 	for _, alias := range aliases {
-		if _, exists := out[alias.SlotKey]; exists {
+		// A flag-only V2 response stores {"answer":null} under the slot id
+		// (e.g. "blk:feat-x": null) alongside the real array answer
+		// ("blk": [...]). The null slot must not shadow the array element:
+		// only a slot with a meaningful answer wins, otherwise expand the
+		// array. Without this, flagging a question wipes its saved answer
+		// and the slot grades as unanswered while the answer is intact.
+		if existing, exists := out[alias.SlotKey]; exists && len(projectionValueStrings(existing)) > 0 {
 			continue
 		}
-		values, ok := answers[alias.ArrayKey].([]any)
-		if ok && alias.Index >= 0 && alias.Index < len(values) {
+		if values, ok := answers[alias.ArrayKey].([]any); ok && alias.Index >= 0 && alias.Index < len(values) {
+			out[alias.SlotKey] = values[alias.Index]
+			continue
+		}
+		if values, ok := answers[alias.ArrayKey].([]string); ok && alias.Index >= 0 && alias.Index < len(values) {
 			out[alias.SlotKey] = values[alias.Index]
 		}
 	}
