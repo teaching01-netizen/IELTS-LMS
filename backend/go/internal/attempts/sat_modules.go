@@ -213,6 +213,14 @@ func satExpectedSequence(modules []satModuleRow, required []string) error {
 		if err != nil {
 			return err
 		}
+		if plan.ShapeFor(section) == satpublish.ShapeM1Only {
+			// M1-only sections hold exactly the base module with no route
+			// decision: no M2 is ever admitted and completion never waits.
+			if len(sectionRows) != 1 || sectionRows[0].role != satpublish.RoleBase || sectionRows[0].selected != "" {
+				return unexpected
+			}
+			continue
+		}
 		entry := plan.ShapeFor(section).EntryRole()
 		if entry != satpublish.RoleBase {
 			// Standalone M2 has exactly its configured entry module and no route

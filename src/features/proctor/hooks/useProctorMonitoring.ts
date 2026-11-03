@@ -69,6 +69,11 @@ function mapBackendSessionSummary(payload: {
   satRecoveryKind?: StudentSession["satRecoveryKind"];
   satRecoveryDeadlineAt?: StudentSession["satRecoveryDeadlineAt"];
   satRecoveryBoundaryRevision?: StudentSession["satRecoveryBoundaryRevision"];
+  scoreAnswered?: number | null | undefined;
+  scoreTotal?: number | null | undefined;
+  scoreCorrect?: number | null | undefined;
+  scoreStatus?: StudentSession["scoreStatus"];
+  scoreModules?: StudentSession["scoreModules"];
   runtimeWaiting: boolean;
   ieltsPersonalStatus?: StudentSession["ieltsPersonalStatus"] | null | undefined;
   ieltsPersonalSectionKey?: StudentSession["ieltsPersonalSectionKey"] | null | undefined;
@@ -119,6 +124,13 @@ function mapBackendSessionSummary(payload: {
     satRecoveryKind: payload.satRecoveryKind ?? null,
     satRecoveryDeadlineAt: payload.satRecoveryDeadlineAt ?? null,
     satRecoveryBoundaryRevision: payload.satRecoveryBoundaryRevision ?? null,
+    // Live score projection: pass through when present, null when the backend
+    // omits it (Phase-1 rooms). Never default a missing projection to zero.
+    scoreAnswered: payload.scoreAnswered ?? null,
+    scoreTotal: payload.scoreTotal ?? null,
+    scoreCorrect: payload.scoreCorrect ?? null,
+    scoreStatus: payload.scoreStatus ?? null,
+    scoreModules: payload.scoreModules ?? null,
     runtimeSectionStatus: payload.runtimeSectionStatus ?? undefined,
     runtimeWaiting: payload.runtimeWaiting,
     ieltsPersonalStatus: payload.ieltsPersonalStatus ?? undefined,

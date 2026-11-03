@@ -41,7 +41,12 @@ export const SAT_PUBLISH_READINESS_FAMILIES = [
     label: "Answer choices",
     codes: ["sat.choice.count", "sat.choice.content.required", "sat.choice.id.duplicate", "sat.rw.question_type"],
   },
-  { id: "module-question-count", label: "Module question count", codes: ["sat.module.incomplete", "sat.module.missing"] },
+  { id: "module-question-count", label: "Module question count", codes: ["sat.module.incomplete", "sat.module.missing", "sat.module.empty"] },
+  // Audit-fix FR-1 (BUG-001): flexible drafts whose routing threshold exceeds
+  // the authored Module 1 count are refused at publish with this blocking
+  // code. It gates here like every other publish code so the release page can
+  // never look ready while the server would refuse.
+  { id: "adaptive-routing", label: "Adaptive routing", codes: ["sat.threshold.unreachable"] },
   {
     id: "correct-answers",
     label: "Correct answers",
@@ -124,6 +129,27 @@ export function getFreshWarnings(
 ): AssessmentValidationReport["warnings"] {
   if (!fresh || !readiness) return [];
   return readiness.warnings;
+}
+
+/**
+ * Non-blocking staff note for a flexible section: the first
+ * `sat.module.flexible_note` finding for that section (e.g. "Module 1 has 10
+ * of 27 questions (flexible)"). Null when the section has no flexible note or
+ * the report is stale. Flexible notes never block publish; they explain why a
+ * partial count is expected.
+ */
+export function flexibleNoteForSection(
+  readiness: AssessmentValidationReport | null | undefined,
+  fresh: boolean,
+  sectionKey: string,
+): string | null {
+  if (!fresh || !readiness || !sectionKey) return null;
+  const prefix = `${sectionKey}.`;
+  const all = [...(readiness.errors ?? []), ...(readiness.warnings ?? [])];
+  const note = all.find(
+    (issue) => issue.code === "sat.module.flexible_note" && issue.path.startsWith(prefix),
+  );
+  return note?.message ?? null;
 }
 
 export interface PublishGateInput {

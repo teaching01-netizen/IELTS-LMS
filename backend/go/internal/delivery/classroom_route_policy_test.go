@@ -72,6 +72,44 @@ func TestNextModuleTxForcedRouteIgnoresModule1Score(t *testing.T) {
 	}
 }
 
+// An M1-only section ends after Module 1: no route decision is recorded and
+// no Module 2 is opened, so completion never waits for M2.
+func TestNextModuleTxM1OnlyEndsAfterModule1(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc := deliverySvc(db)
+	mock.ExpectBegin()
+	txn, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_modules m JOIN assessment_sections s ON s.id = m.section_id WHERE m.id = ?")).
+		WithArgs("mod-base").
+		WillReturnRows(nextModuleSectionRows([]driver.Value{"sec-1", "reading-writing", 0, "base", "pv-1"}))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_routing_policies WHERE section_id = ?")).
+		WithArgs("sec-1").
+		WillReturnRows(sqlmock.NewRows([]string{"section_id", "base_module_id", "lower_module_id", "higher_module_id", "policy_key", "policy_config", "policy_revision"}).
+			AddRow("sec-1", "mod-base", "mod-lower", "mod-higher", "practice_threshold", `{"minimumCorrectForHigher":13}`, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(sch.sat_route_policy, 'adaptive') FROM student_attempts sa")).
+		WithArgs("att-1").
+		WillReturnRows(sqlmock.NewRows([]string{"policy"}).AddRow("adaptive"))
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("pv-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(`{"reading-writing":"m1_only"}`))
+
+	next, err := svc.nextModuleTx(context.Background(), txn, "att-1", "ma-base", "mod-base", 20, 25, routeAudit{})
+	if err != nil {
+		t.Fatalf("m1_only Module 1 close must succeed: %v", err)
+	}
+	if next != nil {
+		t.Fatalf("m1_only must have no follow-up module, got %+v", next)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Late evidence can never "flip" a staff/plan-forced route: those decisions are
 // not score-derived, so no review signal or audit row is produced for them.
 func TestEvidenceWouldChangeRouteSkipsClassroomDecisions(t *testing.T) {

@@ -103,6 +103,12 @@ export type ProctorSessionDetailPayload = {
     ieltsOfflinePreparedSection?: string | null | undefined;
     ieltsOfflinePreparedAt?: string | null | undefined;
     draftEvidencePending?: number | null | undefined;
+    /** Live score projection (additive, null-safe; mirrors StudentSession). */
+    scoreAnswered?: number | null | undefined;
+    scoreTotal?: number | null | undefined;
+    scoreCorrect?: number | null | undefined;
+    scoreStatus?: StudentSession['scoreStatus'];
+    scoreModules?: StudentSession['scoreModules'];
     violations: StudentSession['violations'];
     warnings: number;
     lastActivity: string;

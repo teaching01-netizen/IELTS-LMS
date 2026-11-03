@@ -66,6 +66,7 @@ func TestPersistSATSession(t *testing.T) {
 	t.Run("adaptive writes nothing", func(t *testing.T) {
 		db, mock := newDB(t)
 		mock.ExpectQuery("sat_classroom_plan").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
+		mock.ExpectQuery("sat_flexible_count").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(0)))
 		if err := PersistSATSession(ctx, db, "s1", "sat", "v1", SATSession{}, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -82,8 +83,32 @@ func TestPersistSATSession(t *testing.T) {
 		}
 		// A run narrowed to a section the plan does not touch is still standard practice.
 		mock.ExpectQuery("sat_classroom_plan").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(`{"math":"m2_easy"}`))
+		mock.ExpectQuery("sat_flexible_count").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(0)))
 		if err := PersistSATSession(ctx, db, "s1", "sat", "v1", SATSession{}, map[string]bool{"reading-writing": true}); err != nil {
 			t.Fatalf("out-of-scope plan must not block practice: %v", err)
+		}
+	})
+	t.Run("flexible version without a plan cannot be scheduled as practice", func(t *testing.T) {
+		db, mock := newDB(t)
+		mock.ExpectQuery("sat_classroom_plan").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
+		mock.ExpectQuery("sat_flexible_count").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(1)))
+		err := PersistSATSession(ctx, db, "s1", "sat", "v1", SATSession{}, nil)
+		if err == nil || !strings.Contains(err.Error(), "flexible question counts") {
+			t.Fatalf("flexible-no-plan practice schedule must be rejected, got %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("flexible version schedules as classroom", func(t *testing.T) {
+		db, mock := newDB(t)
+		mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET sat_session_mode = 'classroom' WHERE id = ?")).
+			WithArgs("s1").WillReturnResult(sqlmock.NewResult(0, 1))
+		if err := PersistSATSession(ctx, db, "s1", "sat", "v1", SATSession{Classroom: true, Route: SATRouteAdaptive}, nil); err != nil {
+			t.Fatalf("flexible classroom schedule must be allowed, got %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Fatal(err)
 		}
 	})
 	t.Run("classroom adaptive stores the mode only", func(t *testing.T) {
@@ -122,6 +147,7 @@ func TestPersistSATSession(t *testing.T) {
 			t.Fatalf("classroom creation must be gated, got %v", err)
 		}
 		mock.ExpectQuery("sat_classroom_plan").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
+		mock.ExpectQuery("sat_flexible_count").WithArgs("v1").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(0)))
 		if err := PersistSATSession(ctx, db, "s1", "sat", "v1", SATSession{}, nil); err != nil {
 			t.Fatalf("practice sessions must be unaffected: %v", err)
 		}

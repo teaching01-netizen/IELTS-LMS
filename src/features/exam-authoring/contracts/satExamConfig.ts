@@ -28,12 +28,20 @@ export interface SatExamConfig {
   sections: Record<SatConfigSectionKey, SatSectionConfig>;
   showClassroomScoreReport: boolean;
   classroomPlan?: SatClassroomPlan;
+  /**
+   * Flexible question count (Classroom-only, raw scores only). When true the
+   * included modules publish with 1..max questions instead of requiring the
+   * exact blueprint count. Composes with any custom shape including m1_only.
+   * Locked at creation; omitted = false so old clients are unaffected.
+   */
+  flexibleQuestionCount?: boolean;
   scoreConverter?: unknown;
 }
 
 /** The section shapes staff can choose, plus the standard full adaptive path. */
 export const SHAPE_LABELS: Record<SatClassroomShape | "full", string> = {
   full: "Full adaptive",
+  m1_only: "Module 1 only",
   m1_easy: "Module 1, then Easy Module 2",
   m1_hard: "Module 1, then Hard Module 2",
   m2_easy: "Easy Module 2 only",
@@ -43,18 +51,29 @@ export const SHAPE_LABELS: Record<SatClassroomShape | "full", string> = {
 /** Module roles and timings used by each shape. Keep this aligned with Go Shape.Roles(). */
 export const SHAPE_MODULE_ROLES: Record<SatClassroomShape | "full", readonly ("module1" | "lower" | "higher")[]> = {
   full: ["module1", "lower", "higher"],
+  m1_only: ["module1"],
   m1_easy: ["module1", "lower"],
   m1_hard: ["module1", "higher"],
   m2_easy: ["lower"],
   m2_hard: ["higher"],
 };
 
+/** Threshold copy per shape; Module 2-only and Module 1-only shapes never show it. */
+export const SAT_SHAPE_ROUTING_COPY: Record<SatClassroomShape | "full", { label: string; help: string }> = {
+  full: { label: "Harder Module 2 at", help: "Students with at least this many correct in Module 1 get the harder Module 2." },
+  m1_only: { label: "", help: "" },
+  m1_hard: { label: "Converted score at", help: "Students need at least this many correct in Module 1 to get a converted score." },
+  m1_easy: { label: "Converted score below", help: "Students need fewer than this many correct in Module 1 to get a converted score." },
+  m2_easy: { label: "", help: "" },
+  m2_hard: { label: "", help: "" },
+};
+
 /** Plain-language route and timing summary for SAT configuration forms. */
-export function satSectionPath(shape: SatClassroomShape | "full", section: SatSectionConfig): string {
-  const module1 = `Module 1 · ${section.module1Minutes} min`;
+export function satSectionPath(shape: SatClassroomShape | "full", section: SatSectionConfig): string {  const module1 = `Module 1 · ${section.module1Minutes} min`;
   const easy = `Easy Module 2 · ${section.module2LowerMinutes} min`;
   const hard = `Hard Module 2 · ${section.module2HigherMinutes} min`;
   switch (shape) {
+    case "m1_only": return module1;
     case "m1_easy": return `${module1} → ${easy}`;
     case "m1_hard": return `${module1} → ${hard}`;
     case "m2_easy": return easy;
@@ -132,6 +151,7 @@ export function satExamConfigDiffers(config: SatExamConfig, defaults: SatExamCon
   return (
     (config.sectionScope ?? "full") !== (defaults.sectionScope ?? "full") ||
     config.showClassroomScoreReport !== defaults.showClassroomScoreReport ||
+    (config.flexibleQuestionCount ?? false) !== (defaults.flexibleQuestionCount ?? false) ||
     Object.keys(config.classroomPlan ?? {}).length > 0 ||
     (config.scoreConverter !== undefined && config.scoreConverter !== null) ||
     SAT_CONFIG_SECTION_KEYS.some((section) =>

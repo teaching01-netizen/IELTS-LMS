@@ -3,6 +3,7 @@ import { SHAPE_LABELS } from "../../contracts/satExamConfig";
 
 const SHAPES: readonly (SatClassroomShape | "full")[] = [
   "full",
+  "m1_only",
   "m1_easy",
   "m1_hard",
   "m2_easy",

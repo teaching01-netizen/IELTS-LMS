@@ -341,6 +341,13 @@ func TestSATExpectedSequence(t *testing.T) {
 		{"decided branch the plan excludes", []satModuleRow{
 			{classroom: true, section: rw, role: "base", moduleID: "m1", selected: "lo", plan: `{"reading-writing":"m1_hard"}`},
 			{classroom: true, section: rw, role: "lower_branch", moduleID: "lo", selected: "lo", plan: `{"reading-writing":"m1_hard"}`}}, false},
+		{"m1_only base alone completes", []satModuleRow{
+			{classroom: true, section: rw, role: "base", moduleID: "m1", plan: `{"reading-writing":"m1_only"}`}}, true},
+		{"m1_only with a Module 2", []satModuleRow{
+			{classroom: true, section: rw, role: "base", moduleID: "m1", plan: `{"reading-writing":"m1_only"}`},
+			{classroom: true, section: rw, role: "higher_branch", moduleID: "hi", selected: "hi", plan: `{"reading-writing":"m1_only"}`}}, false},
+		{"m1_only with a route decision", []satModuleRow{
+			{classroom: true, section: rw, role: "base", moduleID: "m1", selected: "hi", plan: `{"reading-writing":"m1_only"}`}}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

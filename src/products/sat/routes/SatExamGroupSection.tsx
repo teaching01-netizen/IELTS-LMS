@@ -96,6 +96,7 @@ function attemptOutcome(attempt: SatAttemptRow): { label: string; tone: SatStatu
     case 'submitted': return { label: 'Completed', tone: satOutcomeTone('pending') };
     case 'terminated': return { label: 'Ended by proctor', tone: satOutcomeTone('invalidated_proctor') };
     case 'locked': return { label: 'Ended', tone: satOutcomeTone('invalidated_timeout') };
+    case 'ended': return { label: 'Ended', tone: satOutcomeTone('invalidated_timeout') };
     default: return { label: 'Status unavailable', tone: 'neutral' };
   }
 }

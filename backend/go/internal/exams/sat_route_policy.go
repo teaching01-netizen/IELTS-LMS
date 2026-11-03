@@ -118,6 +118,16 @@ func PersistSATSession(ctx context.Context, q RoutePolicyExecer, scheduleID, pro
 				return apperrors.New(apperrors.CodeValidation, "This exam version has a classroom module plan; schedule it as a Classroom session.")
 			}
 		}
+		// A flexible-without-plan version delivers per-student question
+		// counts no adaptive practice run can promise, so flexible implies
+		// Classroom even when no plan row exists.
+		flex, err := satpublish.LoadFlexibleFlag(ctx, q, versionID)
+		if err != nil {
+			return err
+		}
+		if flex {
+			return apperrors.New(apperrors.CodeValidation, "This exam version allows flexible question counts; schedule it as a Classroom session.")
+		}
 		return nil
 	}
 	if !classroomCreationEnabled.Load() {

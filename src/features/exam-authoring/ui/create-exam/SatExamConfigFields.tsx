@@ -27,9 +27,10 @@ const FIELDS: readonly FieldDef[] = [
   { key: "minimumCorrectForHigher", label: "Harder Module 2 at", suffix: "correct", role: "routing" },
 ];
 
-/** Threshold copy per shape; Module 2-only shapes have no Module 1 and never show it. */
+/** Threshold copy per shape; Module 2-only and Module 1-only shapes have no Module 2 route and never show it. */
 const ROUTING_COPY: Record<SatClassroomShape | "full", { label: string; help: string }> = {
   full: { label: "Harder Module 2 at", help: "Students with at least this many correct in Module 1 get the harder Module 2." },
+  m1_only: { label: "", help: "" },
   m1_hard: { label: "Converted score at", help: "Students need at least this many correct in Module 1 to get a converted score." },
   m1_easy: { label: "Converted score below", help: "Students need fewer than this many correct in Module 1 to get a converted score." },
   m2_easy: { label: "", help: "" },
@@ -73,7 +74,10 @@ export function SatExamConfigFields({
     if (!roles.includes("lower")) timing.module2LowerMinutes = defaults.sections[section].module2LowerMinutes;
     if (!roles.includes("higher")) timing.module2HigherMinutes = defaults.sections[section].module2HigherMinutes;
     // Fixed Module 2 shapes keep the threshold: it gates the converted score.
-    if (!roles.includes("module1")) timing.minimumCorrectForHigher = defaults.sections[section].minimumCorrectForHigher;
+    // M1-only has no Module 2 and no threshold: reset it alongside the hidden
+    // Module 2 timings so a stale value never ships. Flexible composes with any
+    // shape and never changes which fields are visible.
+    if (!roles.includes("module1") || shape === "m1_only") timing.minimumCorrectForHigher = defaults.sections[section].minimumCorrectForHigher;
 
     // Drop the previous plan so an all-full selection doesn't keep the stale one.
     const { classroomPlan: _previousPlan, ...rest } = value;
@@ -91,7 +95,8 @@ export function SatExamConfigFields({
         const roles = SHAPE_MODULE_ROLES[shape];
         const visibleFields = FIELDS.filter((field) => {
           if (field.role === "break") return true;
-          if (field.role === "routing") return roles.includes("module1");
+          // M1-only sits the base module alone: no Module 2 and no routing gate.
+          if (field.role === "routing") return roles.includes("module1") && shape !== "m1_only";
           return roles.includes(field.role);
         });
         const routingHint = limits.operationalQuestions[section];

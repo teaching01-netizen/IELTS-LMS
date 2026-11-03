@@ -7,10 +7,13 @@ const mocks = vi.hoisted(() => ({
   mutate: vi.fn(),
   converter: null as Record<string, unknown> | null,
   error: null as Error | null,
+  plan: null as Record<string, string> | null,
+  flexible: false,
 }));
 vi.mock("../../../api/assessmentQueries", () => ({
   useScoreConverter: () => ({ data: { converter: mocks.converter }, isSuccess: true }),
   useSetScoreConverter: () => ({ mutate: mocks.mutate, isPending: false, error: mocks.error }),
+  useClassroomPlan: () => ({ data: { plan: mocks.plan, flexible: mocks.flexible }, isSuccess: true }),
 }));
 
 // jsdom's File lacks text(); browsers have it.
@@ -20,6 +23,8 @@ describe("ScoreConverterPanel", () => {
   it("uploads the parsed file and rejects non-JSON locally", async () => {
     mocks.converter = null;
     mocks.error = null;
+    mocks.plan = null;
+    mocks.flexible = false;
     render(<ScoreConverterPanel examId="e1" canEdit />);
     expect(screen.getByText("No converter: raw scores only.")).toBeInTheDocument();
     const input = screen.getByLabelText("Upload converter (JSON)");
@@ -39,6 +44,8 @@ describe("ScoreConverterPanel", () => {
       tables: {},
     };
     mocks.error = new ApiError({ code: "VALIDATION", message: 'Table "a" is missing raw score 3.', status: 422 });
+    mocks.plan = null;
+    mocks.flexible = false;
     render(<ScoreConverterPanel examId="e1" canEdit />);
     expect(screen.getByText("classroom-v1")).toBeInTheDocument();
     expect(screen.getByText("full_higher, full_lower")).toBeInTheDocument();
@@ -50,7 +57,36 @@ describe("ScoreConverterPanel", () => {
   it("is read-only without edit rights", () => {
     mocks.converter = null;
     mocks.error = null;
+    mocks.plan = null;
+    mocks.flexible = false;
     render(<ScoreConverterPanel examId="e1" canEdit={false} />);
     expect(screen.getByLabelText("Upload converter (JSON)")).toBeDisabled();
+  });
+
+  it("hides upload for flexible drafts and keeps remove for clearing", () => {
+    mocks.converter = {
+      converterVersion: "legacy-v1",
+      calibrationSource: "staff_approved",
+      sections: { math: { full_lower: "a" } },
+      tables: {},
+    };
+    mocks.error = null;
+    mocks.plan = null;
+    mocks.flexible = true;
+    render(<ScoreConverterPanel examId="e1" canEdit />);
+    expect(screen.getByText("Flexible exams report raw scores only — converters aren't supported in v1.")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Upload converter|Replace converter/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove converter" }));
+    expect(mocks.mutate).toHaveBeenLastCalledWith(null);
+  });
+
+  it("hides upload for Module 1 only plans", () => {
+    mocks.converter = null;
+    mocks.error = null;
+    mocks.plan = { "reading-writing": "m1_only" };
+    mocks.flexible = false;
+    render(<ScoreConverterPanel examId="e1" canEdit />);
+    expect(screen.getByText("Module 1 only exams report raw scores only — converters aren't supported in v1.")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Upload converter|Replace converter/)).not.toBeInTheDocument();
   });
 });

@@ -207,6 +207,13 @@ export interface SatRunSheetInput {
    * staff infer it from the numbers.
    */
   timingModel?: string | null | undefined;
+  /**
+   * Classroom module plan (`exam_versions.sat_classroom_plan`). When a section
+   * is `m1_only` the sheet projects a single base slot: students sit Module 1
+   * alone with no Module 2 branch. Absent = full adaptive (existing behavior
+   * preserved).
+   */
+  classroomPlan?: Record<string, string> | null | undefined;
 }
 
 const MINUTE_MS = 60_000;
@@ -421,18 +428,36 @@ function buildStages(input: SatRunSheetInput): RunSheetStage[] {
   const plans = new Map<string, AuthoredSection>();
   for (const section of input.plan ?? []) {
     const key = String(section.sectionKey);
+    const authoredModules = (section.modules ?? []).map((module) => ({
+      moduleKey: module.moduleKey,
+      title: module.title,
+      adaptiveRole: module.adaptiveRole,
+      durationMinutes: module.durationMinutes,
+    }));
+    // M1-only sits the base module alone: project a single base slot even when
+    // the authored version still carries the undeliverable M2 rows. The section
+    // length is the base module alone (base-only clock, no branch).
+    if (input.classroomPlan?.[key] === "m1_only") {
+      const base = authoredModules.find((module) => module.adaptiveRole === "base");
+      if (base) {
+        plans.set(key, {
+          sectionKey: key,
+          label: section.label,
+          order: section.order,
+          durationMinutes: base.durationMinutes,
+          gapAfterMinutes: section.gapAfterMinutes,
+          modules: [base],
+        });
+        continue;
+      }
+    }
     plans.set(key, {
       sectionKey: key,
       label: section.label,
       order: section.order,
       durationMinutes: section.durationMinutes,
       gapAfterMinutes: section.gapAfterMinutes,
-      modules: (section.modules ?? []).map((module) => ({
-        moduleKey: module.moduleKey,
-        title: module.title,
-        adaptiveRole: module.adaptiveRole,
-        durationMinutes: module.durationMinutes,
-      })),
+      modules: authoredModules,
     });
   }
   const lives = new Map<string, SectionRuntimeState>();

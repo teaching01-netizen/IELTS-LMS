@@ -2,6 +2,7 @@ package satpublish
 
 import (
 	"context"
+	"fmt"
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"strconv"
 	"strings"
@@ -177,6 +178,7 @@ func TestValidateDraftCountsEveryQuestionAsOperational(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectQuery("sat_classroom_plan").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(`{"math":"m2_hard"}`))
+	mock.ExpectQuery("sat_flexible_count").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(0)))
 	mock.ExpectQuery("SELECT s.section_key, m.module_key").WithArgs("draft", SectionMath).
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key", "title", "target", "id"}).AddRow(SectionMath, "math-m2-higher", "Hard", 2, "mh"))
 	mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("mh").
@@ -184,7 +186,7 @@ func TestValidateDraftCountsEveryQuestionAsOperational(t *testing.T) {
 			AddRow("q1", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")).
 			AddRow("q2", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
 	policy := converterJSON(t, map[string]map[string]string{"math": {"m2_higher_only": "s"}}, map[string]int{"s": 2})
-	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"p"}).AddRow(policy))
+	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}).AddRow("estimated_sat", policy))
 	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 	if err != nil {
@@ -202,13 +204,14 @@ func TestValidateDraftRequiresAllThreeModulesInSelectedSection(t *testing.T) {
 	}
 	defer db.Close()
 	mock.ExpectQuery("sat_classroom_plan").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
+	mock.ExpectQuery("sat_flexible_count").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(0)))
 	mock.ExpectQuery("SELECT s.section_key, m.module_key").WithArgs("draft", SectionReadingWriting).
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key", "title", "target", "id"}).AddRow(SectionReadingWriting, "rw-m1", "RW1", 2, "rw1"))
 	mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("rw1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer"}).
 			AddRow("q1", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")).
 			AddRow("q2", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
-	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"p"}))
+	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
 	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeReadingWriting)
 	if err != nil {
@@ -216,6 +219,206 @@ func TestValidateDraftRequiresAllThreeModulesInSelectedSection(t *testing.T) {
 	}
 	if !hasCode(issues, "sat.module.missing") || len(issues) != 2 {
 		t.Fatalf("missing adaptive modules were ignored: %+v", issues)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateModuleFlexible(t *testing.T) {
+	mk := func(n, target int) Module {
+		qs := make([]Question, n)
+		for i := range qs {
+			qs[i] = Question{ExamQuestionID: strconv.Itoa(i), QuestionType: "single_choice", Prompt: content("Prompt"), Answer: choiceAnswer("A", "A", "B", "C", "D")}
+		}
+		return Module{SectionKey: SectionMath, ModuleKey: "math-m1", Title: "Math Module 1", TargetQuestionCount: target, Questions: qs}
+	}
+	if issues := ValidateModuleFlexible(mk(0, 22)); !hasCode(issues, "sat.module.empty") {
+		t.Fatalf("empty flexible module must block: %+v", issues)
+	} else {
+		for _, is := range issues {
+			if is.Code == "sat.module.empty" && !is.Blocking {
+				t.Fatalf("sat.module.empty must block: %+v", issues)
+			}
+		}
+	}
+	issues := ValidateModuleFlexible(mk(10, 22))
+	if !hasCode(issues, "sat.module.flexible_note") {
+		t.Fatalf("partial flexible module must note: %+v", issues)
+	}
+	for _, is := range issues {
+		if is.Blocking {
+			t.Fatalf("partial flexible module must not block: %+v", issues)
+		}
+	}
+	if issues := ValidateModuleFlexible(mk(22, 22)); len(issues) != 0 {
+		t.Fatalf("full flexible module must pass clean: %+v", issues)
+	}
+	if issues := ValidateModuleFlexible(mk(23, 22)); !hasCode(issues, "sat.module.incomplete") {
+		t.Fatalf("over-target flexible module must block: %+v", issues)
+	}
+}
+
+// FR-1 publish gate matrix (BUG-001): a flexible full-shape draft with N=10
+// authored Module 1 questions publishes iff threshold <= 10. Strict drafts,
+// m1_only, and m2-only shapes never raise the gate.
+func TestValidateDraftThresholdGateMatrix(t *testing.T) {
+	questionRows := func(n int) *sqlmock.Rows {
+		rows := sqlmock.NewRows([]string{"id", "type", "prompt", "answer"})
+		for i := 0; i < n; i++ {
+			rows.AddRow("q"+strconv.Itoa(i), "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D"))
+		}
+		return rows
+	}
+	for _, tc := range []struct {
+		threshold int
+		blocked   bool
+	}{
+		{1, false},
+		{10, false},
+		{11, true},
+		{13, true},
+		{27, true},
+	} {
+		t.Run(fmt.Sprintf("threshold_%d", tc.threshold), func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectQuery("sat_classroom_plan").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
+			mock.ExpectQuery("sat_flexible_count").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(1)))
+			mock.ExpectQuery("SELECT s.section_key, m.module_key").WithArgs("draft", SectionMath).
+				WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key", "title", "target", "id"}).
+					AddRow(SectionMath, "math-m1", "Module 1", 27, "m1").
+					AddRow(SectionMath, "math-m2-lower", "Lower", 27, "ml").
+					AddRow(SectionMath, "math-m2-higher", "Higher", 27, "mh"))
+			mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("m1").WillReturnRows(questionRows(10))
+			mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("ml").WillReturnRows(questionRows(1))
+			mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("mh").WillReturnRows(questionRows(1))
+			mock.ExpectQuery("assessment_routing_policies").WithArgs("draft").
+				WillReturnRows(sqlmock.NewRows([]string{"section_key", "policy_config"}).
+					AddRow(SectionMath, fmt.Sprintf(`{"minimumCorrectForHigher":%d}`, tc.threshold)))
+			mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
+			mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+			issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.blocked {
+				for _, is := range issues {
+					if is.Blocking {
+						t.Fatalf("threshold %d with N=10 must pass, got blocking %+v (all %+v)", tc.threshold, is, issues)
+					}
+				}
+			} else {
+				found := false
+				for _, is := range issues {
+					if is.Code != "sat.threshold.unreachable" {
+						continue
+					}
+					found = true
+					if !is.Blocking {
+						t.Fatalf("sat.threshold.unreachable must block: %+v", is)
+					}
+					if is.Path != SectionMath+".minimumCorrectForHigher" {
+						t.Fatalf("wrong issue path: %+v", is)
+					}
+					if !strings.Contains(is.Message, strconv.Itoa(tc.threshold)) || !strings.Contains(is.Message, "10") || !strings.Contains(is.Message, SectionMath) {
+						t.Fatalf("message must name section, threshold, and authored N: %+v", is)
+					}
+				}
+				if !found {
+					t.Fatalf("threshold %d with N=10 must be refused, got %+v", tc.threshold, issues)
+				}
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// The gate is M1-based only: strict drafts keep their blueprint-max bound,
+// and m1_only / m2-only shapes never raise it (their threshold row, if any,
+// is unused at close). None of these issue the routing read.
+func TestValidateDraftThresholdGateSkipsNonM1Shapes(t *testing.T) {
+	cases := []struct {
+		name     string
+		plan     any
+		flexible int64
+		modKey   string
+		modID    string
+	}{
+		{"strict_full_shape", nil, 0, "math-m1", "m1"},
+		{"flexible_m1_only", `{"math":"m1_only"}`, 1, "math-m1", "m1"},
+		{"flexible_m2_only", `{"math":"m2_easy"}`, 1, "math-m2-lower", "ml"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectQuery("sat_classroom_plan").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(tc.plan))
+			mock.ExpectQuery("sat_flexible_count").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(tc.flexible))
+			mock.ExpectQuery("SELECT s.section_key, m.module_key").WithArgs("draft", SectionMath).
+				WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key", "title", "target", "id"}).
+					AddRow(SectionMath, tc.modKey, "Module", 27, tc.modID))
+			rows := sqlmock.NewRows([]string{"id", "type", "prompt", "answer"})
+			for i := 0; i < 10; i++ {
+				rows.AddRow("q"+strconv.Itoa(i), "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D"))
+			}
+			mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs(tc.modID).WillReturnRows(rows)
+			// No assessment_routing_policies expectation: the gate must not read it.
+			mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
+			mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+			issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hasCode(issues, "sat.threshold.unreachable") {
+				t.Fatalf("%s must not raise the threshold gate, got %+v", tc.name, issues)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// Flexible M1-only drafts publish with a partial base module, no M2 gate, and
+// no converter requirement (raw-score report).
+func TestValidateDraftFlexibleM1Only(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("sat_classroom_plan").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(`{"math":"m1_only"}`))
+	mock.ExpectQuery("sat_flexible_count").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(1)))
+	mock.ExpectQuery("SELECT s.section_key, m.module_key").WithArgs("draft", SectionMath).
+		WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key", "title", "target", "id"}).
+			AddRow(SectionMath, "math-m1", "Module 1", 22, "m1").
+			AddRow(SectionMath, "math-m2-lower", "Lower", 22, "ml").
+			AddRow(SectionMath, "math-m2-higher", "Higher", 22, "mh"))
+	mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("m1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer"}).
+			AddRow("q1", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
+	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
+	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasCode(issues, "sat.module.flexible_note") {
+		t.Fatalf("partial flexible base must note: %+v", issues)
+	}
+	for _, is := range issues {
+		if is.Blocking {
+			t.Fatalf("flexible M1-only draft must not block: %+v", issues)
+		}
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

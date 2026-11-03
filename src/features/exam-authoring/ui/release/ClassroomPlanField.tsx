@@ -40,6 +40,7 @@ export function ClassroomPlanField({
       />
       <p className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
         Custom module sets use Classroom rooms only. Publishing requires the questions students can receive.
+        {value === "m1_only" ? " Module 1 only sits the base module alone with no Module 2 and no routing threshold." : null}
       </p>
       {save.isError ? <p role="alert" className="mt-2 text-[14px] text-[var(--sat-staff-danger,#b42318)]">The module plan could not be saved.</p> : null}
     </div>

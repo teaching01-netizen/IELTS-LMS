@@ -52,7 +52,7 @@ func TestAttemptRowToSessionCohortSATReportsTheWaitingWindow(t *testing.T) {
 	runtime := cohortWaitingRuntime()
 	row := satModuleRow(runtime.ServerNow.Add(-10 * time.Minute))
 
-	got := attemptRowToSession(row, runtime)
+	got := attemptRowToSession(row, runtime, nil)
 
 	if !got.RuntimeWaiting {
 		t.Fatal("a cohort SAT attempt in the between-sections window must project as waiting")
@@ -95,7 +95,7 @@ func TestAttemptRowToSessionCohortSATReportsTheModuleClock(t *testing.T) {
 	row := satModuleRow(startedAt)
 	row.satModuleRole = sql.NullString{String: "base", Valid: true}
 
-	got := attemptRowToSession(row, runtime)
+	got := attemptRowToSession(row, runtime, nil)
 
 	if got.RuntimeCurrentModuleRole == nil || *got.RuntimeCurrentModuleRole != "base" {
 		t.Fatalf("the row must name the module slot the candidate is sitting, got %v", got.RuntimeCurrentModuleRole)
@@ -122,7 +122,7 @@ func TestAttemptRowToSessionPausedModuleFreezesItsWindow(t *testing.T) {
 	row := satModuleRow(startedAt)
 	row.satPausedAt = sql.NullTime{Time: runtime.ServerNow.Add(-4 * time.Minute), Valid: true}
 
-	got := attemptRowToSession(row, runtime)
+	got := attemptRowToSession(row, runtime, nil)
 
 	if got.RuntimeModuleDeadlineAt != nil {
 		t.Fatalf("a paused module has no running deadline, got %v", got.RuntimeModuleDeadlineAt)
@@ -140,7 +140,7 @@ func TestAttemptRowToSessionUnstartedModuleProjectsNoClock(t *testing.T) {
 	row := satModuleRow(runtime.ServerNow)
 	row.satStartedAt = sql.NullTime{}
 
-	got := attemptRowToSession(row, runtime)
+	got := attemptRowToSession(row, runtime, nil)
 
 	if got.RuntimeModuleDeadlineAt != nil || got.RuntimeModuleRemainingSeconds != nil {
 		t.Fatalf("an unstarted module must project no clock, got %v / %v", got.RuntimeModuleDeadlineAt, got.RuntimeModuleRemainingSeconds)
@@ -152,7 +152,7 @@ func TestAttemptRowToSessionLegacySATKeepsTheModuleClock(t *testing.T) {
 	runtime.TimingModel = "legacy_section_v1"
 	row := satModuleRow(runtime.ServerNow.Add(-10 * time.Minute))
 
-	got := attemptRowToSession(row, runtime)
+	got := attemptRowToSession(row, runtime, nil)
 
 	if got.RuntimeWaiting {
 		t.Fatal("legacy SAT has no cohort clock to wait on")

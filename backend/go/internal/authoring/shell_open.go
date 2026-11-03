@@ -159,7 +159,8 @@ func (s *Service) clonePublishedSATToDraftTx(ctx context.Context, q tx.Tx, examI
 	// SELECT ... FOR UPDATE on the published source fences the clone.
 	var contentSnapshot, configSnapshot string
 	var classroomPlan sql.NullString
-	if err := q.QueryRowContext(ctx, "SELECT CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(sat_classroom_plan AS CHAR) FROM exam_versions WHERE id = ? AND exam_id = ? AND is_published = TRUE FOR UPDATE", publishedVersionID, examID).Scan(&contentSnapshot, &configSnapshot, &classroomPlan); err != nil {
+	var flexibleCount int
+	if err := q.QueryRowContext(ctx, "SELECT CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(sat_classroom_plan AS CHAR), sat_flexible_count FROM exam_versions WHERE id = ? AND exam_id = ? AND is_published = TRUE FOR UPDATE", publishedVersionID, examID).Scan(&contentSnapshot, &configSnapshot, &classroomPlan, &flexibleCount); err != nil {
 		if err == sql.ErrNoRows {
 			return "", validationError("The published SAT version is unavailable for draft continuation.")
 		}
@@ -170,7 +171,7 @@ func (s *Service) clonePublishedSATToDraftTx(ctx context.Context, q tx.Tx, examI
 		return "", err
 	}
 	draftVersionID := uuid.NewString()
-	if _, err := q.ExecContext(ctx, "INSERT INTO exam_versions (id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision, sat_classroom_plan) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, TRUE, FALSE, 0, ?)", draftVersionID, examID, nextVersionNumber, publishedVersionID, contentSnapshot, configSnapshot, actorID, classroomPlan); err != nil {
+	if _, err := q.ExecContext(ctx, "INSERT INTO exam_versions (id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision, sat_classroom_plan, sat_flexible_count) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, TRUE, FALSE, 0, ?, ?)", draftVersionID, examID, nextVersionNumber, publishedVersionID, contentSnapshot, configSnapshot, actorID, classroomPlan, flexibleCount); err != nil {
 		return "", err
 	}
 	type sectionCloneRow struct {

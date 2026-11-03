@@ -112,6 +112,59 @@ func ValidateModule(module Module) []Issue {
 	return issues
 }
 
+// ValidateModuleFlexible applies the flexible publish rule: 1<=len<=target per
+// included module. An empty module blocks publish; a partial module emits a
+// non-blocking staff note. Full counts pass clean. Question-level rules are
+// identical to ValidateModule.
+func ValidateModuleFlexible(module Module) []Issue {
+	issues := make([]Issue, 0)
+	label := strings.TrimSpace(module.Title)
+	if label == "" {
+		label = strings.TrimSpace(module.ModuleKey)
+	}
+	if label == "" {
+		label = "Module"
+	}
+	switch n, target := len(module.Questions), module.TargetQuestionCount; {
+	case n > target:
+		issues = append(issues, issue(
+			"sat.module.incomplete",
+			modulePath(module),
+			fmt.Sprintf("%s has %d of %d questions.", label, n, target),
+		))
+	case n == 0:
+		issues = append(issues, issue(
+			"sat.module.empty",
+			modulePath(module),
+			fmt.Sprintf("%s has 0 of %d questions; add at least 1 question per included module.", label, target),
+		))
+	case n < target:
+		issues = append(issues, Issue{
+			Code:     "sat.module.flexible_note",
+			Path:     modulePath(module),
+			Message:  fmt.Sprintf("%s has %d of %d questions (flexible).", label, n, target),
+			Blocking: false,
+		})
+	}
+	for _, question := range module.Questions {
+		questionIssues := ValidateQuestion(question)
+		// Student-produced response is Math-only on the Digital SAT; Reading &
+		// Writing is multiple choice throughout.
+		if strings.TrimSpace(module.SectionKey) == SectionReadingWriting && question.QuestionType != "single_choice" {
+			questionIssues = append(questionIssues, issue(
+				"sat.rw.question_type",
+				"questionType",
+				"Reading & Writing questions must be multiple choice.",
+			))
+		}
+		for _, questionIssue := range questionIssues {
+			questionIssue.Path = "examQuestion:" + question.ExamQuestionID + ":" + questionIssue.Path
+			issues = append(issues, questionIssue)
+		}
+	}
+	return issues
+}
+
 func modulePath(module Module) string {
 	section := strings.TrimSpace(module.SectionKey)
 	key := strings.TrimSpace(module.ModuleKey)
@@ -140,6 +193,10 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 		return nil, err
 	}
 	plan, err := LoadPlan(ctx, q, versionID)
+	if err != nil {
+		return nil, err
+	}
+	flexible, err := LoadFlexibleFlag(ctx, q, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -220,13 +277,18 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 		// Every question in a new release is scored.
 		operational[moduleRow.sectionKey+"/"+role] += len(questions)
 
-		issues = append(issues, ValidateModule(Module{
+		module := Module{
 			SectionKey:          moduleRow.sectionKey,
 			ModuleKey:           moduleRow.moduleKey,
 			Title:               moduleRow.title,
 			TargetQuestionCount: moduleRow.target,
 			Questions:           questions,
-		})...)
+		}
+		if flexible {
+			issues = append(issues, ValidateModuleFlexible(module)...)
+		} else {
+			issues = append(issues, ValidateModule(module)...)
+		}
 	}
 	sectionKeys, err := normalizedScope.SectionKeys()
 	if err != nil {
@@ -239,6 +301,11 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 			}
 		}
 	}
+	thresholdIssues, err := validateThresholdGate(ctx, q, versionID, flexible, plan, sectionKeys, operational)
+	if err != nil {
+		return nil, err
+	}
+	issues = append(issues, thresholdIssues...)
 	converterIssues, err := validateConverter(ctx, q, versionID, plan, sectionKeys, operational)
 	if err != nil {
 		return nil, err
@@ -285,9 +352,13 @@ func validateForms(ctx context.Context, q Queryer, versionID string) ([]Issue, e
 }
 
 // topologiesFor lists the module topologies students can receive in a section
-// under its Classroom shape, with the roles each one sums.
+// under its Classroom shape, with the roles each one sums. M1-only sections
+// deliver the base module alone as a raw-score report, so no converter table
+// is ever required for them.
 func topologiesFor(shape Shape) map[satconvert.Topology][]string {
 	switch shape {
+	case ShapeM1Only:
+		return map[satconvert.Topology][]string{}
 	case ShapeM1Easy:
 		return map[satconvert.Topology][]string{satconvert.FullLower: {RoleBase, RoleLower}}
 	case ShapeM1Hard:
@@ -303,24 +374,26 @@ func topologiesFor(shape Shape) map[satconvert.Topology][]string {
 // validateConverter is the §2 release-time rule: a draft that declares a
 // versioned score converter cannot publish until every route its plan can
 // deliver has a valid table for exactly the operational questions students
-// will see. A draft without one publishes as a raw-score report.
+// will see. A draft without one publishes as a raw-score report. Practice
+// (raw-only) policies bypass conversion entirely, so flexible and M1-only
+// exams never need a table.
 func validateConverter(ctx context.Context, q Queryer, versionID string, plan Plan, sectionKeys []string, operational map[string]int) ([]Issue, error) {
-	rows, err := q.QueryContext(ctx, "SELECT CAST(policy_config AS CHAR) FROM assessment_scoring_policies WHERE exam_version_id = ?", versionID)
+	rows, err := q.QueryContext(ctx, "SELECT policy_key, CAST(policy_config AS CHAR) FROM assessment_scoring_policies WHERE exam_version_id = ?", versionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var raw string
+	var key, raw string
 	found := rows.Next()
 	if found {
-		if err := rows.Scan(&raw); err != nil {
+		if err := rows.Scan(&key, &raw); err != nil {
 			return nil, err
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if !found || !satconvert.Configured([]byte(raw)) {
+	if !found || key == "practice" || !satconvert.Configured([]byte(raw)) {
 		return nil, nil
 	}
 	conv, err := satconvert.Parse([]byte(raw))
@@ -340,6 +413,78 @@ func validateConverter(ctx context.Context, q Queryer, versionID string, plan Pl
 	var out []Issue
 	for _, msg := range conv.Missing(reqs) {
 		out = append(out, issue("sat.converter.missing", "scoringPolicy", msg))
+	}
+	return out, nil
+}
+
+// validateThresholdGate is the FR-1 publish gate (BUG-001): a flexible draft
+// must not seal an M1-based section whose routing threshold exceeds the
+// actually authored base-module question count. The first adaptive M1 close
+// would otherwise hard-fail in chooseAdaptiveRoute and roll back, leaving a
+// whole room stuck at the M1 boundary with no mid-exam recovery (delivery
+// reads immutable published rows; draft threshold edits cannot reach live
+// attempts). Strict drafts are untouched: they keep the blueprint-max bound
+// enforced at Settings time.
+//
+// Only the three M1-based shapes are gated (full, m1_easy, m1_hard — every
+// one delivers M1 and routes on the threshold). m1_only is skipped on
+// purpose: its routing row still exists (init always writes the default
+// threshold) but no close path consumes it, so gating on it would refuse
+// publishable drafts. m2-only shapes are skipped: they deliver no M1, so the
+// threshold is unused. A missing or unparseable routing row is skipped —
+// creation always writes one, and there is no new refusal beyond the gate.
+func validateThresholdGate(ctx context.Context, q Queryer, versionID string, flexible bool, plan Plan, sectionKeys []string, operational map[string]int) ([]Issue, error) {
+	if !flexible {
+		return nil, nil
+	}
+	gated := make([]string, 0, len(sectionKeys))
+	for _, section := range sectionKeys {
+		shape := plan.ShapeFor(section)
+		if shape.EntryRole() != RoleBase || shape == ShapeM1Only {
+			continue
+		}
+		gated = append(gated, section)
+	}
+	if len(gated) == 0 {
+		return nil, nil
+	}
+	rows, err := q.QueryContext(ctx, "SELECT s.section_key, CAST(rp.policy_config AS CHAR) FROM assessment_routing_policies rp JOIN assessment_sections s ON s.id = rp.section_id WHERE s.exam_version_id = ?", versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	thresholds := map[string]int{}
+	hasThreshold := map[string]bool{}
+	for rows.Next() {
+		var key, raw string
+		if err := rows.Scan(&key, &raw); err != nil {
+			return nil, err
+		}
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			continue
+		}
+		if v, ok := parsed["minimumCorrectForHigher"].(float64); ok {
+			thresholds[key] = int(v)
+			hasThreshold[key] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var out []Issue
+	for _, section := range gated {
+		if !hasThreshold[section] {
+			continue
+		}
+		threshold, actual := thresholds[section], operational[section+"/"+RoleBase]
+		if threshold > actual {
+			out = append(out, issue(
+				"sat.threshold.unreachable",
+				section+".minimumCorrectForHigher",
+				fmt.Sprintf("%s higher-route threshold %d exceeds the %d authored Module 1 questions; lower the threshold or add questions before publishing.", section, threshold, actual),
+			))
+		}
 	}
 	return out, nil
 }

@@ -81,7 +81,7 @@ func (s *Service) LoadStudentSessionsPage(ctx context.Context, scheduleID string
 			rows.Close()
 			return RosterPage{}, serr
 		}
-		keyed = append(keyed, keyedRow{summary: attemptRowToSession(r, runtime), updated: r.updatedAt.UTC(), id: r.id})
+		keyed = append(keyed, keyedRow{summary: attemptRowToSession(r, runtime, nil), updated: r.updatedAt.UTC(), id: r.id})
 	}
 	if err := rows.Err(); err != nil {
 		return RosterPage{}, err

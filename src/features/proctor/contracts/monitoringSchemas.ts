@@ -56,6 +56,18 @@ const studentSessionSchema = z.looseObject({
   ieltsOfflinePreparedAt: instant,
   draftEvidencePending: z.number().nullish(),
   violations: z.array(z.unknown()).nullish(),
+  // Live score projection (Phase-2, additive). Explicit nullish keys for docs;
+  // the loose object passes unknown additives through without tightening.
+  scoreAnswered: z.number().nullish(),
+  scoreTotal: z.number().nullish(),
+  scoreCorrect: z.number().nullish(),
+  scoreStatus: z.enum(['unstarted', 'answering', 'scoring', 'scored', 'not_scored']).nullish(),
+  scoreModules: z.array(z.looseObject({
+    moduleKey: z.string(),
+    answered: z.number(),
+    correct: z.number().nullish(),
+    total: z.number(),
+  })).nullish(),
 });
 
 const summarySchema = z.looseObject({

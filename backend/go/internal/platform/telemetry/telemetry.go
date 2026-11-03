@@ -193,6 +193,10 @@ const (
 	MSATStudentModuleSubmitRejected = "sat_student_module_submit_rejected_total"
 	MSATResponseWriteAfterTerminal  = "sat_response_write_after_terminal_total"
 	MSATResultQuestionDetailFailure = "sat_result_question_detail_failure_total"
+	// MProctorScoreProjectionFailure counts best-effort live score roll-ups
+	// the room read omitted after a grouped-count failure (the room itself
+	// still renders). Label is the failed stage only (stage).
+	MProctorScoreProjectionFailure  = "proctor_score_projection_failure_total"
 	MSATTimeoutFinalize             = "sat_timeout_finalize_total"
 	MSATResponseReplayAfterTerminal = "sat_response_replay_after_terminal_total"
 	// MSATAdaptiveIntegrityViolation is the last-line fence counter for the SAT

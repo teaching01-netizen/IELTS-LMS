@@ -7,6 +7,7 @@ import (
 
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // sectionCandidateSeconds is the section length a delivery-settings save
@@ -51,8 +52,9 @@ func (s *Service) UpdateDeliverySettings(ctx context.Context, examID, sectionID 
 			return err
 		}
 		// SELECT ... FOR UPDATE on the section row fences break/timing edits.
+		var sectionKey string
 		var sectionRev int
-		if err := q.QueryRowContext(ctx, "SELECT revision FROM assessment_sections WHERE id = ? FOR UPDATE", sectionID).Scan(&sectionRev); err != nil {
+		if err := q.QueryRowContext(ctx, "SELECT section_key, revision FROM assessment_sections WHERE id = ? FOR UPDATE", sectionID).Scan(&sectionKey, &sectionRev); err != nil {
 			return err
 		}
 		if sectionRev != req.ExpectedSectionRevision {
@@ -144,6 +146,24 @@ func (s *Service) UpdateDeliverySettings(ctx context.Context, examID, sectionID 
 			if operational < 1 {
 				operational = 1
 			}
+			// Flexible drafts bind the threshold to authored questions, not
+			// the blueprint max: the publish gate refuses threshold >
+			// authored N, so Settings must not admit a threshold the publish
+			// gate would refuse.
+			flexibleThisVersion, err := satpublish.LoadFlexibleFlag(ctx, q, draftID)
+			if err != nil {
+				return err
+			}
+			if flexibleThisVersion {
+				var authoredBaseCount int
+				if err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM assessment_exam_questions WHERE module_id = ?", baseID).Scan(&authoredBaseCount); err != nil {
+					return err
+				}
+				operational = authoredBaseCount
+				if operational < 1 {
+					operational = 1
+				}
+			}
 			if req.MinimumCorrectForHigher > operational {
 				return validationError("Higher-route threshold must be between 1 and the operational question count.")
 			}
@@ -158,6 +178,20 @@ func (s *Service) UpdateDeliverySettings(ctx context.Context, examID, sectionID 
 			}
 		}
 		sectionDuration := sectionCandidateSeconds(req.ModuleTimings, baseID, lowerID, higherID)
+		// M1-only sections clock the base module alone: no M2 is ever
+		// delivered, so the timing save must not inflate the stored row to
+		// base + branch (init writes base-only; runtimePlanIn sums Roles()).
+		plan, err := satpublish.LoadPlan(ctx, q, draftID)
+		if err != nil {
+			return err
+		}
+		if plan.ShapeFor(sectionKey) == satpublish.ShapeM1Only {
+			durations := make(map[string]int, len(req.ModuleTimings))
+			for _, t := range req.ModuleTimings {
+				durations[t.ModuleID] = t.DurationSeconds
+			}
+			sectionDuration = durations[baseID]
+		}
 		res, err := q.ExecContext(ctx, "UPDATE assessment_sections SET duration_seconds = ?, break_after_seconds = ?, revision = revision + 1, updated_at = NOW(6) WHERE id = ? AND revision = ?", sectionDuration, req.BreakAfterSeconds, sectionID, req.ExpectedSectionRevision)
 		if err != nil {
 			return err

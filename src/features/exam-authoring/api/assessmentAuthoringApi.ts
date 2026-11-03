@@ -227,13 +227,13 @@ export const assessmentAuthoringApi = {
     );
   },
 
-  getClassroomPlan(examId: string): Promise<{ plan: SatClassroomPlan | null }> {
-    return backendGet<{ plan: SatClassroomPlan | null }>(`/v1/assessment-authoring/exams/${examId}/sat-classroom-plan`);
+  getClassroomPlan(examId: string): Promise<{ plan: SatClassroomPlan | null; flexible?: boolean }> {
+    return backendGet<{ plan: SatClassroomPlan | null; flexible?: boolean }>(`/v1/assessment-authoring/exams/${examId}/sat-classroom-plan`);
   },
 
   /** Replaces the whole plan; an empty one restores the standard adaptive structure. */
-  setClassroomPlan(examId: string, plan: SatClassroomPlan): Promise<{ plan: SatClassroomPlan | null }> {
-    return backendPut<{ plan: SatClassroomPlan | null }, { plan: SatClassroomPlan }>(
+  setClassroomPlan(examId: string, plan: SatClassroomPlan): Promise<{ plan: SatClassroomPlan | null; flexible?: boolean }> {
+    return backendPut<{ plan: SatClassroomPlan | null; flexible?: boolean }, { plan: SatClassroomPlan }>(
       `/v1/assessment-authoring/exams/${examId}/sat-classroom-plan`,
       { plan }
     );

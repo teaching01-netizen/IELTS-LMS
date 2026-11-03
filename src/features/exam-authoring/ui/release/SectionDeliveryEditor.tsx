@@ -8,9 +8,10 @@ import { NumericField } from "./NumericField";
 import { ClassroomPlanField } from "./ClassroomPlanField";
 import { useSatAuthoringCollaboration } from "../../realtime/coedit";
 
-/** Module 1 threshold copy per shape; Module 2-only shapes have no Module 1 to gate. */
+/** Module 1 threshold copy per shape; Module 2-only and Module 1-only shapes have no gate to edit. */
 const ROUTING_COPY: Record<SatClassroomShape | "full", { title: string; label: string; below: string; atOrAbove: string } | null> = {
   full: { title: "Adaptive routing", label: "Higher route at", below: "Lower", atOrAbove: "Higher" },
+  m1_only: null,
   m1_hard: { title: "Converted score", label: "Converted score at", below: "No converted score", atOrAbove: "Converted" },
   m1_easy: { title: "Converted score", label: "Converted score below", below: "Converted", atOrAbove: "No converted score" },
   m2_easy: null,
@@ -155,15 +156,26 @@ function SectionDeliveryEditorInner({
   // Derived bound (stored value -> SAT blueprint -> base target),
   // so threshold-only policy rows (the real DB shape) still edit against
   // the provider contract (RW 27 / Math 22) instead of clamping to 1.
-  const operationalCount = operationalCountForSection(section);
+  // Flexible drafts bind to authored Module 1 questions instead (backend
+  // UpdateDeliverySettings FR-2: max(1, authored N); publish refuses
+  // threshold > authored N with sat.threshold.unreachable). Strict drafts
+  // keep the blueprint path byte-identical.
+  const isFlexible = classroomPlanQuery.data?.flexible === true;
+  const authoredBaseCount = base?.questions.length ?? 0;
+  const operationalCount = isFlexible
+    ? Math.max(1, authoredBaseCount)
+    : operationalCountForSection(section);
+  const routingCopyForDirty = ROUTING_COPY[shape];
   const structureValid = Boolean(base && lower && higher && routing);
+  // A hidden threshold (Module 2-only, Module 1-only) never dirties the form:
+  // it is reset to the server default and excluded from save validation.
   const dirty =
     structureValid &&
     (baseMinutes * 60 !== base!.durationSeconds ||
       lowerMinutes * 60 !== lower!.durationSeconds ||
       higherMinutes * 60 !== higher!.durationSeconds ||
       breakMinutes * 60 !== section.breakAfterSeconds ||
-      threshold !== routing!.minimumCorrectForHigher);
+      (routingCopyForDirty ? threshold !== routing!.minimumCorrectForHigher : false));
 
   const callbackRef = useRef(onDirtyChange);
   callbackRef.current = onDirtyChange;
@@ -181,7 +193,8 @@ function SectionDeliveryEditorInner({
   const save = useCallback(async () => {
     if (!base || !lower || !higher || !routing || !effectiveCanEdit || update.isPending) return;
     setLocalError(null);
-    if (shapeRoles.includes("module1") && (!Number.isInteger(threshold) || threshold < 1 || threshold > operationalCount)) {
+    const routingCopyForSave = ROUTING_COPY[shape];
+    if (routingCopyForSave && (!Number.isInteger(threshold) || threshold < 1 || threshold > operationalCount)) {
       setLocalError(`Higher-route threshold must be between 1 and ${operationalCount}.`);
       return;
     }
@@ -219,7 +232,7 @@ function SectionDeliveryEditorInner({
     } catch (error) {
       setLocalError(toUserFacingReleaseError(error));
     }
-  }, [base, baseMinutes, breakMinutes, collaboration, effectiveCanEdit, higher, higherMinutes, lower, lowerMinutes, operationalCount, routing, section, shapeRoles, threshold, update]);
+  }, [base, baseMinutes, breakMinutes, collaboration, effectiveCanEdit, higher, higherMinutes, lower, lowerMinutes, operationalCount, routing, section, shape, threshold, update]);
 
   // Keep this effect above the incomplete-structure return. A remote
   // structural update can temporarily remove or restore a module; hooks must
@@ -260,7 +273,9 @@ function SectionDeliveryEditorInner({
   const changeBreakMinutes = (value: number) => { setBreakMinutes(value); publishShared("breakMinutes", value); };
   const changeThreshold = (value: number) => { setThreshold(value); publishShared("threshold", value); };
 
-  const candidateMinutes = shape === "m2_easy"
+  const candidateMinutes = shape === "m1_only"
+    ? baseMinutes
+    : shape === "m2_easy"
     ? lowerMinutes
     : shape === "m2_hard"
       ? higherMinutes
@@ -340,7 +355,9 @@ function SectionDeliveryEditorInner({
               </span>{" "}
               → {routingCopy.atOrAbove}
               <div className="mt-0.5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
-                {operationalCount} operational questions · provider-defined
+                {isFlexible
+                  ? `${operationalCount} authored questions · flexible`
+                  : `${operationalCount} operational questions · provider-defined`}
               </div>
             </div>
           </div>

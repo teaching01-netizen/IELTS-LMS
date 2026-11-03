@@ -12,6 +12,7 @@ import (
 type Shape string
 
 const (
+	ShapeM1Only Shape = "m1_only"
 	ShapeM1Easy Shape = "m1_easy"
 	ShapeM1Hard Shape = "m1_hard"
 	ShapeM2Easy Shape = "m2_easy"
@@ -30,6 +31,8 @@ var allRoles = []string{RoleBase, RoleLower, RoleHigher}
 // Roles are the module slots students can receive under this shape.
 func (s Shape) Roles() []string {
 	switch s {
+	case ShapeM1Only:
+		return []string{RoleBase}
 	case ShapeM1Easy:
 		return []string{RoleBase, RoleLower}
 	case ShapeM1Hard:
@@ -87,7 +90,7 @@ func ParsePlan(raw string) (Plan, error) {
 			return nil, fmt.Errorf("unknown SAT section in classroom plan: %s", section)
 		}
 		switch shape {
-		case ShapeM1Easy, ShapeM1Hard, ShapeM2Easy, ShapeM2Hard:
+		case ShapeM1Only, ShapeM1Easy, ShapeM1Hard, ShapeM2Easy, ShapeM2Hard:
 		default:
 			return nil, fmt.Errorf("unknown SAT classroom shape: %s", shape)
 		}
@@ -142,4 +145,24 @@ func LoadPlan(ctx context.Context, q Queryer, versionID string) (Plan, error) {
 		return nil, nil
 	}
 	return ParsePlan(*raw)
+}
+
+// LoadFlexibleFlag reads exam_versions.sat_flexible_count for a version.
+// Absent rows and NULL read as non-flexible; Full SAT behavior is unchanged.
+func LoadFlexibleFlag(ctx context.Context, q Queryer, versionID string) (bool, error) {
+	rows, err := q.QueryContext(ctx, "SELECT sat_flexible_count FROM exam_versions WHERE id = ?", versionID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	var flag *int64
+	if rows.Next() {
+		if err := rows.Scan(&flag); err != nil {
+			return false, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return flag != nil && *flag != 0, nil
 }

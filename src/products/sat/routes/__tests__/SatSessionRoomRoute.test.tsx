@@ -45,6 +45,13 @@ vi.mock('../../../../features/proctor/api/deviceTransfers', () => ({
 }));
 vi.mock('../../ui/SatStaffRoutePanel', () => ({ SatStaffRoutePanel: () => null }));
 vi.mock('../../ui/SatDeviceTransferRequests', () => ({ SatDeviceTransferRequests: () => null }));
+// Zero-click scores join a results read of their own; the room suite below
+// asserts roster, inspector, and command behaviour, so scores stay an empty
+// (dash) projection here. Score rendering has its own suite.
+vi.mock('../../ui/useRoomScores', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../ui/useRoomScores')>()),
+  useRoomScores: () => ({ byAttempt: new Map(), isStale: false, isLoading: false, updatedAt: 0, truncated: false }),
+}));
 
 const schedule = {
   id: 'sched-1', examId: 'sat-1', providerKey: 'sat', examTitle: 'Practice Test 06', proctorDisplayName: 'Practice Test 06',

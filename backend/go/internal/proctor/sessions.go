@@ -298,7 +298,42 @@ type StudentSessionSummary struct {
 	// "never_started" (closed without a start; no result). Null for proctor
 	// start. The code itself never appears in roster payloads.
 	SatStartState *string `json:"satStartState"`
+	// ScoreAnswered is the count of non-pretest questions with a saved
+	// response on this attempt (V2 canonical wins, legacy fallback — the same
+	// fence as the results read path). ScoreTotal is the operational total
+	// summed over the attempt's taken modules that fall inside the schedule's
+	// scoped plan (nil when the plan is missing). ScoreCorrect is the summed
+	// sealed raw_correct, set ONLY when every counted module is sealed and
+	// scored — an open module forces nil plus an answering/scoring status.
+	// ScoreStatus is one of "unstarted"|"answering"|"scoring"|"scored"|
+	// "not_scored". ScoreModules carries the per-module split. All fields are
+	// counts only: no correct-answer text, key, or verdict ever appears here.
+	// SAT-only; other providers omit every key so old clients keep working.
+	ScoreAnswered *int                    `json:"scoreAnswered,omitempty"`
+	ScoreTotal    *int                    `json:"scoreTotal,omitempty"`
+	ScoreCorrect  *int                    `json:"scoreCorrect,omitempty"`
+	ScoreStatus   *string                 `json:"scoreStatus,omitempty"`
+	ScoreModules  []ScoreModuleProjection `json:"scoreModules,omitempty"`
 }
+
+// ScoreModuleProjection is one taken SAT module's live score counts: the
+// module key, answered count, sealed raw_correct (nil unless the module is
+// sealed and scored), and operational total. Counts only, never key material.
+type ScoreModuleProjection struct {
+	ModuleKey string `json:"moduleKey"`
+	Answered  int    `json:"answered"`
+	Correct   *int   `json:"correct,omitempty"`
+	Total     int    `json:"total"`
+}
+
+// Live score statuses for StudentSessionSummary.ScoreStatus.
+const (
+	ScoreStatusUnstarted = "unstarted"
+	ScoreStatusAnswering = "answering"
+	ScoreStatusScoring   = "scoring"
+	ScoreStatusScored    = "scored"
+	ScoreStatusNotScored = "not_scored"
+)
 
 // ProctorAlert mirrors Rust ProctorAlert (camelCase; "type" is the JSON key).
 type ProctorAlert struct {
@@ -1277,6 +1312,359 @@ func loadStudentSessions(ctx context.Context, q sessionQuerier, scheduleID strin
 	return out, rows.Err()
 }
 
+// scoreModuleFacts is one taken SAT module's raw score input: its identity
+// (attempt + module + section), seal state, sealed raw_correct, the sealed
+// operational count (nil while open), the authored non-pretest question count
+// fallback, and the answered non-pretest question count.
+type scoreModuleFacts struct {
+	attemptID        string
+	moduleKey        string
+	sectionKey       string
+	state            string
+	rawCorrect       sql.NullInt64
+	operationalCount sql.NullInt64
+	planCount        int64
+	answered         int64
+}
+
+// scoreSealedStates are the assessment_module_attempts states whose
+// raw_correct the seal wrote: the module is finalized (delivery seals to
+// 'locked'; reconcile records the 'submitted' terminal alongside it).
+func scoreModuleSealed(state string) bool {
+	return state == "locked" || state == "submitted"
+}
+
+// scoreAnsweredPredicate reports whether one assessment_exam_questions row
+// counts as answered. V2 canonical wins per question (the eq.id match first,
+// like the seal and results read paths): a present V2 payload owns the
+// question, and only a decodable non-null answer counts; otherwise the legacy
+// row counts when its stored response is non-empty. Pretest rows never reach
+// this predicate (the facts query filters is_pretest=false, matching
+// SatQuestionResult.IsPretest semantics).
+const scoreAnsweredPredicate = "CASE WHEN v_id.response IS NOT NULL THEN " +
+	"(JSON_EXTRACT(v_id.response, '$.answer') IS NOT NULL " +
+	"AND CAST(JSON_EXTRACT(v_id.response, '$.answer') AS CHAR) NOT IN ('null', '\"\"', '')) " +
+	"WHEN v_q.response IS NOT NULL THEN " +
+	"(JSON_EXTRACT(v_q.response, '$.answer') IS NOT NULL " +
+	"AND CAST(JSON_EXTRACT(v_q.response, '$.answer') AS CHAR) NOT IN ('null', '\"\"', '')) " +
+	"ELSE (ar.response IS NOT NULL AND TRIM(CAST(ar.response AS CHAR)) NOT IN ('', 'null')) END"
+
+// loadScoreModuleFacts reads every taken SAT module of one schedule in a
+// single grouped query (never N+1): per (attempt, module attempt) the seal
+// state, sealed counts, authored non-pretest count, and answered non-pretest
+// count. Read-only; callers omit score fields when it fails.
+func loadScoreModuleFacts(ctx context.Context, q sessionQuerier, scheduleID string) ([]scoreModuleFacts, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT ma.attempt_id, m.module_key, s.section_key, ma.state,
+			ma.raw_correct, MAX(ma.operational_question_count),
+			COUNT(DISTINCT eq.id),
+			COUNT(DISTINCT CASE WHEN `+scoreAnsweredPredicate+` THEN eq.id END)
+		FROM assessment_module_attempts ma
+		JOIN student_attempts sa ON sa.id = ma.attempt_id
+		JOIN assessment_modules m ON m.id = ma.module_id
+		JOIN assessment_sections s ON s.id = m.section_id
+		LEFT JOIN assessment_exam_questions eq ON eq.module_id = m.id AND eq.is_pretest = FALSE
+		LEFT JOIN assessment_question_responses ar ON ar.module_attempt_id = ma.id AND ar.exam_question_id = eq.id
+		LEFT JOIN attempt_responses_v2 v_id ON v_id.attempt_id = ma.attempt_id AND v_id.module_id = m.id
+			AND v_id.question_id = eq.id
+			AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ma.attempt_id)
+		LEFT JOIN attempt_responses_v2 v_q ON v_q.attempt_id = ma.attempt_id AND v_q.module_id = m.id
+			AND v_q.question_id = eq.question_id
+			AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ma.attempt_id)
+		WHERE sa.schedule_id = ?
+		GROUP BY ma.id, ma.attempt_id, m.module_key, s.section_key, ma.state, ma.raw_correct`, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []scoreModuleFacts
+	for rows.Next() {
+		var f scoreModuleFacts
+		if err := rows.Scan(&f.attemptID, &f.moduleKey, &f.sectionKey, &f.state,
+			&f.rawCorrect, &f.operationalCount, &f.planCount, &f.answered); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// loadScoreOutcomes reads the current SAT outcome_status per attempt of one
+// schedule, fenced on terminal_generation so a stale generation's result can
+// never mark the live attempt. Read-only; callers omit score fields on error.
+func loadScoreOutcomes(ctx context.Context, q sessionQuerier, scheduleID string) (map[string]string, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT sa.id, ar.outcome_status
+		FROM student_attempts sa
+		LEFT JOIN assessment_results ar ON ar.attempt_id = sa.id AND ar.provider_key = 'sat'
+			AND ar.terminal_generation = sa.terminal_generation
+		WHERE sa.schedule_id = ?`, scheduleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id string
+		var outcome sql.NullString
+		if err := rows.Scan(&id, &outcome); err != nil {
+			return nil, err
+		}
+		if !outcome.Valid || strings.TrimSpace(outcome.String) == "" {
+			continue
+		}
+		prev := out[id]
+		// One live result row per attempt; last-wins by severity keeps an
+		// invalidation authoritative if a duplicate ever appears.
+		if scoreOutcomeSeverity(outcome.String) >= scoreOutcomeSeverity(prev) {
+			out[id] = outcome.String
+		}
+	}
+	return out, rows.Err()
+}
+
+func scoreOutcomeSeverity(outcome string) int {
+	switch outcome {
+	case "invalidated_proctor", "invalidated_timeout", "unscored":
+		return 3
+	case "scored":
+		return 2
+	case "pending":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// studentScoreProjection is the per-attempt live score roll-up that
+// attemptRowToSession projects onto the wire. Totals count only modules whose
+// section is inside the scoped plan; ScoreTotal stays nil when the plan is
+// missing (the caller then shows a dash, never a guessed total).
+type studentScoreProjection struct {
+	answered int
+	total    *int
+	correct  *int
+	status   string
+	modules  []ScoreModuleProjection
+}
+
+// buildScoreProjections rolls module facts + outcomes into per-attempt
+// projections. attemptIDs covers attempts with no module attempts at all
+// (never-started rows project "unstarted", never "0/0"). plan scopes the
+// totals; a nil plan nils ScoreTotal but still projects answered/modules.
+// No key, choice, or verdict material crosses here — counts only.
+func buildScoreProjections(plan []SessionPlanSection, facts []scoreModuleFacts, outcomes map[string]string, attemptIDs []string) map[string]*studentScoreProjection {
+	allowed := map[string]bool(nil)
+	if plan != nil {
+		allowed = map[string]bool{}
+		for _, section := range plan {
+			allowed[section.SectionKey] = true
+		}
+	}
+	byAttempt := map[string][]scoreModuleFacts{}
+	for _, f := range facts {
+		byAttempt[f.attemptID] = append(byAttempt[f.attemptID], f)
+	}
+	out := make(map[string]*studentScoreProjection, len(attemptIDs))
+	for _, id := range attemptIDs {
+		rows := byAttempt[id]
+		if len(rows) == 0 {
+			out[id] = &studentScoreProjection{status: ScoreStatusUnstarted}
+			continue
+		}
+		// One entry per taken module key (a module has one attempt row in
+		// practice; merge defensively by summing, with seal/score flags
+		// requiring unanimity across the merged rows).
+		merged := map[string]*ScoreModuleProjection{}
+		mergedSection := map[string]string{}
+		mergedSealed := map[string]bool{}
+		mergedScored := map[string]bool{}
+		order := []string{}
+		for _, f := range rows {
+			m := merged[f.moduleKey]
+			if m == nil {
+				total := int(f.planCount)
+				if f.operationalCount.Valid {
+					total = int(f.operationalCount.Int64)
+				}
+				m = &ScoreModuleProjection{ModuleKey: f.moduleKey, Total: total}
+				merged[f.moduleKey] = m
+				mergedSection[f.moduleKey] = f.sectionKey
+				mergedSealed[f.moduleKey] = true
+				mergedScored[f.moduleKey] = true
+				order = append(order, f.moduleKey)
+			}
+			m.Answered += int(f.answered)
+			if f.operationalCount.Valid && int(f.operationalCount.Int64) > m.Total {
+				m.Total = int(f.operationalCount.Int64)
+			}
+			switch {
+			case !scoreModuleSealed(f.state):
+				mergedSealed[f.moduleKey] = false
+				mergedScored[f.moduleKey] = false
+			case !f.rawCorrect.Valid:
+				// Sealed but not yet graded: correctness pending.
+				mergedScored[f.moduleKey] = false
+			default:
+				c := int(f.rawCorrect.Int64)
+				if m.Correct == nil {
+					m.Correct = &c
+				} else {
+					*m.Correct += c
+				}
+			}
+		}
+		// Counted modules are the taken ones inside the scoped plan. A nil
+		// plan cannot scope (delivery guarantees taken ⊆ scope), so every
+		// taken module counts and only the total is withheld. Correctness and
+		// the total always cover the same module set, so the implied
+		// percentage can never exceed 100%.
+		counted := func(key string) bool {
+			return allowed == nil || allowed[mergedSection[key]]
+		}
+		proj := &studentScoreProjection{status: ScoreStatusAnswering}
+		allSealed, allScored := true, true
+		countedAny := false
+		for _, key := range order {
+			m := merged[key]
+			proj.modules = append(proj.modules, *m)
+			if !counted(key) {
+				continue
+			}
+			// F-H: answered covers the same counted scope as the total; the
+			// modules listing above stays factual (out-of-scope rows list).
+			proj.answered += m.Answered
+			countedAny = true
+			if !mergedSealed[key] {
+				allSealed = false
+			}
+			if !mergedScored[key] {
+				allScored = false
+			}
+		}
+		if allowed != nil {
+			total := 0
+			for _, key := range order {
+				if counted(key) {
+					total += merged[key].Total
+				}
+			}
+			proj.total = &total
+		}
+		switch outcome := outcomes[id]; {
+		case outcome == "invalidated_proctor" || outcome == "invalidated_timeout" || outcome == "unscored":
+			proj.status = ScoreStatusNotScored
+			proj.correct = nil
+			for i := range proj.modules {
+				proj.modules[i].Correct = nil
+			}
+		case countedAny && allScored:
+			// Every counted module is sealed and scored (mergedScored
+			// requires raw_correct present), so the summed correct is exact
+			// and publishable. allScored implies allSealed. Only counted
+			// modules contribute; an out-of-scope module never does.
+			correct := 0
+			for i, key := range order {
+				if !counted(key) {
+					proj.modules[i].Correct = nil
+					continue
+				}
+				correct += *proj.modules[i].Correct
+			}
+			proj.status = ScoreStatusScored
+			proj.correct = &correct
+		case countedAny && allSealed:
+			// Every counted module sealed but at least one not yet graded:
+			// the seal is still being scored. Correctness stays nil.
+			proj.status = ScoreStatusScoring
+			for i := range proj.modules {
+				proj.modules[i].Correct = nil
+			}
+		default:
+			proj.status = ScoreStatusAnswering
+			for i := range proj.modules {
+				proj.modules[i].Correct = nil
+			}
+		}
+		// F-I: a non-positive counted total is a degenerate scope
+		// (zero-question counted module): withhold it (&0 becomes omitted
+		// on the wire, which FE already nils) and never pair it with
+		// scored. Terminal invalidations keep not_scored (INV-03a);
+		// unstarted rows return early above; a nil plan withholds the
+		// total by design and never reaches here with a non-nil total.
+		if proj.total != nil && *proj.total <= 0 {
+			proj.total = nil
+			if proj.status != ScoreStatusUnstarted && proj.status != ScoreStatusNotScored {
+				proj.status = ScoreStatusScoring
+				proj.correct = nil
+				for i := range proj.modules {
+					proj.modules[i].Correct = nil
+				}
+			}
+		}
+		out[id] = proj
+	}
+	return out
+}
+
+// scoreReadQuerier opens the score loads' single read-only transaction
+// (repeatable-read snapshot across the grouped counts + outcomes), falling
+// back to the shared read handle when a transaction cannot begin (for
+// example, a sqlmock handle without an expected begin). The caller must call
+// finish (rollback is a no-op-safe close for a read-only txn).
+func (s *Service) scoreReadQuerier(ctx context.Context) (sessionQuerier, func()) {
+	finish := func() {}
+	if s != nil && s.db != nil {
+		if txn, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}); err == nil {
+			return txn, func() { _ = txn.Rollback() }
+		}
+	}
+	q, err := s.sessionDB()
+	if err != nil {
+		return nil, finish
+	}
+	return q, finish
+}
+
+// loadScoreProjections is the best-effort score roll-up for one schedule's
+// room read: grouped module counts + outcomes scoped by the already-loaded
+// plan. Any failure (or a non-SAT provider, or no rows) yields nil so the
+// caller omits the score keys instead of failing the room; a counter records
+// the omission for operators.
+func loadScoreProjections(ctx context.Context, q sessionQuerier, providerKey, scheduleID string, plan []SessionPlanSection, attemptIDs []string) map[string]*studentScoreProjection {
+	if q == nil || providerKey != "sat" || len(attemptIDs) == 0 {
+		return nil
+	}
+	facts, err := loadScoreModuleFacts(ctx, q, scheduleID)
+	if err != nil {
+		telemetry.IncCounter(telemetry.MProctorScoreProjectionFailure, "stage", "module_facts")
+		return nil
+	}
+	outcomes, err := loadScoreOutcomes(ctx, q, scheduleID)
+	if err != nil {
+		telemetry.IncCounter(telemetry.MProctorScoreProjectionFailure, "stage", "outcomes")
+		return nil
+	}
+	return buildScoreProjections(plan, facts, outcomes, attemptIDs)
+}
+
+// applyScoreProjection copies a roll-up onto the wire summary. A nil
+// projection leaves every score key omitted (old clients see no change).
+func applyScoreProjection(summary *StudentSessionSummary, proj *studentScoreProjection) {
+	if summary == nil || proj == nil {
+		return
+	}
+	answered := proj.answered
+	summary.ScoreAnswered = &answered
+	summary.ScoreTotal = proj.total
+	summary.ScoreCorrect = proj.correct
+	status := proj.status
+	summary.ScoreStatus = &status
+	if len(proj.modules) > 0 {
+		summary.ScoreModules = append([]ScoreModuleProjection(nil), proj.modules...)
+	}
+}
+
 // jsonStringField reads one string member from a JSON object (or "").
 func jsonStringField(raw json.RawMessage, key string) string {
 	if len(raw) == 0 {
@@ -1363,8 +1751,10 @@ func satAttemptRemaining(started, paused *time.Time, allocated, extension int, a
 	return int(rem)
 }
 
-// attemptRowToSession ports Rust attempt_row_to_session.
-func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentSessionSummary {
+// attemptRowToSession ports Rust attempt_row_to_session. The optional score
+// roll-up (nil = omit every score key) is the live SAT projection built by
+// buildScoreProjections: counts only, never key material.
+func attemptRowToSession(row studentSessionRow, runtime SessionRuntime, score *studentScoreProjection) StudentSessionSummary {
 	integrity := json.RawMessage(nil)
 	if row.integrity.Valid {
 		integrity = json.RawMessage(row.integrity.String)
@@ -1657,7 +2047,7 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		value := uint64(row.satRecoveryBoundaryRevision.Int64)
 		recoveryRevision = &value
 	}
-	return StudentSessionSummary{
+	summary := StudentSessionSummary{
 		SatStartState:                 satStartState,
 		AttemptID:                     row.id,
 		StudentID:                     row.candidateID,
@@ -1702,6 +2092,8 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime) StudentS
 		ExamID:                        row.examID,
 		ExamName:                      row.examTitle,
 	}
+	applyScoreProjection(&summary, score)
+	return summary
 }
 
 // defaultAlertMessage ports Rust default_alert_message.
@@ -2133,9 +2525,21 @@ func (s *Service) GetSessionDetail(ctx context.Context, actor Actor, scheduleID 
 	if err != nil {
 		return ProctorSessionDetail{}, err
 	}
+	// Live score projection: best-effort counts in a single read-only txn.
+	// Any failure omits the score keys without failing the room read.
+	scoreQ, finishScores := s.scoreReadQuerier(ctx)
+	var scoreMap map[string]*studentScoreProjection
+	if scoreQ != nil {
+		attemptIDs := make([]string, 0, len(rows))
+		for _, row := range rows {
+			attemptIDs = append(attemptIDs, row.id)
+		}
+		scoreMap = loadScoreProjections(ctx, scoreQ, schedule.ProviderKey, scheduleID, plan, attemptIDs)
+	}
+	finishScores()
 	sessions := []StudentSessionSummary{}
 	for _, row := range rows {
-		sessions = append(sessions, attemptRowToSession(row, runtime))
+		sessions = append(sessions, attemptRowToSession(row, runtime, scoreMap[row.id]))
 	}
 	if err := attachIELTSPersonalRosterStates(ctx, q, runtime, sessions); err != nil {
 		return ProctorSessionDetail{}, err

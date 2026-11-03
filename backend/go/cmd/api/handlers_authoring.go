@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -966,7 +967,11 @@ func authorDeliverySettingsHandler(app *App) http.HandlerFunc {
 }
 
 // authorClassroomPlanHandler reads (GET) or replaces (PUT) the draft's SAT
-// Classroom module plan: {"plan": {"math": "m2_hard"}}; an empty plan clears it.
+// Classroom module plan: {"plan": {"math": "m2_hard"}, "flexible": false};
+// an empty plan clears it. "flexible" mirrors exam_versions.sat_flexible_count
+// for the same version the plan is read from (draft preferred, published
+// fallback) so Settings can bind the threshold hint and the converter gate
+// without a second round-trip.
 func authorClassroomPlanHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		write := r.Method != http.MethodGet
@@ -1002,7 +1007,14 @@ func authorClassroomPlanHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"plan": plan})
+		flexible := false
+		if app.DB != nil {
+			var flag sql.NullInt64
+			if ferr := app.DB.QueryRowContext(r.Context(), `SELECT v.sat_flexible_count FROM exam_entities e LEFT JOIN exam_versions v ON v.id = COALESCE(NULLIF(e.current_draft_version_id, ''), NULLIF(e.current_published_version_id, '')) AND v.exam_id = e.id WHERE e.id = ?`, examID).Scan(&flag); ferr == nil && flag.Valid && flag.Int64 != 0 {
+				flexible = true
+			}
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"plan": plan, "flexible": flexible})
 	}
 }
 

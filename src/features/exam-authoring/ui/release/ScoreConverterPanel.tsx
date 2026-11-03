@@ -1,6 +1,6 @@
 import { useState, type ChangeEvent } from "react";
 import { ApiError } from "../../../../shared/api-client/errors";
-import { useScoreConverter, useSetScoreConverter } from "../../api/assessmentQueries";
+import { useClassroomPlan, useScoreConverter, useSetScoreConverter } from "../../api/assessmentQueries";
 import { SectionHeading } from "./releaseChrome";
 import { releaseSurfaceClass } from "./releaseUi";
 
@@ -11,13 +11,30 @@ const SECTION_LABEL: Record<string, string> = { "reading-writing": "Reading and 
  * Staff upload an approved table as JSON; the server validates it and publish
  * requires a table for every module route the plan delivers. Without one,
  * Classroom reports show raw scores only.
+ *
+ * Flexible and Module 1 only drafts are raw-scores-only in v1 (backend
+ * SetScoreConverter FR-6 mirror guard): upload is hidden and a raw-only note
+ * is shown instead. Remove stays available so a pre-fix attached table can
+ * still be cleared.
  */
 export function ScoreConverterPanel({ examId, canEdit }: { examId: string; canEdit: boolean }) {
   const query = useScoreConverter(examId);
+  const planQuery = useClassroomPlan(examId);
   const save = useSetScoreConverter(examId);
   const [fileError, setFileError] = useState<string | null>(null);
   const converter = query.data?.converter ?? null;
-  const busy = !canEdit || !query.isSuccess || save.isPending;
+  const plan = planQuery.data?.plan ?? null;
+  const isFlexible = planQuery.data?.flexible === true;
+  const hasM1Only = plan != null && Object.values(plan).some((shape) => shape === "m1_only");
+  const isRawOnly = isFlexible || hasM1Only;
+  const rawOnlyNote =
+    isFlexible && hasM1Only
+      ? "Flexible Module 1 only exams report raw scores only — converters aren't supported in v1."
+      : isFlexible
+        ? "Flexible exams report raw scores only — converters aren't supported in v1."
+        : "Module 1 only exams report raw scores only — converters aren't supported in v1.";
+  const uploadDisabled = !canEdit || !query.isSuccess || save.isPending || isRawOnly;
+  const removeDisabled = !canEdit || !query.isSuccess || save.isPending;
   const inputId = `score-converter-${examId}`;
   const uploadLabel = converter ? "Replace converter (JSON)" : "Upload converter (JSON)";
 
@@ -50,6 +67,11 @@ export function ScoreConverterPanel({ examId, canEdit }: { examId: string; canEd
         title="Estimated score converter"
         description="An approved table that maps raw scores to estimated 200–800 section scores for each module route. Without one, Classroom reports show raw scores only. Results keep the converter version they were scored with."
       />
+      {isRawOnly ? (
+        <p className="mt-4 rounded-xl bg-[var(--sat-staff-fill-faint)] px-3 py-2.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+          {rawOnlyNote}
+        </p>
+      ) : null}
       {converter ? (
         <dl className="mt-4 space-y-1 text-[14px] leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">
           <div className="flex gap-2">
@@ -71,12 +93,14 @@ export function ScoreConverterPanel({ examId, canEdit }: { examId: string; canEd
         <p className="mt-4 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">No converter: raw scores only.</p>
       )}
       <div className="mt-4 flex flex-wrap gap-3">
-        <label htmlFor={inputId} className={`sat-btn sat-btn--secondary sat-press focus-within:ring-2 focus-within:ring-[var(--sat-staff-accent,#0071e3)] ${busy ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
-          {uploadLabel}
-          <input id={inputId} type="file" accept=".json,application/json" aria-label={uploadLabel} className="sr-only" disabled={busy} onChange={(event) => void upload(event)} />
-        </label>
+        {isRawOnly ? null : (
+          <label htmlFor={inputId} className={`sat-btn sat-btn--secondary sat-press focus-within:ring-2 focus-within:ring-[var(--sat-staff-accent,#0071e3)] ${uploadDisabled ? "pointer-events-none opacity-50" : "cursor-pointer"}`}>
+            {uploadLabel}
+            <input id={inputId} type="file" accept=".json,application/json" aria-label={uploadLabel} className="sr-only" disabled={uploadDisabled} onChange={(event) => void upload(event)} />
+          </label>
+        )}
         {converter ? (
-          <button type="button" disabled={busy} onClick={() => save.mutate(null)} className="sat-btn sat-btn--secondary sat-press">
+          <button type="button" disabled={removeDisabled} onClick={() => save.mutate(null)} className="sat-btn sat-btn--secondary sat-press">
             Remove converter
           </button>
         ) : null}

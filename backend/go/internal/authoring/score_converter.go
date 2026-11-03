@@ -9,6 +9,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/satconvert"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // GetScoreConverter returns the current draft's versioned SAT score converter,
@@ -47,6 +48,29 @@ func (s *Service) SetScoreConverter(ctx context.Context, examID string, converte
 				return notFoundError("The exam has no current draft.")
 			}
 			return err
+		}
+		if key != "raw_only" {
+			// Mirror of the creation rule: flexible and M1-only exams report
+			// raw scores only, so a converter attached here would publish
+			// yet never convert. The clear (null) path stays open.
+			plan, err := satpublish.LoadPlan(ctx, q, draftID)
+			if err != nil {
+				return err
+			}
+			flexible, err := satpublish.LoadFlexibleFlag(ctx, q, draftID)
+			if err != nil {
+				return err
+			}
+			m1Only := false
+			for _, shape := range plan {
+				if shape == satpublish.ShapeM1Only {
+					m1Only = true
+					break
+				}
+			}
+			if flexible || m1Only {
+				return validationError("Score converter is not supported for flexible or M1-only SAT exams; they report raw scores only.")
+			}
 		}
 		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_scoring_policies (id, exam_version_id, policy_key, policy_config, revision) VALUES (?, ?, ?, ?, 0) ON DUPLICATE KEY UPDATE policy_key = VALUES(policy_key), policy_config = VALUES(policy_config), revision = revision + 1", uuid.NewString(), draftID, key, stored); err != nil {
 			return err

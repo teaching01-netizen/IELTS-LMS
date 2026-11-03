@@ -69,4 +69,23 @@ describe('session room layout contracts', () => {
     expect(value(root, '.sat-run-sheet__row-main', 'grid-template-columns')).toBe('minmax(0, 1fr) auto');
     expect(declarations(root).some((declaration) => declaration.prop === 'min-width' && declaration.value === '610px')).toBe(false);
   });
+
+  it('fades score updates with opacity only and honors reduced motion', () => {
+    for (const frame of ['from', 'to']) {
+      const props = declarations(keyframe('sat-room-score-fade', frame)).map((item) => item.prop);
+      expect(props).toContain('opacity');
+      expect(props).not.toContain('transform');
+    }
+    expect(value(root, '.sat-room__score-fade', 'animation')).toContain('sat-room-score-fade');
+    const reducedMotion = atRule('(prefers-reduced-motion: reduce)');
+    expect(declaration(reducedMotion, '.sat-room__score-fade', 'animation')).toMatchObject({ value: 'none', important: true });
+  });
+
+  it('holds a static-geometry skeleton for the score slot', () => {
+    expect(value(root, '.sat-room__row-score-skeleton', 'display')).toBe('block');
+    expect(value(root, '.sat-room__row-score-skeleton', 'height')).toBe('12px');
+    expect(value(root, '.sat-room__row-score-skeleton', 'width')).toBe('7.5rem');
+    const forcedColors = atRule('(forced-colors: active)');
+    expect(value(forcedColors, '.sat-room__row-score-skeleton', 'background')).toBe('GrayText');
+  });
 });

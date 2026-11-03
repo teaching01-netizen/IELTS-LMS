@@ -24,14 +24,21 @@ import { SatExamConfigFields } from "./SatExamConfigFields";
 const FORM_ID = "sat-create-exam-form";
 const STEP_NAMES = ["Basics", "Modules & timing", "Results", "Review"] as const;
 
+function isRawOnlyConfig(config: SatExamConfig | null): boolean {
+  if (!config) return false;
+  if (config.flexibleQuestionCount === true) return true;
+  return Object.values(config.classroomPlan ?? {}).some((shape) => shape === "m1_only");
+}
+
 function planSummary(config: SatExamConfig): string {
+  const flexibleSuffix = config.flexibleQuestionCount ? " · Flexible 1–max Q" : "";
   return SAT_CONFIG_SECTION_KEYS
     .filter((section) => !config.sectionScope || config.sectionScope === "full" || config.sectionScope === section)
     .map((section) => {
       const shape = config.classroomPlan?.[section] ?? "full";
       const timing = config.sections[section];
       const breakSummary = timing.breakAfterMinutes > 0 ? ` · ${timing.breakAfterMinutes} min break` : "";
-      return `${SAT_CONFIG_SECTION_LABELS[section]}: ${SHAPE_LABELS[shape]} · ${satSectionPath(shape, timing)}${breakSummary}`;
+      return `${SAT_CONFIG_SECTION_LABELS[section]}: ${SHAPE_LABELS[shape]} · ${satSectionPath(shape, timing)}${breakSummary}${flexibleSuffix}`;
     })
     .join(" · ");
 }
@@ -112,6 +119,14 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
       configuration = { ...defaultsQuery.data.config, sectionScope: config.sectionScope };
     }
     if (!standardSettings && config && defaultsQuery.data) {
+      // Flexible and Module 1 only exams are raw-scores-only in v1: a converter
+      // can never be part of a valid configuration for them.
+      if (isRawOnlyConfig(config) && config.scoreConverter != null) {
+        setConverterError("Converters aren't supported for flexible or Module 1 only exams — raw scores only.");
+        setServerConverterError(null);
+        setStep(2);
+        return;
+      }
       const errors = validateSatExamConfig(config, defaultsQuery.data.limits);
       setConfigErrors(errors);
       if (Object.keys(errors).length > 0 || converterError) {
@@ -191,6 +206,10 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
       if (Object.keys(errors).length > 0) return;
     }
     if (step === 2 && converterError) return;
+    if (step === 2 && config && isRawOnlyConfig(config) && config.scoreConverter != null) {
+      setConverterError("Converters aren't supported for flexible or Module 1 only exams — raw scores only.");
+      return;
+    }
     if (step === 2 && converterMode === "upload" && config?.scoreConverter == null) {
       setConverterError("Choose a converter JSON file or select Raw scores only.");
       return;
@@ -209,9 +228,42 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
     setCreateError(null);
     if (!custom) setConfig((current) => {
       if (!current) return current;
-      const { classroomPlan: _classroomPlan, ...withoutPlan } = current;
+      const { classroomPlan: _classroomPlan, flexibleQuestionCount: _flexible, ...withoutPlan } = current;
       return withoutPlan;
     });
+  };
+
+  const setFlexible = (enabled: boolean) => {
+    setCreateError(null);
+    setConfig((current) => {
+      if (!current) return current;
+      // Entering raw-only mode drops any attached converter so the draft can
+      // never carry an invalid flexible+converter combination.
+      if (enabled && current.scoreConverter != null) {
+        setConverterFileName(null);
+        setConverterError(null);
+        setServerConverterError(null);
+        setConverterMode("raw");
+        return { ...current, flexibleQuestionCount: true, scoreConverter: undefined };
+      }
+      if (enabled) return { ...current, flexibleQuestionCount: true };
+      const { flexibleQuestionCount: _flexible, ...withoutFlexible } = current;
+      return withoutFlexible;
+    });
+  };
+
+  const handleConfigChange = (next: SatExamConfig) => {
+    // A plan edit that introduces Module 1 only also enters raw-only mode:
+    // drop any attached converter instead of letting the draft go invalid.
+    if (isRawOnlyConfig(next) && next.scoreConverter != null) {
+      setConverterFileName(null);
+      setConverterError(null);
+      setServerConverterError(null);
+      setConverterMode("raw");
+      setConfig({ ...next, scoreConverter: undefined });
+    } else {
+      setConfig(next);
+    }
   };
 
   const chooseConverter = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -262,6 +314,9 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
 
   const customDisabled = !defaultsQuery.data?.classroomCreationEnabled;
   const hasCustomPlan = Boolean(config && Object.keys(config.classroomPlan ?? {}).length > 0);
+  const isFlexible = config?.flexibleQuestionCount === true;
+  const hasM1Only = Boolean(config && Object.values(config.classroomPlan ?? {}).some((shape) => shape === "m1_only"));
+  const isRawOnly = isFlexible || hasM1Only;
   const footer = (
     <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-4 sm:px-6">
       {step === 0 ? (
@@ -351,6 +406,23 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                       <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">Exam settings could not load. You can still create with standard settings.</p>
                     ) : null}
                   </fieldset>
+                  {customModules && config ? (
+                    <label htmlFor="sat-flexible-count" className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-[var(--sat-staff-border-hairline)] p-4 text-[14px] leading-5">
+                      <input
+                        id="sat-flexible-count"
+                        type="checkbox"
+                        checked={isFlexible}
+                        disabled={creating}
+                        onChange={(event) => setFlexible(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-[var(--sat-staff-accent,#0071e3)]"
+                      />
+                      <span>
+                        <span className="block font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Flexible question count</span>
+                        <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Author 1 to max questions per included module (RW max 27, Math max 22). Classroom rooms only, raw scores only. Works with any module set including Module 1 only.</span>
+                        {isFlexible ? <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Tip: fewer than 5 questions per module is allowed for quick checks but gives a noisy signal.</span> : null}
+                      </span>
+                    </label>
+                  ) : null}
                   <fieldset className="space-y-2" aria-describedby="sat-create-sections-help">
                     <legend className="text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Sections</legend>
                     <div className="grid grid-cols-2 gap-2">
@@ -367,6 +439,23 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                 config && defaultsQuery.data ? (
                   <>
                     {customModules ? <p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Choose a module set for each section, then set the time students get for those modules.</p> : null}
+                    {customModules ? (
+                      <label htmlFor="sat-flexible-count-step1" className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-[var(--sat-staff-border-hairline)] p-4 text-[14px] leading-5">
+                        <input
+                          id="sat-flexible-count-step1"
+                          type="checkbox"
+                          checked={isFlexible}
+                          disabled={creating}
+                          onChange={(event) => setFlexible(event.target.checked)}
+                          className="mt-0.5 h-4 w-4 accent-[var(--sat-staff-accent,#0071e3)]"
+                        />
+                        <span>
+                          <span className="block font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Flexible question count</span>
+                          <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Author 1 to max questions per included module (RW max 27, Math max 22). Classroom rooms only, raw scores only.</span>
+                          {isFlexible ? <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Tip: fewer than 5 questions per module is allowed for quick checks but gives a noisy signal. Timing stays full-length unless you lower it.</span> : null}
+                        </span>
+                      </label>
+                    ) : null}
                     <SatExamConfigFields
                       idPrefix="sat-create"
                       value={config}
@@ -375,7 +464,7 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                       errors={configErrors}
                       disabled={creating}
                       customModules={customModules}
-                      onChange={setConfig}
+                      onChange={handleConfigChange}
                     />
                     {createError ? <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">{createError}</p> : null}
                   </>
@@ -405,16 +494,28 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                     </label>
                     <fieldset className="space-y-3">
                       <legend className="text-[15px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Estimated scores</legend>
-                      <p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">An approved table turns raw scores into 200–800 estimates. Add it now or later in Settings.</p>
+                      {isRawOnly ? (
+                        <p className="rounded-xl bg-[var(--sat-staff-fill-faint)] px-3 py-2.5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+                          {isFlexible && hasM1Only
+                            ? "Flexible Module 1 only exams report raw scores only — converters aren't supported in v1."
+                            : isFlexible
+                              ? "Flexible exams report raw scores only — converters aren't supported in v1."
+                              : "Module 1 only exams report raw scores only — converters aren't supported in v1."}
+                        </p>
+                      ) : (
+                        <p className="text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">An approved table turns raw scores into 200–800 estimates. Add it now or later in Settings.</p>
+                      )}
                       <div role="radiogroup" aria-label="Estimated scores" className="grid gap-2 sm:grid-cols-2">
                         <label htmlFor="sat-score-converter-raw" className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-[14px] ${config.scoreConverter == null ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)]" : "border-[var(--sat-staff-border-strong)] bg-white"}`}>
                           <input id="sat-score-converter-raw" type="radio" name="sat-score-converter" aria-label="Raw scores only" checked={converterMode === "raw"} disabled={creating} onChange={removeConverter} className="h-4 w-4 accent-[var(--sat-staff-accent,#0071e3)]" />
                           <span className="font-medium">Raw scores only</span>
                         </label>
+                        {isRawOnly ? null : (
                         <label htmlFor="sat-score-converter-upload" className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-[14px] ${config.scoreConverter != null ? "border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent-tint)]" : "border-[var(--sat-staff-border-strong)] bg-white"}`}>
                           <input id="sat-score-converter-upload" type="radio" name="sat-score-converter" aria-label="Upload converter" checked={converterMode === "upload"} disabled={creating} onChange={() => { setConverterMode("upload"); setConverterError(null); document.getElementById("sat-converter-file")?.click(); }} className="h-4 w-4 accent-[var(--sat-staff-accent,#0071e3)]" />
                           <span className="font-medium">Upload converter</span>
                         </label>
+                        )}
                       </div>
                       <input id="sat-converter-file" type="file" accept=".json,application/json" aria-label="Upload score converter JSON" disabled={creating} onChange={(event) => void chooseConverter(event)} className="sr-only" />
                       {config.scoreConverter != null ? (
@@ -434,14 +535,14 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                 config ? (
                   <div className="space-y-4">
                     <div className="flex items-start justify-between gap-3 border-b border-[var(--sat-staff-border-hairline)] pb-4">
-                      <div><h4 className="text-[14px] font-semibold">Basics</h4><p className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">{title.trim()} · {customModules ? "Custom modules" : "Full SAT"}</p><p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{sectionsSummary(sections, false)}</p></div>
+                      <div><h4 className="text-[14px] font-semibold">Basics</h4><p className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">{title.trim()} · {customModules ? "Custom modules" : "Full SAT"}{isFlexible ? " · Flexible" : ""}</p><p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{sectionsSummary(sections, false)}</p></div>
                       <button type="button" disabled={creating} onClick={() => setStep(0)} className="min-h-11 shrink-0 px-2 text-[14px] font-semibold text-[var(--sat-staff-accent,#0071e3)] underline disabled:opacity-50">Edit</button>
                     </div>
                     <div className="flex items-start justify-between gap-3 border-b border-[var(--sat-staff-border-hairline)] pb-4">
                       <div><h4 className="text-[14px] font-semibold">Modules & timing</h4><p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{planSummary(config)}</p></div>
                       <button type="button" disabled={creating} onClick={() => setStep(1)} className="min-h-11 shrink-0 px-2 text-[14px] font-semibold text-[var(--sat-staff-accent,#0071e3)] underline disabled:opacity-50">Edit</button>
                     </div>
-                    {customModules && !hasCustomPlan ? <p className="rounded-xl bg-[var(--sat-staff-fill-faint)] px-3 py-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Both sections use the full adaptive test, so this exam also works in Practice rooms.</p> : null}
+                    {customModules && !hasCustomPlan && !isFlexible ? <p className="rounded-xl bg-[var(--sat-staff-fill-faint)] px-3 py-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Both sections use the full adaptive test, so this exam also works in Practice rooms.</p> : null}
                     <div className="flex items-start justify-between gap-3 border-b border-[var(--sat-staff-border-hairline)] pb-4">
                       <div>
                         <h4 className="text-[14px] font-semibold">Results</h4>

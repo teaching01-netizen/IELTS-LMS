@@ -1,21 +1,24 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { StudentSession } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import type { ServerClockSnapshot } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import type { SatRoomExpectedStudent } from '../api/satRoomEntryInfo';
 import { SatSearchField, SatToolbarSelect } from './SatPage';
 import { SatRoomStudentRow } from './SatSessionRoomStudents';
+import type { RoomScore, RoomScoreKind } from './useRoomScores';
 import { SatRoomSurface } from './room/SatRoomSurface';
 
 const FILTER_CHIP = 'inline-flex min-h-11 items-center gap-2 rounded-[var(--sat-staff-radius-control,10px)] px-3 text-[14px] font-semibold transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]';
 
 type AttentionFilter = 'all' | 'needs';
-export type SatRosterSort = 'name' | 'attention' | 'time';
+export type SatRosterSort = 'name' | 'attention' | 'time' | 'score_asc' | 'score_desc';
 
 const SORT_OPTIONS: ReadonlyArray<{ value: SatRosterSort; label: string }> = [
   { value: 'name', label: 'Name' },
   { value: 'attention', label: 'Needs attention' },
   { value: 'time', label: 'Time remaining' },
+  { value: 'score_asc', label: 'Score: low→high' },
+  { value: 'score_desc', label: 'Score: high→low' },
 ];
 
 /** The clock the row shows first: the student's module clock, else their section clock. */
@@ -27,15 +30,66 @@ function attentionWeight(student: StudentSession, reasons: ReadonlyMap<string, s
   return reasons.has(student.id) ? 1 : 0;
 }
 
-export function sortRoster(students: StudentSession[], sort: SatRosterSort, reasons: ReadonlyMap<string, string>): StudentSession[] {
+export function sortRoster(
+  students: StudentSession[],
+  sort: SatRosterSort,
+  reasons: ReadonlyMap<string, string>,
+  scores?: ReadonlyMap<string, RoomScore>,
+): StudentSession[] {
   const byName = (left: StudentSession, right: StudentSession) =>
     left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true }) || left.id.localeCompare(right.id);
+  // Scored rows carry a real correct count; everything else (dash, answering,
+  // scoring, not_scored) sorts after them, stable by name, in both directions.
+  // Low scores never create attention — this only orders the list.
+  const scoreValue = (student: StudentSession): number | null =>
+    scores?.get(student.id)?.correct ?? null;
+  const compareScore = (left: StudentSession, right: StudentSession, descending: boolean): number => {
+    const leftScore = scoreValue(left);
+    const rightScore = scoreValue(right);
+    const leftRanked = leftScore !== null;
+    const rightRanked = rightScore !== null;
+    if (leftRanked && rightRanked) {
+      if (leftScore !== rightScore) return descending ? rightScore! - leftScore! : leftScore! - rightScore!;
+      return byName(left, right);
+    }
+    if (leftRanked !== rightRanked) return leftRanked ? -1 : 1;
+    return byName(left, right);
+  };
   return [...students].sort((left, right) => {
     if (sort === 'attention') return attentionWeight(right, reasons) - attentionWeight(left, reasons) || byName(left, right);
     if (sort === 'time') return remainingSeconds(left) - remainingSeconds(right) || byName(left, right);
+    if (sort === 'score_asc') return compareScore(left, right, false);
+    if (sort === 'score_desc') return compareScore(left, right, true);
     return byName(left, right);
   });
 }
+
+/** Plain-language age for the stale-while-revalidate line; null when unknown. */
+function scoresAgeLabel(updatedAt: number | undefined): string | null {
+  if (!updatedAt || !Number.isFinite(updatedAt)) return null;
+  const seconds = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
+  if (seconds < 5) return 'Updated just now';
+  if (seconds < 60) return `Updated ${seconds}s ago`;
+  return `Updated ${Math.floor(seconds / 60)}m ago`;
+}
+
+/**
+ * Footer-scoped age line for the stale paragraph. Owns its own 30s interval
+ * so the listbox never re-renders on the timer — only this line ticks, and it
+ * is mounted only while the stale paragraph renders.
+ */
+const ScoresAgeLine = memo(function ScoresAgeLine({ updatedAt, visible }: { updatedAt: number | undefined; visible: boolean }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!visible) return;
+    const id = window.setInterval(() => setTick((tick) => tick + 1), 30_000);
+    return () => window.clearInterval(id);
+  }, [visible]);
+  if (!visible) return null;
+  const age = scoresAgeLabel(updatedAt);
+  if (!age) return null;
+  return <>{` · ${age}`}</>;
+});
 
 export function SatSessionRoomRoster({
   students,
@@ -54,6 +108,11 @@ export function SatSessionRoomRoster({
   onSortChange,
   onSelect,
   onShareLink,
+  scores,
+  scoresStale = false,
+  scoresLoading = false,
+  scoresUpdatedAt,
+  scoresTruncated = false,
 }: {
   students: StudentSession[];
   expectedStudents?: readonly SatRoomExpectedStudent[];
@@ -72,6 +131,16 @@ export function SatSessionRoomRoster({
   onSortChange: (sort: SatRosterSort) => void;
   onSelect: (studentId: string, trigger: HTMLElement) => void;
   onShareLink?: (() => void) | undefined;
+  /** Zero-click score view-model by attempt id; absent entries render as dash. */
+  scores?: ReadonlyMap<string, RoomScore> | undefined;
+  /** Results read failed: scores keep their last value and dim instead of flashing. */
+  scoresStale?: boolean | undefined;
+  /** First paint of the results join: dash rows hold a skeleton, never a zero. */
+  scoresLoading?: boolean | undefined;
+  /** Last successful results join, for the stale-while-revalidate age line. */
+  scoresUpdatedAt?: number | undefined;
+  /** Results pages capped (500-row guard): roster notes incompleteness explicitly. */
+  scoresTruncated?: boolean | undefined;
 }) {
   // While a proctor's pointer or focus is in the list, live updates never move
   // the row they are about to act on: existing rows keep their place and new
@@ -80,7 +149,7 @@ export function SatSessionRoomRoster({
   const [focusInside, setFocusInside] = useState(false);
   const holdOrder = pointerInside || focusInside;
   const shownOrder = useRef<string[]>([]);
-  const sorted = useMemo(() => sortRoster(visibleStudents, sort, attentionReasons), [attentionReasons, sort, visibleStudents]);
+  const sorted = useMemo(() => sortRoster(visibleStudents, sort, attentionReasons, scores), [attentionReasons, scores, sort, visibleStudents]);
   const ordered = useMemo(() => {
     if (!holdOrder || shownOrder.current.length === 0) return sorted;
     const byId = new Map(sorted.map((student) => [student.id, student]));
@@ -96,7 +165,38 @@ export function SatSessionRoomRoster({
     shownOrder.current = ordered.map((student) => student.id);
   }, [ordered]);
 
-  const activeStudent = ordered.find((student) => student.id === selectedStudent?.id) ?? null;
+  // Score upgrades announce once through a single polite live region: the first
+  // paint only seeds the map, and a poll that flips several attempts into
+  // `scored` collapses to one summary — rapid polls never flood the reader.
+  // Server-authoritative only: nothing here predicts correctness, it reports
+  // the same `byAttempt` Map the row and the inspector already read.
+  const previousScoreKinds = useRef<Map<string, RoomScoreKind> | null>(null);
+  const [scoreAnnouncement, setScoreAnnouncement] = useState('');
+  useEffect(() => {
+    const previous = previousScoreKinds.current;
+    const current = new Map<string, RoomScoreKind>();
+    if (scores) {
+      for (const [id, score] of scores) current.set(id, score.kind);
+    }
+    previousScoreKinds.current = current;
+    if (!previous) return;
+    const changed: string[] = [];
+    if (scores) {
+      for (const [id, score] of scores) {
+        if (score.kind === 'scored' && previous.get(id) !== 'scored') {
+          const name = students.find((student) => student.id === id)?.name ?? 'A student';
+          changed.push(`${name} scored ${score.correct} of ${score.total}`);
+        } else if (score.kind === 'not_scored' && previous.get(id) !== 'not_scored') {
+          const name = students.find((student) => student.id === id)?.name ?? 'A student';
+          changed.push(`${name} marked not scored`);
+        }
+      }
+    }
+    if (changed.length === 1) setScoreAnnouncement(changed[0] ?? '');
+    else if (changed.length > 1) setScoreAnnouncement(`${changed.length} scores updated.`);
+  }, [scores, students]);
+
+    const activeStudent = ordered.find((student) => student.id === selectedStudent?.id) ?? null;
   const joinedAttemptIds = new Set(students.map((student) => student.id));
   const needle = search.trim().toLocaleLowerCase();
   const visibleExpectedStudents = attentionFilter === 'all'
@@ -155,6 +255,20 @@ export function SatSessionRoomRoster({
           </div>
           <SatToolbarSelect<SatRosterSort> id="sat-room-roster-sort" label="Sort" value={sort} options={SORT_OPTIONS} onChange={onSortChange} />
         </div>
+        {/* Stale-while-revalidate, inline and persistent: the rows keep their
+            last value dimmed, and this line says how old it is. Never a toast,
+            never a zero flash. Not a live region — the age text would re-announce. */}
+        {scoresStale ? (
+          <p className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
+            Scores may be stale<ScoresAgeLine updatedAt={scoresUpdatedAt} visible={scoresStale} /> · keeping last values.
+          </p>
+        ) : null}
+        {scoresTruncated ? (
+          <p className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+            Showing first 500 scores — narrow the search to see more.
+          </p>
+        ) : null}
+        <span className="sr-only" role="status">{scoreAnnouncement}</span>
       </div>
       <div
         role="listbox"
@@ -193,6 +307,9 @@ export function SatSessionRoomRoster({
             roomClock={roomClock}
             selected={selectedStudent?.id === student.id}
             attentionReason={attentionReasons.get(student.id) ?? null}
+            score={scores?.get(student.id) ?? null}
+            scoresStale={scoresStale}
+            scoresLoading={scoresLoading}
             onSelect={(trigger) => onSelect(student.id, trigger)}
           />
         )) : (

@@ -1,12 +1,14 @@
 import { DeviceRecoveryDialog } from '../../../features/proctor/ui/DeviceRecoveryDialog';
 import { AlertTriangle, ChevronRight, FileWarning, MessageSquareWarning, MonitorSmartphone, Pause, Play, Timer } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { SatLateEvidenceDialog } from './SatLateEvidenceDialog';
 import type { StudentSession } from '../../../types';
 import type { ExamSessionRuntime } from '../../../types/domain';
 import { useAuthoritativeDeadlineClock, type ServerClockSnapshot } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import { formatRunSheetRemaining, satModuleSlotLabel } from './sessionRunSheet';
 import { isSatAttemptLive, isSatBreakLive, isSatStageLive } from './satStage';
+import type { RoomScore } from './useRoomScores';
 
 type StudentSessionWithModuleRole = StudentSession & {
   /** The server's own name for the SAT adaptive module slot. */
@@ -28,12 +30,51 @@ export function studentAttentionReason(
   return reasons.length ? reasons.join(' · ') : null;
 }
 
+/**
+ * Zero-click score badges, memoized on the stable `RoomScore` object identity
+ * the hook preserves across polls. A poll that changes nothing reuses the same
+ * object, so only the row whose score actually changed re-renders its badge —
+ * the rest of the grid reconciles to identical DOM (per-row subscription).
+ *
+ * The update itself is an opacity-only fade (`sat-room__score-fade`, 160ms =
+ * `feedback.value`): no bounce, no slide, no layout thrash. The `key` replays
+ * the fade exactly when the visible text changes; under `prefers-reduced-motion`
+ * the animation is removed and the swap is instant, with the text cue kept.
+ */
+const SatRoomScoreLine = memo(function SatRoomScoreLine({ score, stale }: { score: RoomScore; stale: boolean }) {
+  const tone = score.kind === 'scored'
+    ? 'text-[var(--sat-staff-text-primary,#1d1d1f)]'
+    : 'text-[var(--sat-staff-text-secondary,#515154)]';
+  return (
+    <span
+      className={`sat-room__row-score sat-room__score-fade block max-w-full truncate break-words pl-3.5 text-[14px] leading-5 tabular-nums ${tone}${stale ? ' opacity-60' : ''}`}
+      aria-hidden="true"
+    >
+      {score.label}
+    </span>
+  );
+});
+
+const SatRoomScoreFraction = memo(function SatRoomScoreFraction({ score, stale }: { score: RoomScore; stale: boolean }) {
+  return (
+    <span
+      className={`sat-room__row-score-fraction sat-room__score-fade block text-[15px] font-semibold leading-5 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]${stale ? ' opacity-60' : ''}`}
+      aria-hidden="true"
+    >
+      {score.correct}/{score.total}
+    </span>
+  );
+});
+
 export function SatRoomStudentRow({
   student,
   runtime,
   roomClock,
   selected,
   attentionReason,
+  score = null,
+  scoresStale = false,
+  scoresLoading = false,
   onSelect,
 }: {
   student: StudentSession;
@@ -42,6 +83,12 @@ export function SatRoomStudentRow({
   selected: boolean;
   /** From `studentAttentionReason`; shown beside the name so the proctor sees why. */
   attentionReason: string | null;
+  /** Zero-click score view-model; null renders the pre-score row (meta only). */
+  score?: RoomScore | null;
+  /** When the results read failed, dim the projected score instead of flashing. */
+  scoresStale?: boolean | undefined;
+  /** First paint of the results join: show a shape-preserving skeleton, never a zero. */
+  scoresLoading?: boolean | undefined;
   onSelect: (trigger: HTMLButtonElement) => void;
 }) {
   const fallbackSeconds = student.runtimeTimeRemainingSeconds ?? student.timeRemaining;
@@ -99,6 +146,16 @@ export function SatRoomStudentRow({
   const time = student.satStartState === 'waiting_for_code' || student.satStartState === 'never_started'
     ? '—'
     : formatRunSheetRemaining(onBreak ? breakRemaining : moduleKnown ? moduleRemaining : remaining);
+  // Zero-click score: neutral ink, tabular numerals. The badges own their own
+  // fade (opacity only); a dash renders nothing until the first join lands, at
+  // which point a shape-preserving skeleton holds the slot — never a zero.
+  const scoreKind = score?.kind ?? 'dash';
+  const showScoreLine = scoreKind !== 'dash' && (score?.label ?? '') !== '';
+  const showScoreFraction = scoreKind === 'scored'
+    && score?.correct !== null && score?.correct !== undefined
+    && score?.total !== null && score?.total !== undefined;
+  const showScoreSkeleton = scoresLoading && !showScoreLine;
+  const ariaLabel = `Open ${student.name}${attentionReason ? `, needs attention: ${attentionReason}` : ''}${score?.srLabel ? `, ${score.srLabel}` : ''}`;
 
   return (
     <button
@@ -106,7 +163,7 @@ export function SatRoomStudentRow({
       id={`sat-room-student-${student.id}`}
       role="option"
       aria-selected={selected}
-      aria-label={`Open ${student.name}${attentionReason ? `, needs attention: ${attentionReason}` : ''}`}
+      aria-label={ariaLabel}
       aria-current={selected || undefined}
       tabIndex={-1}
       onClick={(event) => onSelect(event.currentTarget)}
@@ -124,6 +181,13 @@ export function SatRoomStudentRow({
           </span>
         </span>
         <span className="sat-room__row-meta block break-words pl-3.5 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{rowMeta}</span>
+        {showScoreLine && score ? (
+          <SatRoomScoreLine key={score.label} score={score} stale={scoresStale} />
+        ) : showScoreSkeleton ? (
+          <span aria-hidden="true" className="block pl-3.5">
+            <span className="sat-room__row-score-skeleton sat-skeleton-shimmer" />
+          </span>
+        ) : null}
         {attentionReason ? (
           <span className="block break-words pl-3.5 text-[14px] font-medium leading-5 text-[var(--sat-staff-warning-text,#92400e)]">{attentionReason}</span>
         ) : null}
@@ -131,6 +195,9 @@ export function SatRoomStudentRow({
       <span className="flex items-center gap-1.5">
         {showClock ? (
           <span className="text-right">
+            {showScoreFraction && score ? (
+              <SatRoomScoreFraction key={`${score.correct}/${score.total}`} score={score} stale={scoresStale} />
+            ) : null}
             <span className="sat-room__row-time block text-[14px] font-semibold leading-5 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]">{time}</span>
             {onBreak ? (
               <span className="sat-room__row-sub block text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">
@@ -154,6 +221,9 @@ export function StudentDetail({
   variant,
   pendingActions,
   blocked,
+  score = null,
+  roomReturnTo = null,
+  roomReturnState = null,
   onAddTime,
   onWarn,
   onPause,
@@ -167,6 +237,12 @@ export function StudentDetail({
   variant: 'operational' | 'review';
   pendingActions: ReadonlySet<string>;
   blocked: boolean;
+  /** Zero-click score view-model for the Score summary block; null hides it. */
+  score?: RoomScore | null;
+  /** Where "View answers" returns to (the room path); enables the return-state link. */
+  roomReturnTo?: string | null | undefined;
+  /** Room UI state stashed in link state so Back restores selection, filters and scroll. */
+  roomReturnState?: Record<string, unknown> | null | undefined;
   onAddTime: (minutes: number) => void;
   onWarn: () => void;
   onPause: () => void;
@@ -297,6 +373,8 @@ export function StudentDetail({
         </dl>
       </section>
 
+      <StudentScoreSummary student={student} score={score} roomReturnTo={roomReturnTo} roomReturnState={roomReturnState} />
+
       {hasBlockedSATRecovery && onResolveRecovery ? (
         <section className={DETAIL_SECTION} aria-labelledby="sat-recovery-exception-heading">
           <h3 id="sat-recovery-exception-heading" className={DETAIL_HEADING}>Recovery exception</h3>
@@ -406,6 +484,54 @@ function DetailFact({ label, value, clock = false, capitalize = false }: { label
       <dt className="text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">{label}</dt>
       <dd className={`mt-0.5 [overflow-wrap:anywhere] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)] ${clock ? 'text-[20px] leading-7 tracking-[-0.02em] tabular-nums' : 'text-[15px] leading-6'}${capitalize ? ' capitalize' : ''}`}>{value}</dd>
     </div>
+  );
+}
+
+function StudentScoreSummary({
+  student,
+  score,
+  roomReturnTo,
+  roomReturnState,
+}: {
+  student: StudentSession;
+  score: RoomScore | null | undefined;
+  roomReturnTo: string | null | undefined;
+  roomReturnState: Record<string, unknown> | null | undefined;
+}) {
+  if (!score || score.kind === 'dash') return null;
+  // The key-bearing result detail is reachable only through a scored result;
+  // saved (keyless) answers are safe to link whenever the server holds any.
+  // Otherwise no link is rendered — never a disabled key teaser.
+  const answersPath = score.resultId
+    ? `/sat/results/${encodeURIComponent(score.resultId)}`
+    : score.hasSavedAnswers
+      ? `/sat/results/attempts/${encodeURIComponent(student.id)}`
+      : null;
+  const query = new URLSearchParams({
+    from: 'room',
+    scheduleId: student.scheduleId,
+    studentId: student.studentId,
+  }).toString();
+  const to = answersPath ? `${answersPath}?${query}` : null;
+  // Single-sourced with Responses (SatExamGroupSection): key-bearing detail
+  // only when the attempt is scored AND a result exists; otherwise the
+  // keyless saved-answers view. Pending + resultId still reads saved.
+  const linkLabel = score.kind === 'scored' && score.resultId ? 'View answers ›' : 'View saved answers ›';
+  return (
+    <section className={DETAIL_SECTION} aria-label="Score summary">
+      <h3 className={DETAIL_HEADING}>Score summary</h3>
+      <p className="mt-2 text-[15px] font-semibold leading-6 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]">{score.label}</p>
+      {to ? (
+        <Link
+          to={to}
+          state={roomReturnTo ? { from: roomReturnTo, satRoomReturn: roomReturnState ?? null } : undefined}
+          aria-label={`${linkLabel.replace(/ ›$/, '')} for ${student.name}`}
+          className="sat-btn sat-btn--quiet sat-press mt-2 px-3 text-[var(--sat-staff-accent-text-on-tint,#0067c9)]"
+        >
+          {linkLabel}
+        </Link>
+      ) : null}
+    </section>
   );
 }
 

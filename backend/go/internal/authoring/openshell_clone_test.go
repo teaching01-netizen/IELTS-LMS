@@ -265,3 +265,35 @@ func TestOpenShellClonePreservesPublishedQuestionContent(t *testing.T) {
 	t.Logf("cloned %d published placements into draft %s with identical content, source intact",
 		len(cloned), shell.VersionID)
 }
+
+// A published flexible exam must come back as a flexible draft: the
+// sat_flexible_count flag travels with the sat_classroom_plan in the same
+// version INSERT, or the v2 draft flips to strict gates and becomes
+// unpublishable. Gated on TEST_MYSQL_DSN like the content contract above.
+func TestOpenShellClonePreservesFlexibleFlagAndPlan(t *testing.T) {
+	fixture := seedReadPerfFixture(t)
+	ctx := context.Background()
+	actor := "openshell-clone-flag-" + uuid.NewString()
+	authors := NewService(fixture.DB, fixture.Runner)
+
+	publishReadPerfFixture(t, ctx, fixture)
+	if _, err := fixture.DB.ExecContext(ctx, "UPDATE exam_versions SET sat_flexible_count = 1, sat_classroom_plan = ? WHERE id = ?", `{"math":"m1_only"}`, fixture.VersionID); err != nil {
+		t.Fatalf("flag the published version flexible: %v", err)
+	}
+
+	shell, err := authors.OpenShell(ctx, fixture.ExamID, actor)
+	if err != nil {
+		t.Fatalf("OpenShell on flexible published+no-draft: %v", err)
+	}
+	var flag int
+	var plan sql.NullString
+	if err := fixture.DB.QueryRowContext(ctx, "SELECT sat_flexible_count, CAST(sat_classroom_plan AS CHAR) FROM exam_versions WHERE id = ?", shell.VersionID).Scan(&flag, &plan); err != nil {
+		t.Fatalf("read cloned flag and plan: %v", err)
+	}
+	if flag != 1 {
+		t.Fatalf("cloned draft sat_flexible_count = %d, want 1", flag)
+	}
+	if !plan.Valid || plan.String != `{"math":"m1_only"}` {
+		t.Fatalf("cloned draft sat_classroom_plan = %q, want the published plan", plan.String)
+	}
+}

@@ -393,6 +393,35 @@
   }
 }
 
+/* ── Zero-click score polish ──────────────────────────────────────────
+ * The badge update is motion-as-feedback only: one opacity cross-fade at the
+ * shared state-motion budget (160ms = `feedback.value`), no bounce, no slide,
+ * no layout thrash. Remounting (via `key` on the label) replays it exactly
+ * when the visible text changes; reduced motion removes it for an instant
+ * swap while the text cue itself stays. Transform/opacity only, always. */
+.sat-room__score-fade {
+  animation: sat-room-score-fade var(--sat-staff-motion-row, 160ms) var(--sat-staff-ease, ease-out) both;
+}
+
+@keyframes sat-room-score-fade {
+  from { opacity: 0.4; }
+  to { opacity: 1; }
+}
+
+/* Shape-preserving skeleton for the score slot on first paint: the same
+ * 20px line box the badge will occupy, so nothing shifts when it lands.
+ * The sweep comes from the shared `.sat-skeleton-shimmer`; reduced motion
+ * already pins that to a static bar, so the geometry cue survives. */
+.sat-room__row-score-skeleton {
+  display: block;
+  height: 12px;
+  width: 7.5rem;
+  margin-top: 4px;
+  margin-bottom: 4px;
+  border-radius: 9999px;
+  background: var(--sat-staff-skeleton-bar, rgba(0, 0, 0, 0.07));
+}
+
 /* ── Inspector sheet (split and stack) ─────────────────────────────── */
 .sat-room__inspector-dialog-overlay {
   position: fixed;
@@ -447,12 +476,17 @@
   .sat-room__student-detail,
   .sat-room__inspector-panel,
   .sat-room__inspector-dialog,
-  .sat-room__inspector-dialog-overlay {
+  .sat-room__inspector-dialog-overlay,
+  .sat-room__score-fade {
     animation: none !important;
   }
 }
 
 @media (forced-colors: active) {
+  .sat-room__row-score-skeleton {
+    background: GrayText;
+  }
+
   .sat-room__row[aria-selected="true"] {
     border: 2px solid Highlight;
     background: Canvas;

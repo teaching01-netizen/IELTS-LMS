@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { AlertTriangle, UserRound } from 'lucide-react';
 import { useLocation, useParams } from 'react-router-dom';
 import { isExamDeliveryPath } from './satReturnPath';
+import { useRoomScores } from '../ui/useRoomScores';
 import { SatButton, SatPageError, SatPageLoading } from '../ui/SatPage';
 import { logError, logInfo } from '../../../shared/observability/errorLogger';
 import { useAuthSession } from '../../../features/auth/authSession';
@@ -45,6 +46,10 @@ import '../ui/sat-session-room.css';
 const RELOAD_FAILED_SUFFIX = ' However, the live view could not refresh. Retry to confirm.';
 const EMPTY_PENDING_ACTIONS: ReadonlySet<string> = new Set();
 type RoomMessage = { kind: 'success' | 'error'; text: string };
+
+function escapeRoomRowId(id: string): string {
+  return typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id;
+}
 export function SatSessionRoomRoute() {
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useSatNavigate();
@@ -58,8 +63,22 @@ export function SatSessionRoomRoute() {
   const deliveryReturn = isExamDeliveryPath(from) ? from : null;
   const { session } = useAuthSession();
   const controller = useProctorRouteController({ providerKey: 'sat', initialScheduleId: scheduleId ?? null });
-  const [search, setSearch] = useState('');
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  // Return-state from inspector "View answers ›": the results page navigates
+  // back with the room UI it left (selection, filters, scroll) so reviewing
+  // records one by one never means hunting for your place again.
+  type SatRoomReturnState = {
+    selectedStudentId?: unknown;
+    search?: unknown;
+    rosterSort?: unknown;
+    attentionFilter?: unknown;
+    scrollY?: unknown;
+    rosterScrollTop?: unknown;
+  };
+  const roomReturn = (location.state as { satRoomReturn?: SatRoomReturnState } | null)?.satRoomReturn;
+  const [search, setSearch] = useState(() => (typeof roomReturn?.search === 'string' ? roomReturn.search : ''));
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(() =>
+    typeof roomReturn?.selectedStudentId === 'string' ? roomReturn.selectedStudentId : null,
+  );
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [pendingByRoom, setPendingByRoom] = useState<ReadonlyMap<string, ReadonlySet<string>>>(() => new Map());
   const pendingActions = useMemo(() => {
@@ -79,8 +98,17 @@ export function SatSessionRoomRoute() {
   const [message, setMessage] = useState<RoomMessage | null>(null);
   const deferredMessagesRef = useRef(new Map<string, RoomMessage>());
   const [confirm, setConfirm] = useState<SatSessionRoomConfirmation | null>(null);
-  const [attentionFilter, setAttentionFilter] = useState<'all' | 'needs'>('all');
-  const [rosterSort, setRosterSort] = useState<SatRosterSort>('name');
+  const [attentionFilter, setAttentionFilter] = useState<'all' | 'needs'>(() =>
+    roomReturn?.attentionFilter === 'needs' ? 'needs' : 'all',
+  );
+  const [rosterSort, setRosterSort] = useState<SatRosterSort>(() =>
+    roomReturn?.rosterSort === 'attention'
+    || roomReturn?.rosterSort === 'time'
+    || roomReturn?.rosterSort === 'score_asc'
+    || roomReturn?.rosterSort === 'score_desc'
+      ? roomReturn.rosterSort
+      : 'name',
+  );
   const [pendingTransfers, setPendingTransfers] = useState<ReadonlySet<string>>(() => new Set());
   const [routeAssignmentReasons, setRouteAssignmentReasons] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [shareOpen, setShareOpen] = useState(false);
@@ -126,6 +154,58 @@ export function SatSessionRoomRoute() {
   }, [rememberedExamId, scheduleId]);
   const runtimeStatus = runtime?.status ?? 'not_started';
   const students = useMemo(() => controller.sessions.filter((item) => item.scheduleId === scheduleId), [controller.sessions, scheduleId]);
+  // Zero-click scores: the live roster joined with the results attempts list
+  // by attemptId. Correctness is never computed here — the hook only projects
+  // what the backends already scored.
+  const { byAttempt: roomScores, isStale: roomScoresStale, partial: roomScoresPartial, isLoading: roomScoresLoading, updatedAt: roomScoresUpdatedAt, truncated: roomScoresTruncated } = useRoomScores(
+    scheduleId ?? '',
+    schedule?.examId ?? null,
+    students,
+  );
+  // A return from inspector "View answers ›" re-applies the room UI the
+  // results page carried back (it survives without a remount), restores the
+  // scroll offset, and focuses the inspector heading for keyboard reviewers.
+  const appliedRoomReturnKey = useRef<string | null>(null);
+  useEffect(() => {
+    const returned = (location.state as { satRoomReturn?: SatRoomReturnState } | null)?.satRoomReturn;
+    if (!returned || appliedRoomReturnKey.current === location.key) return;
+    appliedRoomReturnKey.current = location.key;
+    if (typeof returned.search === 'string') setSearch(returned.search);
+    if (returned.attentionFilter === 'all' || returned.attentionFilter === 'needs') setAttentionFilter(returned.attentionFilter);
+    if (
+      returned.rosterSort === 'name'
+      || returned.rosterSort === 'attention'
+      || returned.rosterSort === 'time'
+      || returned.rosterSort === 'score_asc'
+      || returned.rosterSort === 'score_desc'
+    ) setRosterSort(returned.rosterSort);
+    if (typeof returned.selectedStudentId === 'string') {
+      setSelectedStudentId(returned.selectedStudentId);
+      setInspectorOpen(true);
+    }
+    const frame = window.requestAnimationFrame(() => {
+      if (typeof returned.scrollY === 'number' && Number.isFinite(returned.scrollY)) {
+        window.scrollTo({ top: returned.scrollY, behavior: 'instant' });
+      }
+      // Stacked layouts scroll the window (above); split/wide scroll the
+      // roster listbox itself, so the return carries that offset too.
+      const rosterBox = document.querySelector<HTMLElement>('.sat-room__roster [role="listbox"]');
+      if (rosterBox && typeof returned.rosterScrollTop === 'number' && Number.isFinite(returned.rosterScrollTop)) {
+        rosterBox.scrollTop = returned.rosterScrollTop;
+      }
+      // The invoking row is the return focus when it can take it: the docked
+      // inspector leaves the roster in the tab order, so focus lands back on
+      // the row that opened the detail. In sheet layouts the dialog traps
+      // focus, so the inspector heading keeps it instead.
+      const selectedId = typeof returned.selectedStudentId === 'string' ? returned.selectedStudentId : null;
+      const row = selectedId && rosterBox
+        ? rosterBox.querySelector<HTMLElement>(`#${escapeRoomRowId(`sat-room-student-${selectedId}`)}`)
+        : null;
+      if (roomLayout === 'wide' && row) row.focus({ preventScroll: true });
+      else document.querySelector<HTMLElement>('[data-sat-room-student-heading]')?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.key, location.state, roomLayout]);
   const isAdmin = session?.user.role === 'admin';
   const canReadRoomEntryInfo = isAdmin || session?.user.role === 'proctor';
   const entryInfoQuery = useSatRoomEntryInfo(scheduleId ?? '', Boolean(schedule) && canReadRoomEntryInfo);
@@ -424,6 +504,18 @@ export function SatSessionRoomRoute() {
           variant={roomMode === 'review' ? 'review' : 'operational'}
           pendingActions={pendingActions}
           blocked={isStale}
+          score={roomScores.get(selectedStudent.id) ?? null}
+          roomReturnTo={scheduleId ? `/sat/sessions/${scheduleId}` : null}
+          roomReturnState={{
+            selectedStudentId,
+            search,
+            rosterSort,
+            attentionFilter,
+            scrollY: typeof window === 'undefined' ? 0 : window.scrollY,
+            rosterScrollTop: typeof document === 'undefined'
+              ? 0
+              : document.querySelector('.sat-room__roster [role="listbox"]')?.scrollTop ?? 0,
+          }}
           onAddTime={(minutes) => {
             if (isStale) return;
             setConfirm({
@@ -612,6 +704,11 @@ export function SatSessionRoomRoute() {
             sort={rosterSort}
             onSortChange={setRosterSort}
             onSelect={selectStudent}
+            scores={roomScores}
+            scoresStale={roomScoresStale || roomScoresPartial}
+            scoresLoading={roomScoresLoading}
+            scoresUpdatedAt={roomScoresUpdatedAt}
+            scoresTruncated={roomScoresTruncated}
             onShareLink={roomMode === 'review' || !entryUrl ? undefined : () => setShareOpen(true)}
           />
         )}

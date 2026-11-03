@@ -10,6 +10,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/satconvert"
+	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 type satInitialModule struct {
@@ -140,6 +141,12 @@ func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string, 
 			return "", err
 		}
 	}
+	flexible := cfg != nil && cfg.FlexibleQuestionCount != nil && *cfg.FlexibleQuestionCount
+	if flexible {
+		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET sat_flexible_count = 1 WHERE id = ?", versionID); err != nil {
+			return "", err
+		}
+	}
 
 	blueprint, thresholds := cfg.apply(satInitialBlueprint)
 	for sectionIndex, section := range blueprint {
@@ -156,6 +163,11 @@ func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string, 
 			durationByRole[satInitialLowerRole],
 			durationByRole[satInitialHigherRole],
 		)
+		// M1-only sections clock the base module alone: no M2 is ever
+		// delivered, so the branch clock must not reach the section length.
+		if cfg != nil && satpublish.Shape(cfg.ClassroomPlan[section.key]) == satpublish.ShapeM1Only {
+			sectionDuration = durationByRole[satInitialBaseRole]
+		}
 		if _, err := q.ExecContext(ctx, "INSERT INTO assessment_sections (id, exam_version_id, section_key, title, display_order, duration_seconds, break_after_seconds, instructions, tool_policy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", sectionID, versionID, section.key, section.title, sectionIndex, sectionDuration, section.breakSeconds, `{"version":1,"nodes":[]}`, `[]`); err != nil {
 			return "", err
 		}
@@ -191,7 +203,19 @@ func initializeSATDraftTx(ctx context.Context, q tx.Tx, examID, actorID string, 
 
 	policyKey := "practice"
 	var scoringPolicy string
-	if cfg != nil && len(cfg.ScoreConverter) > 0 && strings.TrimSpace(string(cfg.ScoreConverter)) != "" && strings.TrimSpace(string(cfg.ScoreConverter)) != "null" {
+	m1Only := false
+	if cfg != nil {
+		for _, shape := range cfg.ClassroomPlan {
+			if satpublish.Shape(shape) == satpublish.ShapeM1Only {
+				m1Only = true
+				break
+			}
+		}
+	}
+	// Flexible and M1-only exams are raw-scores-only v1: no converter table is
+	// stored even if one were supplied (creation validation already rejects
+	// it; this keeps the materialization fail-closed).
+	if cfg != nil && !flexible && !m1Only && len(cfg.ScoreConverter) > 0 && strings.TrimSpace(string(cfg.ScoreConverter)) != "" && strings.TrimSpace(string(cfg.ScoreConverter)) != "null" {
 		policyKey = satconvert.ScoreType
 		scoringPolicy = string(cfg.ScoreConverter)
 	} else {

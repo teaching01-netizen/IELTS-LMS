@@ -20,6 +20,9 @@ func TestParsePlan(t *testing.T) {
 	if err != nil || p.ShapeFor(SectionMath) != ShapeM2Hard {
 		t.Fatalf("got %v, %v", p, err)
 	}
+	if p, err := ParsePlan(`{"reading-writing":"m1_only"}`); err != nil || p.ShapeFor(SectionReadingWriting) != ShapeM1Only {
+		t.Fatalf("m1_only must parse: %v, %v", p, err)
+	}
 	for _, bad := range []string{`{"math":"m3"}`, `{"writing":"m1_easy"}`, `[`} {
 		if _, err := ParsePlan(bad); err == nil {
 			t.Fatalf("ParsePlan(%q) must fail", bad)
@@ -34,6 +37,7 @@ func TestPlanUsesAndEntryRole(t *testing.T) {
 		uses  map[string]bool
 	}{
 		{"", RoleBase, map[string]bool{RoleBase: true, RoleLower: true, RoleHigher: true}},
+		{ShapeM1Only, RoleBase, map[string]bool{RoleBase: true}},
 		{ShapeM1Easy, RoleBase, map[string]bool{RoleBase: true, RoleLower: true}},
 		{ShapeM1Hard, RoleBase, map[string]bool{RoleBase: true, RoleHigher: true}},
 		{ShapeM2Easy, RoleLower, map[string]bool{RoleLower: true}},
@@ -60,6 +64,8 @@ func TestValidateDraftPlanOnlyRequiresDeliveredModules(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery("sat_classroom_plan").WithArgs("draft").
 		WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(`{"math":"m2_hard"}`))
+	mock.ExpectQuery("sat_flexible_count").WithArgs("draft").
+		WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(0)))
 	// Only the hard module is authored; M1 and Easy are absent and not required.
 	mock.ExpectQuery("SELECT s.section_key, m.module_key").WithArgs("draft", SectionMath).
 		WillReturnRows(sqlmock.NewRows([]string{"section_key", "module_key", "title", "target", "id"}).
@@ -67,7 +73,7 @@ func TestValidateDraftPlanOnlyRequiresDeliveredModules(t *testing.T) {
 			AddRow(SectionMath, "math-m1", "M1 draft", 5, "m1"))
 	mock.ExpectQuery("SELECT eq.id, r.question_type").WithArgs("mh").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer"}))
-	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"p"}))
+	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
 	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 	if err != nil {
@@ -110,6 +116,7 @@ func converterGate(t *testing.T, plan, policy string) []Issue {
 	}
 	defer db.Close()
 	mock.ExpectQuery("sat_classroom_plan").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(plan))
+	mock.ExpectQuery("sat_flexible_count").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(int64(0)))
 	mods := sqlmock.NewRows([]string{"section_key", "module_key", "title", "target", "id"})
 	for _, key := range []string{"math-m1", "math-m2-lower", "math-m2-higher"} {
 		mods.AddRow(SectionMath, key, key, 3, key)
@@ -127,9 +134,13 @@ func converterGate(t *testing.T, plan, policy string) []Issue {
 			WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer"}).
 				AddRow(key+"-q", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
 	}
-	policyRows := sqlmock.NewRows([]string{"p"})
+	policyRows := sqlmock.NewRows([]string{"policy_key", "policy_config"})
 	if policy != "" {
-		policyRows.AddRow(policy)
+		key := "practice"
+		if strings.Contains(policy, "converterVersion") {
+			key = "estimated_sat"
+		}
+		policyRows.AddRow(key, policy)
 	}
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(policyRows)
 	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))

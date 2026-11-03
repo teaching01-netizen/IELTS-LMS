@@ -1638,6 +1638,11 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 		if err != nil {
 			return nil, err
 		}
+		// M1-only sections end after Module 1: no route decision is recorded
+		// and no Module 2 is ever opened, so completion never waits for M2.
+		if plan.ShapeFor(sectionKey) == satpublish.ShapeM1Only {
+			return nil, nil
+		}
 		if forced := plan.ShapeFor(sectionKey).ForcedBranch(); forced != "" && routePolicy != examdomain.SATRouteStaffSelects {
 			routePolicy = examdomain.SATRouteForceLower
 			if forced == satpublish.RoleHigher {

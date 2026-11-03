@@ -46,9 +46,22 @@ export function SatAttemptAnswersRoute() {
   const { attemptId } = useParams<{ attemptId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: unknown } | null)?.from;
-  const backTarget = typeof from === 'string' && (from.startsWith('/sat/results?') || isExamResponsesPath(from)) ? from : '/sat/results';
-  return <SatAttemptAnswersContent attemptId={attemptId} onBack={() => navigate(backTarget)} />;
+  const state = location.state as { from?: unknown; satRoomReturn?: unknown } | null;
+  const params = new URLSearchParams(location.search);
+  const from = state?.from;
+  const inAppList = typeof from === 'string'
+    && (from.startsWith('/sat/results?') || from === '/sat/results' || from.startsWith('/sat/sessions/'));
+  const backTarget = typeof from === 'string' && (inAppList || isExamResponsesPath(from))
+    ? from
+    : params.get('from') === 'room' && params.get('scheduleId')
+      ? `/sat/sessions/${params.get('scheduleId')}`
+      : '/sat/results';
+  // A room return carries the roster UI the inspector left (selection, search,
+  // sort, filter, scroll); the room restores it and focuses the heading.
+  const backState = backTarget.startsWith('/sat/sessions/') && state?.satRoomReturn !== undefined
+    ? { satRoomReturn: state.satRoomReturn }
+    : undefined;
+  return <SatAttemptAnswersContent attemptId={attemptId} onBack={() => navigate(backTarget, backState ? { state: backState } : undefined)} />;
 }
 
 export interface SatAttemptAnswersContentProps {

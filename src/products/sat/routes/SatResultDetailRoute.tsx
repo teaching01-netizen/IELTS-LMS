@@ -62,8 +62,20 @@ function scoreScale(score: ScoreDisplay | null, singleSubject: boolean): string 
   return '400–1600 point scale';
 }
 
+function isM1OnlyRawReport(report: ClassroomReport | null): boolean {
+  if (!report || !Array.isArray(report.sections) || report.sections.length === 0) return false;
+  return report.sections.every((section) => {
+    const modules = Array.isArray(section.modules) ? section.modules : [];
+    return modules.length === 1 && typeof modules[0]?.moduleKey === "string" && /-m1$/.test(modules[0].moduleKey);
+  });
+}
+
 function conversionReason(report: ClassroomReport | null, converterVersion: string | null, notice: string | null): string | null {
   if (!report) return 'Raw classroom score details are not present in this result.';
+  // M1-only sits the base module alone: raw correct/total is the expected
+  // result, so it is exempt from the base+branch combined-estimate check and
+  // never needs a converter table.
+  if (isM1OnlyRawReport(report)) return null;
   const version = converterVersion ?? 'the active converter';
   const knownSections = new Set(['reading-writing', 'math']);
   const unknownSection = report.sections.find((section) => !knownSections.has(section.sectionKey));
@@ -113,11 +125,25 @@ export function SatResultDetailRoute() {
   const { resultId } = useParams<{ resultId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const state = location.state as { from?: unknown; satRoomReturn?: unknown } | null;
+  const params = new URLSearchParams(location.search);
   const backTarget = (() => {
-    const from = (location.state as { from?: unknown } | null)?.from;
-    return typeof from === 'string' && (from.startsWith('/sat/results') || isExamResponsesPath(from)) ? from : '/sat/results';
+    const from = state?.from;
+    if (typeof from !== 'string') {
+      if (params.get('from') === 'room' && params.get('scheduleId')) return `/sat/sessions/${params.get('scheduleId')}`;
+      return '/sat/results';
+    }
+    const inApp = from.startsWith('/sat/results') || from.startsWith('/sat/sessions/');
+    if (inApp || isExamResponsesPath(from)) return from;
+    if (params.get('from') === 'room' && params.get('scheduleId')) return `/sat/sessions/${params.get('scheduleId')}`;
+    return '/sat/results';
   })();
-  return <SatResultDetailContent resultId={resultId} backTarget={backTarget} onBack={() => navigate(backTarget)} />;
+  // A room return carries the roster UI the inspector left (selection, search,
+  // sort, filter, scroll); the room restores it and focuses the heading.
+  const backState = backTarget.startsWith('/sat/sessions/') && state?.satRoomReturn !== undefined
+    ? { satRoomReturn: state.satRoomReturn }
+    : undefined;
+  return <SatResultDetailContent resultId={resultId} backTarget={backTarget} onBack={() => navigate(backTarget, backState ? { state: backState } : undefined)} />;
 }
 
 export interface SatResultDetailContentProps {
@@ -295,7 +321,10 @@ function SubjectPerformanceCard({
 }) {
   const score = subject.score.kind === 'estimated' ? formatScaled(subject.score.low, subject.score.high) : subject.score.kind === 'raw' ? `${subject.score.correct} / ${subject.score.total}` : 'Unavailable';
   const scoreLabel = subject.score.kind === 'estimated' ? 'Estimated section score' : subject.score.kind === 'raw' ? 'Raw section score' : 'Estimated score unavailable';
-  const route = detail?.route ?? (subject.modules.some((module) => module.key.endsWith('-m2-higher')) ? 'higher' : subject.modules.some((module) => module.key.endsWith('-m2-lower')) ? 'lower' : null);
+  // M1-only sits a single base module: raw correct/total is the result, so no
+  // Higher/Lower route badge is ever shown for it.
+  const isSingleM1 = subject.modules.length === 1 && subject.modules[0]?.key.endsWith('-m1');
+  const route = isSingleM1 ? null : (detail?.route ?? (subject.modules.some((module) => module.key.endsWith('-m2-higher')) ? 'higher' : subject.modules.some((module) => module.key.endsWith('-m2-lower')) ? 'lower' : null));
   return (
     <SatSectionCard className="p-5">
       <div className="flex items-start justify-between gap-4">

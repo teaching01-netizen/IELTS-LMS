@@ -869,6 +869,17 @@ export interface StudentSession {
   lastActivity: string;
   examId: string;
   examName: string;
+  /**
+   * Live score projection (Phase-2 backend, additive). Null-safe: absent means
+   * the projection is unavailable and the room falls back to the results join
+   * or a dash. The room never computes correctness client-side.
+   */
+  scoreAnswered?: number | null | undefined;
+  scoreTotal?: number | null | undefined;
+  /** Set only when every counted module is sealed + scored; otherwise null. */
+  scoreCorrect?: number | null | undefined;
+  scoreStatus?: "unstarted" | "answering" | "scoring" | "scored" | "not_scored" | null | undefined;
+  scoreModules?: Array<{ moduleKey: string; answered: number; correct: number | null; total: number }> | null | undefined;
 }
 
 export interface ExamGroup {

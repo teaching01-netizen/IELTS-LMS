@@ -174,7 +174,7 @@ export interface AssessmentRoutingPolicyShell {
 }
 
 /** Which modules students receive in a SAT Classroom section; absent = full adaptive. */
-export type SatClassroomShape = "m1_easy" | "m1_hard" | "m2_easy" | "m2_hard";
+export type SatClassroomShape = "m1_only" | "m1_easy" | "m1_hard" | "m2_easy" | "m2_hard";
 export type SatClassroomPlan = Record<string, SatClassroomShape>;
 
 /**

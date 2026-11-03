@@ -34,6 +34,10 @@ type SATExamConfig struct {
 	ShowClassroomScoreReport *bool `json:"showClassroomScoreReport,omitempty"`
 	// ClassroomPlan fixes the modules students receive in selected sections.
 	ClassroomPlan map[string]string `json:"classroomPlan,omitempty"`
+	// FlexibleQuestionCount allows 1..max questions per included module instead
+	// of the strict blueprint count. Nil (omitted) means false, so old clients
+	// are unaffected. Composes with the m1_only shape.
+	FlexibleQuestionCount *bool `json:"flexibleQuestionCount,omitempty"`
 	// ScoreConverter is an optional, versioned estimated-score table. Absent or
 	// null keeps the raw-score-only policy.
 	ScoreConverter json.RawMessage `json:"scoreConverter,omitempty"`
@@ -84,6 +88,8 @@ func DefaultSATExamConfig() SATExamConfig {
 	}
 	scoreReport := false
 	cfg.ShowClassroomScoreReport = &scoreReport
+	flexible := false
+	cfg.FlexibleQuestionCount = &flexible
 	return cfg
 }
 
@@ -139,6 +145,17 @@ func (c SATExamConfig) Validate() error {
 	if converter := strings.TrimSpace(string(c.ScoreConverter)); converter != "" && converter != "null" {
 		if _, err := satconvert.Parse(c.ScoreConverter); err != nil {
 			return validationError(err.Error())
+		}
+		flexible := c.FlexibleQuestionCount != nil && *c.FlexibleQuestionCount
+		m1Only := false
+		for _, shape := range c.ClassroomPlan {
+			if shape == string(satpublish.ShapeM1Only) {
+				m1Only = true
+				break
+			}
+		}
+		if flexible || m1Only {
+			return validationError("Score converter is not supported for flexible or M1-only SAT exams; they report raw scores only.")
 		}
 	}
 	known := make(map[string]satInitialSection, len(satInitialBlueprint))

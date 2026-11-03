@@ -49,7 +49,7 @@ func TestAttemptRowToSessionProjectsSATRuntimeIdentity(t *testing.T) {
 		satModuleAttemptRevision: sql.NullInt64{Int64: 3, Valid: true},
 	}
 
-	got := attemptRowToSession(row, cohortLiveRuntimeWithDeadline())
+	got := attemptRowToSession(row, cohortLiveRuntimeWithDeadline(), nil)
 
 	if got.RuntimeCurrentModuleRole == nil || *got.RuntimeCurrentModuleRole != "higher_branch" {
 		t.Fatalf("role must project the adaptive slot, got %v", got.RuntimeCurrentModuleRole)
@@ -80,7 +80,7 @@ func TestAttemptRowToSessionLeavesRuntimeIdentityEmptyWithoutAnActiveModule(t *t
 		attemptRevision: 7,
 	}
 
-	got := attemptRowToSession(row, SessionRuntime{Status: "live", ServerNow: started})
+	got := attemptRowToSession(row, SessionRuntime{Status: "live", ServerNow: started}, nil)
 
 	if got.RuntimeCurrentModuleID != nil || got.RuntimeModuleAttemptID != nil || got.RuntimeModuleAttemptRevision != nil {
 		t.Fatalf("no active SAT module means no module identity: %+v", got)
