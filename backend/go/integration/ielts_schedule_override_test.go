@@ -203,7 +203,8 @@ func TestIELTSReleasedRegradePreviewAndApply(t *testing.T) {
 	mustExec("insert version", `
 		INSERT INTO exam_versions (
 			id, exam_id, version_number, content_snapshot, config_snapshot, created_by, is_published, revision
-		) VALUES (?, ?, 1, ?, '{}', ?, TRUE, 0)`, ids.versionID, ids.examID, content, ids.ownerID)
+		) VALUES (?, ?, 1, ?, ?, ?, TRUE, 0)`, ids.versionID, ids.examID, content,
+		`{"standards":{"bandScoreTables":{"readingAcademic":{"0":0,"1":7.0},"listening":{"0":0}}}}`, ids.ownerID)
 	mustExec("insert schedule", `
 		INSERT INTO exam_schedules (
 			id, exam_id, provider_key, organization_id, exam_title,
@@ -239,6 +240,18 @@ func TestIELTSReleasedRegradePreviewAndApply(t *testing.T) {
 	}
 
 	mustExec("release submission", `UPDATE student_submissions SET grading_status = 'released' WHERE attempt_id = ?`, ids.attemptID)
+	var submissionID string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM student_submissions WHERE attempt_id = ?`, ids.attemptID).Scan(&submissionID); err != nil {
+		t.Fatalf("read submission id: %v", err)
+	}
+	mustExec("insert released result", `
+		INSERT INTO student_results (
+			id, submission_id, student_id, student_name, release_status, released_at,
+			released_by, overall_band, section_bands, writing_results, teacher_summary,
+			version, authorized_actor_id, created_at, updated_at
+		) VALUES (?, ?, 'candidate-1', 'Released Candidate', 'released', ?, ?, 6,
+			'{"reading":6,"listening":0,"writing":0,"speaking":0}', '{}', '{}', 1, ?, ?, ?)`,
+		uuid.NewString(), submissionID, now, ids.ownerID, ids.ownerID, now, now)
 	mustExec("stale saved score", `
 		UPDATE section_submissions ss JOIN student_submissions s ON s.id = ss.submission_id
 		SET ss.auto_grading_results = JSON_SET(ss.auto_grading_results,
@@ -313,6 +326,34 @@ func TestIELTSReleasedRegradePreviewAndApply(t *testing.T) {
 		t.Fatal("released regrade did not update the saved score")
 	}
 
+	readReleasedResult := func() (overall float64, bands string, version int, previousID string, writing string, summary string) {
+		t.Helper()
+		if err := db.QueryRowContext(ctx, `
+			SELECT overall_band, CAST(section_bands AS CHAR), version, previous_version_id,
+			       CAST(writing_results AS CHAR), CAST(teacher_summary AS CHAR)
+			FROM student_results WHERE submission_id = ? ORDER BY version DESC LIMIT 1`,
+			submissionID).Scan(&overall, &bands, &version, &previousID, &writing, &summary); err != nil {
+			t.Fatalf("read released result: %v", err)
+		}
+		return overall, bands, version, previousID, writing, summary
+	}
+	overall, bands, resultVersion, previousID, writing, summary := readReleasedResult()
+	if overall != 7 || resultVersion != 2 || previousID == "" {
+		t.Fatalf("released result overall=%v version=%d previous=%q, want 7 / 2 / set", overall, resultVersion, previousID)
+	}
+	if !strings.Contains(bands, `"reading":7`) {
+		t.Fatalf("released result reading band not corrected: %s", bands)
+	}
+	if writing != "{}" || summary != "{}" {
+		t.Fatalf("released result writing/summary changed: writing=%s summary=%s", writing, summary)
+	}
+	var resultEvents int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM release_events WHERE submission_id = ? AND action = 'regraded_released'`,
+		submissionID).Scan(&resultEvents); err != nil || resultEvents != 1 {
+		t.Fatalf("regraded_released events = %d, %v; want 1", resultEvents, err)
+	}
+
 	var events int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM grading_schedule_override_events
@@ -348,5 +389,14 @@ func TestIELTSReleasedRegradePreviewAndApply(t *testing.T) {
 		SELECT COUNT(*) FROM grading_schedule_override_events
 		WHERE schedule_id = ? AND action = 'objective_regrade_released'`, ids.scheduleID).Scan(&events); err != nil || events != 1 {
 		t.Fatalf("released audit events after no-op = %d, %v; want 1", events, err)
+	}
+	_, _, afterVersion, _, _, _ := readReleasedResult()
+	if afterVersion != 2 {
+		t.Fatalf("no-op released regrade created result version %d, want 2", afterVersion)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM release_events WHERE submission_id = ? AND action = 'regraded_released'`,
+		submissionID).Scan(&resultEvents); err != nil || resultEvents != 1 {
+		t.Fatalf("regraded_released events after no-op = %d, %v; want 1", resultEvents, err)
 	}
 }

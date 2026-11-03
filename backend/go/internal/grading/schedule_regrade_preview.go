@@ -91,8 +91,13 @@ func normalizeRegradeScope(scope string) (string, error) {
 
 type plannedSectionUpdate struct {
 	SectionID string
+	Section   string
 	Results   map[string]any
 	Status    string
+	OldTotal  float64
+	NewTotal  float64
+	OldMax    float64
+	NewMax    float64
 }
 
 type plannedSubmission struct {
@@ -111,6 +116,8 @@ type plannedSubmission struct {
 type objectiveRegradePlan struct {
 	ScheduleID  string
 	Scope       string
+	ExamType    string
+	Config      map[string]any
 	Submissions []plannedSubmission
 	Report      ObjectiveRegradeReport
 }
@@ -250,6 +257,18 @@ func planScheduleRegrade(ctx context.Context, q tx.Tx, scheduleID, scope string)
 	if err != nil {
 		return plan, err
 	}
+	var examType string
+	var configRaw sql.NullString
+	if err := q.QueryRowContext(ctx, `
+		SELECT e.exam_type, CAST(v.config_snapshot AS CHAR)
+		FROM exam_schedules s
+		JOIN exam_entities e ON e.id = s.exam_id
+		LEFT JOIN exam_versions v ON v.id = s.published_version_id
+		WHERE s.id = ?`, scheduleID).Scan(&examType, &configRaw); err != nil {
+		return plan, err
+	}
+	plan.ExamType = examType
+	plan.Config = projectionObject(json.RawMessage(configRaw.String))
 	rows, err := q.QueryContext(ctx, `
 		SELECT s.id, s.student_id, s.student_name, s.published_version_id, s.grading_status
 		FROM student_submissions s
@@ -334,7 +353,12 @@ func planScheduleRegrade(ctx context.Context, q tx.Tx, scheduleID, scope string)
 			if changed {
 				plan.Report.SectionsNeedingUpdate++
 				planned.Sections = append(planned.Sections, plannedSectionUpdate{
-					SectionID: section.ID, Results: results, Status: projectionObjectiveStatus(results),
+					SectionID: section.ID, Section: section.Name, Results: results,
+					Status:   projectionObjectiveStatus(results),
+					OldTotal: numberOrZero(previous["totalScore"]),
+					NewTotal: numberOrZero(results["totalScore"]),
+					OldMax:   numberOrZero(previous["maxScore"]),
+					NewMax:   numberOrZero(results["maxScore"]),
 				})
 			}
 			changes := diffQuestionResults(row.ID, row.StudentID, row.StudentName, section.Name, released, previous, results)
@@ -458,6 +482,9 @@ func applyRegradePlan(ctx context.Context, q tx.Tx, plan objectiveRegradePlan, a
 				return err
 			}
 		}
+	}
+	if err := applyReleasedStudentResults(ctx, q, plan, actorID, payload); err != nil {
+		return err
 	}
 	payload["report"] = plan.Report
 	payload["submissions"] = regradeAuditSubmissions(plan)
