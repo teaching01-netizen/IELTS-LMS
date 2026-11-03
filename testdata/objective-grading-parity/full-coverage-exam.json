@@ -991,11 +991,25 @@
       ],
       "scoringRule": "MULTI_MCQ",
       "maxScore": 2
+    },
+    "b-table:c1": {
+      "acceptedAnswers": [
+        "x"
+      ],
+      "scoringRule": "exact_match",
+      "maxScore": 2
+    },
+    "b-tree::tree::r1::lf1": {
+      "acceptedAnswers": [
+        "yes"
+      ],
+      "scoringRule": "exact_match",
+      "maxScore": 2
     }
   },
   "expected": {
-    "totalScore": 25,
-    "maxScore": 29,
+    "totalScore": 27,
+    "maxScore": 31,
     "questions": [
       {
         "questionId": "tfng-1",
@@ -1120,8 +1134,8 @@
       {
         "questionId": "b-table:c1",
         "correctness": true,
-        "awardedScore": 1,
-        "maxScore": 1
+        "awardedScore": 2,
+        "maxScore": 2
       },
       {
         "questionId": "b-table:c2",
@@ -1168,8 +1182,8 @@
       {
         "questionId": "b-tree::tree::r1::lf1",
         "correctness": true,
-        "awardedScore": 1,
-        "maxScore": 1
+        "awardedScore": 2,
+        "maxScore": 2
       },
       {
         "questionId": "b-tree::tree::r1::lf2",

@@ -138,6 +138,41 @@ function treeGroupKey(descriptor: StudentQuestionDescriptor): string | null {
   return descriptor.isSubAnswerTreeLeaf ? descriptor.rootId ?? null : null;
 }
 
+function groupOverrideMax(
+  descriptors: StudentQuestionDescriptor[],
+  overrides: Record<string, ObjectiveScoringOverride> | undefined,
+): number {
+  let groupMax = 1;
+  for (const descriptor of descriptors) {
+    const maxScore = overrides?.[descriptor.id]?.maxScore;
+    if (typeof maxScore === 'number' && maxScore > groupMax) {
+      groupMax = maxScore;
+    }
+  }
+  return groupMax;
+}
+
+function acceptedAnswersForGroupSlot(
+  descriptor: StudentQuestionDescriptor,
+  overrides: Record<string, ObjectiveScoringOverride> | undefined,
+): string[] {
+  const override = overrides?.[descriptor.id];
+  if (override) {
+    const accepted = sanitizeAcceptedAnswers(
+      override.acceptedAnswers && override.acceptedAnswers.length > 0
+        ? override.acceptedAnswers
+        : override.correctAnswer
+          ? [override.correctAnswer]
+          : [],
+    );
+    if (accepted.length > 0) return accepted;
+    if (override.correctOptionIds && override.correctOptionIds.length > 0) {
+      return override.correctOptionIds;
+    }
+  }
+  return getEffectiveAcceptedAnswersForGrading(descriptor);
+}
+
 function applyGroupRepresentative(
   descriptors: StudentQuestionDescriptor[],
   scores: Map<string, ObjectiveDescriptorScore>,
@@ -170,12 +205,13 @@ function applyTreeMatching(
   descriptors: StudentQuestionDescriptor[],
   answerMap: Record<string, StudentAnswerValue | undefined>,
   scores: Map<string, ObjectiveDescriptorScore>,
+  overrides: Record<string, ObjectiveScoringOverride> | undefined,
 ): void {
   const required = descriptors.filter((descriptor) => descriptor.treeRequired !== false);
   const studentLeaves = descriptors.filter((descriptor) => isAnswered(getQuestionAnswer(descriptor, answerMap)));
   const candidates = new Map<string, string[]>();
   required.forEach((requiredLeaf) => {
-    const accepted = getEffectiveAcceptedAnswersForGrading(requiredLeaf);
+    const accepted = acceptedAnswersForGroupSlot(requiredLeaf, overrides);
     const allowed = studentLeaves
       .filter((studentLeaf) => isSubAnswerLeafCorrect(accepted, getQuestionAnswer(studentLeaf, answerMap)))
       .map((studentLeaf) => studentLeaf.id);
@@ -208,13 +244,14 @@ function applyTreeMatching(
     (descriptorId) => assignedStudents.has(descriptorId),
     groupCorrect,
     studentLeaves.length > 0,
-    1,
+    groupOverrideMax(descriptors, overrides),
   );
 }
 
 function applyRequiredGroup(
   descriptors: StudentQuestionDescriptor[],
   scores: Map<string, ObjectiveDescriptorScore>,
+  overrides: Record<string, ObjectiveScoringOverride> | undefined,
 ): void {
   const requiredCorrect = requiredCorrectForGroup(descriptors);
   const correctCount = descriptors.filter((descriptor) => scores.get(descriptor.id)?.correctness === true).length;
@@ -229,7 +266,7 @@ function applyRequiredGroup(
     (descriptorId) => scores.get(descriptorId)?.correctness === true,
     groupCorrect,
     anyAnswered,
-    1,
+    groupOverrideMax(descriptors, overrides),
   );
 }
 
@@ -355,13 +392,13 @@ export function scoreObjectiveDescriptors(
   }
 
   for (const group of treeGroups.values()) {
-    applyTreeMatching(group, answerMap, scores);
+    applyTreeMatching(group, answerMap, scores, overrides);
   }
   for (const group of poolGroups.values()) {
     applyPoolGroup(group, answerMap, scores);
   }
   for (const group of requiredGroups.values()) {
-    applyRequiredGroup(group, scores);
+    applyRequiredGroup(group, scores, overrides);
   }
 
   let totalScore = 0;

@@ -978,7 +978,21 @@ func applyRequiredGroup(outcomes []objectiveOutcome, indices []int) {
 			correct++
 		}
 	}
-	applyGroupRepresentative(outcomes, indices, individual, correct >= required, anyAnswered, 1)
+	applyGroupRepresentative(outcomes, indices, individual, correct >= required, anyAnswered, groupOverrideMax(outcomes, indices))
+}
+
+// groupOverrideMax is the one rule for a group's maximum: an answer-key
+// override on any slot can change the group mark, otherwise it is one mark.
+func groupOverrideMax(outcomes []objectiveOutcome, indices []int) float64 {
+	groupMax := 1.0
+	for _, index := range indices {
+		if outcomes[index].spec.HasOverride && outcomes[index].spec.Points > 0 {
+			if points := float64(outcomes[index].spec.Points); points > groupMax {
+				groupMax = points
+			}
+		}
+	}
+	return groupMax
 }
 
 // applyTreeGroup evaluates one sub-answer-tree root: required leaves must be
@@ -1034,7 +1048,7 @@ func applyTreeGroup(outcomes []objectiveOutcome, indices []int) {
 		individual[index] = assignedStudent[index]
 	}
 	groupCorrect := len(requiredLeaves) == 0 || matchedRequired == len(requiredLeaves)
-	applyGroupRepresentative(outcomes, indices, individual, groupCorrect, len(studentLeaves) > 0, 1)
+	applyGroupRepresentative(outcomes, indices, individual, groupCorrect, len(studentLeaves) > 0, groupOverrideMax(outcomes, indices))
 }
 
 // applyPoolGroup matches a shared sentence answer pool: blanks consume keys in

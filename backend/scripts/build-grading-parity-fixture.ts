@@ -269,6 +269,16 @@ const overrides = {
     scoringRule: 'MULTI_MCQ',
     maxScore: 2,
   },
+  'b-table:c1': {
+    acceptedAnswers: ['x'],
+    scoringRule: 'exact_match',
+    maxScore: 2,
+  },
+  'b-tree::tree::r1::lf1': {
+    acceptedAnswers: ['yes'],
+    scoringRule: 'exact_match',
+    maxScore: 2,
+  },
 };
 
 const descriptors = getStudentQuestionsForModule(examState, 'reading');

@@ -178,3 +178,64 @@ describe('full-coverage parity exam', () => {
     }
   });
 });
+
+describe('group override scoring', () => {
+  it('uses an override max on a grouped table slot', () => {
+    const blocks: QuestionBlock[] = [
+      {
+        id: 'table',
+        type: 'TABLE_COMPLETION',
+        instruction: '',
+        answerRule: 'ONE_WORD',
+        headers: ['A'],
+        rows: [[''], ['']],
+        cells: [
+          { id: 'c1', row: 0, col: 0, correctAnswer: 'x', scoreGroupId: 'g1', requiredCorrect: 2 },
+          { id: 'c2', row: 1, col: 0, correctAnswer: 'y', scoreGroupId: 'g1', requiredCorrect: 2 },
+        ],
+      },
+    ];
+    const scoring = scoreObjectiveDescriptors(
+      getStudentQuestionsForModule(stateWith(blocks), 'reading'),
+      { table: ['x', 'y'] },
+      { 'table:c1': { acceptedAnswers: ['x'], scoringRule: 'exact_match', maxScore: 2 } },
+    );
+    expect(scoring.byId.get('table:c1')?.awardedScore).toBe(2);
+    expect(scoring.byId.get('table:c1')?.maxScore).toBe(2);
+    expect(scoring.totalScore).toBe(2);
+    expect(scoring.maxScore).toBe(2);
+  });
+
+  it('uses an override max and accepted answer on a tree root', () => {
+    const blocks: QuestionBlock[] = [
+      {
+        id: 'tree',
+        type: 'SHORT_ANSWER',
+        instruction: '',
+        questions: [],
+        subAnswerModeEnabled: true,
+        answerTree: [
+          {
+            id: 'r1',
+            children: [
+              { id: 'lf1', acceptedAnswers: ['yes'], required: true },
+              { id: 'lf2', acceptedAnswers: ['no'], required: true },
+            ],
+          },
+        ],
+      },
+    ];
+    const scoring = scoreObjectiveDescriptors(
+      getStudentQuestionsForModule(stateWith(blocks), 'reading'),
+      {
+        'tree::tree::r1::lf1': 'no',
+        'tree::tree::r1::lf2': 'yes',
+      },
+      { 'tree::tree::r1::lf1': { acceptedAnswers: ['yes'], scoringRule: 'exact_match', maxScore: 2 } },
+    );
+    expect(scoring.byId.get('tree::tree::r1::lf1')?.awardedScore).toBe(2);
+    expect(scoring.byId.get('tree::tree::r1::lf1')?.maxScore).toBe(2);
+    expect(scoring.totalScore).toBe(2);
+    expect(scoring.maxScore).toBe(2);
+  });
+});

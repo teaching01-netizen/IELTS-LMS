@@ -207,3 +207,57 @@ func TestSubAnswerTreeUnorderedMatchesRootOnce(t *testing.T) {
 		t.Fatalf("tree with a missing required leaf scored %v, want 0", missing.TotalScore)
 	}
 }
+
+func TestGroupedAndTreeOverridesUseOverrideMax(t *testing.T) {
+	table := readingContent(map[string]any{
+		"id":   "table",
+		"type": "TABLE_COMPLETION",
+		"cells": []any{
+			map[string]any{"id": "c1", "correctAnswer": "x", "scoreGroupId": "g1", "requiredCorrect": 2},
+			map[string]any{"id": "c2", "correctAnswer": "y", "scoreGroupId": "g1", "requiredCorrect": 2},
+		},
+	})
+	grouped := GradeContentForParity(ParityInput{
+		Section: "reading",
+		Content: table,
+		Answers: map[string]any{"table": []any{"x", "y"}},
+		Overrides: map[string]ParityOverride{
+			"table:c1": {AcceptedAnswers: []string{"x"}, ScoringRule: "exact_match", MaxScore: 2},
+		},
+	})
+	assertScore(t, questionByID(t, grouped, "table:c1"), 2, 2)
+	if grouped.TotalScore != 2 || grouped.MaxScore != 2 {
+		t.Fatalf("grouped override totals = %v/%v, want 2/2", grouped.TotalScore, grouped.MaxScore)
+	}
+
+	tree := readingContent(map[string]any{
+		"id":                   "tree",
+		"type":                 "SHORT_ANSWER",
+		"subAnswerModeEnabled": true,
+		"questions":            []any{},
+		"answerTree": []any{
+			map[string]any{
+				"id": "r1",
+				"children": []any{
+					map[string]any{"id": "lf1", "acceptedAnswers": []any{"yes"}, "required": true},
+					map[string]any{"id": "lf2", "acceptedAnswers": []any{"no"}, "required": true},
+				},
+			},
+		},
+	})
+	treeResult := GradeContentForParity(ParityInput{
+		Section: "reading",
+		Content: tree,
+		Answers: map[string]any{
+			"tree::tree::r1::lf1": "no",
+			"tree::tree::r1::lf2": "yes",
+		},
+		Overrides: map[string]ParityOverride{
+			"tree::tree::r1::lf1": {AcceptedAnswers: []string{"yes"}, ScoringRule: "exact_match", MaxScore: 2},
+		},
+	})
+	assertScore(t, questionByID(t, treeResult, "tree::tree::r1::lf1"), 2, 2)
+	if treeResult.TotalScore != 2 || treeResult.MaxScore != 2 {
+		t.Fatalf("tree override totals = %v/%v, want 2/2", treeResult.TotalScore, treeResult.MaxScore)
+	}
+}
