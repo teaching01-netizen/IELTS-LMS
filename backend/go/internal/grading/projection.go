@@ -936,46 +936,49 @@ func projectionObjectiveResults(section string, answers map[string]any, specs []
 	}
 }
 
+// applyGroupRepresentative writes one group's final marks. Every slot keeps
+// its own correctness; the first slot carries the group's mark and the rest
+// carry maxScore 0 so totals cannot double-count it.
+func applyGroupRepresentative(outcomes []objectiveOutcome, indices []int, individual map[int]bool, groupCorrect bool, anyAnswered bool, groupMax float64) {
+	for position, index := range indices {
+		outcomes[index].awarded = 0
+		outcomes[index].max = 0
+		outcomes[index].matched = individual[index]
+		if position != 0 {
+			continue
+		}
+		outcomes[index].representative = true
+		outcomes[index].blank = !anyAnswered
+		outcomes[index].max = groupMax
+		if groupCorrect {
+			outcomes[index].awarded = groupMax
+		}
+		outcomes[index].matched = groupCorrect
+	}
+}
+
 // applyRequiredGroup gives a group of slots (for example two table cells that
-// share one question number) a single mark: the first slot carries the mark
-// and the rest carry maxScore 0 so totals cannot double-count it.
+// share one question number) a single mark.
 func applyRequiredGroup(outcomes []objectiveOutcome, indices []int) {
 	required := 1
+	individual := map[int]bool{}
+	anyAnswered := false
 	for _, index := range indices {
 		if outcomes[index].spec.RequiredCorrect > required {
 			required = outcomes[index].spec.RequiredCorrect
 		}
+		individual[index] = outcomes[index].matched
+		if !outcomes[index].blank {
+			anyAnswered = true
+		}
 	}
 	correct := 0
-	for _, index := range indices {
-		if outcomes[index].matched {
+	for _, value := range individual {
+		if value {
 			correct++
 		}
 	}
-	groupCorrect := correct >= required
-	anyAnswered := false
-	for _, index := range indices {
-		if !outcomes[index].blank {
-			anyAnswered = true
-			break
-		}
-	}
-	for position, index := range indices {
-		outcomes[index].awarded = 0
-		outcomes[index].max = 0
-		if position == 0 {
-			outcomes[index].representative = true
-			outcomes[index].blank = !anyAnswered
-			outcomes[index].max = 1
-			if outcomes[index].spec.HasOverride && outcomes[index].spec.Points > 0 {
-				outcomes[index].max = float64(outcomes[index].spec.Points)
-			}
-			if groupCorrect {
-				outcomes[index].awarded = outcomes[index].max
-			}
-			outcomes[index].matched = groupCorrect
-		}
-	}
+	applyGroupRepresentative(outcomes, indices, individual, correct >= required, anyAnswered, 1)
 }
 
 // applyTreeGroup evaluates one sub-answer-tree root: required leaves must be
@@ -1026,22 +1029,12 @@ func applyTreeGroup(outcomes []objectiveOutcome, indices []int) {
 	for studentIndex := range studentToRequired {
 		assignedStudent[studentIndex] = true
 	}
-	groupCorrect := len(requiredLeaves) == 0 || matchedRequired == len(requiredLeaves)
-	for position, index := range indices {
-		individual := assignedStudent[index]
-		outcomes[index].awarded = 0
-		outcomes[index].max = 0
-		outcomes[index].matched = individual
-		if position == 0 {
-			outcomes[index].representative = true
-			outcomes[index].blank = len(studentLeaves) == 0
-			outcomes[index].max = 1
-			if groupCorrect {
-				outcomes[index].awarded = 1
-			}
-			outcomes[index].matched = groupCorrect
-		}
+	individual := map[int]bool{}
+	for _, index := range indices {
+		individual[index] = assignedStudent[index]
 	}
+	groupCorrect := len(requiredLeaves) == 0 || matchedRequired == len(requiredLeaves)
+	applyGroupRepresentative(outcomes, indices, individual, groupCorrect, len(studentLeaves) > 0, 1)
 }
 
 // applyPoolGroup matches a shared sentence answer pool: blanks consume keys in

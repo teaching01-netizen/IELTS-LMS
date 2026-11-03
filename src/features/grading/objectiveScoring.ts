@@ -138,6 +138,34 @@ function treeGroupKey(descriptor: StudentQuestionDescriptor): string | null {
   return descriptor.isSubAnswerTreeLeaf ? descriptor.rootId ?? null : null;
 }
 
+function applyGroupRepresentative(
+  descriptors: StudentQuestionDescriptor[],
+  scores: Map<string, ObjectiveDescriptorScore>,
+  individualCorrect: (descriptorId: string) => boolean,
+  groupCorrect: boolean,
+  anyAnswered: boolean,
+  groupMax: number,
+): void {
+  descriptors.forEach((descriptor, position) => {
+    const score = scores.get(descriptor.id);
+    if (!score) return;
+    score.correctness = individualCorrect(descriptor.id);
+    score.awardedScore = 0;
+    score.maxScore = 0;
+    if (position === 0) {
+      score.representative = true;
+      score.correctness = groupCorrect;
+      score.awardedScore = groupCorrect ? groupMax : 0;
+      score.maxScore = groupMax;
+      if (!anyAnswered) {
+        score.status = 'verified_unanswered';
+        return;
+      }
+    }
+    score.status = score.correctness ? 'verified_correct' : 'verified_incorrect';
+  });
+}
+
 function applyTreeMatching(
   descriptors: StudentQuestionDescriptor[],
   answerMap: Record<string, StudentAnswerValue | undefined>,
@@ -174,25 +202,14 @@ function applyTreeMatching(
   });
   const assignedStudents = new Set(studentToRequired.keys());
   const groupCorrect = required.length === 0 || matched === required.length;
-
-  descriptors.forEach((descriptor, position) => {
-    const score = scores.get(descriptor.id);
-    if (!score) return;
-    score.correctness = assignedStudents.has(descriptor.id);
-    score.awardedScore = 0;
-    score.maxScore = 0;
-    if (position === 0) {
-      score.representative = true;
-      score.correctness = groupCorrect;
-      score.awardedScore = groupCorrect ? 1 : 0;
-      score.maxScore = 1;
-      if (studentLeaves.length === 0) {
-        score.status = 'verified_unanswered';
-        return;
-      }
-    }
-    score.status = score.correctness ? 'verified_correct' : 'verified_incorrect';
-  });
+  applyGroupRepresentative(
+    descriptors,
+    scores,
+    (descriptorId) => assignedStudents.has(descriptorId),
+    groupCorrect,
+    studentLeaves.length > 0,
+    1,
+  );
 }
 
 function applyRequiredGroup(
@@ -206,24 +223,14 @@ function applyRequiredGroup(
     const score = scores.get(descriptor.id);
     return score?.status !== 'verified_unanswered';
   });
-
-  descriptors.forEach((descriptor, position) => {
-    const score = scores.get(descriptor.id);
-    if (!score) return;
-    score.awardedScore = 0;
-    score.maxScore = 0;
-    if (position === 0) {
-      score.representative = true;
-      score.correctness = groupCorrect;
-      score.awardedScore = groupCorrect ? 1 : 0;
-      score.maxScore = 1;
-      if (!anyAnswered) {
-        score.status = 'verified_unanswered';
-        return;
-      }
-    }
-    score.status = score.correctness ? 'verified_correct' : 'verified_incorrect';
-  });
+  applyGroupRepresentative(
+    descriptors,
+    scores,
+    (descriptorId) => scores.get(descriptorId)?.correctness === true,
+    groupCorrect,
+    anyAnswered,
+    1,
+  );
 }
 
 function applyPoolGroup(
