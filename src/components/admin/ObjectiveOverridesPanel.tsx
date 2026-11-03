@@ -406,7 +406,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
     }
   };
 
-  const handlePreviewRegrade = async (scope: 'all' | 'released') => {
+  const handlePreviewRegrade = async (scope: 'unreleased' | 'released') => {
     setRegradePreviewError(null);
     setRegradePreviewLoading(true);
     setReleasedResult(null);
@@ -533,7 +533,7 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => void handlePreviewRegrade('all')}
+                  onClick={() => void handlePreviewRegrade('unreleased')}
                   disabled={regradePreviewLoading}
                   className="inline-flex min-h-9 items-center justify-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 transition-[background-color,scale] duration-150 ease-out hover:bg-gray-50 active:scale-[0.96] focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-60"
                 >

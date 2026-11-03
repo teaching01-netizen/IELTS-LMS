@@ -34,23 +34,54 @@ func TestDiffQuestionResultsListsOnlyChanges(t *testing.T) {
 }
 
 func TestObjectiveRegradeTokenIgnoresVolatileFields(t *testing.T) {
-	preview := ObjectiveRegradePreview{
+	plan := objectiveRegradePlan{
 		ScheduleID: "sch-1", Scope: ObjectiveRegradeScopeReleased,
-		Submissions: []ObjectiveRegradePreviewSubmission{{
-			SubmissionID: "sub-1", Released: true,
-			Changes: []ObjectiveRegradeChange{{
-				SubmissionID: "sub-1", Section: "reading", QuestionID: "q1", Released: true,
+		Submissions: []plannedSubmission{{
+			ID: "sub-1", Released: true,
+			Sections: []plannedSectionUpdate{{
+				Section: "reading", Status: "verified", OldTotal: 0, NewTotal: 1, OldMax: 1, NewMax: 1,
+				Results: map[string]any{
+					"generatedAt":     "2026-01-01T00:00:00Z",
+					"totalScore":      1,
+					"maxScore":        1,
+					"questionResults": []any{regradeQuestionResult("q1", true, 1, 1)},
+					"integrity":       map[string]any{"integrityStatus": "verified"},
+				},
+			}},
+			Changes: []ObjectiveRegradeChange{{SubmissionID: "sub-1", Section: "reading", QuestionID: "q1", Released: true}},
+		}},
+	}
+	first := objectiveRegradeToken(plan)
+	plan.Submissions[0].Sections[0].Results["generatedAt"] = "2026-01-02T00:00:00Z"
+	if second := objectiveRegradeToken(plan); second != first {
+		t.Fatalf("token changed with generatedAt: %s != %s", first, second)
+	}
+	plan.Submissions[0].Sections[0].Results["questionResults"] = []any{regradeQuestionResult("q1", false, 0, 1)}
+	if second := objectiveRegradeToken(plan); second == first {
+		t.Fatal("token did not change when the planned question results changed")
+	}
+}
+
+func TestObjectiveRegradeTokenCoversIntegrityOnlyWrites(t *testing.T) {
+	plan := objectiveRegradePlan{
+		ScheduleID: "sch-1", Scope: ObjectiveRegradeScopeUnreleased,
+		Submissions: []plannedSubmission{{
+			ID: "sub-1",
+			Sections: []plannedSectionUpdate{{
+				Section: "reading", Status: "needs_recheck",
+				Results: map[string]any{
+					"totalScore":      1,
+					"maxScore":        1,
+					"questionResults": []any{regradeQuestionResult("q1", true, 1, 1)},
+					"integrity":       map[string]any{"integrityStatus": "needs_recheck", "issueCodes": []any{"a"}},
+				},
 			}},
 		}},
 	}
-	first := objectiveRegradeToken(preview)
-	preview.GeneratedAt = preview.GeneratedAt.Add(1)
-	if second := objectiveRegradeToken(preview); second != first {
-		t.Fatalf("token changed with generatedAt: %s != %s", first, second)
-	}
-	preview.Submissions[0].Changes[0].QuestionID = "q2"
-	if second := objectiveRegradeToken(preview); second == first {
-		t.Fatal("token did not change when the change set changed")
+	first := objectiveRegradeToken(plan)
+	plan.Submissions[0].Sections[0].Results["integrity"] = map[string]any{"integrityStatus": "needs_recheck", "issueCodes": []any{"b"}}
+	if second := objectiveRegradeToken(plan); second == first {
+		t.Fatal("token ignored an integrity-only section write")
 	}
 }
 

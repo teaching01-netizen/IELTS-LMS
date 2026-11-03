@@ -260,6 +260,14 @@ func TestIELTSReleasedRegradePreviewAndApply(t *testing.T) {
 			'$.totalScore', 0)
 		WHERE s.attempt_id = ? AND ss.section = 'reading'`, ids.attemptID)
 
+	unreleasedPreview, err := grader.PreviewScheduleObjectiveRegrade(ctx, ids.scheduleID, grading.ObjectiveRegradeScopeUnreleased)
+	if err != nil {
+		t.Fatalf("unreleased preview: %v", err)
+	}
+	if len(unreleasedPreview.Submissions) != 0 || unreleasedPreview.Summary.Changed != 0 {
+		t.Fatalf("unreleased preview included released rows: %+v", unreleasedPreview.Summary)
+	}
+
 	preview, err := grader.PreviewScheduleObjectiveRegrade(ctx, ids.scheduleID, grading.ObjectiveRegradeScopeAll)
 	if err != nil {
 		t.Fatalf("preview regrade: %v", err)

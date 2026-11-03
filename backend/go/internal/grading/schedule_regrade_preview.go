@@ -206,44 +206,44 @@ func previewFromPlan(plan objectiveRegradePlan) ObjectiveRegradePreview {
 		preview.Summary.QuestionChange += len(submission.Changes)
 		preview.Summary.ScoreDelta += submission.NewTotal - submission.OldTotal
 	}
-	preview.PreviewToken = objectiveRegradeToken(preview)
+	preview.PreviewToken = objectiveRegradeToken(plan)
 	return preview
 }
 
-// objectiveRegradeToken hashes the change set, excluding volatile fields.
-func objectiveRegradeToken(preview ObjectiveRegradePreview) string {
-	type tokenChange struct {
-		SubmissionID   string   `json:"submissionId"`
-		Section        string   `json:"section"`
-		QuestionID     string   `json:"questionId"`
-		Released       bool     `json:"released"`
-		OldCorrectness *bool    `json:"oldCorrectness"`
-		NewCorrectness *bool    `json:"newCorrectness"`
-		OldAwarded     *float64 `json:"oldAwardedScore"`
-		NewAwarded     *float64 `json:"newAwardedScore"`
-		OldMax         *float64 `json:"oldMaxScore"`
-		NewMax         *float64 `json:"newMaxScore"`
+// objectiveRegradeToken hashes every planned write, not only the visible
+// per-question changes. Integrity-only section updates are part of the plan and
+// must invalidate a stale preview too.
+func objectiveRegradeToken(plan objectiveRegradePlan) string {
+	type tokenSection struct {
+		Section         string `json:"section"`
+		Status          string `json:"status"`
+		TotalScore      any    `json:"totalScore"`
+		MaxScore        any    `json:"maxScore"`
+		QuestionResults any    `json:"questionResults"`
+		Integrity       any    `json:"integrity"`
 	}
-	changes := make([]tokenChange, 0)
-	for _, submission := range preview.Submissions {
-		for _, change := range submission.Changes {
-			changes = append(changes, tokenChange{
-				SubmissionID: change.SubmissionID, Section: change.Section, QuestionID: change.QuestionID,
-				Released: change.Released, OldCorrectness: change.OldCorrectness, NewCorrectness: change.NewCorrectness,
-				OldAwarded: change.OldAwarded, NewAwarded: change.NewAwarded, OldMax: change.OldMax, NewMax: change.NewMax,
+	type tokenSubmission struct {
+		SubmissionID string                   `json:"submissionId"`
+		Released     bool                     `json:"released"`
+		Sections     []tokenSection           `json:"sections"`
+		Changes      []ObjectiveRegradeChange `json:"changes"`
+	}
+	payload := make([]tokenSubmission, 0, len(plan.Submissions))
+	for _, submission := range plan.Submissions {
+		sections := make([]tokenSection, 0, len(submission.Sections))
+		for _, section := range submission.Sections {
+			sections = append(sections, tokenSection{
+				Section: section.Section, Status: section.Status,
+				TotalScore: section.Results["totalScore"], MaxScore: section.Results["maxScore"],
+				QuestionResults: section.Results["questionResults"], Integrity: section.Results["integrity"],
 			})
 		}
+		payload = append(payload, tokenSubmission{
+			SubmissionID: submission.ID, Released: submission.Released,
+			Sections: sections, Changes: submission.Changes,
+		})
 	}
-	sort.SliceStable(changes, func(left, right int) bool {
-		if changes[left].SubmissionID != changes[right].SubmissionID {
-			return changes[left].SubmissionID < changes[right].SubmissionID
-		}
-		if changes[left].Section != changes[right].Section {
-			return changes[left].Section < changes[right].Section
-		}
-		return changes[left].QuestionID < changes[right].QuestionID
-	})
-	raw, _ := json.Marshal(changes)
+	raw, _ := json.Marshal(payload)
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }

@@ -410,6 +410,9 @@ describe('ObjectiveOverridesPanel released regrade', () => {
     fireEvent.click(screen.getByText('Session Settings'));
     await waitFor(() => expect(screen.getByText(/READING • Q1/i)).toBeTruthy());
 
+    fireEvent.click(screen.getByText('Preview regrade'));
+    await waitFor(() => expect(gradingService.previewObjectiveRegrade).toHaveBeenCalledWith('sched-1', 'unreleased'));
+
     fireEvent.click(screen.getByText('Preview released results'));
     await waitFor(() => expect(gradingService.previewObjectiveRegrade).toHaveBeenCalledWith('sched-1', 'released'));
     expect(await screen.findByText(/1 submission\(s\) \/ 1 question\(s\) would change/i)).toBeTruthy();
