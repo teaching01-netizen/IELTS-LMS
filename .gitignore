@@ -58,6 +58,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+.scratch/
 
 
 # Licensed Desmos partner self-host bundle (never commit vendor distribution)
