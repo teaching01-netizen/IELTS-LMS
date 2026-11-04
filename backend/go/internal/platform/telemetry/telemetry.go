@@ -48,6 +48,8 @@ var metricHelpText = map[string]string{
 	MSATScoreFallbackRows:           "Total SAT scoring rows answered from legacy gaps inside V2-owned passes.",
 	MSATFinalizeTotal:               "Total SAT terminal finalizations by outcome (completed vs replayed vs rejected).",
 	MSATHeartbeatTotal:              "Total SAT student heartbeats recorded by path (memory vs inline).",
+	MSATDesmosOutcomeTotal:          "Total frontend Desmos load outcomes by outcome (ready, timeout, blocked, error) and calculator mode.",
+	MSATDesmosReadySeconds:          "Frontend Desmos mount ready latency in seconds, by calculator mode.",
 	MSATStudentModuleSubmitRejected: "Total legacy SAT student module-submit calls rejected by server policy.",
 	MSATResponseWriteAfterTerminal:  "Total fresh SAT response writes refused at or after a terminal deadline.",
 	MSATResultQuestionDetailFailure: "Total SAT result question-detail reads that failed instead of returning an empty list.",
@@ -188,8 +190,19 @@ const (
 	// Backend finalize/heartbeat series (exam-day re-audit observability
 	// residual): the release must page on server-observed terminal outcomes,
 	// not on frontend-emitted beacons that never arrive during an outage.
-	MSATFinalizeTotal               = "sat_finalize_total"
-	MSATHeartbeatTotal              = "sat_heartbeat_total"
+	MSATFinalizeTotal  = "sat_finalize_total"
+	MSATHeartbeatTotal = "sat_heartbeat_total"
+	// MSATDesmosOutcomeTotal counts frontend Desmos load outcomes reported
+	// through POST /api/v1/sat/desmos-outcome (plan 2026-11-04 §4 Track B).
+	// Labels are the closed outcome/mode vocabulary only (outcome in
+	// ready|timeout|blocked|error, mode in scientific|graphing); schedule,
+	// attempt, and module ids stay in the structured log line, never in a
+	// label, so one room behind NAT cannot fork the series.
+	MSATDesmosOutcomeTotal = "sat_desmos_outcome_total"
+	// MSATDesmosReadySeconds is the ready-latency histogram for successful
+	// Desmos mounts (label: mode). The Math-window board derives the
+	// ready-rate and p95 from this plus MSATDesmosOutcomeTotal.
+	MSATDesmosReadySeconds          = "sat_desmos_ready_seconds"
 	MSATStudentModuleSubmitRejected = "sat_student_module_submit_rejected_total"
 	MSATResponseWriteAfterTerminal  = "sat_response_write_after_terminal_total"
 	MSATResultQuestionDetailFailure = "sat_result_question_detail_failure_total"
@@ -462,6 +475,19 @@ const (
 	OutcomeRetriedAccepted = "retried_accepted"
 )
 
+// SAT Desmos beacon label vocabulary (plan 2026-11-04 §4 Track B).
+// Closed sets: the beacon handler rejects anything else with 400, so
+// these series can never fork on attacker-shaped input.
+const (
+	DesmosOutcomeReady   = "ready"
+	DesmosOutcomeTimeout = "timeout"
+	DesmosOutcomeBlocked = "blocked"
+	DesmosOutcomeError   = "error"
+
+	DesmosModeScientific = "scientific"
+	DesmosModeGraphing   = "graphing"
+)
+
 // LogField keys for structured JSON logs (plan 70). Secrets, bearer tokens,
 // answers and writing bodies must never be logged.
 const (
@@ -504,6 +530,8 @@ func Names() []string {
 		MSATScoreFallbackRows,
 		MSATFinalizeTotal,
 		MSATHeartbeatTotal,
+		MSATDesmosOutcomeTotal,
+		MSATDesmosReadySeconds,
 		MSATStudentModuleSubmitRejected,
 		MSATResponseWriteAfterTerminal,
 		MSATResultQuestionDetailFailure,

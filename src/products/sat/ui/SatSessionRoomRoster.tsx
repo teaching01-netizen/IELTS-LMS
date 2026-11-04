@@ -91,6 +91,36 @@ const ScoresAgeLine = memo(function ScoresAgeLine({ updatedAt, visible }: { upda
   return <>{` · ${age}`}</>;
 });
 
+/**
+ * Shape-preserving initial loading state: 6 skeleton rows mirroring the
+ * roster row geometry (dot + name bar + meta bar + right hero block). The
+ * shimmer is aria-hidden; screen readers hear only "Loading students…".
+ */
+export const SatRosterSkeleton = memo(function SatRosterSkeleton() {
+  return (
+    <>
+      <span className="sr-only">Loading students…</span>
+      <div aria-hidden="true">
+        {Array.from({ length: 6 }, (_, index) => (
+          <div
+            key={index}
+            className="grid min-h-16 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 border-b border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] px-4 py-2.5 last:border-b-0"
+          >
+            <span className="min-w-0">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--sat-staff-skeleton-bar,rgba(0,0,0,0.07))]" />
+                <span className="sat-skeleton-shimmer block h-[16px] w-36 max-w-full rounded-full bg-[var(--sat-staff-skeleton-bar,rgba(0,0,0,0.07))]" />
+              </span>
+              <span className="sat-skeleton-shimmer mt-1.5 block h-[12px] w-48 max-w-full rounded-full bg-[var(--sat-staff-skeleton-bar,rgba(0,0,0,0.07))] pl-3.5" />
+            </span>
+            <span className="sat-skeleton-shimmer block h-[20px] w-20 rounded-full bg-[var(--sat-staff-skeleton-bar,rgba(0,0,0,0.07))]" />
+          </div>
+        ))}
+      </div>
+    </>
+  );
+});
+
 export function SatSessionRoomRoster({
   students,
   expectedStudents = [],
@@ -113,6 +143,7 @@ export function SatSessionRoomRoster({
   scoresLoading = false,
   scoresUpdatedAt,
   scoresTruncated = false,
+  studentsLoading = false,
 }: {
   students: StudentSession[];
   expectedStudents?: readonly SatRoomExpectedStudent[];
@@ -141,6 +172,8 @@ export function SatSessionRoomRoster({
   scoresUpdatedAt?: number | undefined;
   /** Results pages capped (500-row guard): roster notes incompleteness explicitly. */
   scoresTruncated?: boolean | undefined;
+  /** Initial room load with no students yet: skeleton rows, never an empty flash. */
+  studentsLoading?: boolean | undefined;
 }) {
   // While a proctor's pointer or focus is in the list, live updates never move
   // the row they are about to act on: existing rows keep their place and new
@@ -205,6 +238,7 @@ export function SatSessionRoomRoster({
     : [];
 
   const filtered = needle !== '' || attentionFilter === 'needs';
+  const showRosterSkeleton = studentsLoading && ordered.length === 0;
 
   return (
     <SatRoomSurface aria-label="Students" className="sat-room__roster overflow-hidden">
@@ -274,6 +308,7 @@ export function SatSessionRoomRoster({
         role="listbox"
         aria-label="Students in this session. Use arrow keys to move between students."
         aria-activedescendant={activeStudent ? `sat-room-student-${activeStudent.id}` : undefined}
+        aria-busy={showRosterSkeleton ? 'true' : undefined}
         tabIndex={ordered.length ? 0 : -1}
         onPointerEnter={() => setPointerInside(true)}
         onPointerLeave={() => setPointerInside(false)}
@@ -312,7 +347,9 @@ export function SatSessionRoomRoster({
             scoresLoading={scoresLoading}
             onSelect={(trigger) => onSelect(student.id, trigger)}
           />
-        )) : (
+        )) : showRosterSkeleton ? (
+          <SatRosterSkeleton />
+        ) : (
           <div className="px-6 py-12 text-center">
             <p className="text-[14px] font-semibold text-[var(--sat-staff-text-secondary,#515154)]">
               {students.length ? 'No matching students.' : 'No students have joined yet.'}

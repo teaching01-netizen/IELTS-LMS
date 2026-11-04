@@ -36,6 +36,7 @@ export interface SatAttemptRow extends Omit<SatResultSummary, 'id' | 'submission
   rawCorrect?: number;
   rawTotal?: number;
   estimatedTotal?: { low: number; high: number } | null;
+  estimatedPrimary?: { low: number; high: number } | null;
 }
 
 export interface SatAttemptPage {

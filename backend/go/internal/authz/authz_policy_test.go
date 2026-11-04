@@ -206,6 +206,9 @@ var expectedFullPaths = []string{
 	"POST /api/v1/sat/exams/{id}/rooms",
 	"GET /api/v1/sat/room-operations/{operationKey}",
 	"GET /api/v1/sat/exam-config/defaults",
+	// SAT Desmos outcome beacon (plan 2026-11-04): attempt bearer,
+	// handler binds owner. Telemetry-only; never a DB write.
+	"POST /api/v1/sat/desmos-outcome",
 	// Server-rendered answered-exam PDFs.
 	"POST /api/v1/sat-answered-pdf/schedules/{scheduleID}",
 	"POST /api/v1/sat-answered-pdf/attempts/{attemptID}",

@@ -1,5 +1,6 @@
 import type { DesmosCalculatorMode, DesmosLocale } from '../infrastructure/desmos/desmosTypes';
 import { SAT_EXAM_LOCALE } from '../infrastructure/desmos/desmosTypes';
+import { emitStudentObservabilityMetric } from '../../../utils/studentObservability';
 
 const STORAGE_PREFIX = 'sat-desmos-embed:v1';
 const LOCALE_PREFIX = 'sat-desmos-locale:v1';
@@ -53,16 +54,41 @@ export function calculatorLocaleKey(
   return `${LOCALE_PREFIX}:${scheduleId}:${attemptId}:${moduleAttemptId}`;
 }
 
+let localeFreezeBeaconed = false;
+
 export function loadCalculatorLocale(key: string): DesmosLocale {
+  // Burst-plan freeze (FR-06): the embed URL always carries
+  // SAT_EXAM_LOCALE (`lang=en`). Seeded storage is ignored — a stale
+  // `en-US` seed previously flipped the embed to `lang=en-US`. The seeded
+  // value is never read back; a one-time beacon records the freeze hit.
   if (!canUseSessionStorage()) return SAT_EXAM_LOCALE;
   try {
     const raw = window.sessionStorage.getItem(key);
-    if (!raw) return SAT_EXAM_LOCALE;
-    const parsed = JSON.parse(raw) as Partial<{ locale: unknown }>;
-    return parsed.locale === 'en-US' ? 'en-US' : SAT_EXAM_LOCALE;
+    if (raw != null) {
+      const parsed = JSON.parse(raw) as Partial<{ locale: unknown }>;
+      if (parsed.locale !== undefined && parsed.locale !== SAT_EXAM_LOCALE && !localeFreezeBeaconed) {
+        localeFreezeBeaconed = true;
+        emitStudentObservabilityMetric('sat_desmos_locale_frozen', {
+          seededLocale: typeof parsed.locale === 'string' ? parsed.locale : 'unknown',
+        });
+      }
+    }
   } catch {
-    return SAT_EXAM_LOCALE;
+    // Corrupt storage never breaks the embed; the frozen default holds.
   }
+  return SAT_EXAM_LOCALE;
+}
+
+/**
+ * Prewarm read-only rule (FR-07): storage keys minted for a synthetic
+ * `prewarm:<moduleId>` module attempt must never be written. Callers gate
+ * saves through this predicate; a write under a prewarm key would fork the
+ * prewarmed frame away from the real module attempt (INV-012).
+ */
+export function isPrewarmKey(key: string): boolean {
+  if (key.startsWith('prewarm:')) return true;
+  const segments = key.split(':');
+  return segments.length >= 2 && segments[segments.length - 2] === 'prewarm';
 }
 
 export function saveCalculatorLocale(key: string, locale: DesmosLocale) {

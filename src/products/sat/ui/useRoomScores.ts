@@ -21,6 +21,8 @@ export interface RoomScore {
   total: number | null;
   pct: number | null;
   modules: RoomScoreModule[] | null;
+  /** Server-estimated conversion only (row.estimatedPrimary); never computed client-side. */
+  scaled: { low: number; high: number } | null;
   label: string;
   srLabel: string;
   resultId: string | null;
@@ -34,7 +36,7 @@ type ScoreSessionInput = Pick<
 
 type AttemptRowInput = Pick<
   SatAttemptRow,
-  'resultId' | 'rawCorrect' | 'rawTotal' | 'outcomeStatus' | 'attemptStatus'
+  'resultId' | 'rawCorrect' | 'rawTotal' | 'outcomeStatus' | 'attemptStatus' | 'estimatedPrimary'
 > | null
   | undefined;
 
@@ -70,6 +72,22 @@ function shortModuleLabel(moduleKey: string): string {
 }
 
 /**
+ * Screen-reader suffix for the conversion estimate. Scored rows always name
+ * the outcome: the scaled value (or range) when the server supplied one,
+ * "conversion unavailable" when it did not. Other kinds only append when an
+ * estimate is present; they never claim a missing conversion.
+ */
+function scaledSrSuffix(scaled: { low: number; high: number } | null, kind: RoomScoreKind): string {
+  if (scaled) {
+    return scaled.low === scaled.high
+      ? `, scaled ${scaled.low}`
+      : `, scaled ${scaled.low} to ${scaled.high}`;
+  }
+  if (kind === 'scored') return ', conversion unavailable';
+  return '';
+}
+
+/**
  * Pure view-model: one owner per score fact. Correctness comes only from the
  * backend projection (`scoreCorrect`) or the results list (`rawCorrect`).
  * This function never derives correctness from saved answers.
@@ -86,6 +104,16 @@ export function resolveRoomScore(session: ScoreSessionInput, row: AttemptRowInpu
   const outcomeStatus = row?.outcomeStatus ?? null;
   const attemptStatus = row?.attemptStatus ?? null;
   const resultId = row?.resultId ?? null;
+  // Conversion passthrough only: the server's estimate flows straight to the
+  // hero view-model. Never computed client-side from raw counts.
+  const estimated = row?.estimatedPrimary ?? null;
+  const scaled = estimated
+    && typeof estimated.low === 'number'
+    && typeof estimated.high === 'number'
+    && Number.isFinite(estimated.low)
+    && Number.isFinite(estimated.high)
+    ? { low: estimated.low, high: estimated.high }
+    : null;
 
   // Same-source pairing (F-G): correctness and its denominator always come
   // from the same scope — BE pair wins when it carries correctness,
@@ -178,8 +206,8 @@ export function resolveRoomScore(session: ScoreSessionInput, row: AttemptRowInpu
 
   if (kind === 'not_scored') {
     return {
-      kind, answered, correct: null, total, pct: null, modules,
-      label: 'Not scored', srLabel: 'not scored',
+      kind, answered, correct: null, total, pct: null, modules, scaled,
+      label: 'Not scored', srLabel: `not scored${scaledSrSuffix(scaled, kind)}`,
       resultId, hasSavedAnswers,
     };
   }
@@ -191,9 +219,9 @@ export function resolveRoomScore(session: ScoreSessionInput, row: AttemptRowInpu
     const left = answered !== null && answered <= total ? total - answered : null;
     const leftPart = left !== null && left > 0 ? ` · ${left} left` : '';
     return {
-      kind, answered, correct, total, pct, modules,
+      kind, answered, correct, total, pct, modules, scaled,
       label: `✓ ${correct}/${total} · ${pct}%${modulesPart}${leftPart}`,
-      srLabel: `score ${correct} of ${total}, ${pct} percent`,
+      srLabel: `score ${correct} of ${total}, ${pct} percent${scaledSrSuffix(scaled, kind)}`,
       resultId, hasSavedAnswers,
     };
   }
@@ -201,15 +229,15 @@ export function resolveRoomScore(session: ScoreSessionInput, row: AttemptRowInpu
   if (kind === 'scoring') {
     if (answered !== null && total !== null) {
       return {
-        kind, answered, correct: null, total, pct: null, modules,
+        kind, answered, correct: null, total, pct: null, modules, scaled,
         label: `Scoring… ${answered}/${total} answered`,
-        srLabel: `scoring, ${answered} of ${total} answered`,
+        srLabel: `scoring, ${answered} of ${total} answered${scaledSrSuffix(scaled, kind)}`,
         resultId, hasSavedAnswers,
       };
     }
     return {
-      kind, answered, correct: null, total, pct: null, modules,
-      label: 'Scoring…', srLabel: 'scoring',
+      kind, answered, correct: null, total, pct: null, modules, scaled,
+      label: 'Scoring…', srLabel: `scoring${scaledSrSuffix(scaled, kind)}`,
       resultId, hasSavedAnswers,
     };
   }
@@ -217,22 +245,22 @@ export function resolveRoomScore(session: ScoreSessionInput, row: AttemptRowInpu
   if (kind === 'answering') {
     if (answered !== null && total !== null) {
       return {
-        kind, answered, correct: null, total, pct: null, modules,
+        kind, answered, correct: null, total, pct: null, modules, scaled,
         label: `${answered}/${total} answered`,
-        srLabel: `${answered} of ${total} answered`,
+        srLabel: `${answered} of ${total} answered${scaledSrSuffix(scaled, kind)}`,
         resultId, hasSavedAnswers,
       };
     }
     return {
-      kind, answered, correct: null, total, pct: null, modules,
-      label: 'Answering…', srLabel: 'answering',
+      kind, answered, correct: null, total, pct: null, modules, scaled,
+      label: 'Answering…', srLabel: `answering${scaledSrSuffix(scaled, kind)}`,
       resultId, hasSavedAnswers,
     };
   }
 
   return {
-    kind: 'dash', answered, correct: null, total, pct: null, modules,
-    label: '', srLabel: '',
+    kind: 'dash', answered, correct: null, total, pct: null, modules, scaled,
+    label: '', srLabel: scaled ? `scaled ${scaled.low === scaled.high ? scaled.low : `${scaled.low} to ${scaled.high}`}` : '',
     resultId, hasSavedAnswers,
   };
 }
@@ -254,6 +282,8 @@ export function isSameRoomScore(a: RoomScore, b: RoomScore): boolean {
     || a.srLabel !== b.srLabel
     || a.resultId !== b.resultId
     || a.hasSavedAnswers !== b.hasSavedAnswers
+    || a.scaled?.low !== b.scaled?.low
+    || a.scaled?.high !== b.scaled?.high
   ) {
     return false;
   }

@@ -707,10 +707,29 @@ func WriteRateLimitExceeded(w http.ResponseWriter, r *http.Request, tier, keyCla
 	denyTierRateLimit(w, r, tier, keyClass, retryAfter)
 }
 
+// WriteRateLimitExceededWithQueue is WriteRateLimitExceeded with an additive
+// queue-position detail (plan 2026-11-04 §4 Track B: visible queue). The
+// core fields (code, retryAfterSeconds, Retry-After header) are unchanged;
+// queueDepth >= 0 adds details.queueDepth plus an X-Queue-Depth header so
+// the client can render "waiting — retrying in Ns" with a position hint.
+// queueDepth < 0 omits both (queue unknown): existing envelope consumers
+// keep passing, and shed paths with no queue concept stay byte-identical.
+func WriteRateLimitExceededWithQueue(w http.ResponseWriter, r *http.Request, tier, keyClass string, retryAfter time.Duration, queueDepth int) {
+	denyTierRateLimitWithQueue(w, r, tier, keyClass, retryAfter, queueDepth)
+}
+
 // denyRateLimitWithTier renders the stable 429 envelope. The core fields
 // (code, retryAfterSeconds, Retry-After header) are unchanged; a non-empty
 // tier is purely additive so existing envelope consumers keep passing.
 func denyRateLimitWithTier(w http.ResponseWriter, r *http.Request, tier string, retryAfter time.Duration) {
+	denyRateLimitWithQueueTier(w, r, tier, retryAfter, -1)
+}
+
+// denyRateLimitWithQueueTier renders the stable 429 envelope with an
+// optional additive queue position. queueDepth < 0 omits the queue detail
+// entirely (unknown queue); queueDepth >= 0 adds details.queueDepth and
+// the X-Queue-Depth header. Retry-After (header + body) floors at 1s.
+func denyRateLimitWithQueueTier(w http.ResponseWriter, r *http.Request, tier string, retryAfter time.Duration, queueDepth int) {
 	secs := int(retryAfter.Seconds())
 	if secs < 1 {
 		secs = 1
@@ -719,11 +738,17 @@ func denyRateLimitWithTier(w http.ResponseWriter, r *http.Request, tier string, 
 	if tier != "" {
 		w.Header().Set("X-RateLimit-Tier", tier)
 	}
+	if queueDepth >= 0 {
+		w.Header().Set("X-Queue-Depth", itoa(queueDepth))
+	}
 	err := apperrors.New(apperrors.CodeRateLimitExceeded, "Rate limit exceeded.")
 	err.HTTPStatus = http.StatusTooManyRequests
 	details := map[string]any{"retryAfterSeconds": secs}
 	if tier != "" {
 		details["tier"] = tier
+	}
+	if queueDepth >= 0 {
+		details["queueDepth"] = queueDepth
 	}
 	err.Details = details
 	WriteError(w, r, err)

@@ -393,8 +393,10 @@ describe("SatStudentSessionRoute prewarm gating", () => {
     const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: null });
     setup({ phase: "directions", stateModuleId: null, pendingModuleId: "math-m1", data });
     expect(screen.getByTestId("sat-scheduled-break")).toBeInTheDocument();
-    expect(screen.getByTitle(SCI_TITLE)).toHaveAttribute("inert");
+    // Burst contract: a single eager document (the default graphing mode);
+    // the second mode defers until activeReady/hover/idle (see Panel tests).
     expect(screen.getByTitle(GRAPH_TITLE)).toHaveAttribute("inert");
+    expect(screen.queryByTitle(SCI_TITLE)).toBeNull();
     expect(screen.queryByRole("dialog", { name: "Calculator" })).toBeNull();
     expect(screen.getByTestId("sat-scheduled-break").querySelector("iframe")).toBeNull();
   });
@@ -402,8 +404,11 @@ describe("SatStudentSessionRoute prewarm gating", () => {
   it("preserves warmed iframe identity through preparation, module, review and reopening", () => {
     const pendingData = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: null });
     const { renderResult, routeElement } = setup({ phase: "directions", stateModuleId: null, pendingModuleId: "math-m1", data: pendingData });
-    const scientific = screen.getByTitle(SCI_TITLE);
     const graphing = screen.getByTitle(GRAPH_TITLE);
+    // Focus intent mounts the deferred second mode immediately (prewarm
+    // jitter only delays the automatic paths, never explicit intent).
+    fireEvent.focus(graphing);
+    const scientific = screen.getByTitle(SCI_TITLE);
     fireEvent.load(scientific); fireEvent.load(graphing);
     const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: "math-m1" });
     const current = controllerMock.current as Record<string, unknown>;
@@ -424,7 +429,8 @@ describe("SatStudentSessionRoute prewarm gating", () => {
     const otherData = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: { ...MATH_CALC, id: "math-m2" }, activeModuleId: "math-m2" });
     controllerMock.current = { ...(controllerMock.current as object), data: otherData, state: { ...liveState, moduleKey: "math-m2" }, stateModule: moduleById(otherData, "math-m2"), stateModuleAttempt: otherData.attempt.moduleAttempts[0], stateSection: otherData.sections[1] };
     renderResult.rerender(cloneElement(routeElement));
-    expect(screen.getByTitle(SCI_TITLE)).not.toBe(scientific);
+    // M2 mounts a fresh frame (the second mode defers again): never the M1 node.
+    expect(screen.queryByTitle(SCI_TITLE)).not.toBe(scientific);
   });
 
   it("C5 module, calculator closed (B12): hidden tree, open reveals dialog", () => {
@@ -435,13 +441,17 @@ describe("SatStudentSessionRoute prewarm gating", () => {
       pendingModuleId: null,
       data,
     });
-    // keepAlive closed tree: both iframes mounted hidden, no dialog role.
-    expect(screen.getByTitle(SCI_TITLE)).toBeInTheDocument();
+    // keepAlive closed tree: the eager (graphing) iframe mounts hidden, no
+    // dialog role; the second mode defers until ready/hover/idle.
     expect(screen.getByTitle(GRAPH_TITLE)).toBeInTheDocument();
+    expect(screen.queryByTitle(SCI_TITLE)).toBeNull();
     expect(screen.queryByRole("dialog", { name: "Calculator" })).toBeNull();
     expect(document.body.querySelector("[data-sat-tool-window=\"Calculator\"]")).not.toBeNull();
+    // Focus intent mounts the deferred mode in the hidden tree.
+    fireEvent.focus(screen.getByTitle(GRAPH_TITLE));
+    expect(screen.getByTitle(SCI_TITLE)).toBeInTheDocument();
     // Open via activeTools: a second route instance with the tool open
-    // renders the visible dialog with both warm modes. Node-level identity
+    // renders the visible dialog with the warm modes. Node-level identity
     // (SAME iframe closed -> open) is covered by SatCalculatorPanel.test.tsx.
     const mocked = controllerMock.current as unknown as {
       state: Record<string, unknown>;
@@ -463,7 +473,6 @@ describe("SatStudentSessionRoute prewarm gating", () => {
       activeTools: { calculator: true, referenceSheet: false },
     });
     expect(screen.getByRole("dialog", { name: "Calculator" })).toBeInTheDocument();
-    expect(screen.getByTitle(SCI_TITLE)).toBeInTheDocument();
     expect(screen.getByTitle(GRAPH_TITLE)).toBeInTheDocument();
   });
 
@@ -504,8 +513,8 @@ describe("SatStudentSessionRoute prewarm gating", () => {
     const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: "math-m1" });
     setup({ phase: "review", stateModuleId: "math-m1", pendingModuleId: null, data });
     expect(screen.getByRole("heading", { name: "Review your answers" })).toBeInTheDocument();
-    expect(screen.getByTitle(SCI_TITLE)).toBeInTheDocument();
     expect(screen.getByTitle(GRAPH_TITLE)).toBeInTheDocument();
+    expect(screen.queryByTitle(SCI_TITLE)).toBeNull();
     expect(screen.queryByRole("dialog", { name: "Calculator" })).toBeNull();
   });
 
@@ -551,6 +560,39 @@ describe("SatStudentSessionRoute prewarm gating", () => {
       toolCapabilities: { calculator: false, referenceSheet: false },
     });
     // Shell renders the R+W question; the math fallback must NOT prewarm.
+    expect(screen.queryByTitle(/Desmos/)).toBeNull();
+    expectBare(document.body);
+  });
+
+  it("C14 section-entry form boundary stays bare: pending Math mounts zero Desmos iframes", () => {
+    const data = bootstrapFixture({ rwModule: RW_NO_CALC, mathModule: MATH_CALC, activeModuleId: null });
+    const gate = {
+      ready: false,
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      state: {
+        versionId: "v",
+        sectionKey: "math",
+        formKey: "math_entry",
+        moduleId: "math-m1",
+        state: "required",
+        canSubmit: true,
+        canStart: false,
+        fields: [],
+      },
+    };
+    setup({
+      phase: "directions",
+      stateModuleId: null,
+      pendingModuleId: "math-m1",
+      data,
+      examOverrides: { sectionEntry: gate },
+    });
+    // The Math form owns the surface: only preconnect warms, no host mounts
+    // (INV-002 form boundary) even though the pending module is Math with a
+    // calculator policy.
+    expect(screen.getByRole("heading", { name: "Before Math" })).toBeInTheDocument();
     expect(screen.queryByTitle(/Desmos/)).toBeNull();
     expectBare(document.body);
   });

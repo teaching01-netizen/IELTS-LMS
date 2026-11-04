@@ -2,6 +2,9 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SatCalculatorPanel } from "../SatCalculatorPanel";
 
+const SCI_TITLE = "Desmos scientific calculator, College Board testing version";
+const GRAPH_TITLE = "Desmos graphing calculator, College Board testing version";
+
 const baseProps = {
   scheduleId: "schedule-1",
   attemptId: "attempt-1",
@@ -32,36 +35,91 @@ describe("SatCalculatorPanel", () => {
     );
   });
 
-  it("prewarms both Desmos modes hidden while closed and reveals the same frames on open", () => {
-    // Prewarm contract: closed + prewarmWhenClosed mounts both frames hidden
-    // (same ready iframes revealed on open — no fresh mount, no reload).
+  it("mounts a single document while closed and defers the second mode until activeReady", async () => {
+    // Burst contract: closed + prewarmWhenClosed mounts the active frame only
+    // (one document per student during the burst minute); the inactive frame
+    // mounts once the active frame reports ready — the same warm frames the
+    // open dialog reveals, with node identity preserved (keepAlive).
     const { rerender } = render(
       <SatCalculatorPanel {...baseProps} open prewarmWhenClosed />
     );
-    const scientific = screen.getByTitle(
-      "Desmos scientific calculator, College Board testing version"
-    );
-    const graphing = screen.getByTitle("Desmos graphing calculator, College Board testing version");
-    expect(scientific).toBeInTheDocument();
+    const graphing = screen.getByTitle(GRAPH_TITLE);
     expect(graphing).toBeInTheDocument();
+    expect(screen.queryByTitle(SCI_TITLE)).not.toBeInTheDocument();
+
+    fireEvent.load(graphing);
+    const scientific = await screen.findByTitle(SCI_TITLE);
+    expect(scientific).toBeInTheDocument();
 
     rerender(<SatCalculatorPanel {...baseProps} open={false} prewarmWhenClosed />);
-    expect(
-      screen.queryByTitle("Desmos scientific calculator, College Board testing version")
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTitle("Desmos graphing calculator, College Board testing version")
-    ).toBeInTheDocument();
+    expect(screen.getByTitle(GRAPH_TITLE)).toBe(graphing);
+    expect(screen.getByTitle(SCI_TITLE)).toBe(scientific);
     // keepAlive: same nodes survive closed -> open (prewarm identity).
-    const before = screen.getByTitle("Desmos scientific calculator, College Board testing version");
     rerender(<SatCalculatorPanel {...baseProps} open prewarmWhenClosed />);
-    expect(screen.getByTitle("Desmos scientific calculator, College Board testing version")).toBe(before);
+    expect(screen.getByTitle(GRAPH_TITLE)).toBe(graphing);
+    expect(screen.getByTitle(SCI_TITLE)).toBe(scientific);
+  });
+
+  it("mounts the deferred mode on focus intent without waiting for ready", () => {
+    render(<SatCalculatorPanel {...baseProps} open />);
+    expect(screen.queryByTitle(SCI_TITLE)).not.toBeInTheDocument();
+    fireEvent.focus(screen.getByTitle(GRAPH_TITLE));
+    expect(screen.getByTitle(SCI_TITLE)).toBeInTheDocument();
+  });
+
+  it("refuses mode writes under a prewarm key without forking the frame", () => {
+    render(<SatCalculatorPanel {...baseProps} open moduleAttemptId="prewarm:math-m1" />);
+    expect(screen.getByRole("radio", { name: "Graphing" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "Scientific" }));
+    // No-op: the prewarm frame keeps its default mode and writes nothing.
+    expect(screen.getByRole("radio", { name: "Graphing" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByTitle(SCI_TITLE)).toBeNull();
+    const keys = [...Array(window.sessionStorage.length)].map((_, index) =>
+      window.sessionStorage.key(index)
+    );
+    expect(keys.filter((key) => key?.includes("prewarm"))).toHaveLength(0);
+  });
+
+  it("keeps the mode in memory when session storage quota is exceeded", () => {
+    const setItem = vi
+      .spyOn(window.sessionStorage, "setItem")
+      .mockImplementation(() => {
+        throw new Error("quota exceeded");
+      });
+    try {
+      render(<SatCalculatorPanel {...baseProps} open />);
+      fireEvent.click(screen.getByRole("radio", { name: "Scientific" }));
+      expect(screen.getByRole("radio", { name: "Scientific" })).toHaveAttribute(
+        "aria-checked",
+        "true"
+      );
+      expect(screen.getByTitle(SCI_TITLE)).toHaveClass("block");
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it("defers the automatic second mount on saveData connections but honors focus intent", () => {
+    Object.defineProperty(window.navigator as unknown as Record<string, unknown>, "connection", {
+      value: { saveData: true, effectiveType: "4g" },
+      configurable: true,
+    });
+    try {
+      render(<SatCalculatorPanel {...baseProps} open />);
+      const graphing = screen.getByTitle(GRAPH_TITLE);
+      fireEvent.load(graphing);
+      expect(screen.queryByTitle(SCI_TITLE)).not.toBeInTheDocument();
+      fireEvent.focus(graphing);
+      expect(screen.getByTitle(SCI_TITLE)).toBeInTheDocument();
+    } finally {
+      delete (window.navigator as unknown as Record<string, unknown>).connection;
+    }
   });
 
   it("drops the Desmos iframe on close: fixed sheets unmount, session persists via Desmos state", () => {
     const { rerender } = render(<SatCalculatorPanel {...baseProps} open />);
     expect(
-      screen.getByTitle("Desmos scientific calculator, College Board testing version")
+      screen.getByTitle(GRAPH_TITLE)
     ).toBeInTheDocument();
 
     // Phase 5 fixed sheets unmount on close (no hidden-dialog keep-alive):
@@ -69,12 +127,12 @@ describe("SatCalculatorPanel", () => {
     // a fresh frame while calculator input state persists through Desmos.
     rerender(<SatCalculatorPanel {...baseProps} open={false} />);
     expect(
-      screen.queryByTitle("Desmos scientific calculator, College Board testing version")
+      screen.queryByTitle(GRAPH_TITLE)
     ).not.toBeInTheDocument();
 
     rerender(<SatCalculatorPanel {...baseProps} open />);
     expect(
-      screen.getByTitle("Desmos scientific calculator, College Board testing version")
+      screen.getByTitle(GRAPH_TITLE)
     ).toBeInTheDocument();
   });
 
@@ -82,7 +140,7 @@ describe("SatCalculatorPanel", () => {
     render(<SatCalculatorPanel {...baseProps} open />);
     expect(screen.getByRole("radio", { name: "Graphing" })).toHaveAttribute("aria-checked", "true");
     expect(
-      screen.getByTitle("Desmos graphing calculator, College Board testing version")
+      screen.getByTitle(GRAPH_TITLE)
     ).toHaveClass("block");
   });
 
@@ -96,7 +154,7 @@ describe("SatCalculatorPanel", () => {
     });
     expect(persisted).toContain(JSON.stringify({ activeMode: "scientific" }));
     expect(
-      screen.getByTitle("Desmos scientific calculator, College Board testing version")
+      screen.getByTitle(SCI_TITLE)
     ).toHaveClass("block");
   });
 
@@ -133,7 +191,7 @@ describe("SatCalculatorPanel", () => {
     const dialog = screen.getByRole("dialog", { name: "Calculator" });
     const before = { left: dialog.style.left, top: dialog.style.top, width: dialog.style.width, height: dialog.style.height };
     fireEvent.click(screen.getByRole("radio", { name: "Scientific" }));
-    expect(screen.getByTitle("Desmos scientific calculator, College Board testing version")).toHaveClass("block");
+    expect(screen.getByTitle(SCI_TITLE)).toHaveClass("block");
     expect(dialog.style.left).toBe(before.left);
     expect(dialog.style.top).toBe(before.top);
     expect(dialog.style.width).toBe(before.width);
@@ -171,8 +229,8 @@ describe("SatCalculatorPanel", () => {
 
   it("embeds carry the explicit exam locale", () => {
     render(<SatCalculatorPanel {...baseProps} open />);
-    const scientific = screen.getByTitle("Desmos scientific calculator, College Board testing version");
-    expect(scientific.getAttribute("src")).toContain("lang=en");
+    const graphing = screen.getByTitle(GRAPH_TITLE);
+    expect(graphing.getAttribute("src")).toContain("lang=en");
   });
 
   it("compact sheet keeps exactly one mode selector at the top of the body", () => {

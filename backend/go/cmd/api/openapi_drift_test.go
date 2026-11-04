@@ -145,6 +145,9 @@ func TestOpenAPIRateLimitedResponseContract(t *testing.T) {
 		"/results/export",
 		"/results/export-profile",
 		"/assessment-delivery/schedules/{scheduleId}/start-with-code",
+		// Plan 2026-11-04 Track B: the Desmos beacon sheds burst floods as
+		// 429 (client drops, no retry storm) with the reusable envelope.
+		"/sat/desmos-outcome",
 	}
 	for _, path := range rateLimitedPaths {
 		start := strings.Index(body, "  "+path+":")

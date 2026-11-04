@@ -370,7 +370,7 @@ test("SAT: armed text ownership is active before the first pointer", async ({ pa
     webkitUserSelect: "none",
     textUserSelect: "none",
     editorUserSelect: "text",
-    touchAction: "none",
+    touchAction: "pan-y",
   });
 
   await toggle.click();

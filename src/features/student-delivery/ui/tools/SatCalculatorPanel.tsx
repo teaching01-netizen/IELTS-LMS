@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -7,20 +8,21 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
-  calculatorLocaleKey,
   calculatorWorkspaceKey,
-  loadCalculatorLocale,
+  isPrewarmKey,
   loadCalculatorWorkspace,
   saveCalculatorWorkspace,
 } from "../../infrastructure/satCalculatorWorkspace";
-import type { DesmosCalculatorMode, DesmosLocale } from "../../infrastructure/desmos/desmosTypes";
-import { DesmosCalculator } from "./DesmosCalculator";
+import { SAT_EXAM_LOCALE } from "../../infrastructure/desmos/desmosTypes";
+import type { DesmosCalculatorMode } from "../../infrastructure/desmos/desmosTypes";
+import { DesmosCalculator, type DesmosOutcomeEvent } from "./DesmosCalculator";
 import { SatFloatingTool } from "./SatFloatingTool";
 import { satToolGeometryKey } from "../../infrastructure/satToolGeometryStore";
 import { useSatMediaQuery } from "../useSatMediaQuery";
 import { satToolViewKey } from "../../infrastructure/satToolStateStore";
 import { useSatExamZoom } from "../zoom/SatExamZoomContext";
 import { readSatCalculatorDragArea, readSatCalculatorSafeArea } from "./satToolPlacementRuntime";
+import { emitStudentObservabilityMetric } from "../../../../utils/studentObservability";
 
 export interface SatCalculatorPanelProps {
   open: boolean;
@@ -37,6 +39,26 @@ const calculatorModes: readonly DesmosCalculatorMode[] = ["graphing", "scientifi
 /** Compact breakpoint mirrors the primitive's sheet switch (SatFloatingTool). */
 const SAT_TOOL_COMPACT_QUERY = "(max-width: 639px), (max-height: 560px)";
 
+/** Idle budget after which the deferred mode mounts without any signal. */
+const SAT_DESMOS_IDLE_EAGER_MS = 30_000;
+
+/** Prewarm jitter window spreading pending-host second-mode mounts. */
+const SAT_DESMOS_PREWARM_JITTER_MS = 10_000;
+
+function readDataSaver(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const connection =
+    (navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }).connection ?? null;
+  if (!connection) return false;
+  return (
+    connection.saveData === true ||
+    connection.effectiveType === "slow-2g" ||
+    connection.effectiveType === "2g"
+  );
+}
+
 export function SatCalculatorPanel({
   open,
   scheduleId,
@@ -48,10 +70,6 @@ export function SatCalculatorPanel({
 }: SatCalculatorPanelProps) {
   const storageKey = useMemo(
     () => calculatorWorkspaceKey(scheduleId, attemptId, moduleAttemptId),
-    [attemptId, moduleAttemptId, scheduleId]
-  );
-  const localeKey = useMemo(
-    () => calculatorLocaleKey(scheduleId, attemptId, moduleAttemptId),
     [attemptId, moduleAttemptId, scheduleId]
   );
   const { logicalSize, viewportToLogicalLength, scale } = useSatExamZoom();
@@ -82,18 +100,80 @@ export function SatCalculatorPanel({
   const [mode, setMode] = useState<DesmosCalculatorMode>(
     () => loadCalculatorWorkspace(storageKey).activeMode
   );
-  const [locale, setLocale] = useState<DesmosLocale>(() => loadCalculatorLocale(localeKey));
   const compact = useSatMediaQuery(SAT_TOOL_COMPACT_QUERY);
 
   useEffect(() => {
     setMode(loadCalculatorWorkspace(storageKey).activeMode);
-    setLocale(loadCalculatorLocale(localeKey));
-  }, [localeKey, storageKey]);
+  }, [storageKey]);
 
+  // Lazy second mode (burst plan CF-2/FR-02): the active mode mounts eager;
+  // the inactive mode mounts only once eagerInactive derives true —
+  // activeReady (first ready beacon for this panel) OR explicit hover/focus
+  // intent OR the 30s idle budget. Data-saver / slow-2g connections defer
+  // every automatic path; only explicit hover/focus intent mounts there.
+  // Pending (prewarm:) hosts add 0–10s jitter so a bell-burst of Math opens
+  // does not mount second documents in lockstep.
+  const prewarm = isPrewarmKey(moduleAttemptId);
+  const [activeReady, setActiveReady] = useState(false);
+  const [hoverIntent, setHoverIntent] = useState(false);
+  const [idleElapsed, setIdleElapsed] = useState(false);
+  const [prewarmDelayElapsed, setPrewarmDelayElapsed] = useState(!prewarm);
+  const [dataSaver] = useState(readDataSaver);
+  useEffect(() => {
+    if (!prewarm) {
+      setPrewarmDelayElapsed(true);
+      return;
+    }
+    const jitterMs = Math.floor(Math.random() * SAT_DESMOS_PREWARM_JITTER_MS);
+    const timer = window.setTimeout(() => setPrewarmDelayElapsed(true), jitterMs);
+    return () => window.clearTimeout(timer);
+  }, [prewarm, moduleAttemptId]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIdleElapsed(true), SAT_DESMOS_IDLE_EAGER_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  const eagerInactive =
+    hoverIntent || (prewarmDelayElapsed && !dataSaver && (activeReady || idleElapsed));
+
+  const handleDesmosOutcome = useCallback(
+    (event: DesmosOutcomeEvent) => {
+      emitStudentObservabilityMetric("sat_desmos_outcome", {
+        scheduleId,
+        attemptId,
+        moduleAttemptId,
+        mode: event.mode,
+        outcome: event.outcome,
+        durationMs: event.durationMs,
+        retryCount: event.retryCount,
+      });
+      if (event.outcome === "ready") setActiveReady(true);
+    },
+    [attemptId, moduleAttemptId, scheduleId],
+  );
   const handleModeChange = (nextMode: DesmosCalculatorMode) => {
     if (nextMode === mode || disabled) return;
+    // Prewarm read-only (INV-012): a synthetic prewarm: attempt must never
+    // persist mode — the real module attempt owns the workspace. Assert +
+    // beacon instead of forking the prewarmed frame.
+    if (isPrewarmKey(storageKey)) {
+      emitStudentObservabilityMetric("sat_desmos_prewrite_blocked", {
+        scheduleId,
+        attemptId,
+        moduleAttemptId,
+      });
+      return;
+    }
     setMode(nextMode);
-    saveCalculatorWorkspace(storageKey, { activeMode: nextMode });
+    const saved = saveCalculatorWorkspace(storageKey, { activeMode: nextMode });
+    if (!saved) {
+      // Quota/private-mode: keep the mode in memory for this mount and
+      // beacon — never throw out of a tool toggle.
+      emitStudentObservabilityMetric("sat_desmos_workspace_quota", {
+        scheduleId,
+        attemptId,
+        moduleAttemptId,
+      });
+    }
   };
 
   const handleModeKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
@@ -107,7 +187,9 @@ export function SatCalculatorPanel({
     });
   };
 
-  // Keep Desmos mounted while closed; mode selection is shared across presentations.
+  // Keep Desmos mounted while closed; the mode is per-moduleAttempt
+  // (storageKey) — shared across open/close presentations of the SAME module
+  // attempt only, never across modules (INV-004 isolation).
   const modeSwitch = (
     <div
       className="sat-calculator-modes grid min-w-0 grid-cols-2 gap-0.5"
@@ -138,13 +220,22 @@ export function SatCalculatorPanel({
           {modeSwitch}
         </div>
       ) : null}
-      <div className="h-full min-h-0 flex-1">
+      {/* Intent signals only (lazy second-mode mount), not an interactive
+          control: the embed keeps its own tab order and roles. */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      <div
+        className="h-full min-h-0 flex-1"
+        onMouseEnter={() => setHoverIntent(true)}
+        onFocus={() => setHoverIntent(true)}
+      >
         <DesmosCalculator
           mode={mode}
-          locale={locale}
+          locale={SAT_EXAM_LOCALE}
           disabled={disabled}
           prewarmInactiveModes={prewarmWhenClosed || open}
           silenceLiveRegions={!open || undefined}
+          eagerInactive={eagerInactive}
+          onDesmosOutcome={handleDesmosOutcome}
         />
       </div>
     </div>

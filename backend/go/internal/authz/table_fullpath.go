@@ -67,6 +67,9 @@ func init() {
 		"POST /api/v1/sat/exams/{id}/rooms":              {MinRoles: writeStaff},
 		"GET /api/v1/sat/room-operations/{operationKey}": {MinRoles: writeStaff},
 		"GET /api/v1/sat/exam-config/defaults":           {MinRoles: writeStaff},
+		// SAT Desmos outcome beacon (plan 2026-11-04): attempt bearer,
+		// handler binds owner. Telemetry-only; never a DB write.
+		"POST /api/v1/sat/desmos-outcome": {Bearer: true, Scope: ScopeAttemptOwner},
 		// Prompt co-editing (2026-09-13 design). Token issuance is a
 		// write-capable authoring read (admin/builder/observer may request;
 		// the handler mints a read-mode token for observers). The partial

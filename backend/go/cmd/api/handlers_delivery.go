@@ -378,7 +378,7 @@ func deliveryCloseModuleHandler(app *App) http.HandlerFunc {
 			}
 			closeCtx, releaseClose, err := app.Delivery.AcquireSATCloseAdmission(r.Context())
 			if err != nil {
-				writeDeliveryCloseError(w, r, err)
+				writeDeliveryCloseErrorWithQueue(w, r, closeQueueDepth(app), err)
 				return
 			}
 			defer releaseClose()
@@ -412,8 +412,17 @@ func deliveryCloseModuleHandler(app *App) http.HandlerFunc {
 }
 
 func writeDeliveryCloseError(w http.ResponseWriter, r *http.Request, err error) {
+	writeDeliveryCloseErrorWithQueue(w, r, -1, err)
+}
+
+// writeDeliveryCloseErrorWithQueue renders close-path backpressure with an
+// additive queue position (plan 2026-11-04 §4 Track B: visible queue).
+// queueDepth < 0 (unknown) renders the historical shape byte-identically;
+// the admission-full 429 carries the sampled bulkhead depth so the client
+// can show queue position alongside the Retry-After wait.
+func writeDeliveryCloseErrorWithQueue(w http.ResponseWriter, r *http.Request, queueDepth int, err error) {
 	if errors.Is(err, delivery.ErrSATCloseAdmissionFull) {
-		httpx.WriteRateLimitExceeded(w, r, "sat-close", "attempt", time.Second)
+		httpx.WriteRateLimitExceededWithQueue(w, r, "sat-close", "attempt", time.Second, queueDepth)
 		return
 	}
 	if errors.Is(err, delivery.ErrSATCloseAdmissionUnavailable) {
@@ -421,6 +430,17 @@ func writeDeliveryCloseError(w http.ResponseWriter, r *http.Request, err error) 
 		return
 	}
 	writeEntryError(w, r, err)
+}
+
+// closeQueueDepth samples the close bulkhead for the additive 429
+// queueDepth detail (plan 2026-11-04 §4 Track B). Unknown (-1) when no
+// delivery service is wired, so the envelope omits the field instead of
+// inventing a position.
+func closeQueueDepth(app *App) int {
+	if app == nil || app.Delivery == nil {
+		return -1
+	}
+	return app.Delivery.SATCloseQueueDepth()
 }
 
 // deliveryCloseIntentHandler registers the immutable frontier before a

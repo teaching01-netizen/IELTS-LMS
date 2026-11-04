@@ -310,26 +310,42 @@ describe('roster attention and ordering', () => {
 describe('roster zero-click scores', () => {
   const scored: RoomScore = {
     kind: 'scored', answered: 25, correct: 18, total: 27, pct: 67, modules: null,
-    label: '✓ 18/27 · 67% · 2 left', srLabel: 'score 18 of 27, 67 percent',
+    scaled: { low: 600, high: 640 },
+    label: '✓ 18/27 · 67% · 2 left', srLabel: 'score 18 of 27, 67 percent, scaled 600 to 640',
+    resultId: 'result-1', hasSavedAnswers: true,
+  };
+  const scoredSingle: RoomScore = {
+    kind: 'scored', answered: 25, correct: 18, total: 27, pct: 67, modules: null,
+    scaled: { low: 620, high: 620 },
+    label: '✓ 18/27 · 67% · 2 left', srLabel: 'score 18 of 27, 67 percent, scaled 620',
+    resultId: 'result-1', hasSavedAnswers: true,
+  };
+  const scoredNoConverter: RoomScore = {
+    kind: 'scored', answered: 25, correct: 18, total: 27, pct: 67, modules: null,
+    scaled: null,
+    label: '✓ 18/27 · 67% · 2 left', srLabel: 'score 18 of 27, 67 percent, conversion unavailable',
     resultId: 'result-1', hasSavedAnswers: true,
   };
   const answering: RoomScore = {
     kind: 'answering', answered: 9, correct: null, total: 27, pct: null, modules: null,
+    scaled: null,
     label: '9/27 answered', srLabel: '9 of 27 answered',
     resultId: null, hasSavedAnswers: true,
   };
   const scoring: RoomScore = {
     kind: 'scoring', answered: 9, correct: null, total: 27, pct: null, modules: null,
+    scaled: null,
     label: 'Scoring… 9/27 answered', srLabel: 'scoring, 9 of 27 answered',
     resultId: null, hasSavedAnswers: true,
   };
   const notScored: RoomScore = {
     kind: 'not_scored', answered: null, correct: null, total: 27, pct: null, modules: null,
+    scaled: null,
     label: 'Not scored', srLabel: 'not scored',
     resultId: null, hasSavedAnswers: false,
   };
 
-  function renderRow(score: RoomScore | null) {
+  function renderRow(score: RoomScore | null, extra: Partial<Parameters<typeof SatRoomStudentRow>[0]> = {}) {
     return render(
       <SatRoomStudentRow
         student={student}
@@ -339,18 +355,37 @@ describe('roster zero-click scores', () => {
         attentionReason={null}
         score={score}
         onSelect={vi.fn()}
+        {...extra}
       />,
     );
   }
 
-  it('renders the scored second line plus the bold right-side fraction', () => {
+  it('renders the scored second line plus the conversion hero, never a duplicated raw fraction', () => {
     const { container } = renderRow(scored);
-    expect(screen.getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent, scaled 600 to 640' })).toBeInTheDocument();
     expect(container.querySelector('.sat-room__row-score')).toHaveTextContent('✓ 18/27 · 67% · 2 left');
-    expect(container.querySelector('.sat-room__row-score-fraction')).toHaveTextContent('18/27');
+    // Right block hero owns the conversion; the raw fraction never renders there.
+    expect(container.querySelector('.sat-room__row-score-hero')).toHaveTextContent('600–640');
+    expect(container.querySelector('.sat-room__row-score-fraction')).toBeNull();
+    // Line 2 keeps the raw counts exactly once.
+    expect(container.querySelector('.sat-room__row-score')?.textContent).toContain('18/27');
   });
 
-  it('renders answering, scoring, and not_scored states without a fraction', () => {
+  it('renders the hero single value, range, and dash', () => {
+    const { container: singleContainer, unmount: unmountSingle } = renderRow(scoredSingle);
+    expect(singleContainer.querySelector('.sat-room__row-score-hero')).toHaveTextContent('620');
+    unmountSingle();
+
+    const { container: rangeContainer, unmount: unmountRange } = renderRow(scored);
+    expect(rangeContainer.querySelector('.sat-room__row-score-hero')).toHaveTextContent('600–640');
+    unmountRange();
+
+    const { container: dashContainer } = renderRow(scoredNoConverter);
+    expect(dashContainer.querySelector('.sat-room__row-score-hero')).toHaveTextContent('—');
+    expect(screen.getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent, conversion unavailable' })).toBeInTheDocument();
+  });
+
+  it('renders answering, scoring, and not_scored states with an em-dash hero and no fraction', () => {
     for (const [score, text, name] of [
       [answering, '9/27 answered', 'Open Ananda S., 9 of 27 answered'],
       [scoring, 'Scoring… 9/27 answered', 'Open Ananda S., scoring, 9 of 27 answered'],
@@ -360,15 +395,17 @@ describe('roster zero-click scores', () => {
       expect(screen.getByRole('option', { name })).toBeInTheDocument();
       expect(screen.getByRole('option', { name }).querySelector('.sat-room__row-score')).toHaveTextContent(text);
       expect(screen.getByRole('option', { name }).querySelector('.sat-room__row-score-fraction')).toBeNull();
+      expect(screen.getByRole('option', { name }).querySelector('.sat-room__row-score-hero')).toHaveTextContent('—');
       unmount();
     }
   });
 
-  it('renders a dash with no badge and an unchanged accessible name', () => {
+  it('renders a dash with no line-2 badge, a dash hero, and an unchanged accessible name', () => {
     const { container } = renderRow(null);
     expect(screen.getByRole('option', { name: 'Open Ananda S.' })).toBeInTheDocument();
     expect(container.querySelector('.sat-room__row-score')).toBeNull();
     expect(container.querySelector('.sat-room__row-score-fraction')).toBeNull();
+    expect(container.querySelector('.sat-room__row-score-hero')).toHaveTextContent('—');
   });
 
   it('keeps score ink neutral and tabular, truncating instead of overflowing narrow rows', () => {
@@ -380,13 +417,16 @@ describe('roster zero-click scores', () => {
     expect(line?.className).toContain('truncate');
     expect(line?.className).toMatch(/text-\[var\(--sat-staff-text-(primary|secondary)/);
     expect(line?.className).not.toMatch(/red|green|success|danger/);
-    expect(container.querySelector('.sat-room__row-score-fraction')?.className).toContain('tabular-nums');
+    const hero = container.querySelector('.sat-room__row-score-hero');
+    expect(hero?.className).toContain('tabular-nums');
+    expect(hero?.className).toMatch(/text-\[var\(--sat-staff-text-primary/);
+    expect(hero?.className).not.toMatch(/red|green|success|danger/);
   });
 
   it('sorts scored attempts before unscored ones in both directions, stable by name', () => {
     const zahra: StudentSession = { ...student, id: 'attempt-z', name: 'Zahra K.' };
     const budi: StudentSession = { ...student, id: 'attempt-b', name: 'Budi T.' };
-    const low: RoomScore = { ...scored, correct: 9, label: '✓ 9/27 · 33%', srLabel: 'score 9 of 27, 33 percent' };
+    const low: RoomScore = { ...scored, correct: 9, label: '✓ 9/27 · 33%', srLabel: 'score 9 of 27, 33 percent, scaled 600 to 640' };
     const scores = new Map<string, RoomScore>([
       ['attempt-1', scored],
       ['attempt-z', low],
@@ -443,7 +483,7 @@ describe('roster zero-click scores', () => {
     const { container, rerender } = render(row(scored));
     const first = container.querySelector('.sat-room__row-score');
     expect(first?.className).toContain('sat-room__score-fade');
-    const upgraded: RoomScore = { ...scored, correct: 19, pct: 70, label: '✓ 19/27 · 70% · 2 left', srLabel: 'score 19 of 27, 70 percent' };
+    const upgraded: RoomScore = { ...scored, correct: 19, pct: 70, label: '✓ 19/27 · 70% · 2 left', srLabel: 'score 19 of 27, 70 percent, scaled 600 to 640' };
     rerender(row(upgraded));
     const second = container.querySelector('.sat-room__row-score');
     expect(second?.className).toContain('sat-room__score-fade');
@@ -489,18 +529,51 @@ describe('roster zero-click scores', () => {
       />,
     );
     expect(container.querySelector('.sat-room__row-score')?.className).toContain('opacity-60');
-    expect(container.querySelector('.sat-room__row-score-fraction')?.className).toContain('opacity-60');
+    expect(container.querySelector('.sat-room__row-score-hero')?.className).toContain('opacity-60');
+  });
+
+  it('holds a shimmer skeleton in the hero slot while scored-but-unconverted is loading', () => {
+    const loadingRow = (score: RoomScore | null, loading: boolean) => (
+      <SatRoomStudentRow
+        student={student}
+        runtime={liveRuntime()}
+        roomClock={null}
+        selected={false}
+        attentionReason={null}
+        score={score}
+        scoresLoading={loading}
+        onSelect={vi.fn()}
+      />
+    );
+    // Scored with no estimate yet: skeleton instead of a —→value flash.
+    const { container, rerender } = render(loadingRow(scoredNoConverter, true));
+    expect(container.querySelector('.sat-room__row-score-hero-skeleton')).not.toBeNull();
+    expect(container.querySelector('.sat-room__row-score-hero')).toBeNull();
+    rerender(loadingRow(scored, false));
+    expect(container.querySelector('.sat-room__row-score-hero-skeleton')).toBeNull();
+    expect(container.querySelector('.sat-room__row-score-hero')).toHaveTextContent('600–640');
+  });
+
+  it('renders the dash immediately for non-scored kinds even while loading', () => {
+    for (const score of [answering, scoring, notScored, null] as const) {
+      const { container, unmount } = renderRow(score, { scoresLoading: true });
+      expect(container.querySelector('.sat-room__row-score-hero-skeleton')).toBeNull();
+      expect(container.querySelector('.sat-room__row-score-hero')).toHaveTextContent('—');
+      unmount();
+    }
   });
 });
 
 describe('roster score polish', () => {
   const scored: RoomScore = {
     kind: 'scored', answered: 25, correct: 18, total: 27, pct: 67, modules: null,
-    label: '✓ 18/27 · 67% · 2 left', srLabel: 'score 18 of 27, 67 percent',
+    scaled: { low: 620, high: 620 },
+    label: '✓ 18/27 · 67% · 2 left', srLabel: 'score 18 of 27, 67 percent, scaled 620',
     resultId: 'result-1', hasSavedAnswers: true,
   };
   const answering: RoomScore = {
     kind: 'answering', answered: 9, correct: null, total: 27, pct: null, modules: null,
+    scaled: null,
     label: '9/27 answered', srLabel: '9 of 27 answered',
     resultId: null, hasSavedAnswers: true,
   };
@@ -537,7 +610,7 @@ describe('roster score polish', () => {
     expect(screen.getByText(/Updated 40s ago/)).toBeInTheDocument();
     expect(screen.getByText(/keeping last values/)).toBeInTheDocument();
     // The rows keep their last value, dimmed — no zero flash.
-    expect(screen.getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent, scaled 620' })).toBeInTheDocument();
   });
 
   it('announces a score upgrade once and collapses rapid batches', () => {
@@ -587,7 +660,7 @@ describe('roster score polish', () => {
   });
 
   it('collapses simultaneous upgrades into one summary', () => {
-    const budiScored: RoomScore = { ...scored, label: '✓ 9/27 · 33%', srLabel: 'score 9 of 27, 33 percent', correct: 9, pct: 33 };
+    const budiScored: RoomScore = { ...scored, label: '✓ 9/27 · 33%', srLabel: 'score 9 of 27, 33 percent, scaled 620', correct: 9, pct: 33 };
     const { rerender } = renderRoster({
       scores: new Map([['attempt-1', answering], ['attempt-b', answering]]),
     });
@@ -616,7 +689,8 @@ describe('roster score polish', () => {
 describe('inspector Score summary', () => {
   const scored: RoomScore = {
     kind: 'scored', answered: 25, correct: 18, total: 27, pct: 67, modules: null,
-    label: '✓ 18/27 · 67%', srLabel: 'score 18 of 27, 67 percent',
+    scaled: { low: 620, high: 620 },
+    label: '✓ 18/27 · 67%', srLabel: 'score 18 of 27, 67 percent, scaled 620',
     resultId: 'result-1', hasSavedAnswers: true,
   };
 
@@ -651,6 +725,7 @@ describe('inspector Score summary', () => {
   it('links saved answers without a result, and hides the block on a dash', () => {
     const answering: RoomScore = {
       kind: 'answering', answered: 9, correct: null, total: 27, pct: null, modules: null,
+      scaled: null,
       label: '9/27 answered', srLabel: '9 of 27 answered',
       resultId: null, hasSavedAnswers: true,
     };
@@ -709,11 +784,13 @@ describe('SAT room round-2 polish (T-06/T-10/T-11)', () => {
   const budiStudent: StudentSession = { ...student, id: 'attempt-b', name: 'Budi T.' };
   const scoredFresh: RoomScore = {
     kind: 'scored', answered: 25, correct: 18, total: 27, pct: 67, modules: null,
-    label: '✓ 18/27 · 67% · 2 left', srLabel: 'score 18 of 27, 67 percent',
+    scaled: { low: 620, high: 620 },
+    label: '✓ 18/27 · 67% · 2 left', srLabel: 'score 18 of 27, 67 percent, scaled 620',
     resultId: 'result-1', hasSavedAnswers: true,
   };
   const notScoredFresh: RoomScore = {
     kind: 'not_scored', answered: null, correct: null, total: 27, pct: null, modules: null,
+    scaled: null,
     label: 'Not scored', srLabel: 'not scored',
     resultId: null, hasSavedAnswers: false,
   };
@@ -764,7 +841,7 @@ describe('SAT room round-2 polish (T-06/T-10/T-11)', () => {
     // the listbox cannot re-render on it.
     expect(setIntervalSpy.mock.calls.filter((call) => call[1] === 30_000)).toHaveLength(0);
     const badgeBefore = screen
-      .getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent' })
+      .getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent, scaled 620' })
       .querySelector('.sat-room__row-score')?.textContent;
     act(() => {
       vi.advanceTimersByTime(30_000);
@@ -772,7 +849,7 @@ describe('SAT room round-2 polish (T-06/T-10/T-11)', () => {
     expect(screen.queryByText(/Scores may be stale/)).toBeNull();
     expect(
       screen
-        .getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent' })
+        .getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent, scaled 620' })
         .querySelector('.sat-room__row-score'),
     ).toHaveTextContent(badgeBefore ?? '');
     setIntervalSpy.mockRestore();
@@ -791,7 +868,7 @@ describe('SAT room round-2 polish (T-06/T-10/T-11)', () => {
     });
     expect(screen.getByText(/Updated 1m ago/)).toBeInTheDocument();
     // The rows keep their last value, dimmed — no zero flash, no remount.
-    expect(screen.getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Open Ananda S., score 18 of 27, 67 percent, scaled 620' })).toBeInTheDocument();
   });
 
   it('T-11: a scored→not_scored transition announces marked not scored', () => {
@@ -808,6 +885,7 @@ describe('SAT room round-2 polish (T-06/T-10/T-11)', () => {
   it('T-11: simultaneous upgrades and not_scored markings collapse to one summary', () => {
     const answeringFresh: RoomScore = {
       kind: 'answering', answered: 9, correct: null, total: 27, pct: null, modules: null,
+      scaled: null,
       label: '9/27 answered', srLabel: '9 of 27 answered',
       resultId: null, hasSavedAnswers: true,
     };
@@ -817,5 +895,71 @@ describe('SAT room round-2 polish (T-06/T-10/T-11)', () => {
     // both transitions collapse into one summary like existing upgrades.
     rerender(polishRoster(new Map([['attempt-1', scoredFresh], ['attempt-b', notScoredFresh]])));
     expect(screen.getByRole('status')).toHaveTextContent('2 scores updated.');
+  });
+});
+
+describe('roster initial loading skeleton', () => {
+  function emptyRoster(extra: Partial<Parameters<typeof SatSessionRoomRoster>[0]> = {}) {
+    return (
+      <SatSessionRoomRoster
+        students={[]}
+        visibleStudents={[]}
+        selectedStudent={null}
+        runtime={liveRuntime()}
+        search=""
+        onSearchChange={vi.fn()}
+        attentionFilter="all"
+        onAttentionFilterChange={vi.fn()}
+        attentionCount={0}
+        attentionReasons={new Map()}
+        sort="name"
+        onSortChange={vi.fn()}
+        onSelect={vi.fn()}
+        {...extra}
+      />
+    );
+  }
+
+  it('renders 6 shimmer skeleton rows with busy listbox while studentsLoading and empty', () => {
+    const { container } = render(emptyRoster({ studentsLoading: true }));
+    const listbox = screen.getByRole('listbox');
+    expect(listbox).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('Loading students…')).toBeInTheDocument();
+    const shimmer = container.querySelectorAll('.sat-skeleton-shimmer');
+    // 6 rows × (name bar + meta bar + hero block) = 18 shimmer bars.
+    expect(shimmer.length).toBe(18);
+    expect(screen.queryByText('No students have joined yet.')).toBeNull();
+  });
+
+  it('renders the empty state when not loading and empty', () => {
+    render(emptyRoster({ studentsLoading: false }));
+    expect(screen.getByRole('listbox')).not.toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('No students have joined yet.')).toBeInTheDocument();
+    expect(screen.queryByText('Loading students…')).toBeNull();
+  });
+
+  it('renders rows instead of the skeleton once students arrive', () => {
+    const { rerender } = render(emptyRoster({ studentsLoading: true }));
+    expect(screen.getByText('Loading students…')).toBeInTheDocument();
+    rerender(
+      <SatSessionRoomRoster
+        students={[student]}
+        visibleStudents={[student]}
+        selectedStudent={null}
+        runtime={liveRuntime()}
+        search=""
+        onSearchChange={vi.fn()}
+        attentionFilter="all"
+        onAttentionFilterChange={vi.fn()}
+        attentionCount={0}
+        attentionReasons={new Map()}
+        sort="name"
+        onSortChange={vi.fn()}
+        onSelect={vi.fn()}
+        studentsLoading={false}
+      />,
+    );
+    expect(screen.queryByText('Loading students…')).toBeNull();
+    expect(screen.getByRole('option', { name: 'Open Ananda S.' })).toBeInTheDocument();
   });
 });

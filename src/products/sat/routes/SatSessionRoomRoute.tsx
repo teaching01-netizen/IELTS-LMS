@@ -709,6 +709,7 @@ export function SatSessionRoomRoute() {
             scoresLoading={roomScoresLoading}
             scoresUpdatedAt={roomScoresUpdatedAt}
             scoresTruncated={roomScoresTruncated}
+            studentsLoading={controller.isLoading && students.length === 0}
             onShareLink={roomMode === 'review' || !entryUrl ? undefined : () => setShareOpen(true)}
           />
         )}

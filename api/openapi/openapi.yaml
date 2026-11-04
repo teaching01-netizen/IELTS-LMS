@@ -3172,6 +3172,50 @@ paths:
               schema: { type: object }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /sat/desmos-outcome:
+    post:
+      security:
+        - attemptBearer: []
+      tags: [delivery]
+      summary: SAT Desmos calculator load outcome beacon (exam-day burst signal)
+      description: >-
+        Frontend telemetry for the bounded Desmos mount (plan 2026-11-04
+        Track B): the calculator reports every load outcome (ready, timeout,
+        blocked, error) with its mount latency and calculator mode. The
+        endpoint verifies the attempt bearer, binds the beacon identity to
+        that credential, and records closed-vocabulary counters plus one
+        structured log line; it never writes to the database. Clients drop
+        429 sheds without retrying (a beacon must never amplify a burst).
+        Identity/credential mismatches render 400; malformed bodies 400.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scheduleId, attemptId, moduleAttemptId, mode, outcome, durationMs, buildSHA]
+              properties:
+                scheduleId: { type: string }
+                attemptId: { type: string }
+                moduleAttemptId: { type: string }
+                mode: { type: string, enum: [scientific, graphing] }
+                outcome: { type: string, enum: [ready, timeout, blocked, error] }
+                durationMs: { type: integer, minimum: 0, maximum: 3600000 }
+                buildSHA: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        "200":
+          description: Beacon recorded
+          headers:
+            X-Request-Id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { type: object, properties: { ok: { type: boolean } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
   /library/passages:
     get:
       tags: [library]
@@ -5475,6 +5519,14 @@ components:
           description: Low-cardinality limiter tier that denied the request.
           required: false
           schema: { type: string }
+        X-Queue-Depth:
+          description: >-
+            Zero-based queue position at denial time (plan 2026-11-04
+            visible queue). Present only when the limiter knows its queue
+            (currently the SAT close bulkhead); absent means unknown, and
+            the client must fall back to Retry-After alone.
+          required: false
+          schema: { type: integer, minimum: 0 }
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
@@ -5748,11 +5800,14 @@ components:
           type: object
           description: >-
             Rate-limit errors include retryAfterSeconds as integer seconds;
-            tier denials also include the tier string. Other error codes may
+            tier denials also include the tier string. Shed paths that know
+            their queue (SAT close bulkhead) additionally include queueDepth
+            as the zero-based position at denial time. Other error codes may
             use additional domain-specific detail fields.
           properties:
             retryAfterSeconds: { type: integer, minimum: 1 }
             tier: { type: string }
+            queueDepth: { type: integer, minimum: 0 }
           additionalProperties: true
         requestId: { type: string }
     DeviceTransfer:

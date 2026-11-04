@@ -7,6 +7,7 @@ import {
   clearCalculatorWorkspace,
   clearCalculatorWorkspacesForAttempt,
   createCalculatorWorkspace,
+  isPrewarmKey,
   loadCalculatorLocale,
   loadCalculatorWorkspace,
   saveCalculatorLocale,
@@ -49,20 +50,33 @@ describe('satCalculatorWorkspace', () => {
     expect(window.sessionStorage.getItem(other)).toBe('{}');
   });
 
-  it('stores the exam locale under its own key without touching the mode payload', () => {
+  it('freezes the exam locale: seeded storage is never read back', () => {
     const modeKey = calculatorWorkspaceKey('schedule-1', 'attempt-1', 'module-1');
     const localeKey = calculatorLocaleKey('schedule-1', 'attempt-1', 'module-1');
     expect(localeKey).not.toBe(modeKey);
     expect(loadCalculatorLocale(localeKey)).toBe(SAT_EXAM_LOCALE);
     expect(saveCalculatorWorkspace(modeKey, { activeMode: 'graphing' })).toBe(true);
     expect(saveCalculatorLocale(localeKey, 'en-US')).toBe(true);
-    expect(loadCalculatorLocale(localeKey)).toBe('en-US');
+    // The seeded value persists in storage but is never read back: the embed
+    // URL always carries the frozen locale (FR-06).
+    expect(window.sessionStorage.getItem(localeKey)).toBe(JSON.stringify({ locale: 'en-US' }));
+    expect(loadCalculatorLocale(localeKey)).toBe(SAT_EXAM_LOCALE);
     // Mode payload keeps its exact-string contract (separate keys).
     expect(window.sessionStorage.getItem(modeKey)).toBe(JSON.stringify({ activeMode: 'graphing' }));
     window.sessionStorage.setItem(localeKey, '{bad json');
     expect(loadCalculatorLocale(localeKey)).toBe(SAT_EXAM_LOCALE);
     clearCalculatorLocale(localeKey);
     expect(window.sessionStorage.getItem(localeKey)).toBeNull();
+  });
+
+  it('flags prewarm storage keys as read-only', () => {
+    const real = calculatorWorkspaceKey('schedule-1', 'attempt-1', 'module-1');
+    const prewarmWorkspace = calculatorWorkspaceKey('schedule-1', 'attempt-1', 'prewarm:math-m1');
+    const prewarmLocale = calculatorLocaleKey('schedule-1', 'attempt-1', 'prewarm:math-m1');
+    expect(isPrewarmKey(real)).toBe(false);
+    expect(isPrewarmKey(prewarmWorkspace)).toBe(true);
+    expect(isPrewarmKey(prewarmLocale)).toBe(true);
+    expect(isPrewarmKey('prewarm:math-m1')).toBe(true);
   });
 
   it('cleans every module locale when the attempt is finalized', () => {

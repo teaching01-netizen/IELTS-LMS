@@ -89,7 +89,8 @@ describe('resolveRoomScore', () => {
     const score = resolveRoomScore(session(), row());
     expect(score.kind).toBe('scored');
     expect(score.label).toBe('✓ 18/27 · 67%');
-    expect(score.srLabel).toBe('score 18 of 27, 67 percent');
+    expect(score.srLabel).toBe('score 18 of 27, 67 percent, conversion unavailable');
+    expect(score.scaled).toBeNull();
     expect(score.resultId).toBe('result-1');
     expect(score.hasSavedAnswers).toBe(true);
   });
@@ -212,7 +213,7 @@ describe('useRoomScores', () => {
 
     await waitFor(() => expect(screen.getByTestId('score-attempt-1')).toHaveTextContent('✓ 18/27 · 67%'));
     expect(screen.getByTestId('score-attempt-1')).toHaveAttribute('data-kind', 'scored');
-    expect(screen.getByTestId('score-attempt-1')).toHaveAttribute('data-srlabel', 'score 18 of 27, 67 percent');
+    expect(screen.getByTestId('score-attempt-1')).toHaveAttribute('data-srlabel', 'score 18 of 27, 67 percent, conversion unavailable');
     expect(screen.getByTestId('score-attempt-2')).toHaveTextContent('Scoring…');
     expect(screen.getByTestId('staleness')).toHaveTextContent('fresh');
   });
@@ -434,7 +435,7 @@ describe('room score rules (round-2 FE-2: T-01/05/07)', () => {
     expect(score.total).toBe(27);
     expect(score.pct).toBe(0);
     expect(score.label).toBe('✓ 0/27 · 0%');
-    expect(score.srLabel).toBe('score 0 of 27, 0 percent');
+    expect(score.srLabel).toBe('score 0 of 27, 0 percent, conversion unavailable');
   });
 
   it('T-05: terminated/locked with no outcome or counts reads Not scored (no-facts dash case)', () => {
@@ -488,5 +489,45 @@ describe('room score rules (round-2 FE-2: T-01/05/07)', () => {
     expect(score.kind).not.toBe('scored');
     expect(score.label).not.toContain('✓ 9/27');
     expect(score.correct).toBeNull();
+  });
+});
+
+describe('room score scaled conversion (hero)', () => {
+  it('passes row.estimatedPrimary through to scaled + srLabel (single and range)', () => {
+    const single = resolveRoomScore(session(), row({ estimatedPrimary: { low: 620, high: 620 } }));
+    expect(single.kind).toBe('scored');
+    expect(single.scaled).toEqual({ low: 620, high: 620 });
+    expect(single.srLabel).toBe('score 18 of 27, 67 percent, scaled 620');
+    // Line 2 stays raw-only; the hero owns the conversion.
+    expect(single.label).toBe('✓ 18/27 · 67%');
+
+    const range = resolveRoomScore(session(), row({ estimatedPrimary: { low: 600, high: 640 } }));
+    expect(range.scaled).toEqual({ low: 600, high: 640 });
+    expect(range.srLabel).toBe('score 18 of 27, 67 percent, scaled 600 to 640');
+  });
+
+  it('null estimate leaves scaled null with conversion-unavailable srLabel', () => {
+    const score = resolveRoomScore(session(), row());
+    expect(score.scaled).toBeNull();
+    expect(score.srLabel).toBe('score 18 of 27, 67 percent, conversion unavailable');
+  });
+
+  it('never computes scaled client-side and ignores estimatedTotal', () => {
+    const bare = resolveRoomScore(session(), row({ rawCorrect: 18, rawTotal: 27, estimatedPrimary: null }));
+    expect(bare.scaled).toBeNull();
+    // The list-level total estimate must not leak into the single-subject hero.
+    const withTotal = resolveRoomScore(session(), row({ estimatedTotal: { low: 1200, high: 1280 } }));
+    expect(withTotal.scaled).toBeNull();
+    expect(withTotal.srLabel).toBe('score 18 of 27, 67 percent, conversion unavailable');
+  });
+
+  it('isSameRoomScore detects scaled changes', () => {
+    const base = resolveRoomScore(session(), row({ estimatedPrimary: { low: 620, high: 620 } }));
+    const same = resolveRoomScore(session(), row({ estimatedPrimary: { low: 620, high: 620 } }));
+    expect(isSameRoomScore(base, same)).toBe(true);
+    const ranged = resolveRoomScore(session(), row({ estimatedPrimary: { low: 600, high: 640 } }));
+    expect(isSameRoomScore(base, ranged)).toBe(false);
+    const removed = resolveRoomScore(session(), row());
+    expect(isSameRoomScore(base, removed)).toBe(false);
   });
 });

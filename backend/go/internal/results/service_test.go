@@ -13,6 +13,8 @@ import (
 
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/satconvert"
+	"example.com/ielts-proctoring/internal/satscoring"
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
@@ -245,6 +247,159 @@ func TestListSATAttemptsDoesNotReturnStaleEstimateWhenActiveRevisionLookupFails(
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestListSATAttemptsEstimatedPrimaryMirrorsDetailPrimary(t *testing.T) {
+	section := func(key string) string { return `{"sectionKey":"` + key + `"}` }
+	tests := []struct {
+		name        string
+		raw         string
+		wantPrimary *SATEstimatedTotal
+		wantTotal   *SATEstimatedTotal
+	}{
+		{
+			name:        "single converted section reports its section range",
+			raw:         `{"rawCorrect":20,"total":27,"sections":[{"sectionKey":"math","scaled":{"low":520,"high":540}}]}`,
+			wantPrimary: &SATEstimatedTotal{Low: 520, High: 540},
+		},
+		{
+			name:        "full sat reports the total range",
+			raw:         `{"rawCorrect":42,"total":54,"sections":[` + section("reading-writing") + `,` + section("math") + `],"totalScaled":{"low":1300,"high":1320}}`,
+			wantPrimary: &SATEstimatedTotal{Low: 1300, High: 1320},
+			wantTotal:   &SATEstimatedTotal{Low: 1300, High: 1320},
+		},
+		{
+			name:        "single section ignores a stray totalScaled",
+			raw:         `{"rawCorrect":20,"total":27,"sections":[{"sectionKey":"math","scaled":{"low":520,"high":540}}],"totalScaled":{"low":1300,"high":1320}}`,
+			wantPrimary: &SATEstimatedTotal{Low: 520, High: 540},
+			wantTotal:   &SATEstimatedTotal{Low: 1300, High: 1320},
+		},
+		{
+			name: "unconverted reports no primary",
+			raw:  `{"rawCorrect":42,"total":54}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM student_attempts a")).
+				WithArgs("exam-1", "schedule-1").
+				WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored')")).
+				WithArgs("exam-1", "schedule-1", 50, 0).
+				WillReturnRows(sqlmock.NewRows([]string{
+					"result_id", "attempt_id", "attempt_status", "outcome_status", "release_status", "total_score", "classroom_raw", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at", "test_started_at",
+				}).AddRow("result-1", "attempt-1", "submitted", OutcomeScored, ReleaseReady, nil, tt.raw,
+					"schedule-1", "exam-1", "SAT", 20, "student-1", "Student 1", nil, "Cohort", nil,
+					time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), nil))
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT revision_id FROM sat_score_conversion_active WHERE id = 1")).
+				WillReturnRows(sqlmock.NewRows([]string{"revision_id"}))
+
+			page, err := NewService(db).ListSATAttempts(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1", 50, 0, "", "all", SATAttemptOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Items) != 1 {
+				t.Fatalf("expected one attempt row, got %#v", page.Items)
+			}
+			gotPrimary, gotTotal := page.Items[0].EstimatedPrimary, page.Items[0].EstimatedTotal
+			if (gotPrimary == nil) != (tt.wantPrimary == nil) || (gotPrimary != nil && *gotPrimary != *tt.wantPrimary) {
+				t.Fatalf("estimatedPrimary = %#v, want %#v", gotPrimary, tt.wantPrimary)
+			}
+			if (gotTotal == nil) != (tt.wantTotal == nil) || (gotTotal != nil && *gotTotal != *tt.wantTotal) {
+				t.Fatalf("estimatedTotal = %#v, want %#v", gotTotal, tt.wantTotal)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestListSATAttemptsEstimatedPrimaryNilledWhenActiveRevisionLookupFails(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT COUNT(*) FROM student_attempts a")).
+		WithArgs("exam-1", "schedule-1").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT ar.id, a.id, a.delivery_status, COALESCE(ar.outcome_status, 'unscored')")).
+		WithArgs("exam-1", "schedule-1", 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"result_id", "attempt_id", "attempt_status", "outcome_status", "release_status", "total_score", "classroom_raw", "schedule_id", "exam_id", "exam_title", "version_number", "student_id", "student_name", "student_email", "cohort_name", "submitted_at", "created_at", "test_started_at",
+		}).AddRow("result-1", "attempt-1", "submitted", OutcomeScored, ReleaseReady, nil,
+			`{"rawCorrect":20,"total":27,"sections":[{"sectionKey":"math","scaled":{"low":520,"high":540}}],"totalScaled":{"low":1300,"high":1320}}`,
+			"schedule-1", "exam-1", "SAT", 20, "student-1", "Student 1", nil, "Cohort", nil,
+			time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), nil))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT revision_id FROM sat_score_conversion_active WHERE id = 1")).
+		WillReturnError(errors.New("active policy lookup failed"))
+
+	page, err := NewService(db).ListSATAttempts(context.Background(), auth.NewActorContext("observer-1", auth.RoleAdminObserver), "exam-1", "schedule-1", 50, 0, "", "all", SATAttemptOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].RawCorrect == nil || page.Items[0].RawTotal == nil {
+		t.Fatalf("raw classroom score should remain available, got %#v", page.Items)
+	}
+	if page.Items[0].EstimatedPrimary != nil {
+		t.Fatalf("must not show a stale primary after active policy lookup failure, got %#v", page.Items[0].EstimatedPrimary)
+	}
+	if page.Items[0].EstimatedTotal != nil {
+		t.Fatalf("must not show a stale total after active policy lookup failure, got %#v", page.Items[0].EstimatedTotal)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestEstimatedPrimaryReadsActiveRevisionStructForm covers the re-apply path:
+// ApplyRevision writes satconvert.Score structs (not JSON maps) into the raw,
+// and the primary must still resolve from them.
+func TestEstimatedPrimaryReadsActiveRevisionStructForm(t *testing.T) {
+	cells := func(v int) [][]*int { return [][]*int{{&v, &v}, {&v, &v}} }
+	five, six := 500, 600
+	rev := &satscoring.Revision{Content: &satconvert.Content{Sections: map[string]*satconvert.SectionPolicy{
+		satconvert.SectionMath: {
+			Tables: map[string]*satconvert.PolicyTable{"t": {Kind: satconvert.KindMatrix, M1Operational: 1, M2Operational: 1, Cells: cells(five)}},
+			Assign: map[string][]string{string(satconvert.FullHigher): {"t"}},
+		},
+		satconvert.SectionReadingWriting: {
+			Tables: map[string]*satconvert.PolicyTable{"t": {Kind: satconvert.KindMatrix, M1Operational: 1, M2Operational: 1, Cells: cells(six)}},
+			Assign: map[string][]string{string(satconvert.FullLower): {"t"}},
+		},
+	}}}
+	mods := func(m1, m2 string) []any {
+		return []any{
+			map[string]any{"moduleKey": m1, "rawCorrect": float64(1), "total": float64(1)},
+			map[string]any{"moduleKey": m2, "rawCorrect": float64(1), "total": float64(1)},
+		}
+	}
+	mathOnly := map[string]any{
+		"rawCorrect": json.Number("2"), "total": json.Number("2"),
+		"sections": []any{map[string]any{"sectionKey": satconvert.SectionMath, "modules": mods("math-m1", "math-m2-higher")}},
+	}
+	satscoring.ApplyRevision(rev, mathOnly)
+	if got := estimatedPrimary(mathOnly); got == nil || *got != (SATEstimatedTotal{Low: 500, High: 500}) {
+		t.Fatalf("single converted section via active revision = %#v, want {500 500}", got)
+	}
+
+	full := map[string]any{
+		"rawCorrect": json.Number("4"), "total": json.Number("4"),
+		"sections": []any{
+			map[string]any{"sectionKey": satconvert.SectionReadingWriting, "modules": mods("rw-m1", "rw-m2-lower")},
+			map[string]any{"sectionKey": satconvert.SectionMath, "modules": mods("math-m1", "math-m2-higher")},
+		},
+	}
+	satscoring.ApplyRevision(rev, full)
+	if got := estimatedPrimary(full); got == nil || *got != (SATEstimatedTotal{Low: 1100, High: 1100}) {
+		t.Fatalf("full SAT via active revision = %#v, want {1100 1100}", got)
 	}
 }
 

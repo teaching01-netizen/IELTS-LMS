@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,15 @@ const DefaultEntryTimeout = 1500 * time.Millisecond
 const DefaultSATCloseTimeout = 5 * time.Second
 
 func writeEntryError(w http.ResponseWriter, r *http.Request, err error) {
+	writeEntryErrorWithQueue(w, r, err, -1)
+}
+
+// writeEntryErrorWithQueue is writeEntryError with an additive queue
+// position on the retryable 503 envelope (plan 2026-11-04 §4 Track B:
+// visible queue). queueDepth >= 0 adds details.queueDepth plus an
+// X-Queue-Depth header; queueDepth < 0 (queue unknown — the common case
+// for budget-exhaustion 503s) renders byte-identical output.
+func writeEntryErrorWithQueue(w http.ResponseWriter, r *http.Request, err error, queueDepth int) {
 	if r != nil && r.Context().Err() != nil {
 		// database/sql can return ErrTxDone after the request deadline has
 		// already rolled back its transaction; retain the retryable cause.
@@ -49,7 +59,12 @@ func writeEntryError(w http.ResponseWriter, r *http.Request, err error) {
 	mapped := MapDBError(err)
 	if appErr, ok := apperrors.As(mapped); ok && appErr.Code == apperrors.CodeServiceUnavailable {
 		w.Header().Set("Retry-After", "1")
-		appErr.Details = map[string]any{"retryAfterSeconds": 1}
+		details := map[string]any{"retryAfterSeconds": 1}
+		if queueDepth >= 0 {
+			details["queueDepth"] = queueDepth
+			w.Header().Set("X-Queue-Depth", strconv.Itoa(queueDepth))
+		}
+		appErr.Details = details
 	}
 	httpx.WriteError(w, r, mapped)
 }

@@ -1418,49 +1418,16 @@ export function useStudentSelectionGesture(
   );
 
   /**
-   * iOS-specific event-level defense, scoped to owned SAT prose only.
+   * No `touchstart` prevention here by design.
    *
-   * Pointer Events alone do not stop Safari's long-press selection recognizer;
-   * `touchstart` with `preventDefault()` does, but only when it runs in capture
-   * on the armed root and only for touches that begin on real selectable prose.
-   * Never on `document`, never for scrolling candidates outside
-   * `[data-content-text-node]`, never inside excluded/editable UI.
-   *
-   * IELTS highlightable surfaces are deliberately NOT covered: the whole
-   * surface is prose, so preventing every touchstart would also kill the
-   * vertical pane scroll students rely on (pinned by e2e). Their callout is
-   * already suppressed by CSS (`-webkit-touch-callout: none` on highlightable
-   * roots), and with `user-select: none` under ownership there is no native
-   * selection for the recognizer to decorate — so a pointercancel there ends an
-   * unclaimed gesture rather than raising a menu. Revisit only with iPad
-   * evidence of pointercancel killing claimed IELTS drags.
+   * A `touchstart` `preventDefault()` on prose cancels the browser's scroll
+   * before direction is known, so a vertical pane swipe starting on text could
+   * never scroll while highlight was armed (SAT P0). Native callout/menu is
+   * already suppressed by `user-select: none` under ownership plus the
+   * `selectstart`/`selectionchange` guards, the same contract IELTS relies on.
+   * Scroll is suppressed only after the gesture claims text (`suppress-scroll`
+   * on `touchmove`), never on contact.
    */
-  const preventNativeOwnedSelection = useCallback(
-    (event: Event) => {
-      const root = rootRef.current;
-      if (
-        !root ||
-        !isSatSelectionRoot(root) ||
-        root.getAttribute("data-student-selection-owner") !== "app"
-      )
-        return;
-      if (!live.current.enabled || live.current.activation !== "drag") return;
-      if (!(event.target instanceof Node) || !root.contains(event.target)) return;
-      if (live.current.isExcludedTarget(event.target)) return;
-      const element = event.target instanceof Element ? event.target : event.target.parentElement;
-      // Saved SAT marks remain selectable prose, but they are also tap targets:
-      // cancelling touchstart here suppresses the browser's click synthesis, so
-      // a student's tap cannot open the mark's editor while a selection rests.
-      if (element?.closest('[data-sat-annotation-control="true"]')) return;
-      if (!element?.closest("[data-content-text-node]")) return;
-      if (event.cancelable) event.preventDefault();
-      live.current.diagnostics?.record("touchstart-suppressed", {
-        ownerMarkerPresent: true,
-        defaultPrevented: event.defaultPrevented,
-      });
-    },
-    [rootRef]
-  );
 
   /* ------------------------------------------------------------------ *
    * Wiring.
@@ -1486,10 +1453,6 @@ export function useStudentSelectionGesture(
     root?.addEventListener("pointerdown", handleDown);
     document.addEventListener("pointerdown", onDocumentPointerDown, true);
     root?.addEventListener("selectstart", onSatSelectStart, true);
-    root?.addEventListener("touchstart", preventNativeOwnedSelection, {
-      capture: true,
-      passive: false,
-    });
     document.addEventListener("selectionchange", onSatSelectionChange);
     document.addEventListener("keydown", onKeyboardSelectionStart, true);
 
@@ -1500,7 +1463,6 @@ export function useStudentSelectionGesture(
       root?.removeEventListener("pointerdown", handleDown);
       document.removeEventListener("pointerdown", onDocumentPointerDown, true);
       root?.removeEventListener("selectstart", onSatSelectStart, true);
-      root?.removeEventListener("touchstart", preventNativeOwnedSelection, { capture: true });
       document.removeEventListener("selectionchange", onSatSelectionChange);
       document.removeEventListener("keydown", onKeyboardSelectionStart, true);
       detachAll();
@@ -1514,7 +1476,6 @@ export function useStudentSelectionGesture(
     onKeyboardSelectionStart,
     onSatSelectStart,
     onSatSelectionChange,
-    preventNativeOwnedSelection,
     rootRef,
   ]);
 

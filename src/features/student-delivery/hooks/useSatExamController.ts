@@ -39,6 +39,7 @@ import {
 } from "../infrastructure/satDeliveryGateway";
 import {
   calculatorWorkspaceKey,
+  clearCalculatorLocaleForAttempt,
   clearCalculatorWorkspace,
   clearCalculatorWorkspacesForAttempt,
 } from "../infrastructure/satCalculatorWorkspace";
@@ -1135,7 +1136,7 @@ export function useSatExamController({
   /**
    * Everything this attempt kept on THIS device, released when the attempt
    * ends: reading preferences (which carry its automatic zoom decision and the
-   * display choices that go with them), cached calculator workspaces, the
+   * display choices that go with them), cached calculator workspaces/locales, the
    * eliminator switch, and the Notes column's open pane.
    *
    * One helper, because the end of an attempt arrives down more than one path
@@ -1145,6 +1146,7 @@ export function useSatExamController({
    */
   const clearAttemptClientState = useCallback(() => {
     clearCalculatorWorkspacesForAttempt(scheduleId, attemptId);
+    clearCalculatorLocaleForAttempt(scheduleId, attemptId);
     clearSatReadingPreferences(scheduleId, attemptId);
     clearSatEliminatorMode(scheduleId, attemptId);
     clearSatNotesColumn(scheduleId, attemptId);
@@ -2347,6 +2349,17 @@ export function useSatExamController({
   const blocked = Boolean(
     data && (data.proctorStatus === "paused" || data.scheduleRuntimeStatus === "paused")
   );
+  // Block-entry (INV-005/CONC-03): a pause must never reveal an open tool on
+  // unpause — close every floating tool the moment the block lands. The
+  // command-layer toggle guard below refuses re-opens while blocked, so the
+  // TOCTOU between a toggle dispatch and the pause commit cannot strand an
+  // operable calculator behind the overlay.
+  const wasBlockedRef = useRef(blocked);
+  useEffect(() => {
+    const was = wasBlockedRef.current;
+    wasBlockedRef.current = blocked;
+    if (blocked && !was) dispatch({ type: "closeAllTools" });
+  }, [blocked]);
   const warning = data?.proctorStatus === "warned" ? data.proctorNote : null;
   // Set only after confirmed completion; failed completion cannot claim that
   // answers were recorded. Cleared on identity change.
@@ -2447,8 +2460,50 @@ export function useSatExamController({
         dispatch({ type: "returnToModule" });
       },
       showDirections: () => dispatch({ type: "showDirections" }),
-      toggleCalculator: () => dispatch({ type: "toggleTool", tool: "calculator" }),
-      toggleReference: () => dispatch({ type: "toggleTool", tool: "reference_sheet" }),
+      // Command-layer blocked-guard (INV-005): mirrors the unblocked arm of
+      // satInteractionGuards.openCalculator/openReference. A toggle raced
+      // with a proctor pause is refused (never queued behind the overlay)
+      // and beaconed, so activeTools cannot flip open while blocked.
+      toggleCalculator: () => {
+        if (
+          blocked ||
+          isSubmitting ||
+          persistence.failureKind === "superseded" ||
+          persistence.failureKind === "terminal" ||
+          persistence.failureKind === "expired"
+        ) {
+          emitStudentObservabilityMetric("sat_tool_toggle_blocked", {
+            scheduleId,
+            attemptId,
+            tool: "calculator",
+            blocked,
+            isSubmitting,
+            failureKind: persistence.failureKind,
+          });
+          return;
+        }
+        dispatch({ type: "toggleTool", tool: "calculator" });
+      },
+      toggleReference: () => {
+        if (
+          blocked ||
+          isSubmitting ||
+          persistence.failureKind === "superseded" ||
+          persistence.failureKind === "terminal" ||
+          persistence.failureKind === "expired"
+        ) {
+          emitStudentObservabilityMetric("sat_tool_toggle_blocked", {
+            scheduleId,
+            attemptId,
+            tool: "reference_sheet",
+            blocked,
+            isSubmitting,
+            failureKind: persistence.failureKind,
+          });
+          return;
+        }
+        dispatch({ type: "toggleTool", tool: "reference_sheet" });
+      },
       closeTool: (tool: SatToolId) => dispatch({ type: "closeTool", tool }),
       closeAllTools: () => dispatch({ type: "closeAllTools" }),
     },

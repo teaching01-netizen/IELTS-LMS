@@ -1,10 +1,32 @@
 import { practiceEntrySession } from './practice-entry.js';
 import http from 'k6/http';
 import { check, fail, sleep } from 'k6';
-import { Trend } from 'k6/metrics';
+import { Counter, Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
 import { randomBytes } from 'k6/crypto';
 import { satAttemptUrl, satBatchRequest, assertSatAcknowledgements, assertSatStoredResponses } from './sat-response-contract.js';
+
+// Bell-burst rehearsal profile (plan 2026-11-04 Track B/B4, FR-03 gate).
+//
+// K6_BELL_BURST=true swaps the steady scenarios below for a synchronized
+// bell-burst arrival against ONE isolated staging schedule: every VU
+// releases at t=0 and K6_STUDENT_JITTER_MAX_SECONDS spreads the entry wave
+// inside the 60s bell window (set it to 60 for the gate run). Size the
+// target file to the burst (500 smoke, 2000 for the FR-03 gate) and never
+// point K6_SCHEDULE_ID at a live schedule.
+//
+// Bell thresholds are the FR-03 exam-day gates (bootstrap p99<5s,
+// response-ack p95<2s, handoff p99<5s, submit p99<30s, unexpected-status
+// rate<2%): identical values to the steady profile, asserted here against
+// the burst. Bounded 429 with retry guidance is admission shed, not
+// failure; sat_entry_shed_retries counts shed waits so the rehearsal log
+// can report the shed rate alongside the pool/outbox signals.
+//
+// The default (non-burst) scenarios and thresholds are untouched.
+const bellBurst = __ENV.K6_BELL_BURST === 'true';
+if (bellBurst) {
+  console.log(`[sat-bell-burst] schedule=${__ENV.K6_SCHEDULE_ID || '(target file)'} jitter=${__ENV.K6_STUDENT_JITTER_MAX_SECONDS || '30'}s queue=${__ENV.K6_ENTRY_QUEUE_MAX_SECONDS || '600'}s`);
+}
 
 // SAT exam-day distributed scenario (plan docs/sat-exam-day-10000-test-plan.md).
 //
@@ -133,6 +155,20 @@ if (students.length !== studentCount) {
   throw new Error(`Not enough students in target file for K6_STUDENTS=${studentCount} at offset=${studentOffset}`);
 }
 
+// Strict bell-gate profile (Track C E2E-C, FR-03): K6_BELL_GATE=true fails
+// fast unless the run matches the 2000 VU/60s/single-schedule shape — 60s
+// jitter window, queue budget covering the window, one schedule — and logs
+// the gate line for the rehearsal record. Off by default.
+if (bellBurst && __ENV.K6_BELL_GATE === 'true') {
+  if ((__ENV.K6_STUDENT_JITTER_MAX_SECONDS || '30') !== '60') {
+    throw new Error('K6_BELL_GATE requires K6_STUDENT_JITTER_MAX_SECONDS=60 (single 60s bell window).');
+  }
+  if (clampInt(__ENV.K6_ENTRY_QUEUE_MAX_SECONDS || '600', 0, 3600) < 60) {
+    throw new Error('K6_BELL_GATE requires K6_ENTRY_QUEUE_MAX_SECONDS>=60 so shed waits fit the window.');
+  }
+  console.log(`[sat-bell-gate] vus=${studentCount} window=60s schedule=${scheduleId} probe=${__ENV.K6_DESMOS_PROBE === 'true'} thresholds=FR-03`);
+}
+
 // Per-plan latency signals (release gates, §5). k6 thresholds below are the
 // normal-online budgets; queue wait is excluded via retry accounting.
 const tEntry = new Trend('sat_entry_ms');
@@ -141,36 +177,183 @@ const tModuleStart = new Trend('sat_module_start_ms');
 const tResponseAck = new Trend('sat_response_ack_ms');
 const tHandoff = new Trend('sat_handoff_ms');
 const tSubmit = new Trend('sat_submit_ms');
+// Shed accounting (Track B/B4): bounded 429 waits at entry are admission
+// shed, not failure. A Counter (no threshold) so the rehearsal log reports
+// the shed rate without moving the FR-03 gates.
+const shedRetries = new Counter('sat_entry_shed_retries');
+// Queue-position envelope (Track B B2 / Track C E2E-C): every entry 429 is
+// classified into sat_entry_queue_positioned (body carried
+// retryAfterSeconds) and sat_entry_queue_depth_seen (body carried
+// queueDepth) — report-only counters, never thresholds, so the FR-03 gates
+// below cannot move.
+const queuePositioned = new Counter('sat_entry_queue_positioned');
+const queueDepthSeen = new Counter('sat_entry_queue_depth_seen');
+// Beacon contract probe (Track C E2E-C): shed beacons are counted as
+// dropped, never retried (no retry storm). Report-only; the desmos
+// ready-rate gate itself is asserted from the backend series
+// (sat desmos outcome log/counters) + the Playwright beacon capture,
+// because protocol-level k6 VUs never mount the Desmos embed.
+const desmosBeaconDropped = new Counter('sat_desmos_beacon_dropped');
+const tDesmosBeacon = new Trend('sat_desmos_beacon_ms');
 
-export const options = {
-  scenarios: {
-    control: {
-      executor: 'shared-iterations',
-      vus: 1,
-      iterations: 1,
-      exec: 'controlFlow',
-      maxDuration: '30m',
-    },
-    students: {
-      executor: 'per-vu-iterations',
-      vus: studentCount,
-      iterations: 1,
-      exec: 'studentFlow',
-      maxDuration: '6h',
-      startTime: '1s',
-    },
-  },
-  thresholds: {
-    checks: ['rate==1'],
-    // Bounded 429 with retry guidance is admission shed, not failure; only
-    // unexpected statuses fail. Tail budgets per plan §5 (online requests).
-    http_req_failed: ['rate<0.02'],
-    sat_response_ack_ms: ['p(95)<2000', 'p(99)<5000'],
-    sat_bootstrap_ms: ['p(99)<5000'],
-    sat_handoff_ms: ['p(99)<5000'],
-    sat_submit_ms: ['p(99)<30000'],
-  },
+// FR-03 exam-day gates, shared verbatim by the steady and bell-burst
+// profiles: bootstrap p99<5s, ack p95<2s (p99<5s tail), handoff p99<5s,
+// submit p99<30s, unexpected-status rate<2%. One literal, two profiles —
+// a gate change lands in both runs by construction.
+const fr03Thresholds = {
+  checks: ['rate==1'],
+  // Bounded 429 with retry guidance is admission shed, not failure; only
+  // unexpected statuses fail. Tail budgets per plan §5 (online requests).
+  http_req_failed: ['rate<0.02'],
+  sat_response_ack_ms: ['p(95)<2000', 'p(99)<5000'],
+  sat_bootstrap_ms: ['p(99)<5000'],
+  sat_handoff_ms: ['p(99)<5000'],
+  sat_submit_ms: ['p(99)<30000'],
 };
+
+const controlScenario = {
+  executor: 'shared-iterations',
+  vus: 1,
+  iterations: 1,
+  exec: 'controlFlow',
+  maxDuration: '30m',
+};
+
+const steadyStudentsScenario = {
+  executor: 'per-vu-iterations',
+  vus: studentCount,
+  iterations: 1,
+  exec: 'studentFlow',
+  maxDuration: '6h',
+  startTime: '1s',
+};
+
+// Bell-burst arrival (Track B/B4): every VU releases at t=0 against one
+// schedule; the entry-wave spread comes from K6_STUDENT_JITTER_MAX_SECONDS
+// inside studentFlow (set 60 for the 60s gate window). per-vu-iterations
+// keeps the journey exactly-once per VU, identical to the steady run.
+const burstStudentsScenario = Object.assign({}, steadyStudentsScenario, { startTime: '0s' });
+
+export const options = bellBurst ? {
+  scenarios: {
+    control: controlScenario,
+    burst: burstStudentsScenario,
+  },
+  thresholds: fr03Thresholds,
+} : {
+  scenarios: {
+    control: controlScenario,
+    students: steadyStudentsScenario,
+  },
+  thresholds: fr03Thresholds,
+};
+
+// Beacon contract probe (Track C E2E-C, K6_DESMOS_PROBE=true only): a 1-VU
+// sidecar that never joins the journey. Standalone use against isolated
+// staging (K6_STUDENTS=1 + a spare K6_STUDENT_OFFSET row) — it mints its own
+// entry/bootstrap, so running it inside a full journey run would collide
+// with that row's journey VU under the single-writer policy.
+if (__ENV.K6_DESMOS_PROBE === 'true') {
+  options.scenarios.probe = {
+    executor: 'shared-iterations',
+    vus: 1,
+    iterations: 1,
+    exec: 'desmosProbeFlow',
+    maxDuration: '5m',
+  };
+}
+
+function mintProbeBearer() {
+  const student = students[0];
+  const jar = http.cookieJar();
+  const clientSessionId = uuidV4();
+  const entryResp = http.post(
+    `${baseUrl}/api/v1/auth/student/entry`,
+    JSON.stringify({ scheduleId, wcode: student.wcode, email: student.email, studentName: student.fullName, clientSessionId, entrySession: practiceEntrySession(scheduleId, student) }),
+    { jar, headers: jsonHeaders(), responseCallback: http.expectedStatuses({ min: 200, max: 200 }, 429) },
+  );
+  check(entryResp, { 'sat probe entry 200': (r) => r.status === 200 })
+    || fail(`Desmos probe entry failed (${student.wcode}): status=${entryResp.status} body=${String(entryResp.body).slice(0, 200)}`);
+  const bootResp = http.post(
+    `${baseUrl}/api/v1/student/sessions/${scheduleId}/bootstrap`,
+    JSON.stringify({
+      candidateId: student.wcode,
+      candidateName: student.fullName,
+      candidateEmail: student.email,
+      clientSessionId,
+    }),
+    { jar, headers: jsonHeaders(csrfHeader(jar, baseUrl)) },
+  );
+  check(bootResp, { 'sat probe bootstrap 200': (r) => r.status === 200 })
+    || fail(`Desmos probe bootstrap failed (${student.wcode}): status=${bootResp.status}`);
+  let ctx = null;
+  try {
+    ctx = bootResp.json();
+  } catch (e) {
+    fail(`Desmos probe bootstrap unparseable: ${String(e)}`);
+  }
+  const data = (ctx && (ctx.data || ctx)) || {};
+  const attemptId = (data.attempt && data.attempt.id) || '';
+  const attemptToken = (data.attemptCredential && data.attemptCredential.attemptToken) || '';
+  if (!attemptId || !attemptToken) fail('Desmos probe missing attempt credential.');
+  return { attemptId, attemptToken };
+}
+
+export function desmosProbeFlow() {
+  const { attemptId, attemptToken } = mintProbeBearer();
+  const authHeaders = jsonHeaders({ authorization: `Bearer ${attemptToken}` });
+  const validBeacon = JSON.stringify({
+    scheduleId,
+    attemptId,
+    moduleAttemptId: 'k6-probe-module',
+    mode: 'scientific',
+    outcome: 'ready',
+    durationMs: 1200,
+    buildSHA: `k6-probe-${runId}`,
+  });
+
+  // 1. Malformed body (unknown outcome) must fail closed as 400 — the
+  // contract stays pinned, no series polluted, no retry.
+  const t0 = Date.now();
+  const badResp = http.post(
+    `${baseUrl}/api/v1/sat/desmos-outcome`,
+    validBeacon.replace('"ready"', '"frozen"'),
+    { headers: authHeaders },
+  );
+  tDesmosBeacon.add(Date.now() - t0);
+  check(badResp, { 'sat desmos beacon rejects unknown outcome (400)': (r) => r.status === 400 });
+
+  // 2. Forged bearer must fail closed as 401 without touching the series.
+  const forgedResp = http.post(
+    `${baseUrl}/api/v1/sat/desmos-outcome`,
+    validBeacon,
+    { headers: jsonHeaders({ authorization: 'Bearer k6-probe-forged' }) },
+  );
+  check(forgedResp, { 'sat desmos beacon rejects forged bearer (401)': (r) => r.status === 401 });
+
+  // 3. Valid beacon: 200 records one buildSHA-labelled sample on isolated
+  // staging; 429 shed is counted as dropped and never retried (client rule:
+  // a beacon must never amplify a burst). Anything else fails the gate.
+  const t1 = Date.now();
+  const goodResp = http.post(
+    `${baseUrl}/api/v1/sat/desmos-outcome`,
+    validBeacon,
+    { headers: authHeaders },
+  );
+  tDesmosBeacon.add(Date.now() - t1);
+  if (goodResp.status === 200) {
+    check(goodResp, { 'sat desmos beacon accepted (200)': (r) => r.status === 200 });
+  } else if (goodResp.status === 429) {
+    desmosBeaconDropped.add(1);
+    check(goodResp, {
+      'sat desmos beacon shed is bounded (429 + Retry-After)': (r) =>
+        Number(r.headers['Retry-After'] || r.headers['retry-after']) >= 1,
+    });
+  } else {
+    fail(`Desmos probe beacon unexpected status=${goodResp.status} body=${String(goodResp.body).slice(0, 200)}`);
+  }
+  console.log(`[sat-desmos-probe] run=${runId} attempt=${attemptId} status=${goodResp.status}`);
+}
 
 function staffLogin(jar) {
   const preferEditor = __ENV.K6_USE_EDITOR_AS_PROCTOR !== 'false';
@@ -473,7 +656,20 @@ export function studentFlow() {
   const qStart = Date.now();
   while (entryResp.status === 429 && (Date.now() - qStart) / 1000 < queueBudget) {
     const retryAfter = boundedRetryAfterSeconds(entryResp);
+    // Track C E2E-C: classify the Track B queue-position envelope on every
+    // shed response (report-only; see the counters above).
+    try {
+      const denied = entryResp.json();
+      const details = (denied && (denied.details || (denied.error && denied.error.details))) || {};
+      if (Number(details.retryAfterSeconds) >= 1) queuePositioned.add(1);
+      if (Number(details.queueDepth) >= 0) queueDepthSeen.add(1);
+    } catch (_) {}
     if (retryAfter <= 0) break;
+    // Track B/B4 shed accounting: every honored Retry-After wait is one
+    // shed event for the rehearsal log (FR-03 reports shed rate, not just
+    // tail latency). queueDepth rides the same envelope when the limiter
+    // knows its queue; Retry-After remains the authoritative wait.
+    shedRetries.add(1);
     sleep(retryAfter);
     entryResp = http.post(
       `${baseUrl}/api/v1/auth/student/entry`,

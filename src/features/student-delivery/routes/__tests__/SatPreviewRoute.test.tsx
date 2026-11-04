@@ -227,9 +227,12 @@ describe("SatPreviewRoute", () => {
     render(<MemoryRouter><SatPreviewRoute examId="exam-1" /></MemoryRouter>);
     await screen.findByText("Preview question");
     fireEvent.click(screen.getByRole("button", { name: "Preview break" }));
-    const scientific = await screen.findByTitle("Desmos scientific calculator, College Board testing version");
-    const graphing = screen.getByTitle("Desmos graphing calculator, College Board testing version");
-    expect(scientific).toHaveAttribute("inert");
+    const graphing = await screen.findByTitle("Desmos graphing calculator, College Board testing version");
+    expect(screen.queryByTitle("Desmos scientific calculator, College Board testing version")).toBeNull();
+    expect(graphing).toHaveAttribute("inert");
+    // Explicit intent mounts the deferred second mode immediately.
+    fireEvent.focus(graphing);
+    const scientific = screen.getByTitle("Desmos scientific calculator, College Board testing version");
     fireEvent.load(scientific); fireEvent.load(graphing);
     fireEvent.change(screen.getByLabelText("Preview section"), { target: { value: "math" } });
     await screen.findByText("Math preview question");

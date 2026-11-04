@@ -345,6 +345,17 @@ func SetShedExam(on bool) {
 }
 
 func denyTierRateLimit(w http.ResponseWriter, r *http.Request, tier, keyClass string, retryAfter time.Duration) {
+	denyTierRateLimitWithQueue(w, r, tier, keyClass, retryAfter, -1)
+}
+
+// denyTierRateLimitWithQueue renders the stable 429 envelope with an
+// optional additive queue position (plan 2026-11-04 §4 Track B: visible
+// queue). Counters, the shed slice, and the deny log line behave exactly
+// as denyTierRateLimit; queueDepth >= 0 additionally flows into the
+// envelope body (details.queueDepth), the X-Queue-Depth header, and the
+// log line. queueDepth < 0 (unknown queue) renders byte-identical output
+// to denyTierRateLimit.
+func denyTierRateLimitWithQueue(w http.ResponseWriter, r *http.Request, tier, keyClass string, retryAfter time.Duration, queueDepth int) {
 	secs := int(retryAfter.Seconds())
 	if secs < 1 {
 		secs = 1
@@ -360,7 +371,12 @@ func denyTierRateLimit(w http.ResponseWriter, r *http.Request, tier, keyClass st
 			route = route[:64]
 		}
 	}
-	log.Printf(`{"level":"warn","msg":"rate limit denied","tier":%q,"key_class":%q,"route":%q,"method":%q,"retry_after":%d}`,
-		tier, keyClass, route, r.Method, secs)
-	denyRateLimitWithTier(w, r, tier, retryAfter)
+	if queueDepth >= 0 {
+		log.Printf(`{"level":"warn","msg":"rate limit denied","tier":%q,"key_class":%q,"route":%q,"method":%q,"retry_after":%d,"queue_depth":%d}`,
+			tier, keyClass, route, r.Method, secs, queueDepth)
+	} else {
+		log.Printf(`{"level":"warn","msg":"rate limit denied","tier":%q,"key_class":%q,"route":%q,"method":%q,"retry_after":%d}`,
+			tier, keyClass, route, r.Method, secs)
+	}
+	denyRateLimitWithQueueTier(w, r, tier, retryAfter, queueDepth)
 }

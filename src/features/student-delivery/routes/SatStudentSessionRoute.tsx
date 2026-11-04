@@ -41,6 +41,7 @@ import {
 import { answeredSatQuestionCount, buildSatQuestionNavigationItems } from "../domain/satSelectors";
 import { formatSatTime } from "../domain/satTiming";
 import { resolveSatExamToolPolicy, toSatSectionKey } from "../domain/satToolPolicy";
+import { selectCalculatorAvailable } from "../domain/satCalculatorAvailability";
 import { ensureDesmosPreconnect } from "../infrastructure/desmos/desmosPreconnect";
 import { SatExamShell } from "../ui/SatExamShell";
 import { SatQuestionRenderer } from "../ui/question/SatQuestionRenderer";
@@ -309,37 +310,39 @@ export function SatStudentSessionRoute({
    * card beside the frozen exam frame) — position 0 is the stage's own surface in
    * every case, which is what keeps the exam frame mounted across a handoff.
    */
-  const currentCalculatorModule =
-    (state.phase === "module" || state.phase === "review") &&
-    state.toolCapabilities.calculator &&
-    exam.stateModule
-      ? exam.stateModule
-      : null;
-  // Same section gate as the live module: Desmos is Math-only, and an
-  // unresolved section reads as Reading and Writing, so it never prewarms one.
+  // Desmos is Math-only and module-policy-gated (INV-001): one selector
+  // owns the live + pending decision (domain/satCalculatorAvailability).
+  // Same section gate as the live module: an unresolved section reads as
+  // Reading and Writing, so it never prewarms one.
   const pendingSectionKey = toSatSectionKey(
     data && exam.pendingModule ? sectionForModule(data, exam.pendingModule.id)?.sectionKey : undefined,
   );
-  const pendingCalculatorModule =
-    exam.pendingModule &&
-    resolveSatExamToolPolicy(pendingSectionKey, exam.pendingModule.toolPolicy).calculator
-      ? exam.pendingModule
-      : null;
+  const calculatorModule = selectCalculatorAvailable({
+    phase: state.phase,
+    calculatorCapable:
+      (state.phase === "module" || state.phase === "review") &&
+      state.toolCapabilities.calculator,
+    stateModule: exam.stateModule,
+    pendingModule: exam.pendingModule,
+    pendingSectionKey,
+  });
 
-  // Warm the live or upcoming Math module, including preparation and breaks.
-  const prewarmEligibleModule =
-    state.phase === "module" || state.phase === "review"
-      ? currentCalculatorModule
-      : (state.phase === "directions" || state.phase === "break")
-        ? pendingCalculatorModule
-        : null;
+  // Warm the live or upcoming Math module. The section-entry form phase stays
+  // bare (no host — preconnect alone warms): a form student must never mount
+  // a hidden Desmos document (INV-002 form boundary, C14).
+  const prewarmEligibleModule = calculatorModule;
 
   const prewarmAttempt = data && prewarmEligibleModule
     ? findAttemptForModule(data, prewarmEligibleModule.id)
     : undefined;
   // A pending module may not have its server attempt yet; retain its iframe host.
+  // Host identity is preserved (the inner panel key stays
+  // schedule:attempt:moduleId) — only the attempt id shown here swaps from
+  // the synthetic prewarm: id to the real module attempt id.
   const calculatorModuleAttemptId =
-    currentCalculatorModule && exam.stateModuleAttempt
+    (state.phase === "module" || state.phase === "review") &&
+    prewarmEligibleModule &&
+    exam.stateModuleAttempt
       ? exam.stateModuleAttempt.id
       : (prewarmAttempt?.id ??
         ((state.phase === "directions" || state.phase === "break") && prewarmEligibleModule
@@ -849,12 +852,21 @@ export function SatStudentSessionRoute({
       return stageHost(examStage, refreshFallback);
     }
     if (examStage.content === "skew-hold") {
+      // Hold safety (BUG-006/CONC-03): the held frame is a cached render —
+      // its props (including the calculator host's disabled flag) are frozen
+      // at record time. Re-resolve disabledness at hold-render time instead:
+      // the held tree is always inert while held, and when the exam is
+      // currently blocked the hold pins data-sat-skew-hold-disabled so no
+      // stale calculator interaction survives a pause that landed mid-skew
+      // (INV-005 TOCTOU closed).
       return stageHost(examStage, [
         <SatPresenceSurface
           key="sat-exam-frame"
           className="sat-ui min-h-[100dvh] min-w-0"
           data-sat-student-frame
           data-sat-skew-hold="true"
+          data-sat-skew-hold-disabled={calculatorDisabled ? "true" : undefined}
+          inert
         >
           {retainedFrame.element}
         </SatPresenceSurface>,
@@ -1038,7 +1050,7 @@ export function SatStudentSessionRoute({
         questionIndex={state.questionIndex}
         questionCount={state.questionIds.length}
         navigationItems={navigationItems}
-        calculatorAvailable={state.toolCapabilities.calculator}
+        calculatorAvailable={calculatorModule !== null}
         calculatorOpen={state.activeTools.calculator}
         referenceAvailable={state.toolCapabilities.referenceSheet}
         referenceOpen={state.activeTools.referenceSheet}

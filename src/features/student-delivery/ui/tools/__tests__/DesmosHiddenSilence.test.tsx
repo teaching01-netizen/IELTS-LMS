@@ -54,7 +54,7 @@ describe("Desmos hidden silence", () => {
 
   it("silenced calculator exposes zero live roles but preserves the loading tree", () => {
     const { container } = render(
-      <DesmosCalculator mode="scientific" prewarmInactiveModes silenceLiveRegions />
+      <DesmosCalculator mode="scientific" prewarmInactiveModes eagerInactive silenceLiveRegions />
     );
     expectZeroLiveRoles(container);
     expect(container.querySelector("[data-desmos-loading]")).not.toBeNull();
@@ -71,15 +71,15 @@ describe("Desmos hidden silence", () => {
   });
 
   it.each([false, true])(
-    "closed prewarm panel composes to zero live roles (matchMedia matches=%s) with both iframes mounted",
+    "closed prewarm panel composes to zero live roles (matchMedia matches=%s) with a single iframe mounted",
     (matches) => {
       matchMediaMock(matches);
       const { container } = render(
         <SatCalculatorPanel {...baseProps} open={false} prewarmWhenClosed />
       );
       expectZeroLiveRoles(container);
-      expect(screen.queryByTitle(SCI_TITLE)).toBeInTheDocument();
       expect(screen.queryByTitle(GRAPH_TITLE)).toBeInTheDocument();
+      expect(screen.queryByTitle(SCI_TITLE)).not.toBeInTheDocument();
     }
   );
 

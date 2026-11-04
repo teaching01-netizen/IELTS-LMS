@@ -55,13 +55,23 @@ const SatRoomScoreLine = memo(function SatRoomScoreLine({ score, stale }: { scor
   );
 });
 
-const SatRoomScoreFraction = memo(function SatRoomScoreFraction({ score, stale }: { score: RoomScore; stale: boolean }) {
+/** Local mirror of SatResultDetailRoute formatScaled — do not import from a route. */
+function formatScaled(scaled: { low: number; high: number }): string {
+  return scaled.low === scaled.high ? String(scaled.low) : `${scaled.low}–${scaled.high}`;
+}
+
+/**
+ * Conversion hero for the row's right block: the server estimate only, never
+ * a client-side guess. Null (scored-but-no-converter, pending, unscored,
+ * answering) renders an em dash. Neutral ink, tabular numerals.
+ */
+const SatRoomScoreHero = memo(function SatRoomScoreHero({ scaled, stale }: { scaled: { low: number; high: number }; stale: boolean }) {
   return (
     <span
-      className={`sat-room__row-score-fraction sat-room__score-fade block text-[15px] font-semibold leading-5 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]${stale ? ' opacity-60' : ''}`}
+      className={`sat-room__row-score-hero sat-room__score-fade block text-[20px] font-semibold leading-7 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]${stale ? ' opacity-60' : ''}`}
       aria-hidden="true"
     >
-      {score.correct}/{score.total}
+      {formatScaled(scaled)}
     </span>
   );
 });
@@ -151,10 +161,14 @@ export function SatRoomStudentRow({
   // which point a shape-preserving skeleton holds the slot — never a zero.
   const scoreKind = score?.kind ?? 'dash';
   const showScoreLine = scoreKind !== 'dash' && (score?.label ?? '') !== '';
-  const showScoreFraction = scoreKind === 'scored'
-    && score?.correct !== null && score?.correct !== undefined
-    && score?.total !== null && score?.total !== undefined;
   const showScoreSkeleton = scoresLoading && !showScoreLine;
+  // Conversion hero (right block): server estimate only, never a guessed
+  // number. While the results join is loading a scored row with no estimate
+  // yet holds a shimmer skeleton (avoids —→value flash); every other kind
+  // renders the em dash immediately.
+  const heroScaled = score?.scaled ?? null;
+  const showHeroSkeleton = scoresLoading && scoreKind === 'scored' && heroScaled == null;
+  const heroText = heroScaled ? formatScaled(heroScaled) : '—';
   const ariaLabel = `Open ${student.name}${attentionReason ? `, needs attention: ${attentionReason}` : ''}${score?.srLabel ? `, ${score.srLabel}` : ''}`;
 
   return (
@@ -195,9 +209,20 @@ export function SatRoomStudentRow({
       <span className="flex items-center gap-1.5">
         {showClock ? (
           <span className="text-right">
-            {showScoreFraction && score ? (
-              <SatRoomScoreFraction key={`${score.correct}/${score.total}`} score={score} stale={scoresStale} />
-            ) : null}
+            {showHeroSkeleton ? (
+              <span aria-hidden="true" className="block">
+                <span className="sat-room__row-score-hero-skeleton sat-skeleton-shimmer ml-auto block h-[20px] w-20 rounded-full bg-[var(--sat-staff-skeleton-bar,rgba(0,0,0,0.07))]" />
+              </span>
+            ) : heroScaled ? (
+              <SatRoomScoreHero key={heroText} scaled={heroScaled} stale={scoresStale} />
+            ) : (
+              <span
+                className={`sat-room__row-score-hero sat-room__score-fade block text-[20px] font-semibold leading-7 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]${scoresStale ? ' opacity-60' : ''}`}
+                aria-hidden="true"
+              >
+                —
+              </span>
+            )}
             <span className="sat-room__row-time block text-[14px] font-semibold leading-5 tabular-nums text-[var(--sat-staff-text-primary,#1d1d1f)]">{time}</span>
             {onBreak ? (
               <span className="sat-room__row-sub block text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">

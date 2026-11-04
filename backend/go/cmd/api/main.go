@@ -690,6 +690,13 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Get("/exam-config/defaults", authorize("GET /api/v1/sat/exam-config/defaults", satExamConfigDefaults(app)))
 			r.With(adminLimit).Get("/room-operations/{operationKey}", authorize("GET /api/v1/sat/room-operations/{operationKey}", satRoomOperationGet(app)))
 		})
+		// SAT Desmos outcome beacon (plan 2026-11-04 §4 Track B): attempt-
+		// bearer telemetry, never a DB write. It sits outside the /sat staff
+		// group on purpose: the beacon is keyed by attempt hash (one budget
+		// per calculator client, so a flooding room cannot starve staff
+		// writes), and burst floods shed as 429 which the client drops
+		// without retrying.
+		r.With(studentLimit, limitTier(app, httpx.TierWrites, attemptKey())).Post("/sat/desmos-outcome", authorize("POST /api/v1/sat/desmos-outcome", satDesmosOutcomeHandler(app)))
 		// SAT delivery reads (the polled state view, module entry probes) must
 		// not spend the writes budget that answer saves and submits draw from.
 		// JSON is gzip-compressed: a whole room shares one uplink, and after the

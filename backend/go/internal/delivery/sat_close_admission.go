@@ -79,6 +79,20 @@ func (s *Service) AcquireSATCloseAdmission(ctx context.Context) (context.Context
 	return context.WithValue(ctx, satCloseAdmissionContextKey{}, struct{}{}), release, nil
 }
 
+// SATCloseQueueDepth reports the current number of requests waiting in the
+// process-local close bulkhead (plan 2026-11-04 §4 Track B: visible
+// queue). It is an instantaneous sample rendered into the additive 429
+// queueDepth detail, never an admission decision: a nil service or gate
+// reads 0 (unknown), which the envelope omits.
+func (s *Service) SATCloseQueueDepth() int {
+	if s == nil || s.satCloseAdmission == nil {
+		return 0
+	}
+	s.satCloseAdmission.mu.Lock()
+	defer s.satCloseAdmission.mu.Unlock()
+	return len(s.satCloseAdmission.waiters)
+}
+
 // acquire bounds both active closes and queued requests. Waiters are served in
 // FIFO order, hold no database connection, and are removed on cancellation.
 func (a *satCloseAdmission) acquire(ctx context.Context) (func(), error) {

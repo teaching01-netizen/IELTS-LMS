@@ -21,6 +21,7 @@ import (
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
+	"example.com/ielts-proctoring/internal/satconvert"
 	"example.com/ielts-proctoring/internal/satscoring"
 )
 
@@ -148,16 +149,20 @@ type SATAttemptRow struct {
 	RawCorrect     *int64             `json:"rawCorrect,omitempty"`
 	RawTotal       *int64             `json:"rawTotal,omitempty"`
 	EstimatedTotal *SATEstimatedTotal `json:"estimatedTotal,omitempty"`
-	ScheduleID     string             `json:"scheduleId"`
-	ExamID         string             `json:"examId"`
-	ExamTitle      string             `json:"examTitle"`
-	VersionNumber  int                `json:"versionNumber"`
-	StudentID      string             `json:"studentId"`
-	StudentName    string             `json:"studentName"`
-	StudentEmail   *string            `json:"studentEmail"`
-	CohortName     string             `json:"cohortName"`
-	SubmittedAt    *time.Time         `json:"submittedAt"`
-	TestStartedAt  *time.Time         `json:"testStartedAt"`
+	// EstimatedPrimary mirrors the result-detail primaryScore for the common
+	// cases: a single converted section reports its section range, otherwise
+	// the full-SAT total range applies. Nil for partial conversion.
+	EstimatedPrimary *SATEstimatedTotal `json:"estimatedPrimary,omitempty"`
+	ScheduleID       string             `json:"scheduleId"`
+	ExamID           string             `json:"examId"`
+	ExamTitle        string             `json:"examTitle"`
+	VersionNumber    int                `json:"versionNumber"`
+	StudentID        string             `json:"studentId"`
+	StudentName      string             `json:"studentName"`
+	StudentEmail     *string            `json:"studentEmail"`
+	CohortName       string             `json:"cohortName"`
+	SubmittedAt      *time.Time         `json:"submittedAt"`
+	TestStartedAt    *time.Time         `json:"testStartedAt"`
 }
 
 // SATEstimatedTotal is the active global converter's total-score range.
@@ -830,6 +835,7 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 			item.RawCorrect = int64FieldPtr(raw["rawCorrect"])
 			item.RawTotal = int64FieldPtr(raw["total"])
 			item.EstimatedTotal = estimatedTotal(raw["totalScaled"])
+			item.EstimatedPrimary = estimatedPrimary(raw)
 		}
 		items = append(items, item)
 		classroomRaws = append(classroomRaws, raw)
@@ -846,16 +852,19 @@ func (s *Service) ListSATAttempts(ctx context.Context, actor auth.ActorContext, 
 			for i, raw := range classroomRaws {
 				if raw != nil {
 					items[i].EstimatedTotal = nil
+					items[i].EstimatedPrimary = nil
 				}
 			}
 		} else if active != nil {
 			for i, raw := range classroomRaws {
 				if raw == nil || !classroomRawScoreAvailable(raw) {
 					items[i].EstimatedTotal = nil
+					items[i].EstimatedPrimary = nil
 					continue
 				}
 				satscoring.ApplyRevision(active, raw)
 				items[i].EstimatedTotal = estimatedTotal(raw["totalScaled"])
+				items[i].EstimatedPrimary = estimatedPrimary(raw)
 			}
 		}
 	}
@@ -935,6 +944,66 @@ func estimatedTotal(value any) *SATEstimatedTotal {
 		return nil
 	}
 	return &SATEstimatedTotal{Low: *low, High: *high}
+}
+
+// estimatedPrimary mirrors the result-detail primaryScore for the common
+// cases: a classroomRaw with exactly one section reports that section's
+// converted range (a stray totalScaled never applies to one subject),
+// otherwise the full-SAT total range applies. Anything else — partial
+// conversion, no converter output — yields nil.
+func estimatedPrimary(raw map[string]any) *SATEstimatedTotal {
+	if raw == nil {
+		return nil
+	}
+	if sections := classroomRawSections(raw); len(sections) == 1 {
+		return estimatedRange(sections[0]["scaled"], 200, 800)
+	}
+	return estimatedRange(raw["totalScaled"], 400, 1600)
+}
+
+// estimatedRange reads a converted score range in either the persisted JSON
+// map form or the satconvert.Score struct form written by ApplyRevision.
+func estimatedRange(value any, min, max int) *SATEstimatedTotal {
+	low, high, ok := scaledBounds(value)
+	if !ok || low < min || high > max || low > high {
+		return nil
+	}
+	return &SATEstimatedTotal{Low: low, High: high}
+}
+
+func scaledBounds(value any) (int, int, bool) {
+	switch score := value.(type) {
+	case map[string]any:
+		low := intFieldPtr(score["low"])
+		high := intFieldPtr(score["high"])
+		if low == nil || high == nil {
+			return 0, 0, false
+		}
+		return *low, *high, true
+	case satconvert.Score:
+		return score.Low, score.High, true
+	case *satconvert.Score:
+		if score == nil {
+			return 0, 0, false
+		}
+		return score.Low, score.High, true
+	}
+	return 0, 0, false
+}
+
+func classroomRawSections(raw map[string]any) []map[string]any {
+	var out []map[string]any
+	switch list := raw["sections"].(type) {
+	case []any:
+		for _, e := range list {
+			if m, ok := e.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+	case []map[string]any:
+		out = list
+	}
+	return out
 }
 
 func classroomRawScoreAvailable(raw map[string]any) bool {
