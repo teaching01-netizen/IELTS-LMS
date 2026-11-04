@@ -5952,11 +5952,14 @@ textarea.sat-input {
    keeps all of its pixels; corners are L-shaped (clip-path) and always show
    a bracket telling the student where to grab. */
 @media (pointer: coarse) {
-  .sat-ui.sat-tool-calculator[data-sat-tool-resizable="true"] {
+  .sat-ui.sat-tool-calculator[data-sat-tool-resizable="true"],
+  .sat-ui.sat-tool-calculator[data-sat-tool-presentation="compact-sheet"] {
     /* Physical pixels, not zoom-plane pixels: --sat-tool-unit is 1/scale, so
        these stay 20px/28px on screen at every Display zoom. Without this the
        band doubles at 200% and creeps inside Desmos, and shrinks to 10px at
-       50% — a fingertip target that is no longer a fingertip target. */
+       50% — a fingertip target that is no longer a fingertip target. The
+       compact sheet shares the band: its N/NE/NW height edges live outside
+       the window exactly like the floating tree's (parity FR-03). */
     --sat-tool-edge-zone: 0px;
     --sat-tool-edge-outside: calc(20 * var(--sat-tool-unit, 1px));
     --sat-tool-corner-zone: calc(28 * var(--sat-tool-unit, 1px));
@@ -6009,6 +6012,32 @@ textarea.sat-input {
   .sat-tool-calculator[data-sat-resizing="true"] [data-sat-resize-handle]::after {
     border-color: var(--sat-focus);
   }
+}
+/* Sheet parity (FR-03): the compact calculator's N/NE/NW edges live in the
+   outside band on every pointer, so the sheet window must not clip them.
+   Coarse pointers get the full 20/28px band from the block above; fine
+   pointers keep the base tokens. */
+.sat-ui.sat-tool-calculator[data-sat-tool-presentation="compact-sheet"] {
+  overflow: visible;
+}
+/* Sheet edges sit fully outside the window rect: the base N edge straddles
+   the top border (its lower half hides under the header, where header
+   buttons win taps), so a press on its center would land on a radio instead
+   of arming a resize. Flush-outside placement keeps every sheet edge
+   hittable on all pointers. */
+.sat-ui.sat-tool-calculator[data-sat-tool-presentation="compact-sheet"] .sat-tool-resize-edge-n {
+  top: calc((var(--sat-tool-edge-zone) + var(--sat-tool-edge-outside)) * -1);
+}
+.sat-ui.sat-tool-calculator[data-sat-tool-presentation="compact-sheet"] :is(.sat-tool-resize-edge-ne, .sat-tool-resize-edge-nw) {
+  top: calc(var(--sat-tool-corner-zone) * -1);
+}
+/* Parity grip (FR-03a): the floating tree centers the capsule over the bar,
+   but the sheet needs a draggable hit area clear of the radios at the header
+   edge. Static flow puts the 44px grip first, so an edge press arms a drag
+   instead of landing on a tab. */
+.sat-ui.sat-tool-calculator[data-sat-tool-presentation="compact-sheet"] .sat-tool-grip {
+  position: static;
+  transform: none;
 }
 /* Compact chrome leaves a readable tool viewport on short or narrow screens. */
 @media (max-width: 719px), (max-height: 560px) {

@@ -418,8 +418,8 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                       />
                       <span>
                         <span className="block font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Flexible question count</span>
-                        <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Author 1 to max questions per included module (RW max 27, Math max 22). Classroom rooms only, raw scores only. Works with any module set including Module 1 only.</span>
-                        {isFlexible ? <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Tip: fewer than 5 questions per module is allowed for quick checks but gives a noisy signal.</span> : null}
+                        <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">You don't need to fill the whole test. Add just the questions you want: up to 27 Reading & Writing questions and 22 Math questions. Only for Classroom rooms — scores look like 7 out of 10. Works with Module 1 only, too.</span>
+                        {isFlexible ? <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Less than 5 questions is fine for a quick check, but each answer moves the score a lot.</span> : null}
                       </span>
                     </label>
                   ) : null}
@@ -451,8 +451,8 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                         />
                         <span>
                           <span className="block font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Flexible question count</span>
-                          <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Author 1 to max questions per included module (RW max 27, Math max 22). Classroom rooms only, raw scores only.</span>
-                          {isFlexible ? <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Tip: fewer than 5 questions per module is allowed for quick checks but gives a noisy signal. Timing stays full-length unless you lower it.</span> : null}
+                          <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">You don't need to fill the whole test. Add just the questions you want: up to 27 Reading & Writing questions and 22 Math questions. Only for Classroom rooms — scores look like 7 out of 10.</span>
+                          {isFlexible ? <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Less than 5 questions is fine for a quick check, but each answer moves the score a lot. The timer stays full length — make it shorter below if you want.</span> : null}
                         </span>
                       </label>
                     ) : null}

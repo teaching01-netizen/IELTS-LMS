@@ -426,6 +426,50 @@ func TestLoadScoreModuleFactsPinsFences(t *testing.T) {
 	}
 }
 
+// The facts query must return modules in authored delivery order
+// (section, then module display order), never in GROUP BY / storage order:
+// the roster prints ScoreModules in loader order, so an unordered read shows
+// "M2 … M1 …" for some students while others read "M1 … M2 …".
+func TestLoadScoreModuleFactsOrdersByDisplayOrder(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("ORDER BY ma\\.attempt_id, s\\.display_order, m\\.display_order, m\\.id").
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"attempt_id", "module_key", "section_key", "state",
+			"raw_correct", "operational", "plan", "answered",
+		}).
+			AddRow("att-1", "rw-m1", "reading-writing", "locked", int64(9), int64(13), int64(13), int64(11)))
+
+	if _, err := loadScoreModuleFacts(context.Background(), db, "sched-1"); err != nil {
+		t.Fatalf("facts load must succeed: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// buildScoreProjections preserves loader order in the module listing: display
+// order is the loader's contract (see TestLoadScoreModuleFactsOrdersByDisplayOrder).
+func TestBuildScoreProjectionsPreservesLoaderModuleOrder(t *testing.T) {
+	facts := []scoreModuleFacts{
+		scoreTestFact("att-1", "rw-m2-higher", "reading-writing", "locked", scoreI64(9), scoreI64(14), 14, 12),
+		scoreTestFact("att-1", "rw-m1", "reading-writing", "locked", scoreI64(9), scoreI64(14), 14, 12),
+	}
+	got := buildScoreProjections(scoreTestPlan(), facts, map[string]string{}, []string{"att-1"})
+	p := mustScoreProj(t, got, "att-1")
+	if len(p.modules) != 2 {
+		t.Fatalf("modules = %d, want 2", len(p.modules))
+	}
+	if p.modules[0].ModuleKey != "rw-m2-higher" || p.modules[1].ModuleKey != "rw-m1" {
+		t.Fatalf("builder must preserve loader order, got %q then %q",
+			p.modules[0].ModuleKey, p.modules[1].ModuleKey)
+	}
+}
+
 // The outcome read fences on terminal_generation so a stale generation's
 // result never marks the live attempt; duplicates resolve invalidation-first.
 func TestLoadScoreOutcomesFencesOnTerminalGeneration(t *testing.T) {

@@ -215,11 +215,6 @@ export function SatCalculatorPanel({
   );
   const body = (
     <div className="flex h-full min-h-0 flex-col bg-[var(--sat-surface)]">
-      {compact ? (
-        <div className="flex shrink-0 items-center justify-end bg-[var(--sat-ref-header-bg)] border-b border-[var(--sat-divider-soft)] px-3 py-1.5">
-          {modeSwitch}
-        </div>
-      ) : null}
       {/* Intent signals only (lazy second-mode mount), not an interactive
           control: the embed keeps its own tab order and roles. */}
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
@@ -242,14 +237,12 @@ export function SatCalculatorPanel({
   );
   // Window dimensions are physical pixels, converted once into the zoom plane.
   const viewport = logicalSize({ width: window.innerWidth, height: window.innerHeight });
-  // Touch resize targets live in a 20px band OUTSIDE the window (see the
-  // `pointer: coarse` block in index.css). A window flush against the screen
-  // edge would push most of that band — and the corner bracket that advertises
-  // it — off-screen, which is also where iOS keeps its edge gestures. Inflate
-  // the clamp area by the band depth so first open, drags and zooms all leave
-  // the band reachable. Fine pointers keep the tight 8px inset.
+  // Drag/resize parity (plan FR-05): the 20px outside band is unconditional —
+  // a window flush against the screen edge would push most of that band (and
+  // the corner bracket that advertises it) off-screen, which is also where
+  // iOS keeps its edge gestures. Fine pointers keep the tight 8px clamp.
   const coarsePointer = useSatMediaQuery("(pointer: coarse)");
-  const edgeGutter = coarsePointer ? viewportToLogicalLength(20) : 0;
+  const edgeGutter = viewportToLogicalLength(20);
   // Bluebook layout: the window may cover the exam header and footer. First open
   // stays full height from the top inset down to the body so the expression list
   // stays visible above the keypad; afterwards it moves and resizes screen-wide.
@@ -279,13 +272,26 @@ export function SatCalculatorPanel({
     h: bodyHeight,
   };
   const defaultGeometry = useMemo(
-    () => ({
-      x: safeArea.left + edgeGutter,
-      y: dragArea.top + edgeGutter,
-      w: firstOpenSize.w,
-      h: firstOpenSize.h,
-    }),
-    [safeArea.left, dragArea.top, edgeGutter, firstOpenSize.w, firstOpenSize.h]
+    () => {
+      // Sheet parity (plan FR-03): the compact sheet keeps its first-open
+      // look (centered 520/scale, 15%/85%) while y/h follow live geometry.
+      if (compact) {
+        const sheetW = Math.min(viewport.width, 520 / scale);
+        return {
+          x: Math.max(0, (viewport.width - sheetW) / 2),
+          y: viewport.height * 0.15,
+          w: sheetW,
+          h: viewport.height * 0.85,
+        };
+      }
+      return {
+        x: safeArea.left + edgeGutter,
+        y: dragArea.top + edgeGutter,
+        w: firstOpenSize.w,
+        h: firstOpenSize.h,
+      };
+    },
+    [compact, viewport.width, viewport.height, scale, safeArea.left, dragArea.top, edgeGutter, firstOpenSize.w, firstOpenSize.h]
   );
   const minimumSize = useMemo(
     () => ({ w: Math.min(400 / scale, dragWidth), h: Math.min(400 / scale, dragHeight) }),
@@ -318,7 +324,7 @@ export function SatCalculatorPanel({
       resizable
       disabled={disabled}
       keepAlive={prewarmWhenClosed}
-      headerControls={compact ? undefined : modeSwitch}
+      headerControls={modeSwitch}
       onClose={onClose}
     >
       {body}

@@ -99,8 +99,7 @@ export function satToolSafeArea(viewport: { w: number; h: number }, inset = 16):
  * radius. Only left and top move; width and height are untouched. When no
  * edge is close enough the rect is returned unchanged.
  */
-export function alignToSafeArea(rect: SatToolGeometry, safe: SatToolSafeArea): SatToolGeometry {
-  let nx = rect.x;
+export function alignToSafeArea(rect: SatToolGeometry, safe: SatToolSafeArea): SatToolGeometry {  let nx = rect.x;
   let ny = rect.y;
   if (Math.abs(rect.x - safe.x) <= SAT_TOOL_ALIGN_PX) {
     nx = safe.x;
@@ -114,4 +113,19 @@ export function alignToSafeArea(rect: SatToolGeometry, safe: SatToolSafeArea): S
   }
   if (nx === rect.x && ny === rect.y) return rect;
   return { x: nx, y: ny, w: rect.w, h: rect.h };
+}
+
+/**
+ * Compact-sheet constraint (drag/resize parity, plan FR-03). The sheet keeps
+ * a fixed centered width: x recenters to `sheetX` and w pins to `sheetW` on
+ * every commit, while y/h stay exactly as dragged/resized. Pointer and
+ * keyboard commits both flow through here via the shared clamp pipeline.
+ */
+export function constrainCompactSheet(
+  rect: SatToolGeometry,
+  viewport: { w: number; h: number },
+  sheetW: number,
+): SatToolGeometry {
+  const w = Math.max(1, Math.min(sheetW, viewport.w));
+  return { ...rect, x: Math.max(0, (viewport.w - w) / 2), w };
 }

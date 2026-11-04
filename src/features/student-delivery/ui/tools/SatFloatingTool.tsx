@@ -19,6 +19,7 @@ import {
 } from "../../infrastructure/satToolGeometryStore";
 import {
   alignToSafeArea,
+  constrainCompactSheet,
   dragExceeded,
   resizeGeometry,
   satToolSafeArea,
@@ -235,9 +236,15 @@ interface ResizeSession {
 /**
  * The seven pointer-only resize targets. The SE corner keeps the single
  * resize-handle node (role separator, keyboard support); these layers are
- * non-button pointer surfaces with no role and no keyboard handling.
+ * non-button pointer surfaces with no role and no keyboard handling. The
+ * compact calculator sheet renders the N/NE/NW subset only (height/top —
+ * E/S/W would fight the fixed centered width).
  */
 const SAT_RESIZE_EDGES: readonly SatResizeEdge[] = ["n", "s", "e", "w", "ne", "nw", "sw"];
+
+/** Drag/resize parity (plan FR-03): the compact sheet keeps its fixed
+ * centered width, so only height/top edges render there. */
+const SAT_COMPACT_SHEET_EDGES: readonly SatResizeEdge[] = ["n", "ne", "nw"];
 
 /**
  * Shared floating-tool shell (tool-window primitive): the one chrome both
@@ -249,8 +256,7 @@ const SAT_RESIZE_EDGES: readonly SatResizeEdge[] = ["n", "s", "e", "w", "ne", "n
  *
  * Non-modal on every breakpoint: open tools never trap focus, so Calculator
  * and Reference coexist with the exam and with each other. Escape closes
- * the tool itself. Focus reports to the opener on close. Compact viewports
- * keep the bottom-sheet (no drag/resize by design). Blocked shells render
+ * the tool itself. Focus reports to the opener on close. Blocked shells render
  * inert + dimmed with positions kept; drag/resize/keys all gate on disabled.
  *
  * Gesture handoff: every pointer/keyboard gesture runs through small named
@@ -261,7 +267,8 @@ const SAT_RESIZE_EDGES: readonly SatResizeEdge[] = ["n", "s", "e", "w", "ne", "n
  * Direct manipulation (Phase 07): the whole title bar drags with grab and
  * grabbing cursors behind a small movement threshold; pointer capture plus
  * selection suppression keep fast gestures alive; seven edge and corner
- * layers join the SE handle for eight-direction resize; lift is shadow plus
+ * layers join the SE handle for eight-direction resize (compact calculator
+ * sheet: N/NE/NW height edges, fixed centered width); lift is shadow plus
  * border only; release settles within a small assist radius; the first-open
  * hint teaches the gesture once per tool; local tooltips keep pointer
  * optional; Escape cancels an active drag and restores the pre-drag rect.
@@ -362,10 +369,20 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
 
   const clampGeometry = useCallback((next: SatToolGeometry) => {
     const viewport = viewportSize(logicalSize);
+    // Sheet parity (plan FR-03/§5 trace): the compact calculator sheet keeps
+    // its fixed centered width and drags/resizes freely in y/h — the legacy
+    // 2-arg clamp keeps 48px of chrome reachable without pinning the tall
+    // sheet inside the viewport (a dragged-down sheet may extend past the
+    // bottom edge, like a native bottom sheet). constrainCompactSheet then
+    // recenters x and pins w on every commit.
+    if (isCalculator && compact) {
+      const sheetW = Math.min(viewport.w, 520 / scale);
+      return constrainCompactSheet(clampSatToolGeometry(next, viewport), viewport, sheetW);
+    }
     return isReference || props.safeArea
       ? clampSatToolGeometry(next, viewport, props.safeArea ?? readSatToolSafeArea(viewportToLogicalLength), toolMinSize ?? resolveSatToolMinSize('reference', scale))
       : clampSatToolGeometry(next, viewport);
-  }, [isReference, logicalSize, viewportToLogicalLength, toolMinSize, scale, props.safeArea]);
+  }, [compact, isCalculator, isReference, logicalSize, viewportToLogicalLength, toolMinSize, scale, props.safeArea]);
 
   useEffect(() => {
     const saved = props.geometryKey ? loadSatToolGeometry(props.geometryKey) : null;
@@ -383,6 +400,10 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     // persists the clamped rect, matching its existing contract; Calculator
     // keeps its saved position and is re-clamped again on the next open.
     const onResize = () => {
+      // P1 rotation guard (BUG-001): a rotation mid-gesture must not yank the
+      // rect out from under the live pointer — the gesture owns the rect
+      // until finishDrag/finishResize settles, then the next open re-clamps.
+      if (dragRef.current || resizeRef.current) return;
       const next = clampGeometry(lastCommittedRef.current);
       lastCommittedRef.current = next;
       setGeometry(next);
@@ -539,7 +560,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     const committed = lastCommittedRef.current;
     const viewport = viewportSize(logicalSize);
     const area = dragSafeArea;
-    const snapped = compact || resizable !== true ? committed : alignToSafeArea(committed, area ? {
+    const snapped = resizable !== true ? committed : alignToSafeArea(committed, area ? {
       x: area.left, y: area.top,
       w: viewport.w - area.left - area.right, h: viewport.h - area.top - area.bottom,
     } : satToolSafeArea(viewport));
@@ -548,7 +569,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     }
     persist(snapped);
     onManualMove?.();
-  }, [compact, logicalSize, persist, updateGeometry, commitDragPoint, resizable, dragSafeArea, onManualMove, requestToggleCollapse]);
+  }, [logicalSize, persist, updateGeometry, commitDragPoint, resizable, dragSafeArea, onManualMove, requestToggleCollapse]);
 
   const commitResizePoint = useCallback((session: ResizeSession, point: { x: number; y: number }) => {
     const viewport = viewportSize(logicalSize);
@@ -674,7 +695,9 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   }, [commitResizePoint, persist, updateGeometry, onManualResize, requestToggleCollapse]);
 
   const handleHeaderPointerDown = (event: React.PointerEvent) => {
-    if (compact || !interactive) return;
+    // RULE-01: gesture gates are `!interactive` only — never `compact`. The
+    // compact calculator header is the same draggable node as desktop.
+    if (!interactive) return;
     if (event.isPrimary === false) return;
     if ((event.target as HTMLElement).closest("button,[role=radio]")) return;
     event.preventDefault();
@@ -727,8 +750,10 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   };
 
   const moveByKeyboard = (dx: number, dy: number) => {
-    if (compact || !interactive) return;
+    if (!interactive) return;
     const current = lastCommittedRef.current;
+    // Sheet parity: persist flows through clampGeometry, which recenters x
+    // and pins w on compact — arrows move the sheet vertically.
     persist({ ...current, x: current.x + dx, y: current.y + dy });
     props.onManualMove?.();
   };
@@ -741,10 +766,25 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     else if (event.key === "ArrowDown") { event.preventDefault(); moveByKeyboard(0, step); }
   };
 
-  const resizeByKeyboard = (dw: number, dh: number) => {
-    if (compact || !interactive || !props.resizable) return;
+  /**
+   * P1 tiny-viewport fold (BUG-002): on viewports narrower/shorter than the
+   * content minimum, the minimum folds into the available span so keyboard
+   * steps and ARIA ranges stay reachable instead of pinning against an
+   * unsatisfiable min (pointer resize keeps the hard min pin).
+   */
+  const foldMinIntoSpan = (min: { w: number; h: number }) => {
     const viewport = viewportSize(logicalSize);
-    const min = props.minSize ?? defaultMinSizeForTitle(props.title);
+    const insets = dragSafeArea ?? { left: 0, right: 0, top: 0, bottom: 0 };
+    return {
+      w: Math.min(min.w, Math.max(1, viewport.w - insets.left - insets.right)),
+      h: Math.min(min.h, Math.max(1, viewport.h - insets.top - insets.bottom)),
+    };
+  };
+
+  const resizeByKeyboard = (dw: number, dh: number) => {
+    if (!interactive || !props.resizable) return;
+    const viewport = viewportSize(logicalSize);
+    const min = foldMinIntoSpan(props.minSize ?? defaultMinSizeForTitle(props.title));
     const max = props.maxSize ?? defaultMaxSizeForViewport(viewport, toolTitle);
     const current = lastCommittedRef.current;
     persist({
@@ -756,7 +796,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   };
 
   const startResize = (event: React.PointerEvent, edge: SatResizeEdge) => {
-    if (compact || !interactive || !props.resizable) return;
+    if (!interactive || !props.resizable) return;
     if (event.isPrimary === false) return;
     event.preventDefault();
     event.stopPropagation();
@@ -825,7 +865,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   };
 
   useEffect(() => {
-    if (!props.open || props.disabled || compact) {
+    if (!props.open || props.disabled) {
       finishDrag(true);
       finishResize(true);
     }
@@ -841,7 +881,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       window.removeEventListener("blur", interrupt);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [props.open, props.disabled, compact, finishDrag, finishResize]);
+  }, [props.open, props.disabled, finishDrag, finishResize]);
 
   useEffect(() => () => {
     for (const session of [dragRef.current, resizeRef.current]) {
@@ -988,8 +1028,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   const resizeMin = props.minSize ?? defaultMinSizeForTitle(props.title);
   const resizeMax =
     props.maxSize ??
-    defaultMaxSizeForViewport(typeof window === "undefined" ? { w: 0, h: 0 } : viewportSize(logicalSize), props.title);
-  const availableWidth = isReference && typeof window !== 'undefined'
+    defaultMaxSizeForViewport(typeof window === "undefined" ? { w: 0, h: 0 } : viewportSize(logicalSize), props.title);  const availableWidth = isReference && typeof window !== 'undefined'
     ? Math.max(1, viewportSize(logicalSize).w - readSatToolSafeArea(viewportToLogicalLength).left - readSatToolSafeArea(viewportToLogicalLength).right)
     : resizeMax.w;
   const collapseClass = !isReference || compact
@@ -997,6 +1036,12 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     : collapsing
       ? (collapsed ? " sat-ref-collapsing" : " sat-ref-expanding")
       : (collapsed ? " sat-ref-collapsed" : "");
+  // Sheet parity (plan FR-03): the compact sheet keeps its first-open look
+  // (centered 520/scale, 15%/85%) while y/h follow live geometry — drag moves
+  // y, N/NE/NW resize the height, x/w recenter through constrainCompactSheet.
+  const sheetViewport = viewportSize(logicalSize);
+  const sheetW = Math.min(sheetViewport.w, 520 / scale);
+  const sheetX = Math.max(0, (sheetViewport.w - sheetW) / 2);
   return (
     <div
       ref={panelRef}
@@ -1023,10 +1068,10 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       onTransitionEnd={handleAlignTransitionEnd}
       className={"sat-ui fixed " + satOverlayZClass("toolSheet") + " sat-tool-window flex flex-col overflow-hidden " + (isReference ? "rounded-none border border-[var(--sat-ref-border)] bg-white" : "sat-tool-calculator rounded-none border border-[var(--sat-tool-border)] bg-[var(--sat-surface)]") + " text-[var(--sat-text)] shadow-[var(--sat-shadow-floating)]" + (showActive ? " sat-tool-active" : " sat-tool-inactive") + (dragging ? " sat-tool-dragging sat-tool-window-lift" : "") + (resizing ? " sat-tool-resizing sat-tool-window-lift" : "") + (aligning ? " sat-tool-aligning" : "") + (props.open && enterMotion && !isCalculator ? " sat-tool-enter" : "") + (props.disabled ? " opacity-70" : "") + (isReference ? " sat-tool-ref" : "") + collapseClass}
       style={{ ...props.style,
-        left: compact ? Math.max(0, (viewportSize(logicalSize).w - Math.min(viewportSize(logicalSize).w, 520 / scale)) / 2) : geometry.x,
-        top: compact ? viewportSize(logicalSize).h * 0.15 : geometry.y,
-        width: compact ? Math.min(viewportSize(logicalSize).w, 520 / scale) : geometry.w,
-        height: compact ? viewportSize(logicalSize).h * 0.85 : renderedH,
+        left: compact ? sheetX : geometry.x,
+        top: geometry.y,
+        width: compact ? sheetW : geometry.w,
+        height: compact ? geometry.h : renderedH,
         visibility: props.open ? undefined : "hidden", pointerEvents: props.open ? "auto" : "none",
       }}
     >
@@ -1071,8 +1116,14 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           </button>
         </div>
       ) : (
+        // Parity header (plan FR-03/FR-04): one draggable header on every
+        // presentation — grip first (drag affordance clears the mode tabs so
+        // a header-edge press never lands on a radio), mode switch in the
+        // header slot on all breakpoints, Close last. `data-sat-tool-header`
+        // is the desktop probe; `data-sat-tool-compact-header` marks the
+        // same node on the sheet so the compact alias keeps resolving.
         <div
-          data-sat-tool-header={compact ? undefined : true}
+          data-sat-tool-header
           data-sat-tool-compact-header={compact ? true : undefined}
           className="sat-tool-header-drag sat-calculator-header flex shrink-0 cursor-grab touch-none select-none items-center gap-1 bg-[var(--sat-ref-header-bg)] px-1 text-white active:cursor-grabbing"
           onPointerDown={handleHeaderPointerDown}
@@ -1081,8 +1132,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           onPointerCancel={handleCancelDrag}
           onLostPointerCapture={handleCancelDrag}
         >
-          {compact ? <span className="flex-1 px-2 font-semibold">Calculator</span> : props.headerControls}
-          {!compact ? <span
+          <span
             role="button"
             tabIndex={props.disabled ? -1 : 0}
             aria-label={"Move " + props.title + ". Use arrow keys to move."}
@@ -1092,21 +1142,22 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
           >
             <span aria-hidden="true" className="sat-tool-grabber" />
             <span className="sat-tool-tip" aria-hidden="true">Move {props.title}</span>
-          </span> : null}
+          </span>
+          {props.headerControls}
           <span className="flex-1" />
           <button type="button" onClick={props.onClose} aria-label={"Close " + props.title} data-sat-tool-close disabled={props.disabled} className="sat-tool-header-control grid shrink-0 place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)] disabled:cursor-not-allowed disabled:opacity-50">
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
       )}
-      {props.resizable && !compact ? (
+      {props.resizable && (!compact || !isCalculator) ? (
         // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- separator is the ARIA resize-handle role; keyboard support is provided via tabIndex + Arrow keys (Wave B R-09).
         <div
           role="separator"
           tabIndex={props.disabled ? -1 : 0}
           aria-label={"Resize " + props.title + ". Use arrow keys to resize."}
           aria-orientation="vertical"
-          aria-valuemin={Math.round(Math.min(resizeMin.w, availableWidth))}
+          aria-valuemin={Math.round(Math.min(foldMinIntoSpan(resizeMin).w, availableWidth))}
           aria-valuemax={Math.round(Math.min(resizeMax.w, availableWidth))}
           aria-valuenow={Math.round(geometry.w)}
           aria-valuetext={`${Math.round(geometry.w)} by ${Math.round(renderedH)} pixels`}
@@ -1131,7 +1182,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
         {props.children}
         {showHint ? <SatToolDiscoveryHint cornerOnly={isReference && coarsePointer} onAnimationEnd={handleHintAnimationEnd} /> : null}
       </div>
-      {props.resizable && !compact && !(isReference && coarsePointer) ? SAT_RESIZE_EDGES.map((edge) => (
+      {props.resizable && (!compact || isCalculator) && !(isReference && coarsePointer) ? (isCalculator && compact ? SAT_COMPACT_SHEET_EDGES : SAT_RESIZE_EDGES).map((edge) => (
         <div
           key={edge}
           data-sat-resize-edge={edge}

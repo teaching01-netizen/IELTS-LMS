@@ -1372,7 +1372,8 @@ func loadScoreModuleFacts(ctx context.Context, q sessionQuerier, scheduleID stri
 			AND v_q.question_id = eq.question_id
 			AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ma.attempt_id)
 		WHERE sa.schedule_id = ?
-		GROUP BY ma.id, ma.attempt_id, m.module_key, s.section_key, ma.state, ma.raw_correct`, scheduleID)
+		GROUP BY ma.id, ma.attempt_id, m.module_key, s.section_key, ma.state, ma.raw_correct
+		ORDER BY ma.attempt_id, s.display_order, m.display_order, m.id`, scheduleID)
 	if err != nil {
 		return nil, err
 	}
