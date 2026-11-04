@@ -6078,12 +6078,15 @@ textarea.sat-input {
     clip-path: polygon(0 0, var(--sat-tool-edge-outside) 0, var(--sat-tool-edge-outside) calc(100% - var(--sat-tool-edge-outside)), 100% calc(100% - var(--sat-tool-edge-outside)), 100% 100%, 0 100%);
   }
   /* SE handle sits fully outside, adjacent to the corner (was bottom-0
-     right-0, overlapping the Desmos keypad corner). */
+     right-0, overlapping the Desmos keypad corner). The glyph aligns to the
+     handle's corner-adjacent (start) edge so the L hugs the window — end
+     alignment left a ~20px empty gap like the screenshot. */
   .sat-ui.sat-tool-calculator [data-sat-resize-handle] {
     top: 100%;
     left: 100%;
     right: auto;
     bottom: auto;
+    place-items: start;
   }
 }
 /* Compact chrome leaves a readable tool viewport on short or narrow screens. */
