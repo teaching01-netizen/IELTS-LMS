@@ -133,8 +133,10 @@ test("FR-02 desktop SE resize is 1:1 and pins at the minimum", async ({ page }) 
 
   // Minimum pin: a huge inward drag clamps (no collapse/inversion), and a
   // second inward push changes nothing (stability = the pin proof).
-  const corner = { x: grown.x + grown.w - 22, y: grown.y + grown.h - 22 };
-  await mouseDrag(page, corner, -500, -500);
+  // NOTE: the SE handle lives fully outside the window (outside chrome), so
+  // re-query its live center — a computed inside point would miss it.
+  const sePin = panel.locator('[data-sat-resize-handle="se"]');
+  await mouseDrag(page, await centerOf(sePin), -500, -500);
   const pinned = await boxOf(panel);
   expect(pinned.w, `no width collapse (pinned at ${pinned.w.toFixed(0)})`).toBeGreaterThanOrEqual(380);
   expect(pinned.h, `no height collapse (pinned at ${pinned.h.toFixed(0)})`).toBeGreaterThanOrEqual(380);
@@ -142,7 +144,7 @@ test("FR-02 desktop SE resize is 1:1 and pins at the minimum", async ({ page }) 
     type: "min-pin",
     description: `pinned at ${pinned.w.toFixed(0)}x${pinned.h.toFixed(0)}`,
   });
-  const corner2 = { x: pinned.x + pinned.w - 22, y: pinned.y + pinned.h - 22 };
+  const corner2 = await centerOf(panel.locator('[data-sat-resize-handle="se"]'));
   await mouseDrag(page, corner2, -200, -200);
   const repinned = await boxOf(panel);
   expectDelta(repinned.w, pinned.w, 2, "min width is stable under further inward drag");
@@ -224,8 +226,7 @@ test("FR-04b compact mode radiogroup lives in the header (NEW parity)", async ({
   ).toHaveCount(1, { timeout: 5_000 });
 });
 
-test("FR-05 Esc cancels a live desktop drag without persist or close", async ({ page }) => {
-  test.setTimeout(120_000);
+test("FR-05 Esc cancels a live desktop drag without persist or close", async ({ page }) => {  test.setTimeout(120_000);
   await page.setViewportSize(DESKTOP_VIEWPORT);
   const panel = await openCalculator(page);
   const start = await boxOf(panel);
@@ -251,4 +252,47 @@ test("FR-05 Esc cancels a live desktop drag without persist or close", async ({ 
     await page.evaluate((key) => window.localStorage.getItem(key), GEOMETRY_KEY),
     "cancelled gesture persists nothing"
   ).toBe(storedBefore);
+});
+
+test("FR-06 outside chrome: drag/resize boxes never overlap the Desmos frame", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize(DESKTOP_VIEWPORT);
+  const panel = await openCalculator(page);
+
+  // The Desmos content box: the visible calculator iframe.
+  const frame = panel.locator("iframe[data-desmos-mode]:visible");
+  const frameBox = await frame.boundingBox();
+  if (!frameBox) throw new Error("Visible Desmos iframe has no box");
+
+  const overlaps = (a: { x: number; y: number; width: number; height: number }): boolean =>
+    a.x < frameBox.x + frameBox.width &&
+    a.x + a.width > frameBox.x &&
+    a.y < frameBox.y + frameBox.height &&
+    a.y + a.height > frameBox.y;
+
+  // N/S/E/W edge strips are fully-outside boxes (zone 0): layout boxes must
+  // be disjoint from the Desmos frame. (Corner boxes straddle the border by
+  // construction but are clipped to the outside L via clip-path, so they are
+  // excluded from the layout-box check.)
+  for (const edge of ["n", "s", "e", "w"] as const) {
+    const node = panel.locator(`[data-sat-resize-edge="${edge}"]`);
+    await expect(node, `${edge} edge exists`).toHaveCount(1);
+    const box = await node.boundingBox();
+    if (!box) throw new Error(`${edge} edge has no box`);
+    expect(overlaps(box), `${edge} edge must not overlap Desmos content`).toBe(false);
+  }
+
+  // SE handle sits fully outside, adjacent to the corner (was bottom-0
+  // right-0, overlapping the keypad corner).
+  const se = panel.locator('[data-sat-resize-handle="se"]');
+  await expect(se).toBeVisible();
+  const seBox = await se.boundingBox();
+  if (!seBox) throw new Error("SE handle has no box");
+  expect(overlaps(seBox), "SE handle must not overlap Desmos content").toBe(false);
+  expect(
+    seBox.x >= frameBox.x + frameBox.width || seBox.y >= frameBox.y + frameBox.height,
+    "SE handle lives outside (right and/or below) the Desmos frame"
+  ).toBe(true);
 });

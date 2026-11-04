@@ -6039,6 +6039,53 @@ textarea.sat-input {
   position: static;
   transform: none;
 }
+/* Outside chrome: calculator drag/resize affordances must never overlap
+   Desmos content — they live fully outside the window rect on every
+   pointer/presentation (touch already did via the coarse outside band;
+   fine pointers join here). The window must not clip them, so overflow
+   stays visible; the body still clips Desmos (SatFloatingTool body keeps
+   overflow-hidden). Header drag needs no change: the header is a layout
+   row above the body, never an overlay. */
+.sat-ui.sat-tool-calculator {
+  overflow: visible;
+}
+@media (pointer: fine) {
+  .sat-ui.sat-tool-calculator {
+    --sat-tool-edge-zone: 0px;
+    --sat-tool-edge-outside: 8px;
+  }
+  /* N/S strips span between the corners (no gap, no overlap). */
+  .sat-ui.sat-tool-calculator .sat-tool-resize-edge-n,
+  .sat-ui.sat-tool-calculator .sat-tool-resize-edge-s {
+    left: calc(var(--sat-tool-corner-zone) - var(--sat-tool-edge-outside));
+    right: calc(var(--sat-tool-corner-zone) - var(--sat-tool-edge-outside));
+  }
+  /* E/W strips span between the corners (no gap, no overlap). */
+  .sat-ui.sat-tool-calculator .sat-tool-resize-edge-e,
+  .sat-ui.sat-tool-calculator .sat-tool-resize-edge-w {
+    top: calc(var(--sat-tool-corner-zone) - var(--sat-tool-edge-outside));
+    bottom: calc(var(--sat-tool-corner-zone) - var(--sat-tool-edge-outside));
+  }
+  /* Corner boxes straddle the border; the clip keeps only the outside L
+     (hit-testing follows clip-path), so no corner pixel covers Desmos. */
+  .sat-ui.sat-tool-calculator .sat-tool-resize-edge-ne {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, calc(100% - var(--sat-tool-edge-outside)) 100%, calc(100% - var(--sat-tool-edge-outside)) var(--sat-tool-edge-outside), 0 var(--sat-tool-edge-outside));
+  }
+  .sat-ui.sat-tool-calculator .sat-tool-resize-edge-nw {
+    clip-path: polygon(0 0, 100% 0, 100% var(--sat-tool-edge-outside), var(--sat-tool-edge-outside) var(--sat-tool-edge-outside), var(--sat-tool-edge-outside) 100%, 0 100%);
+  }
+  .sat-ui.sat-tool-calculator .sat-tool-resize-edge-sw {
+    clip-path: polygon(0 0, var(--sat-tool-edge-outside) 0, var(--sat-tool-edge-outside) calc(100% - var(--sat-tool-edge-outside)), 100% calc(100% - var(--sat-tool-edge-outside)), 100% 100%, 0 100%);
+  }
+  /* SE handle sits fully outside, adjacent to the corner (was bottom-0
+     right-0, overlapping the Desmos keypad corner). */
+  .sat-ui.sat-tool-calculator [data-sat-resize-handle] {
+    top: 100%;
+    left: 100%;
+    right: auto;
+    bottom: auto;
+  }
+}
 /* Compact chrome leaves a readable tool viewport on short or narrow screens. */
 @media (max-width: 719px), (max-height: 560px) {
   .sat-exam-topbar,
