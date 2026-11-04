@@ -2,6 +2,7 @@ export type {
   PerStudentZipPdfExportSection,
   PerStudentZipPdfMode,
   PerStudentZipPdfSectionData,
+  ObjectiveRowContext,
   PerStudentZipPdfStudentInput,
   PerStudentZipPdfExportInput,
   PerStudentZipPdfExportManifestStudent,

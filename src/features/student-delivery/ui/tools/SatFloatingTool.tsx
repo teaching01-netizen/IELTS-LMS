@@ -2,12 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Keyb
 import { ChevronDown, ChevronUp, GripVertical, X } from "lucide-react";
 import { satOverlayZClass } from "../primitives/satOverlayZ";
 import { useSatMediaQuery } from "../useSatMediaQuery";
-import {
-  loadSatToolViewState,
-  saveSatToolViewState,
-  type SatToolViewState,
-} from "../../infrastructure/satToolStateStore";
-import { resolveSatToolMinSize, resolveSatToolMaxSize, type SatToolKind } from "../../domain/satToolSizePolicy";
+import { resolveSatToolMinSize, resolveSatToolMaxSize } from "../../domain/satToolSizePolicy";
 import {
   SAT_FLOATING_TOOL_CHROME,
   SAT_TOOL_GEOMETRY_MIN_H,
@@ -25,7 +20,6 @@ import {
   satToolSafeArea,
   type SatResizeEdge,
 } from "./satToolPointer";
-import { SatToolDiscoveryHint } from "./SatToolDiscoveryHint";
 import { useSatExamZoom } from "../zoom/SatExamZoomContext";
 import { readSatToolSafeArea } from "./satToolPlacementRuntime";
 
@@ -73,13 +67,6 @@ export interface SatFloatingToolProps {
   maxSize?: { w: number; h: number } | undefined;
   safeArea?: { top: number; right: number; bottom: number; left: number } | undefined;
   /**
-   * Phase-02 view-state key for this tool's module-attempt
-   * (satToolViewKey family). Carries the toolHintSeen flag. Optional so
-   * existing call sites keep compiling; when absent the hint flag uses the
-   * HINT_SEEN_PREFIX localStorage fallback only.
-   */
-  viewStateKey?: string | null | undefined;
-  /**
    * Reference-only controlled collapse flag (R-01: presence + ARIA only;
    * R-03 owns the collapse state machine + motion). Undefined = expanded.
    */
@@ -95,66 +82,6 @@ export interface SatFloatingToolProps {
 
 const DEFAULT_W = 420;
 const DEFAULT_H = 520;
-
-/**
- * First-open hint flag per tool title. Primary source is the Phase-02
- * view-state store (toolHintSeen keyed by SatToolKind); the HINT_SEEN_PREFIX
- * localStorage entry survives only as a read/write fallback when the store
- * is unreachable (no viewStateKey or storage throws), keeping the key family
- * and boolean shape identical.
- */
-const HINT_SEEN_PREFIX = "sat-tool-hint-seen:v1:";
-
-function toolKindForTitle(title: string): SatToolKind | null {
-  if (title === "Calculator") return "calculator";
-  if (title === "Reference Sheet") return "reference";
-  return null;
-}
-
-function readHintSeenFallback(title: string): boolean {
-  try {
-    return window.localStorage.getItem(HINT_SEEN_PREFIX + title) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeHintSeenFallback(title: string): void {
-  try {
-    window.localStorage.setItem(HINT_SEEN_PREFIX + title, "1");
-  } catch {
-    /* Hint memory must never block the exam. */
-  }
-}
-
-function readHintSeen(title: string, viewStateKey: string | null): boolean {
-  const kind = toolKindForTitle(title);
-  if (kind && viewStateKey) {
-    try {
-      const stored: SatToolViewState = loadSatToolViewState(viewStateKey);
-      if (stored.toolHintSeen[kind] === true) return true;
-    } catch {
-      /* fall through to the local fallback below */
-    }
-  }
-  return readHintSeenFallback(title);
-}
-
-function writeHintSeen(title: string, viewStateKey: string | null): void {
-  const kind = toolKindForTitle(title);
-  if (kind && viewStateKey) {
-    try {
-      const current: SatToolViewState = loadSatToolViewState(viewStateKey);
-      saveSatToolViewState(viewStateKey, {
-        ...current,
-        toolHintSeen: { ...current.toolHintSeen, [kind]: true },
-      });
-    } catch {
-      /* store write failed — still persist the local fallback below */
-    }
-  }
-  writeHintSeenFallback(title);
-}
 
 /**
  * Content minimum fallback keyed by tool until the shared size policy
@@ -269,9 +196,9 @@ const SAT_COMPACT_SHEET_EDGES: readonly SatResizeEdge[] = ["n", "ne", "nw"];
  * selection suppression keep fast gestures alive; seven edge and corner
  * layers join the SE handle for eight-direction resize (compact calculator
  * sheet: N/NE/NW height edges, fixed centered width); lift is shadow plus
- * border only; release settles within a small assist radius; the first-open
- * hint teaches the gesture once per tool; local tooltips keep pointer
- * optional; Escape cancels an active drag and restores the pre-drag rect.
+ * border only; release settles within a small assist radius; local tooltips
+ * keep pointer optional; Escape cancels an active drag and restores the
+ * pre-drag rect.
  */
 export function SatFloatingTool(props: SatFloatingToolProps) {
   const isReference = props.title === "Reference Sheet";
@@ -301,16 +228,14 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   const [touchInteraction, setTouchInteraction] = useState(false);
   const [aligning, setAligning] = useState(false);
   const [enterMotion, setEnterMotion] = useState(true);
-  const [hintSeen, setHintSeen] = useState(() => readHintSeen(props.title, props.viewStateKey ?? null));
   const interactive = !props.disabled;
   // R-01 reference variant (D1): single title-keyed guard matching the
-  // existing helpers (toolKindForTitle, defaultMinSizeForTitle). Every R-01
+  // existing helper (defaultMinSizeForTitle). Every R-01
   // JSX/className/style delta sits behind isReference; the Calculator path
   // stays character-identical.
   const dragRef = useRef<DragSession | null>(null);
   const resizeRef = useRef<ResizeSession | null>(null);
   const lastCommittedRef = useRef(geometry);
-  const hintSeenRef = useRef(hintSeen);
   const mountedRef = useRef(true);
   const panelRef = useRef<HTMLDivElement>(null);
   // ── R-03 window phase (Reference collapse extension) ────────────────────
@@ -326,7 +251,6 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   // R-04: hydrate `collapsed` from the view-state store when the `collapsed`
   // field lands (persist intent via saveSatToolViewState hunk in handoff).
   // Until then local useState(false) is the source of truth.
-  // TODO(R-04): init from loadSatToolViewState(viewStateKey).collapsed.
   const [internalCollapsed, setInternalCollapsed] = useState(false);
   const { onToggleCollapse: onToggleCollapseProp } = props;
   const externallyControlled = props.collapsed !== undefined || onToggleCollapseProp !== undefined;
@@ -433,19 +357,6 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     setGeometry(next);
   }, [clampGeometry]);
 
-  const markHintSeen = useCallback(() => {
-    if (hintSeenRef.current) return;
-    hintSeenRef.current = true;
-    writeHintSeen(props.title, props.viewStateKey ?? null);
-    // Synchronous hide: the first successful drag/resize flips state on the
-    // live=true transition itself, never gated on animation or mount timing.
-    setHintSeen(true);
-  }, [props.title, props.viewStateKey]);
-
-  const handleHintAnimationEnd = useCallback(() => {
-    markHintSeen();
-  }, [markHintSeen]);
-
   // R-03 first-placement top-right + manual-wins behavior contract (persistence
   // by R-04). Pure helper recorded here for the handoff; the panel keeps
   // owning `defaultGeometry` until R-04 relocates it.
@@ -459,7 +370,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   //     y: safe.y + 24,
   //   };
   // }
-  // Manual-wins set-points: the two markHintSeen() gesture sites
+  // Manual-wins set-points: the two gesture sites
   // (handleHeaderPointerMove live=true, commitResizePoint committed flip) are
   // R-04's hasBeenMoved/hasBeenResized set-points; once set, viewport changes
   // clamp via clampSatToolGeometry and never re-emit defaults.
@@ -506,11 +417,8 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     else setInternalCollapsed(next);
   }, [compact, interactive, isReference, externallyControlled, measureCollapsedH, onToggleCollapseProp]);
 
-  const handleCollapseAnimationEnd = useCallback((event?: React.AnimationEvent) => {
+  const handleCollapseAnimationEnd = useCallback(() => {
     if (!mountedRef.current) return;
-    // Ignore the discovery-hint lifetime animation bubbling through the body.
-    const target = event?.target as HTMLElement | undefined;
-    if (target && typeof target.closest === "function" && target.closest("[data-sat-tool-hint]")) return;
     setCollapsing(false);
   }, []);
 
@@ -590,10 +498,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       min,
       max,
     );
-    if (!session.committed) {
-      session.committed = true;
-      markHintSeen();
-    }
+    session.committed = true;
     // Thread the same min/max into the committed rect: resizeGeometry pins
     // the content minimum (e.g. 400) but the legacy 2-arg clamp only floors
     // at 320, which would re-widen a west-edge stop back toward 420. The
@@ -647,7 +552,7 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
         else applyAnchor();
       }
     }
-  }, [isReference, logicalSize, markHintSeen, updateGeometry, clampGeometry, scrollNodeForReference, toolMaxSize, toolMinSize, toolTitle, viewportToLogicalLength]);
+  }, [isReference, logicalSize, updateGeometry, clampGeometry, scrollNodeForReference, toolMaxSize, toolMinSize, toolTitle, viewportToLogicalLength]);
 
   const flushResizeFrame = useCallback(() => {
     const session = resizeRef.current;
@@ -727,7 +632,6 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
     if (!session.live) {
       if (!dragExceeded(session.startX, session.startY, event.clientX, event.clientY)) return;
       session.live = true;
-      markHintSeen();
     }
     session.pending = { x: event.clientX, y: event.clientY };
     if (session.frame == null) {
@@ -1014,7 +918,6 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
   // prewarmed iframe identity survives closed -> open. `hidden` removes it
   // from layout; inert + no dialog role keeps it out of the tab order/AT.
   const showActive = props.active === true && !props.disabled;
-  const showHint = !compact && props.open && interactive && !hintSeen;
   // R-03 collapsed render: desktop Reference only; compact masks (never
   // clears) so desktop restore still sees `collapsed: true`. Calculator
   // paths are byte-identical — every branch below is isReference-gated.
@@ -1059,7 +962,6 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       data-sat-resizing={resizing ? "true" : undefined}
       data-sat-touch-interaction={touchInteraction ? "true" : undefined}
       data-collapsed={collapsedEffective ? "true" : undefined}
-      data-sat-tool-teaching={showHint ? "true" : undefined}
       onPointerDown={handleWindowPointerDown}
       onPointerDownCapture={event => setTouchInteraction(event.pointerType === "touch")}
       onKeyDownCapture={() => setTouchInteraction(false)}
@@ -1180,7 +1082,6 @@ export function SatFloatingTool(props: SatFloatingToolProps) {
       ) : null}
       <div id={isReference ? "reference-sheet-content" : undefined} hidden={collapsedSettled ? true : undefined} onAnimationEnd={isReference ? handleCollapseAnimationEnd : undefined} className={"relative min-h-0 flex-1 overflow-hidden" + (isReference && !compact ? " sat-ref-collapsible sat-ref-fade sat-ref-clip" : "")}>
         {props.children}
-        {showHint ? <SatToolDiscoveryHint cornerOnly={isReference && coarsePointer} onAnimationEnd={handleHintAnimationEnd} /> : null}
       </div>
       {props.resizable && (!compact || isCalculator) && !(isReference && coarsePointer) ? (isCalculator && compact ? SAT_COMPACT_SHEET_EDGES : SAT_RESIZE_EDGES).map((edge) => (
         <div

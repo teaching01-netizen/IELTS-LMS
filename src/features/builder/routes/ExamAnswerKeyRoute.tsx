@@ -376,6 +376,26 @@ function AnswerKeyRowEditor({
   );
 }
 
+function AcceptedAnswersField({
+  value,
+  onChange,
+  hint,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+  hint?: string | undefined;
+}) {
+  return (
+    <div>
+      <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Accepted Answers</div>
+      <div className="mt-2">
+        <AcceptedAnswersEditor value={value} onChange={onChange} placeholder="Enter accepted answer…" />
+        {hint ? <p className="mt-1 text-[11px] text-slate-500">{hint}</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function AnswerControl({
   descriptor,
   onEdit,
@@ -388,16 +408,10 @@ function AnswerControl({
   if (descriptor.isSubAnswerTreeLeaf) {
     const currentAccepted = getSubAnswerLeafAcceptedAnswers(block, descriptor.id);
     return (
-      <div>
-        <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Accepted Answers</div>
-        <div className="mt-2">
-          <AcceptedAnswersEditor
-            value={currentAccepted}
-            onChange={(next) => onEdit({ kind: 'set_sub_answer_leaf_accepted_answers', leafId: descriptor.id, acceptedAnswers: next })}
-            placeholder="Enter accepted answer…"
-          />
-        </div>
-      </div>
+      <AcceptedAnswersField
+        value={currentAccepted}
+        onChange={(next) => onEdit({ kind: 'set_sub_answer_leaf_accepted_answers', leafId: descriptor.id, acceptedAnswers: next })}
+      />
     );
   }
 
@@ -428,16 +442,10 @@ function AnswerControl({
       const base = question && 'correctAnswer' in question ? question : null;
       const currentAccepted = base ? resolveAcceptedAnswers(base) : [];
       return (
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Accepted Answers</div>
-          <div className="mt-2">
-            <AcceptedAnswersEditor
-              value={currentAccepted}
-              onChange={(next) => onEdit({ kind: 'set_accepted_answer_fields', questionId: descriptor.answerKey, acceptedAnswers: next })}
-              placeholder="Enter accepted answer…"
-            />
-          </div>
-        </div>
+        <AcceptedAnswersField
+          value={currentAccepted}
+          onChange={(next) => onEdit({ kind: 'set_accepted_answer_fields', questionId: descriptor.answerKey, acceptedAnswers: next })}
+        />
       );
     }
 
@@ -448,16 +456,10 @@ function AnswerControl({
       const blank = question.blanks[answerIndex];
       const currentAccepted = blank ? resolveAcceptedAnswers(blank) : [];
       return (
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Accepted Answers</div>
-          <div className="mt-2">
-            <AcceptedAnswersEditor
-              value={currentAccepted}
-              onChange={(next) => onEdit({ kind: 'set_sentence_blank_accepted_answer_fields', questionId: question.id, blankIndex: answerIndex, acceptedAnswers: next })}
-              placeholder="Enter accepted answer…"
-            />
-          </div>
-        </div>
+        <AcceptedAnswersField
+          value={currentAccepted}
+          onChange={(next) => onEdit({ kind: 'set_sentence_blank_accepted_answer_fields', questionId: question.id, blankIndex: answerIndex, acceptedAnswers: next })}
+        />
       );
     }
 
@@ -468,16 +470,10 @@ function AnswerControl({
       const blank = question.blanks[answerIndex];
       const currentAccepted = blank ? resolveAcceptedAnswers(blank) : [];
       return (
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Accepted Answers</div>
-          <div className="mt-2">
-            <AcceptedAnswersEditor
-              value={currentAccepted}
-              onChange={(next) => onEdit({ kind: 'set_note_blank_accepted_answer_fields', questionId: question.id, blankIndex: answerIndex, acceptedAnswers: next })}
-              placeholder="Enter accepted answer…"
-            />
-          </div>
-        </div>
+        <AcceptedAnswersField
+          value={currentAccepted}
+          onChange={(next) => onEdit({ kind: 'set_note_blank_accepted_answer_fields', questionId: question.id, blankIndex: answerIndex, acceptedAnswers: next })}
+        />
       );
     }
 
@@ -488,16 +484,10 @@ function AnswerControl({
       const cell = block.cells[answerIndex];
       const currentAccepted = cell ? resolveAcceptedAnswers(cell) : [];
       return (
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Accepted Answers</div>
-          <div className="mt-2">
-            <AcceptedAnswersEditor
-              value={currentAccepted}
-              onChange={(next) => onEdit({ kind: 'set_table_cell_accepted_answer_fields', cellIndex: answerIndex, acceptedAnswers: next })}
-              placeholder="Enter accepted answer…"
-            />
-          </div>
-        </div>
+        <AcceptedAnswersField
+          value={currentAccepted}
+          onChange={(next) => onEdit({ kind: 'set_table_cell_accepted_answer_fields', cellIndex: answerIndex, acceptedAnswers: next })}
+        />
       );
     }
 
@@ -525,15 +515,23 @@ function AnswerControl({
 
     case 'MAP': {
       const current = question && 'correctAnswer' in question ? String(question.correctAnswer ?? '') : '';
+      const currentAccepted = question && 'correctAnswer' in question ? resolveAcceptedAnswers(question as { correctAnswer: string; acceptedAnswers?: string[] }) : [];
       return (
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-semibold text-slate-600">Correct</label>
-          <input
-            type="text"
-            value={current}
-            onChange={(e) => onEdit({ kind: 'set_text_answer', questionId: descriptor.answerKey, value: e.target.value })}
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-            placeholder="Enter correct answer…"
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-600">Correct</label>
+            <input
+              type="text"
+              value={current}
+              onChange={(e) => onEdit({ kind: 'set_text_answer', questionId: descriptor.answerKey, value: e.target.value })}
+              className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+              placeholder="Enter correct answer…"
+            />
+          </div>
+          <AcceptedAnswersField
+            value={currentAccepted}
+            onChange={(next) => onEdit({ kind: 'set_map_accepted_answer_fields', questionId: descriptor.answerKey, acceptedAnswers: next })}
+            hint="Used only when Correct is empty — a filled Correct answer takes precedence."
           />
         </div>
       );
@@ -609,15 +607,22 @@ function AnswerControl({
       }
       const label = block.labels[answerIndex];
       const current = label ? String(label.correctAnswer ?? '') : '';
+      const currentAccepted = label ? resolveAcceptedAnswers(label) : [];
       return (
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-semibold text-slate-600">Correct</label>
-          <input
-            type="text"
-            value={current}
-            onChange={(e) => onEdit({ kind: 'set_diagram_label_answer', labelIndex: answerIndex, value: e.target.value })}
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-            placeholder="Enter correct answer…"
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-600">Correct</label>
+            <input
+              type="text"
+              value={current}
+              onChange={(e) => onEdit({ kind: 'set_diagram_label_answer', labelIndex: answerIndex, value: e.target.value })}
+              className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+              placeholder="Enter correct answer…"
+            />
+          </div>
+          <AcceptedAnswersField
+            value={currentAccepted}
+            onChange={(next) => onEdit({ kind: 'set_diagram_label_accepted_answer_fields', labelIndex: answerIndex, acceptedAnswers: next })}
           />
         </div>
       );
@@ -629,15 +634,22 @@ function AnswerControl({
       }
       const step = block.steps[answerIndex];
       const current = step ? String(step.correctAnswer ?? '') : '';
+      const currentAccepted = step ? resolveAcceptedAnswers(step) : [];
       return (
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-semibold text-slate-600">Correct</label>
-          <input
-            type="text"
-            value={current}
-            onChange={(e) => onEdit({ kind: 'set_flow_step_answer', stepIndex: answerIndex, value: e.target.value })}
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-            placeholder="Enter correct answer…"
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-600">Correct</label>
+            <input
+              type="text"
+              value={current}
+              onChange={(e) => onEdit({ kind: 'set_flow_step_answer', stepIndex: answerIndex, value: e.target.value })}
+              className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
+              placeholder="Enter correct answer…"
+            />
+          </div>
+          <AcceptedAnswersField
+            value={currentAccepted}
+            onChange={(next) => onEdit({ kind: 'set_flow_step_accepted_answer_fields', stepIndex: answerIndex, acceptedAnswers: next })}
           />
         </div>
       );
@@ -650,19 +662,28 @@ function AnswerControl({
       const categories = Array.isArray(block.categories) ? block.categories : [];
       const item = Array.isArray(block.items) ? block.items[answerIndex] : null;
       const current = item ? String(item.correctCategory ?? '') : '';
+      const currentAccepted: string[] = item && Array.isArray((item as { acceptedAnswers?: unknown }).acceptedAnswers)
+        ? ((item as { acceptedAnswers: unknown[] }).acceptedAnswers.filter((entry): entry is string => typeof entry === 'string'))
+        : [];
       return (
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-semibold text-slate-600">Correct</label>
-          <select
-            value={current}
-            onChange={(e) => onEdit({ kind: 'set_classification_category', itemIndex: answerIndex, category: e.target.value })}
-            className="min-w-[220px] rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-medium text-slate-800"
-          >
-            <option value="">(none)</option>
-            {categories.map((cat: string) => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-600">Correct</label>
+            <select
+              value={current}
+              onChange={(e) => onEdit({ kind: 'set_classification_category', itemIndex: answerIndex, category: e.target.value })}
+              className="min-w-[220px] rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-medium text-slate-800"
+            >
+              <option value="">(none)</option>
+              {categories.map((cat: string) => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
+          </div>
+          <AcceptedAnswersField
+            value={currentAccepted}
+            onChange={(next) => onEdit({ kind: 'set_classification_accepted_answer_fields', itemIndex: answerIndex, acceptedAnswers: next })}
+          />
         </div>
       );
     }
@@ -674,22 +695,31 @@ function AnswerControl({
       const options = Array.isArray(block.options) ? block.options : [];
       const feature = Array.isArray(block.features) ? block.features[answerIndex] : null;
       const current = feature ? String(feature.correctMatch ?? '') : '';
+      const currentAccepted: string[] = feature && Array.isArray((feature as { acceptedAnswers?: unknown }).acceptedAnswers)
+        ? ((feature as { acceptedAnswers: unknown[] }).acceptedAnswers.filter((entry): entry is string => typeof entry === 'string'))
+        : [];
       return (
-        <div className="flex items-center gap-3">
-          <label className="text-xs font-semibold text-slate-600">Correct</label>
-          <select
-            value={current}
-            onChange={(e) => onEdit({ kind: 'set_matching_feature_match', featureIndex: answerIndex, match: e.target.value })}
-            className="min-w-[220px] rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-medium text-slate-800"
-          >
-            <option value="">(none)</option>
-            {current && !options.includes(current) ? (
-              <option value={current}>{`Invalid saved answer: ${current}`}</option>
-            ) : null}
-            {options.map((opt: string) => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-semibold text-slate-600">Correct</label>
+            <select
+              value={current}
+              onChange={(e) => onEdit({ kind: 'set_matching_feature_match', featureIndex: answerIndex, match: e.target.value })}
+              className="min-w-[220px] rounded-md border border-slate-200 bg-white px-2 py-1 text-sm font-medium text-slate-800"
+            >
+              <option value="">(none)</option>
+              {current && !options.includes(current) ? (
+                <option value={current}>{`Invalid saved answer: ${current}`}</option>
+              ) : null}
+              {options.map((opt: string) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+          </div>
+          <AcceptedAnswersField
+            value={currentAccepted}
+            onChange={(next) => onEdit({ kind: 'set_matching_feature_accepted_answer_fields', featureIndex: answerIndex, acceptedAnswers: next })}
+          />
         </div>
       );
     }

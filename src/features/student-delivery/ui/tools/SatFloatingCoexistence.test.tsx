@@ -39,7 +39,7 @@ beforeEach(() => {
   try {
     window.localStorage.clear();
   } catch {
-    /* Storage unavailable in this host; hint tests still run. */
+    /* Storage unavailable in this host; gesture tests still run. */
   }
 });
 
@@ -211,6 +211,7 @@ describe("SatFloatingTool", () => {
     const compactDialog = screen.getByRole("dialog", { name: "Calculator" });
     expect(compactDialog.querySelectorAll("[data-sat-resize-edge]").length).toBe(0);
     expect(compactDialog.querySelector("[data-sat-tool-hint]")).toBeNull();
+    expect(compactDialog.getAttribute("data-sat-tool-teaching")).toBeNull();
   });
 
   it("ignores sub-threshold drags and tracks live drags 1:1 without scale (C12)", async () => {
@@ -303,7 +304,7 @@ describe("SatFloatingTool", () => {
     }
   });
 
-  it("shows the first-open hint once and dismisses it after the first drag", () => {
+  it("renders no first-open teaching chip on desktop and persists no hint state", () => {
     matchMediaMock(false);
     const { unmount } = render(
       <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} resizable onClose={() => undefined}>
@@ -311,19 +312,16 @@ describe("SatFloatingTool", () => {
       </SatFloatingTool>
     );
     const dialog = screen.getByRole("dialog", { name: "Calculator" });
-    const hint = dialog.querySelector("[data-sat-tool-hint]");
-    expect(hint).not.toBeNull();
-    expect(hint!.textContent).toContain("Drag the bar to move");
-    expect(dialog.getAttribute("data-sat-tool-teaching")).toBe("true");
-    expect(hint!.getAttribute("aria-hidden")).toBe("true");
-    expect(hint!.className).toContain("sat-tool-hint");
+    expect(dialog.querySelector("[data-sat-tool-hint]")).toBeNull();
+    expect(dialog.getAttribute("data-sat-tool-teaching")).toBeNull();
     const header = dialog.querySelector("[data-sat-tool-header]") as HTMLElement;
     pointer(header, "pointerdown", 700, 120, 6);
     pointer(header, "pointermove", 760, 180, 6);
     pointer(header, "pointerup", 760, 180, 6);
-    expect(dialog.querySelector("[data-sat-tool-hint]")).toBeNull();
+    // The removed chip wrote its seen flag on first drag; removal must not
+    // leave a writer behind for students who never see a hint.
+    expect(window.localStorage.getItem("sat-tool-hint-seen:v1:Calculator")).toBeNull();
     unmount();
-    // Reopen with the seen flag persisted: the hint never returns.
     render(
       <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} resizable onClose={() => undefined}>
         <div>calc body</div>
@@ -332,7 +330,20 @@ describe("SatFloatingTool", () => {
     expect(screen.getByRole("dialog", { name: "Calculator" }).querySelector("[data-sat-tool-hint]")).toBeNull();
   });
 
-  it("teaches move and resize on touch screens too", () => {
+  it("renders no first-open teaching chip on the compact (mobile) sheet", () => {
+    matchMediaMock(true);
+    render(
+      <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} resizable onClose={() => undefined}>
+        <div>calc body</div>
+      </SatFloatingTool>
+    );
+    const dialog = screen.getByRole("dialog", { name: "Calculator" });
+    expect(dialog).toHaveAttribute("data-sat-tool-presentation", "compact-sheet");
+    expect(dialog.querySelector("[data-sat-tool-hint]")).toBeNull();
+    expect(dialog.getAttribute("data-sat-tool-teaching")).toBeNull();
+  });
+
+  it("keeps the resize edges but shows no teaching text on touch screens", () => {
     matchMediaMock((query) => query === "(pointer: coarse)");
     render(
       <SatFloatingTool title="Calculator" open geometryKey={null} defaultGeometry={{ x: 600, y: 110, w: 420, h: 520 }} resizable onClose={() => undefined}>
@@ -340,7 +351,8 @@ describe("SatFloatingTool", () => {
       </SatFloatingTool>
     );
     const dialog = screen.getByRole("dialog", { name: "Calculator" });
-    expect(dialog.querySelector("[data-sat-tool-hint]")?.textContent).toContain("Drag a corner or edge to resize");
+    expect(dialog.querySelector("[data-sat-tool-hint]")).toBeNull();
+    expect(dialog.getAttribute("data-sat-tool-teaching")).toBeNull();
     expect(dialog.querySelectorAll("[data-sat-resize-edge]")).toHaveLength(7);
   });
 

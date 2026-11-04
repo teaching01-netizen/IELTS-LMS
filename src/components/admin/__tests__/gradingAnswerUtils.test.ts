@@ -102,6 +102,48 @@ describe('gradingAnswerUtils', () => {
     ]));
   });
 
+  test('shared pool keeps a case-variant sibling available for a second blank', () => {
+    const question = {
+      id: 'sentence-1',
+      sentence: 'The ____ and ____.',
+      blanks: [
+        { id: 'blank-1', correctAnswer: 'Garden', position: 0 },
+        { id: 'blank-2', correctAnswer: 'garden', position: 1, caseSensitive: false },
+      ],
+      answerRule: 'ONE_WORD',
+      acceptAnyAnswerKey: true,
+      sharedAcceptedAnswers: ['Garden', 'garden'],
+    };
+    const descriptors = ['sentence-1:blank-1', 'sentence-1:blank-2'].map((id, answerIndex) => ({
+      id,
+      blockId: 'sentence-block',
+      groupId: 'passage-1',
+      groupLabel: 'Passage 1',
+      isMulti: false,
+      correctCount: 1,
+      answerKey: 'sentence-1',
+      answerIndex,
+      block: {
+        id: 'sentence-block',
+        type: 'SENTENCE_COMPLETION',
+        instruction: 'Complete the sentence.',
+        questions: [question],
+      },
+      question,
+    })) as unknown as StudentQuestionDescriptor[];
+
+    // Strict blank consumes only its own "Garden" entry; the "garden" sibling
+    // stays available for the opt-out blank (pre-fix it was wrongly consumed).
+    expect(
+      resolveSentenceCompletionCorrectness(descriptors, {
+        'sentence-1': ['Garden', 'garden'],
+      }),
+    ).toEqual(new Map([
+      ['sentence-1:blank-1', true],
+      ['sentence-1:blank-2', true],
+    ]));
+  });
+
   test('shared-disabled blank 1 rejects a key configured only on blank 2', () => {
     const descriptors = [
       buildSentenceDescriptor('sentence-1:blank-1', 0, false),
@@ -155,7 +197,7 @@ describe('gradingAnswerUtils', () => {
     expect(isStudentAnswerCorrect(descriptor, { q1: 'T' })).toBe(true);
   });
 
-  test('CLOZE: ignores answer-key case for correctness indicator', () => {
+  test('CLOZE: requires exact case by default policy', () => {
     const descriptor = {
       id: 'q1',
       blockId: 'b1',
@@ -175,6 +217,29 @@ describe('gradingAnswerUtils', () => {
     } as unknown as StudentQuestionDescriptor;
 
     expect(getCorrectAnswerDisplay(descriptor)).toBe('daily');
+    expect(isStudentAnswerCorrect(descriptor, { q1: 'Daily' })).toBe(false);
+    expect(isStudentAnswerCorrect(descriptor, { q1: 'daily' })).toBe(true);
+  });
+
+  test('CLOZE: explicit opt-out restores insensitive match', () => {
+    const descriptor = {
+      id: 'q1',
+      blockId: 'b1',
+      groupId: 'p1',
+      groupLabel: 'Passage 1',
+      isMulti: false,
+      correctCount: 1,
+      answerKey: 'q1',
+      block: {
+        id: 'b1',
+        type: 'CLOZE',
+        instruction: '',
+        answerRule: 'TWO_WORDS',
+        questions: [{ id: 'q1', prompt: 'Fill blank', correctAnswer: 'daily', caseSensitive: false }],
+      },
+      question: { id: 'q1', prompt: 'Fill blank', correctAnswer: 'daily', caseSensitive: false },
+    } as unknown as StudentQuestionDescriptor;
+
     expect(isStudentAnswerCorrect(descriptor, { q1: 'Daily' })).toBe(true);
     expect(isStudentAnswerCorrect(descriptor, { q1: 'daily' })).toBe(true);
   });
@@ -212,7 +277,7 @@ describe('gradingAnswerUtils', () => {
 
     expect(getCorrectAnswerDisplay(descriptor)).toBe('state-of-the-art | advanced');
     expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'state of the art' })).toBe(true);
-    expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'State of the art' })).toBe(true);
+    expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'State of the art' })).toBe(false);
     expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'advanced' })).toBe(true);
     expect(isStudentAnswerCorrect(descriptor, { 'q-alt': 'different' })).toBe(false);
   });

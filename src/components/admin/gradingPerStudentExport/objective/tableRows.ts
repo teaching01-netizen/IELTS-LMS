@@ -1,7 +1,8 @@
 import type { CsvColumn } from '../../gradingReviewUtils';
+import type { ObjectiveRowContext } from '../types';
 
 import { toDisplayValue, toOptionalFiniteNumber } from '../pdf/text';
-import { answersMatch } from '../../../../utils/acceptedAnswers';
+import { answersMatchCaseExact, answersMatchForEntry } from '../../../../utils/acceptedAnswers';
 
 export type ObjectiveQuestionTableRow = {
   question: string;
@@ -12,17 +13,38 @@ export type ObjectiveQuestionTableRow = {
 };
 
 /**
+ * Display-only separator for coalesced score-group rows. Deliberately not
+ * " | ": a pipe separates accepted variants on both stacks, so a display
+ * merge must never emit text that could be parsed as a variant list.
+ */
+const GROUP_ROW_DISPLAY_SEPARATOR = ', ';
+
+/** Appends `right` unless it is empty or already present as a display entry. */
+function joinDistinctDisplayValues(left: string, right: string): string {
+  if (!left) return right;
+  if (!right || left.split(GROUP_ROW_DISPLAY_SEPARATOR).includes(right)) return left;
+  return `${left}${GROUP_ROW_DISPLAY_SEPARATOR}${right}`;
+}
+
+/**
  * Builds a stable, teacher-oriented row model for objective exports (Reading/Listening).
  *
  * Invariants:
- * - One row per `answer:*` column in the wide export.
+ * - One row per `answer:*` column, except slots sharing one `scoreGroup:` mark
+ *   (2-for-1 groups), which coalesce into a single row so Yes counts match totals.
  * - `rightAnswer:*` and `score:*` keys are best-effort; missing keys yield empty values.
- * - Correctness is derived from numeric score when present, else a case-sensitive normalized string compare.
+ * - Correctness is derived from numeric score when present (authoritative saved score),
+ *   else default strict: case-exact unless `caseSensitiveByQuestionId[id]` is explicitly false.
  */
 export function buildObjectiveQuestionTableRows(
   columns: CsvColumn[],
   row: Record<string, unknown>,
+  context: ObjectiveRowContext = {},
 ): ObjectiveQuestionTableRow[] {
+  const {
+    caseSensitiveByQuestionId = {},
+    groupThresholdByScoreKey = {},
+  } = context;
   const scoreKeyByLabel = new Map<string, string>();
   for (const column of columns) {
     const key = column.key;
@@ -30,7 +52,8 @@ export function buildObjectiveQuestionTableRows(
     scoreKeyByLabel.set(column.label.trim(), key);
   }
 
-  const rows: ObjectiveQuestionTableRow[] = [];
+  type ScoredRow = ObjectiveQuestionTableRow & { scoreKey: string; baseQuestion: string };
+  const rows: ScoredRow[] = [];
   for (const column of columns) {
     if (!column.key.startsWith('answer:')) continue;
     const id = column.key.slice('answer:'.length);
@@ -66,6 +89,8 @@ export function buildObjectiveQuestionTableRows(
             : rightAnswer,
           correct: selectionScore > 0 ? 'Yes' : 'No',
           score: String(selectionScore),
+          scoreKey,
+          baseQuestion,
         });
       });
       continue;
@@ -79,9 +104,11 @@ export function buildObjectiveQuestionTableRows(
       // ("a | b") is not itself an accepted answer. Split on any pipe
       // spacing ("a|b", "a |b", "a| b") to match sanitizeAcceptedAnswers.
       const alternatives = rightAnswer.split('|').map((value) => value.trim()).filter(Boolean);
-      correct = alternatives.some((alternative) => answersMatch(studentAnswer, alternative))
-        ? 'Yes'
-        : 'No';
+      const strict = caseSensitiveByQuestionId[id] !== false;
+      const matches = strict
+        ? alternatives.some((alternative) => answersMatchCaseExact(studentAnswer, alternative))
+        : alternatives.some((alternative) => answersMatchForEntry(studentAnswer, alternative, false));
+      correct = matches ? 'Yes' : 'No';
     }
 
     rows.push({
@@ -90,8 +117,74 @@ export function buildObjectiveQuestionTableRows(
       rightAnswer,
       correct,
       score: scoreValue,
+      scoreKey,
+      baseQuestion,
     });
   }
 
-  return rows;
+  // Slots sharing one scoreGroup mark (2-for-1 groups) coalesce into a single
+  // row: per-slot rows would otherwise repeat the same group verdict and break
+  // Yes==total. The merged row carries the group score once. Without a saved
+  // group score, member verdicts are recomputed against the group threshold
+  // (default any-correct, mirroring the scorer's requiredCorrect default).
+  const merged: ObjectiveQuestionTableRow[] = [];
+  const groupIndex = new Map<string, number>();
+  interface GroupAccumulator {
+    readonly firstIndex: number;
+    yesCount: number;
+    blankCount: number;
+    savedScore: string | null;
+  }
+  const groupAccumulators = new Map<string, GroupAccumulator>();
+  for (const entry of rows) {
+    const { scoreKey: entryScoreKey, baseQuestion: entryBase, ...row } = entry;
+    if (!entryScoreKey.startsWith('scoreGroup:')) {
+      merged.push(row);
+      continue;
+    }
+    const existing = groupIndex.get(entryScoreKey);
+    if (existing === undefined) {
+      groupIndex.set(entryScoreKey, merged.length);
+      merged.push({ ...row, question: entryBase });
+      groupAccumulators.set(entryScoreKey, {
+        firstIndex: merged.length - 1,
+        yesCount: row.correct === 'Yes' ? 1 : 0,
+        blankCount: row.correct === '' ? 1 : 0,
+        savedScore: toOptionalFiniteNumber(row.score) === null ? null : row.score,
+      });
+      continue;
+    }
+    const target = merged[existing]!;
+    merged[existing] = {
+      ...target,
+      studentAnswer: joinDistinctDisplayValues(target.studentAnswer, row.studentAnswer),
+      rightAnswer: joinDistinctDisplayValues(target.rightAnswer, row.rightAnswer),
+    };
+    const accumulator = groupAccumulators.get(entryScoreKey)!;
+    if (row.correct === 'Yes') accumulator.yesCount += 1;
+    if (row.correct === '') accumulator.blankCount += 1;
+    if (accumulator.savedScore === null && toOptionalFiniteNumber(row.score) !== null) {
+      accumulator.savedScore = row.score;
+    }
+  }
+
+  // Evaluate each group's threshold exactly once from every member verdict:
+  // merging pairwise would discard votes for 3+ slot groups.
+  for (const [scoreKey, accumulator] of groupAccumulators) {
+    const row = merged[accumulator.firstIndex]!;
+    if (accumulator.savedScore !== null) {
+      merged[accumulator.firstIndex] = { ...row, score: accumulator.savedScore };
+      continue;
+    }
+    const threshold = groupThresholdByScoreKey[scoreKey] ?? 1;
+    merged[accumulator.firstIndex] = {
+      ...row,
+      correct: accumulator.blankCount > 0
+        ? ''
+        : accumulator.yesCount >= threshold ? 'Yes' : 'No',
+      score: '',
+    };
+  }
+
+  return merged;
 }

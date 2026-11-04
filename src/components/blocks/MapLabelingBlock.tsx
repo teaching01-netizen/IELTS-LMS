@@ -6,6 +6,9 @@ import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
 import { BlockInstructionField } from './BlockInstructionField';
+import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { CaseSensitivityToggle } from './CaseSensitivityToggle';
+import { mapAcceptedAnswers, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 
 interface Props {
   block: QuestionBlock;
@@ -57,9 +60,22 @@ export const MapLabelingBlock: React.FC<Props> = ({
     updateBlock({ ...mapBlock, questions: newQ });
   };
 
-  const updateHotspot = (id: string, field: 'label' | 'correctAnswer' | 'x' | 'y', value: string | number) => {
+  const updateHotspot = (
+    id: string,
+    field: 'label' | 'correctAnswer' | 'caseSensitive' | 'x' | 'y',
+    value: string | number | boolean | undefined,
+  ) => {
     const newQ = questions.map(q => q.id === id ? { ...q, [field]: value } : q);
     updateBlock({ ...mapBlock, questions: newQ });
+  };
+
+  // Accepted answers are alternatives only: keep the authoritative
+  // correctAnswer untouched (grading reads correctAnswer first for MAP).
+  const updateHotspotAcceptedAnswers = (id: string, next: string[]) => {
+    updateBlock({
+      ...mapBlock,
+      questions: mapAcceptedAnswers(questions, (question) => question.id === id, next),
+    });
   };
 
   const handleImageClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -256,6 +272,22 @@ export const MapLabelingBlock: React.FC<Props> = ({
                       className={`w-full border rounded-sm px-2 py-1 text-xs focus:ring-1 focus:ring-blue-700 outline-none transition-colors text-gray-800 ${getFieldError(`questions[${i}].correctAnswer`) ? 'border-red-500' : 'border-gray-100'}`}
                       placeholder="Correct answer"
                     />
+                    <div className="mt-1">
+                      <AcceptedAnswersEditor
+                        value={resolveAcceptedAnswers(q)}
+                        onChange={(next) => updateHotspotAcceptedAnswers(q.id, next)}
+                        placeholder="Other accepted answers..."
+                      />
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Used only when Correct is empty — a filled Correct answer takes precedence.
+                      </p>
+                    </div>
+                    <div className="mt-1">
+                      <CaseSensitivityToggle
+                        caseSensitive={q.caseSensitive}
+                        onChange={(caseSensitive) => updateHotspot(q.id, 'caseSensitive', caseSensitive)}
+                      />
+                    </div>
                   </div>
                   <div className="flex gap-1">
                     <div className="flex-1">

@@ -359,6 +359,12 @@ type projectionQuestion struct {
 	Correct  any
 	Rule     string
 	Multi    bool
+	// CaseSensitive requires exact case. Default true (strict); explicit
+	// `caseSensitive: false` opts a question back into case-insensitive grading.
+	CaseSensitive bool
+	// ExactID compares option IDs as raw identity (no cleaning/folding).
+	// Set for SINGLE_MCQ specs; MULTI_MCQ has its own set logic.
+	ExactID bool
 	// Set only by a schedule answer-key override.
 	HasOverride bool
 	Excluded    []string
@@ -463,9 +469,10 @@ func collectProjectionBlock(model *projectionSectionModel, block map[string]any,
 					continue
 				}
 				spec := projectionQuestion{
-					ID:       questionID + ":" + blankID,
-					Rule:     rule,
-					Accepted: projectionAcceptedAnswers(blank, "SENTENCE_COMPLETION"),
+					ID:            questionID + ":" + blankID,
+					Rule:          rule,
+					Accepted:      projectionAcceptedAnswers(blank, "SENTENCE_COMPLETION"),
+					CaseSensitive: projectionCaseSensitive(blank),
 				}
 				if acceptAny {
 					spec.Accepted = pool
@@ -543,13 +550,14 @@ func collectProjectionTree(model *projectionSectionModel, node map[string]any, b
 					required = value
 				}
 				leaves = append(leaves, projectionQuestion{
-					ID:           blockID + "::tree::" + rootID + "::" + nodeID,
-					Rule:         "sub_answer_tree",
-					Accepted:     projectionAcceptedAnswers(current, "SUB_ANSWER_TREE"),
-					GroupKey:     blockID + "::tree::root::" + rootID,
-					GroupKind:    "tree",
-					GroupIndex:   len(leaves),
-					TreeRequired: required,
+					ID:            blockID + "::tree::" + rootID + "::" + nodeID,
+					Rule:          "sub_answer_tree",
+					Accepted:      projectionAcceptedAnswers(current, "SUB_ANSWER_TREE"),
+					GroupKey:      blockID + "::tree::root::" + rootID,
+					GroupKind:     "tree",
+					GroupIndex:    len(leaves),
+					TreeRequired:  required,
+					CaseSensitive: projectionCaseSensitive(current),
 				})
 			}
 			return
@@ -593,9 +601,10 @@ func collectProjectionSlots(model *projectionSectionModel, blockID string, raw a
 		}
 		questionID := blockID + ":" + id
 		spec := projectionQuestion{
-			ID:       questionID,
-			Rule:     rule,
-			Accepted: projectionAcceptedAnswers(item, questionType),
+			ID:            questionID,
+			Rule:          rule,
+			Accepted:      projectionAcceptedAnswers(item, questionType),
+			CaseSensitive: projectionCaseSensitive(item),
 		}
 		if groupKey := slotScoreGroupKey(blockID, questionType, item); groupKey != "" {
 			spec.GroupKey = groupKey
@@ -631,7 +640,7 @@ func addProjectionOptionQuestion(model *projectionSectionModel, id string, raw a
 		correct = append(correct, optionID)
 		accepted = append(accepted, optionID)
 	}
-	addProjectionQuestionWithValues(model, projectionQuestion{ID: id, Accepted: accepted, Correct: correct, Rule: rule, Multi: multi})
+	addProjectionQuestionWithValues(model, projectionQuestion{ID: id, Accepted: accepted, Correct: correct, Rule: rule, Multi: multi, ExactID: !multi})
 }
 
 func addProjectionQuestion(model *projectionSectionModel, question map[string]any, fallbackRule string, multi bool, questionType string) {
@@ -646,6 +655,16 @@ func addProjectionQuestion(model *projectionSectionModel, question map[string]an
 	addProjectionQuestionWithID(model, id, question, rule, multi, questionType)
 }
 
+func projectionCaseSensitive(question map[string]any) bool {
+	if question == nil {
+		return true
+	}
+	if flag, ok := question["caseSensitive"].(bool); ok {
+		return flag
+	}
+	return true
+}
+
 func addProjectionQuestionWithID(model *projectionSectionModel, id string, question map[string]any, rule string, multi bool, questionType string) {
 	accepted := projectionAcceptedAnswers(question, questionType)
 	correct := any(nil)
@@ -655,7 +674,7 @@ func addProjectionQuestionWithID(model *projectionSectionModel, id string, quest
 			correct = append([]string(nil), accepted...)
 		}
 	}
-	addProjectionQuestionWithValues(model, projectionQuestion{ID: id, Accepted: accepted, Correct: correct, Rule: rule, Multi: multi})
+	addProjectionQuestionWithValues(model, projectionQuestion{ID: id, Accepted: accepted, Correct: correct, Rule: rule, Multi: multi, CaseSensitive: projectionCaseSensitive(question)})
 }
 
 func addProjectionQuestionWithValues(model *projectionSectionModel, question projectionQuestion) {
@@ -680,6 +699,7 @@ func addProjectionQuestionWithValues(model *projectionSectionModel, question pro
 }
 
 func projectionAcceptedAnswers(question map[string]any, questionType string) []string {
+	strict := projectionCaseSensitive(question)
 	seen := map[string]bool{}
 	accepted := make([]string, 0)
 	appendValue := func(raw any) {
@@ -694,12 +714,33 @@ func projectionAcceptedAnswers(question map[string]any, questionType string) []s
 			}
 			for _, variant := range strings.Split(text, "|") {
 				variant = normalizeAnswer(variant)
-				if variant != "" && !seen[strings.ToLower(variant)] {
-					seen[strings.ToLower(variant)] = true
+				if variant == "" {
+					continue
+				}
+				key := answerDedupeKey(variant, strict)
+				if !seen[key] {
+					seen[key] = true
 					accepted = append(accepted, variant)
 				}
 			}
 		}
+	}
+	// Some builder editors save the selected key and the accepted alternatives
+	// as separate fields, so grading must be additive rather than
+	// first-non-empty:
+	//   - CLASSIFICATION / MATCHING_FEATURES: selected category/match first,
+	//     then acceptedAnswers; a stale legacy correctAnswer is never graded.
+	//   - DIAGRAM_LABELING / FLOW_CHART: primary correctAnswer first, then
+	//     acceptedAnswers, so a filled alternatives list can never shadow the
+	//     primary key (pipe variants are split for every field).
+	// MAP deliberately stays single-winner (correctAnswer then acceptedAnswers).
+	if fields := additiveAnswerFields(questionType); len(fields) > 0 {
+		for _, field := range fields {
+			if raw, ok := question[field]; ok && raw != nil {
+				appendValue(raw)
+			}
+		}
+		return accepted
 	}
 	for _, field := range fieldsForQuestionType(questionType) {
 		raw, ok := question[field]
@@ -712,6 +753,23 @@ func projectionAcceptedAnswers(question map[string]any, questionType string) []s
 		}
 	}
 	return accepted
+}
+
+// additiveAnswerFields names the fields graded together, de-duped, instead of
+// as an either/or key source: every listed field contributes keys, in order.
+// The per-row keySourceFields entry still documents where the type stores its
+// key; these types are the ones whose editors write more than one key field.
+func additiveAnswerFields(questionType string) []string {
+	switch strings.ToUpper(strings.TrimSpace(questionType)) {
+	case "CLASSIFICATION":
+		return []string{"correctCategory", "acceptedAnswers"}
+	case "MATCHING_FEATURES":
+		return []string{"correctMatch", "acceptedAnswers"}
+	case "DIAGRAM_LABELING", "FLOW_CHART":
+		return []string{"correctAnswer", "acceptedAnswers"}
+	default:
+		return nil
+	}
 }
 
 // projectionSectionAnswers is the one place a saved answer map is narrowed to
@@ -772,12 +830,25 @@ type objectiveOutcome struct {
 func projectionObjectiveResults(section string, answers map[string]any, specs []projectionQuestion, keys map[string]string, versionID string) map[string]any {
 	// The normalized Go assessment tables are authoritative when present; the
 	// snapshot answer key remains the compatibility path for IELTS builder data.
+	// A fallback-filled spec inherits the sealed definition's case policy, so
+	// an explicit `caseSensitive: false` there grades exactly like the
+	// submit-time scoreObjective path: strict unless either the content or the
+	// sealed definition opted out.
 	for index := range specs {
 		if len(specs[index].Accepted) == 0 {
 			if definition, ok := keys[specs[index].ID]; ok {
-				if answer, ok := objectiveKeyAnswer(definition); ok {
-					specs[index].Accepted = []string{normalizeAnswer(answer)}
+				if sealed, ok := parseObjectiveKey(definition); ok {
+					// Option IDs are identity (ExactID compares raw), so the sealed
+					// value must not be cleaned here: normalizeAnswer would turn
+					// "opt-1111" into "opt 1111" and the raw compare could never
+					// match. Free-text keys keep the one cleaning rule.
+					answer := sealed.Answer
+					if !specs[index].ExactID {
+						answer = normalizeAnswer(answer)
+					}
+					specs[index].Accepted = []string{answer}
 					specs[index].Correct = answer
+					specs[index].CaseSensitive = specs[index].CaseSensitive && sealed.CaseSensitive
 				}
 			}
 		}
@@ -786,7 +857,7 @@ func projectionObjectiveResults(section string, answers map[string]any, specs []
 	outcomes := make([]objectiveOutcome, 0, len(specs))
 	for _, spec := range specs {
 		given, present := answers[spec.ID]
-		blank := !present || len(projectionValueStrings(given)) == 0
+		blank := !present || projectionIsBlank(given)
 		item := objectiveOutcome{spec: spec, given: given, blank: blank, displayKeys: spec.Accepted}
 		switch {
 		case spec.Rule == "duplicate_question_id":
@@ -826,7 +897,7 @@ func projectionObjectiveResults(section string, answers map[string]any, specs []
 				item.max = float64(spec.Points)
 			}
 		default:
-			item.matched = projectionAnswerMatches(given, spec.Accepted, false) && !projectionAnswerExcluded(given, spec.Excluded)
+			item.matched = projectionAnswerMatchesFull(given, spec.Accepted, false, spec.CaseSensitive, spec.ExactID) && !projectionAnswerExcluded(given, spec.Excluded)
 			item.max = 1
 			if spec.HasOverride {
 				item.max = float64(spec.Points)
@@ -1035,7 +1106,7 @@ func applyTreeGroup(outcomes []objectiveOutcome, indices []int) {
 			if seen[studentIndex] {
 				continue
 			}
-			if !projectionAnswerMatches(outcomes[studentIndex].given, outcomes[requiredIndex].spec.Accepted, false) {
+			if !projectionAnswerMatchesForEntry(outcomes[studentIndex].given, outcomes[requiredIndex].spec.Accepted, false, outcomes[requiredIndex].spec.CaseSensitive) {
 				continue
 			}
 			if projectionAnswerExcluded(outcomes[studentIndex].given, outcomes[requiredIndex].spec.Excluded) {
@@ -1067,12 +1138,11 @@ func applyTreeGroup(outcomes []objectiveOutcome, indices []int) {
 }
 
 // applyPoolGroup matches a shared sentence answer pool: blanks consume keys in
-// blank order, so repeating one pool answer in two blanks counts once.
+// blank order, so repeating one pool answer in two blanks counts once. Each
+// blank matches under its own strictness, and consuming one key never consumes
+// a case-variant sibling (see answerPool).
 func applyPoolGroup(outcomes []objectiveOutcome, indices []int) {
-	available := map[string]bool{}
-	for _, value := range outcomes[indices[0]].spec.Accepted {
-		available[normalizeComparable(value)] = true
-	}
+	pool := newAnswerPool(outcomes[indices[0]].spec.Accepted)
 	for _, index := range indices {
 		outcomes[index].awarded = 0
 		outcomes[index].max = 1
@@ -1084,13 +1154,26 @@ func applyPoolGroup(outcomes []objectiveOutcome, indices []int) {
 		if len(values) != 1 {
 			continue
 		}
-		key := normalizeComparable(values[0])
-		if key != "" && available[key] {
-			available[key] = false
+		if pool.consume(values[0], outcomes[index].spec.CaseSensitive) {
 			outcomes[index].matched = true
 			outcomes[index].awarded = 1
 		}
 	}
+}
+
+// projectionIsBlank reports whether a saved answer counts as unanswered:
+// absent, empty, or whitespace-only (mirrors the website's trim-based check).
+func projectionIsBlank(given any) bool {
+	values := projectionValueStrings(given)
+	if len(values) == 0 {
+		return true
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // projectionAnswerExcluded reports whether a typed answer was explicitly kept
@@ -1109,8 +1192,30 @@ func projectionAnswerExcluded(given any, excluded []string) bool {
 	return false
 }
 
-func projectionAnswerMatches(given any, accepted []string, multi bool) bool {
+// answersMatchInsensitive is the explicit `caseSensitive: false` opt-out
+// comparison. Empty student answers never match.
+func answersMatchInsensitive(student, key string) bool {
+	normalizedStudent := normalizeComparable(student)
+	if normalizedStudent == "" {
+		return false
+	}
+	return normalizedStudent == normalizeComparable(key)
+}
+
+func projectionAnswerMatchesForEntry(given any, accepted []string, multi bool, caseSensitive bool) bool {
+	return projectionAnswerMatchesFull(given, accepted, multi, caseSensitive, false)
+}
+
+func projectionAnswerMatchesFull(given any, accepted []string, multi bool, caseSensitive, exactID bool) bool {
 	values := projectionValueStrings(given)
+	if exactID {
+		// Option IDs are identity: raw equality, no cleaning or folding.
+		// Empty never matches (blank is handled by callers as unanswered).
+		if len(values) != 1 || len(accepted) != 1 {
+			return false
+		}
+		return values[0] != "" && values[0] == accepted[0]
+	}
 	if multi {
 		if len(values) != len(accepted) {
 			return false
@@ -1126,11 +1231,17 @@ func projectionAnswerMatches(given any, accepted []string, multi bool) bool {
 		}
 		return true
 	}
-	if len(values) == 0 {
+	// A single-value question takes exactly one value; arrays (legacy/corrupt
+	// payloads) fail closed instead of matching on the first element.
+	if len(values) != 1 {
 		return false
 	}
 	for _, expected := range accepted {
-		if answersMatch(values[0], expected) {
+		matched := answersMatchCaseExact(values[0], expected)
+		if !caseSensitive {
+			matched = answersMatchInsensitive(values[0], expected)
+		}
+		if matched {
 			return true
 		}
 	}

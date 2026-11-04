@@ -6,6 +6,7 @@ import type { SectionSubmission } from '../../../types/grading';
 import {
   buildObjectiveExportRows,
   buildQuestionTracebackGroups,
+  buildWideObjectiveExport,
   findSavedScoreMismatches,
 } from '../gradingReviewUtils';
 
@@ -179,5 +180,82 @@ describe('parity-consistent saved results', () => {
     } as unknown as SectionSubmission;
 
     expect(findSavedScoreMismatches(fixture.examState, sectionSubmission, 'reading')).toEqual([]);
+  });
+
+  it('keeps the saved group mark in traceback and export totals', () => {
+    const fixture = JSON.parse(
+      readFileSync('testdata/objective-grading-parity/full-coverage-exam.json', 'utf8'),
+    ) as {
+      examState: ExamState;
+      answers: Record<string, unknown>;
+      overrides: Record<string, unknown>;
+      expected: {
+        totalScore: number;
+        maxScore: number;
+        questions: Array<{ questionId: string; correctness: boolean | null; awardedScore: number | null; maxScore: number | null }>;
+      };
+    };
+    const savedResults = fixture.expected.questions.map((question) => ({
+      questionId: question.questionId,
+      studentAnswer: '',
+      correctAnswer: '',
+      isCorrect: question.correctness ?? false,
+      awardedScore: question.awardedScore ?? 0,
+      maxScore: question.maxScore ?? 0,
+      scoringRule: 'exact_match',
+      hasOverride: Object.prototype.hasOwnProperty.call(fixture.overrides, question.questionId),
+    }));
+    const sectionSubmission = {
+      id: 'sec-parity',
+      submissionId: 'sub-parity',
+      section: 'reading',
+      answers: { type: 'reading', answers: fixture.answers },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: fixture.expected.totalScore,
+        maxScore: fixture.expected.maxScore,
+        percentage: 86.21,
+        questionResults: savedResults,
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } as unknown as SectionSubmission;
+
+    const items = buildQuestionTracebackGroups(fixture.examState, sectionSubmission, 'reading')
+      .flatMap((group) => group.items);
+    const tableGroup = items.find((item) => item.questionId === 'b-table:c1');
+    expect(tableGroup?.correctness).toBe(true);
+    expect(tableGroup?.awardedScore).toBe(2);
+    expect(tableGroup?.maxScore).toBe(2);
+    const treeGroup = items.find((item) => item.questionId === 'b-tree::tree::r1::lf1');
+    expect(treeGroup?.correctness).toBe(true);
+    expect(treeGroup?.awardedScore).toBe(2);
+    expect(treeGroup?.maxScore).toBe(2);
+
+    const exportData = buildWideObjectiveExport({
+      session: { sessionId: 'session-parity', examTitle: 'Exam' },
+      submissions: [{
+        id: 'sub-parity',
+        scheduleId: 'schedule-1',
+        studentName: 'Student',
+        studentId: 'student-1',
+        cohortName: 'Cohort',
+        submittedAt: '2026-01-01T00:00:00.000Z',
+      } as never],
+      sectionSubmissions: [{ submissionId: 'sub-parity', sectionSubmission }],
+      examState: fixture.examState,
+      moduleType: 'reading',
+    });
+    const row = exportData.rows[0]!;
+    expect(row['totalScore']).toBe(fixture.expected.totalScore);
+    expect(row['maxScore']).toBe(fixture.expected.maxScore);
+    const scoreColumns = exportData.columns.filter(
+      (column) => column.key.startsWith('score:') || column.key.startsWith('scoreGroup:'),
+    );
+    const scoreSum = scoreColumns.reduce((sum, column) => {
+      const value = row[column.key];
+      return sum + (typeof value === 'number' ? value : 0);
+    }, 0);
+    expect(scoreSum).toBe(fixture.expected.totalScore);
   });
 });

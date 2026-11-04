@@ -1,5 +1,5 @@
-import type { QuestionBlock, SubAnswerTreeNode } from '../types';
-import { normalizeAnswerForAcceptedAnswerKey, normalizeAnswerForMatching } from './acceptedAnswers';
+import type { CaseSensitivity, QuestionBlock, SubAnswerTreeNode } from '../types';
+import { normalizeAnswerCaseExact, normalizeAnswerForAcceptedAnswerKey, normalizeAnswerForMatching } from './acceptedAnswers';
 
 export const SUB_ANSWER_TREE_MAX_DEPTH = 10;
 
@@ -18,7 +18,7 @@ export interface SubAnswerTreeRootDescriptor {
   requiredLeafQuestionIds: string[];
 }
 
-export interface SubAnswerTreeLeafDescriptor {
+export interface SubAnswerTreeLeafDescriptor extends CaseSensitivity {
   id: string;
   rootId: string;
   rootNodeId: string;
@@ -85,6 +85,7 @@ function normalizeNodeTree(
     ? node['acceptedAnswers'].filter((entry): entry is string => typeof entry === 'string')
     : undefined;
   const required = typeof node['required'] === 'boolean' ? node['required'] : undefined;
+  const caseSensitive = typeof node['caseSensitive'] === 'boolean' ? node['caseSensitive'] : undefined;
   const rawChildren = Array.isArray(node['children'])
     ? node['children'].filter((child): child is Record<string, unknown> => isNodeObject(child))
     : [];
@@ -96,6 +97,7 @@ function normalizeNodeTree(
     label,
     acceptedAnswers,
     required,
+    ...(caseSensitive === undefined ? {} : { caseSensitive }),
     children,
   };
 }
@@ -272,6 +274,7 @@ export function flattenSubAnswerTree(
         acceptedAnswers,
         required,
         depth,
+        ...(node.caseSensitive === undefined ? {} : { caseSensitive: node.caseSensitive }),
       });
     });
 
@@ -295,10 +298,10 @@ export function flattenSubAnswerTree(
   };
 }
 
-function normalizedAnswerSet(values: readonly string[]): Set<string> {
+function normalizedAnswerSet(values: readonly string[], caseSensitive = true): Set<string> {
   const out = new Set<string>();
   values.forEach((value) => {
-    const key = normalizeAnswerForMatching(value);
+    const key = caseSensitive ? normalizeAnswerCaseExact(value) : normalizeAnswerForMatching(value);
     if (key) out.add(key);
   });
   return out;
@@ -307,12 +310,14 @@ function normalizedAnswerSet(values: readonly string[]): Set<string> {
 export function isSubAnswerLeafCorrect(
   acceptedAnswers: readonly string[],
   studentValue: unknown,
+  caseSensitive = true,
 ): boolean {
-  const normalized = normalizeAnswerForMatching(typeof studentValue === 'string' ? studentValue : '');
+  const raw = typeof studentValue === 'string' ? studentValue : '';
+  const normalized = caseSensitive ? normalizeAnswerCaseExact(raw) : normalizeAnswerForMatching(raw);
   if (!normalized) {
     return false;
   }
-  return normalizedAnswerSet(acceptedAnswers).has(normalized);
+  return normalizedAnswerSet(acceptedAnswers, caseSensitive).has(normalized);
 }
 
 export function evaluateSubAnswerRootUnordered(

@@ -10,8 +10,12 @@ on:
       - "src/utils/sentenceCompletionAnswerPool.ts"
       - "src/utils/subAnswerTree.ts"
       - "src/utils/subAnswerTreeSlots.ts"
+      - "src/utils/gradingGroups.ts"
       - "src/utils/multiSelectMcq.ts"
       - "src/services/examAdapterService.ts"
+      - "e2e/ielts-*.spec.ts"
+      - "e2e/helpers/ieltsGradingFixtures.ts"
+      - "playwright.ielts-case.config.ts"
       - "backend/go/internal/grading/**"
       - "backend/go/internal/exams/**"
       - "backend/go/cmd/grading-parity-grade/**"
@@ -26,6 +30,14 @@ on:
     branches: [main]
     paths:
       - "src/**/grading**"
+      - "src/utils/acceptedAnswers.ts"
+      - "src/utils/sentenceCompletionAnswerPool.ts"
+      - "src/utils/subAnswerTree.ts"
+      - "src/utils/gradingGroups.ts"
+      - "src/services/examAdapterService.ts"
+      - "e2e/ielts-*.spec.ts"
+      - "e2e/helpers/ieltsGradingFixtures.ts"
+      - "playwright.ielts-case.config.ts"
       - "backend/go/internal/grading/**"
       - "testdata/objective-grading-parity/**"
       - ".github/workflows/grading-parity.yml"
@@ -54,9 +66,13 @@ jobs:
           node-version: 20
       - run: bun install --frozen-lockfile
       - name: Shared answer-cleaning fixture
-        run: bunx vitest run src/utils/__tests__/answerCleaningParity.test.ts src/utils/__tests__/acceptedAnswers.test.ts
+        run: bunx vitest run src/utils/__tests__/answerCleaningParity.test.ts src/utils/__tests__/acceptedAnswers.test.ts src/utils/__tests__/studentInputVectors.test.ts
       - name: Key-source table + objective scoring
-        run: bunx vitest run src/components/admin/__tests__/gradingKeySources.test.ts src/components/admin/__tests__/keySourceTable.test.ts src/features/grading/__tests__/objectiveScoring.test.ts
+        run: bunx vitest run src/components/admin/__tests__/gradingKeySources.test.ts src/components/admin/__tests__/keySourceTable.test.ts src/components/admin/__tests__/gradingAnswerDisplay.test.ts src/features/grading/__tests__/objectiveScoring.test.ts
+      - name: Shared pool + grouped-slot contracts
+        run: bunx vitest run src/utils/__tests__/sentenceCompletionAnswerPool.test.ts src/utils/__tests__/subAnswerTree.test.ts src/services/__tests__/examAdapterService.studentQuestions.test.ts
+      - name: IELTS vertical-slice parity suites
+        run: bun run e2e:ielts-case
 
   parity-report:
     runs-on: ubuntu-latest

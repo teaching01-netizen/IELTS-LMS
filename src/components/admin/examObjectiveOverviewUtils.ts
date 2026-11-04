@@ -10,7 +10,10 @@ import {
   getQuestionNumberLabel,
   getStudentQuestionsForModule,
 } from '../../features/exam-authoring/api/examAuthoringGateway';
+import type { StudentQuestionDescriptor } from '../../features/exam-authoring/api/examAuthoringGateway';
+import { answersMatchForEntry } from '../../utils/acceptedAnswers';
 import { formatAnswerValue, getCorrectAnswerDisplay, getCorrectAnswerValue } from './gradingAnswerUtils';
+import { scoreSectionForRecheck } from './gradingReviewUtils';
 
 export interface ExamObjectiveOverviewBundle {
   readonly submission: Pick<StudentSubmission, 'id' | 'studentName'>;
@@ -32,6 +35,13 @@ export interface ExamObjectiveOverviewRow {
   readonly maxScore: number;
   readonly scoringRule: string;
   readonly hasOverride: boolean;
+  /**
+   * Website re-check only, never the official score. Null when a manual
+   * override makes a re-check meaningless.
+   */
+  readonly websiteIsCorrect: boolean | null;
+  /** True when the website re-check disagrees with the saved result (regrade warning). */
+  readonly savedResultOutOfDate: boolean;
   readonly manualOverride: ObjectiveManualOverride | null;
 }
 
@@ -84,16 +94,6 @@ function normalizeCaseInsensitiveAndWhitespace(value: string): string {
   return normalizeCaseAndWhitespace(value).toLowerCase();
 }
 
-function textAnswersMatch(studentAnswer: string, correctAnswer: string): boolean {
-  const normalizedStudentAnswer = normalizeCaseAndWhitespace(studentAnswer);
-  if (!normalizedStudentAnswer) return false;
-
-  return correctAnswer
-    .split('|')
-    .map((answer) => normalizeCaseAndWhitespace(answer))
-    .some((answer) => answer === normalizedStudentAnswer);
-}
-
 function answersDifferOnlyByCaseOrWhitespace(studentAnswer: string, correctAnswer: string): boolean {
   if (!studentAnswer || !correctAnswer) return false;
 
@@ -122,8 +122,10 @@ function buildQuestionAnswerKindLookup(examState: ExamState | null | undefined):
   return lookup;
 }
 
-function buildQuestionDescriptorLookup(examState: ExamState | null | undefined) {
-  const lookup = new Map<string, ReturnType<typeof getStudentQuestionsForModule>[number]>();
+function buildQuestionDescriptorLookup(
+  examState: ExamState | null | undefined,
+): Map<string, StudentQuestionDescriptor> {
+  const lookup = new Map<string, StudentQuestionDescriptor>();
   if (!examState) return lookup;
 
   for (const section of ['reading', 'listening'] as const) {
@@ -161,9 +163,12 @@ function isTextAnswerResult(
   return questionAnswerKind ? questionAnswerKind === 'text' : isTextScoringRule(result.scoringRule);
 }
 
-function resolveResultValues(
+/**
+ * The saved result is the official score (ticket 11). A teacher override wins
+ * over it; the website never substitutes its own verdict here.
+ */
+function resolveSavedResultValues(
   result: ObjectiveQuestionResult,
-  correctAnswer: string = result.correctAnswer,
 ): Pick<ExamObjectiveOverviewRow, 'isCorrect' | 'awardedScore'> {
   if (result.manualOverride) {
     return {
@@ -172,20 +177,22 @@ function resolveResultValues(
     };
   }
 
-  const computedCorrectness = isTextScoringRule(result.scoringRule)
-    ? textAnswersMatch(result.studentAnswer, correctAnswer)
-    : result.isCorrect;
+  return { isCorrect: result.isCorrect, awardedScore: result.awardedScore };
+}
 
-  return {
-    isCorrect: computedCorrectness,
-    awardedScore: isTextScoringRule(result.scoringRule)
-      ? computedCorrectness ? result.maxScore : 0
-      : result.awardedScore,
-  };
+/**
+ * Best-effort recheck used only when exam content is unavailable (exam state
+ * loading failed or the descriptor is missing from this version). The shared
+ * scorer is always preferred when it can evaluate the question.
+ */
+function fallbackTextRecheck(studentAnswer: string, correctAnswer: string): boolean {
+  const alternatives = correctAnswer.split('|').map((answer) => answer.trim()).filter(Boolean);
+  if (alternatives.length === 0) return false;
+  return alternatives.some((answer) => answersMatchForEntry(studentAnswer, answer, true));
 }
 
 function getOverviewCorrectAnswerDisplay(
-  descriptor: ReturnType<typeof getStudentQuestionsForModule>[number] | undefined,
+  descriptor: StudentQuestionDescriptor | undefined,
   result: ObjectiveQuestionResult,
 ): string {
   if (result.hasOverride && result.correctAnswer.trim() !== '') {
@@ -200,7 +207,7 @@ function getPrimaryCorrectAnswer(value: string): string {
 }
 
 function getOverviewPrimaryCorrectAnswer(
-  descriptor: ReturnType<typeof getStudentQuestionsForModule>[number] | undefined,
+  descriptor: StudentQuestionDescriptor | undefined,
   result: ObjectiveQuestionResult,
 ): string {
   if (result.hasOverride && result.correctAnswer.trim() !== '') {
@@ -228,16 +235,36 @@ export function buildExamObjectiveOverviewRows(
       .filter((section): section is SectionSubmission & { section: 'reading' | 'listening' } =>
         section.section === 'reading' || section.section === 'listening',
       )
-      .flatMap((section) => (section.autoGradingResults?.questionResults ?? [])
-        .filter((result) => isTextAnswerResult(result, section.section, questionAnswerKinds))
-        .map((result) => {
-          const descriptor = questionDescriptors.get(`${section.section}:${result.questionId}`);
-          const correctAnswer = getOverviewCorrectAnswerDisplay(descriptor, result);
-          if (!answersDifferOnlyByCaseOrWhitespace(result.studentAnswer, correctAnswer)) {
-            return null;
-          }
-
-          const resolved = resolveResultValues(result, correctAnswer);
+      .flatMap((section) => {
+        const candidates = (section.autoGradingResults?.questionResults ?? [])
+          .filter((result) => isTextAnswerResult(result, section.section, questionAnswerKinds))
+          .map((result) => {
+            const descriptor = questionDescriptors.get(`${section.section}:${result.questionId}`);
+            const correctAnswer = getOverviewCorrectAnswerDisplay(descriptor, result);
+            return answersDifferOnlyByCaseOrWhitespace(result.studentAnswer, correctAnswer)
+              ? { result, descriptor, correctAnswer }
+              : null;
+          })
+          .filter((candidate): candidate is {
+            result: ObjectiveQuestionResult;
+            descriptor: StudentQuestionDescriptor | undefined;
+            correctAnswer: string;
+          } => candidate !== null);
+        if (candidates.length === 0) return [];
+        // One shared scorer pass per section submission. It owns grouped,
+        // pooled and tree verdicts, so this warning cannot disagree with the
+        // review page (and clears after a regrade).
+        const recheck = scoreSectionForRecheck(options.examState ?? null, section, section.section);
+        return candidates.map(({ result, descriptor, correctAnswer }) => {
+          // Saved result is official; the re-check is only a warning signal.
+          const savedResult = resolveSavedResultValues(result);
+          const scoredRecheck = recheck?.byId.get(result.questionId);
+          const websiteIsCorrect = result.manualOverride
+            ? null
+            : scoredRecheck?.correctness
+              ?? (scoredRecheck === undefined
+                ? fallbackTextRecheck(result.studentAnswer, correctAnswer)
+                : null);
           const row: ExamObjectiveOverviewRow = {
             rowId: `${submission.id}:${section.id}:${result.questionId}`,
             submissionId: submission.id,
@@ -251,12 +278,15 @@ export function buildExamObjectiveOverviewRows(
             maxScore: result.maxScore,
             scoringRule: result.scoringRule,
             hasOverride: result.hasOverride,
-            ...resolved,
+            ...savedResult,
+            websiteIsCorrect,
+            savedResultOutOfDate:
+              websiteIsCorrect !== null && websiteIsCorrect !== savedResult.isCorrect,
             manualOverride: result.manualOverride ?? null,
           };
           return row;
-        })
-        .filter((row): row is ExamObjectiveOverviewRow => row !== null)))
+        });
+      }))
     .sort((left, right) => {
       const studentOrder = left.studentName.localeCompare(right.studentName);
       if (studentOrder !== 0) return studentOrder;

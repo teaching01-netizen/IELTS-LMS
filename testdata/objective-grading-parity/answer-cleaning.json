@@ -28,14 +28,14 @@
     },
     {
       "name": "invisible zero width space",
-      "student": "waiter\u200b",
+      "student": "waiter​",
       "key": "waiter",
       "match": true
     },
     {
       "name": "invisible soft hyphen and word joiner",
-      "student": "Gar\u00adden\u2060 hall",
-      "key": "garden hall",
+      "student": "Gar­den⁠ hall",
+      "key": "Garden hall",
       "match": true
     },
     {
@@ -60,7 +60,7 @@
       "name": "accented letters match exactly",
       "student": "CAFÉ",
       "key": "café",
-      "match": true
+      "match": false
     },
     {
       "name": "en dash becomes a space",
@@ -96,7 +96,7 @@
       "name": "mixed case",
       "student": "GARDEN HALL",
       "key": "Garden hall",
-      "match": true
+      "match": false
     },
     {
       "name": "extra spaces",
@@ -133,7 +133,7 @@
   ],
   "idempotent": [
     "  Garden   Hall ",
-    "waiter\u200b",
+    "waiter​",
     "ＡＢＣ",
     "ภาษาไทย",
     "café",

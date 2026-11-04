@@ -10,6 +10,7 @@ import { MoreVertical, Plus, Trash2, GripVertical, ArrowUp, ArrowDown, AlertCirc
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { CaseSensitivityToggle } from './CaseSensitivityToggle';
 import { buildAcceptedAnswerFields, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
 import { maxVariantWordCountFromAcceptedAnswers, suggestUpgradedAnswerRule } from '../../utils/answerRuleAutoUpgrade';
@@ -204,6 +205,12 @@ export const ClozeBlock: React.FC<Props> = ({
                     }
                     placeholder="e.g., factories"
                   />
+                  <div className="mt-1">
+                    <CaseSensitivityToggle
+                      caseSensitive={q.caseSensitive}
+                      onChange={(caseSensitive) => updateQuestion(q.id, { caseSensitive })}
+                    />
+                  </div>
                 </div>
                 {getFieldError(`questions[${i}].correctAnswer`) && (
                   <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle size={10} /> {getFieldError(`questions[${i}].correctAnswer`)!.message}</p>

@@ -20,10 +20,16 @@ async function resolveExamState(
   return (version?.contentSnapshot as ExamState | undefined) ?? null;
 }
 
+async function resolveExamStateByVersionId(versionId: string): Promise<ExamState | null> {
+  const version = await examRepository.getVersionById(versionId);
+  return (version?.contentSnapshot as ExamState | undefined) ?? null;
+}
+
 export const exportBuilderDeps: BuildPerStudentZipPdfExportInputDeps = {
   getSectionSubmissionsBySubmissionId: (submissionId) =>
     gradingRepository.getSectionSubmissionsBySubmissionId(submissionId),
   getWritingSubmissionsBySubmissionId: (submissionId) =>
     gradingRepository.getWritingSubmissionsBySubmissionId(submissionId),
   resolveExamState,
+  resolveExamStateByVersionId,
 };

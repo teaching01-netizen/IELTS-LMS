@@ -1,0 +1,76 @@
+{
+  "description": "Shared sentence/note answer-pool contract. Read by Go (shared_pool_fixture_test.go) and TypeScript (sentenceCompletionAnswerPool.test.ts): pool size after grading-equivalent de-duplication, and one-shot consumption in blank order.",
+  "policy": "Pool de-duplication uses the grading cleaner (NFKC, invisible strip, quotes/dashes, punctuation strip, space collapse+trim) plus the shared case fold only when the question or every blank opts out. Each key is consumed at most once, in blank order; a case-distinct sibling stays independently consumable in strict mode.",
+  "cases": [
+    {
+      "id": "invisible-variant-collapses",
+      "pool": ["Garden", "Ga\u200Brden"],
+      "blanks": [
+        { "caseSensitive": true, "answer": "Garden" },
+        { "caseSensitive": true, "answer": "Garden" }
+      ],
+      "expectedPoolSize": 1,
+      "expected": [true, false]
+    },
+    {
+      "id": "case-variants-strict",
+      "pool": ["Garden", "garden"],
+      "blanks": [
+        { "caseSensitive": true, "answer": "garden" },
+        { "caseSensitive": true, "answer": "Garden" }
+      ],
+      "expectedPoolSize": 2,
+      "expected": [true, true]
+    },
+    {
+      "id": "optout-folds",
+      "pool": ["Garden", "garden"],
+      "blanks": [
+        { "caseSensitive": false, "answer": "GARDEN" },
+        { "caseSensitive": false, "answer": "garden" }
+      ],
+      "expectedPoolSize": 1,
+      "expected": [true, false]
+    },
+    {
+      "id": "apostrophe-collapses",
+      "pool": ["don't", "dont"],
+      "blanks": [
+        { "caseSensitive": true, "answer": "dont" },
+        { "caseSensitive": true, "answer": "dont" }
+      ],
+      "expectedPoolSize": 1,
+      "expected": [true, false]
+    },
+    {
+      "id": "curly-quote-collapses",
+      "pool": ["say \u201Chello\u201D", "say hello"],
+      "blanks": [
+        { "caseSensitive": true, "answer": "say hello" },
+        { "caseSensitive": true, "answer": "say hello" }
+      ],
+      "expectedPoolSize": 1,
+      "expected": [true, false]
+    },
+    {
+      "id": "next-line-is-whitespace",
+      "pool": ["a\u0085b", "a b"],
+      "blanks": [
+        { "caseSensitive": true, "answer": "a b" },
+        { "caseSensitive": true, "answer": "a b" }
+      ],
+      "expectedPoolSize": 1,
+      "expected": [true, false]
+    },
+    {
+      "id": "mixed-strictness-consumes-in-blank-order",
+      "pool": ["Garden", "garden"],
+      "blanks": [
+        { "caseSensitive": false, "answer": "garden" },
+        { "caseSensitive": true, "answer": "Garden" }
+      ],
+      "expectedPoolSize": 2,
+      "expected": [true, false]
+    }
+  ]
+}

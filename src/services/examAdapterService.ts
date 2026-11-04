@@ -20,8 +20,10 @@ import type {
   MatchingQuestion,
   ModuleType,
   MultiMCQBlock,
+  NoteCompletionBlock,
   NoteCompletionQuestion,
   QuestionBlock,
+  SentenceCompletionBlock,
   SentenceCompletionQuestion,
   ShortAnswerQuestion,
   SubAnswerTreeNode,
@@ -43,6 +45,7 @@ import {
 import { replaceWritingTaskContents } from "../utils/writingTaskUtils";
 import { flattenSubAnswerTree, hasSubAnswerTreeMode } from "../utils/subAnswerTree";
 import { getMultiSelectSelectionLimit } from "../utils/multiSelectMcq";
+import { getGroupedScoringSlotKey, resolveGroupedScoringRequiredCorrect } from '../utils/gradingGroups';
 
 const MODULE_ORDER: ModuleType[] = ["listening", "reading", "writing", "speaking", "science"];
 
@@ -799,46 +802,6 @@ export function getQuestionNumberLabel(
   return `${start}`;
 }
 
-function getGroupedScoringSlotKey(question: StudentQuestionDescriptor): string | null {
-  if (typeof question.rootId !== "string") {
-    return null;
-  }
-  // Only collapse slots explicitly marked as grouped scoring (e.g. 2-for-1),
-  // not other uses of rootId such as the sub-answer tree.
-  return question.rootId.includes("::group::") ? question.rootId : null;
-}
-
-function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDescriptor[]): number {
-  const candidates: number[] = [];
-
-  for (const question of groupQuestions) {
-    if (
-      question.block.type === "SENTENCE_COMPLETION" &&
-      question.question &&
-      question.answerIndex !== undefined
-    ) {
-      const blank = (question.question as SentenceCompletionQuestion).blanks[question.answerIndex];
-      if (blank?.requiredCorrect !== undefined) {
-        candidates.push(blank.requiredCorrect);
-      }
-      continue;
-    }
-
-    if (question.block.type === "TABLE_COMPLETION" && question.answerIndex !== undefined) {
-      const cell = (question.block as TableCompletionBlock).cells[question.answerIndex];
-      if (cell?.requiredCorrect !== undefined) {
-        candidates.push(cell.requiredCorrect);
-      }
-    }
-  }
-
-  const normalized = candidates
-    .map((value) => (Number.isFinite(value) ? Math.floor(value) : 0))
-    .filter((value) => value >= 1);
-
-  return normalized.length > 0 ? Math.max(...normalized) : 1;
-}
-
 function buildQuestionStartNumberLookup(
   questions: StudentQuestionDescriptor[]
 ): Map<string, number> {
@@ -954,23 +917,15 @@ function questionsForGroupedScoringSlot(
   void answers;
   // We don't have the entire question list here, so fall back to using the block/question
   // shape to locate all sibling slots that belong to the same group key.
-  // This is only used for grouped scoring on SentenceCompletion/TableCompletion slots.
-  if (representative.block.type === "SENTENCE_COMPLETION" && representative.question) {
-    const question = representative.question as SentenceCompletionQuestion;
-    return question.blanks
-      .map((blank, index) => ({
-        ...representative,
-        id: `${question.id}:${blank.id}`,
-        answerIndex: index,
-        rootId: (() => {
-          const scoreGroupId =
-            typeof blank.scoreGroupId === "string" ? blank.scoreGroupId.trim() : "";
-          return scoreGroupId
-            ? `${representative.block.id}::sentence::${question.id}::group::${scoreGroupId}`
-            : `${representative.block.id}::sentence::${question.id}::slot::${blank.id}`;
-        })(),
-      }))
-      .filter((entry) => entry.rootId === groupKey);
+  // Every block type that can emit grouped scoring roots needs a branch here.
+  // Sentence and note completion share one shape and differ only by the marker
+  // their descriptors use (see buildCompletionSlotDescriptors).
+  if (representative.block.type === "SENTENCE_COMPLETION") {
+    return completionGroupMembers(groupKey, representative, "sentence");
+  }
+
+  if (representative.block.type === "NOTE_COMPLETION") {
+    return completionGroupMembers(groupKey, representative, "note");
   }
 
   if (representative.block.type === "TABLE_COMPLETION") {
@@ -993,6 +948,112 @@ function questionsForGroupedScoringSlot(
   }
 
   return [representative];
+}
+
+/**
+ * Rebuilds the sibling descriptors of one grouped sentence/note completion
+ * slot from the block shape. Mirrors buildCompletionSlotDescriptors so a
+ * grouped slot that appears in the navigation footer resolves to every member
+ * the scorer will read.
+ */
+function completionGroupMembers(
+  groupKey: string,
+  representative: StudentQuestionDescriptor,
+  marker: "sentence" | "note",
+): StudentQuestionDescriptor[] {
+  const { block, question } = representative;
+  if (!question || !("blanks" in question) || !Array.isArray(question.blanks)) {
+    return [representative];
+  }
+
+  const completionQuestion = question as SentenceCompletionQuestion | NoteCompletionQuestion;
+  const rootPrefix = `${block.id}::${marker}::${completionQuestion.id}::`;
+  return completionQuestion.blanks
+    .map((blank, index) => ({
+      ...representative,
+      id: `${completionQuestion.id}:${blank.id}`,
+      answerIndex: index,
+      rootId: (() => {
+        const scoreGroupId = normalizeScoreGroupId(blank.scoreGroupId);
+        return scoreGroupId
+          ? `${rootPrefix}group::${scoreGroupId}`
+          : `${rootPrefix}slot::${blank.id}`;
+      })(),
+    }))
+    .filter((entry) => entry.rootId === groupKey);
+}
+
+function normalizeScoreGroupId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function buildGroupedSlotRootNumbers(
+  slotKeys: string[],
+  firstRootNumber: number
+): { rootNumbers: number[]; nextNumber: number } {
+  const rootNumbers: number[] = [];
+  const assigned = new Map<string, number>();
+  let nextNumber = firstRootNumber;
+
+  for (const key of slotKeys) {
+    const existing = assigned.get(key);
+    if (existing !== undefined) {
+      rootNumbers.push(existing);
+      continue;
+    }
+    assigned.set(key, nextNumber);
+    rootNumbers.push(nextNumber);
+    nextNumber += 1;
+  }
+
+  return { rootNumbers, nextNumber };
+}
+
+/**
+ * Sentence and note completion share one descriptor shape; only the score-group
+ * marker differs. Both must group slots identically to mirror the Go grader.
+ */
+function buildCompletionSlotDescriptors(
+  block: SentenceCompletionBlock | NoteCompletionBlock,
+  groupId: string,
+  groupLabel: string,
+  startRootNumber: number,
+  marker: "sentence" | "note"
+): StudentQuestionDescriptor[] {
+  let nextNumber = startRootNumber;
+  const result: StudentQuestionDescriptor[] = [];
+
+  for (const question of block.questions) {
+    const slotKeys = question.blanks.map((blank) => {
+      const groupKey = normalizeScoreGroupId(blank.scoreGroupId);
+      return groupKey
+        ? `${block.id}::${marker}::${question.id}::group::${groupKey}`
+        : `${block.id}::${marker}::${question.id}::slot::${blank.id}`;
+    });
+    const numbering = buildGroupedSlotRootNumbers(slotKeys, nextNumber);
+    nextNumber = numbering.nextNumber;
+
+    question.blanks.forEach((blank, blankIndex) => {
+      result.push({
+        id: `${question.id}:${blank.id}`,
+        blockId: block.id,
+        groupId,
+        groupLabel,
+        isMulti: false,
+        correctCount: 1,
+        answerKey: question.id,
+        answerIndex: blankIndex,
+        block,
+        question,
+        rootId: slotKeys[blankIndex],
+        rootNumber: numbering.rootNumbers[blankIndex],
+      });
+    });
+  }
+
+  return result;
 }
 
 function buildStudentQuestionDescriptors(
@@ -1033,34 +1094,6 @@ function buildStudentQuestionDescriptors(
     };
   }
 
-  const normalizeScoreGroupId = (value: unknown): string | null => {
-    if (typeof value !== "string") return null;
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  };
-
-  const buildGroupedSlotRootNumbers = (
-    slotKeys: string[],
-    firstRootNumber: number
-  ): { rootNumbers: number[]; nextNumber: number } => {
-    const rootNumbers: number[] = [];
-    const assigned = new Map<string, number>();
-    let nextNumber = firstRootNumber;
-
-    for (const key of slotKeys) {
-      const existing = assigned.get(key);
-      if (existing !== undefined) {
-        rootNumbers.push(existing);
-        continue;
-      }
-      assigned.set(key, nextNumber);
-      rootNumbers.push(nextNumber);
-      nextNumber += 1;
-    }
-
-    return { rootNumbers, nextNumber };
-  };
-
   const descriptors: StudentQuestionDescriptor[] = (() => {
     switch (block.type) {
       case "TFNG":
@@ -1081,56 +1114,10 @@ function buildStudentQuestionDescriptors(
         }));
 
       case "SENTENCE_COMPLETION":
-        return (() => {
-          let nextNumber = startRootNumber;
-          const result: StudentQuestionDescriptor[] = [];
-
-          for (const question of block.questions) {
-            const slotKeys = question.blanks.map((blank) => {
-              const groupKey = normalizeScoreGroupId(blank.scoreGroupId);
-              return groupKey
-                ? `${block.id}::sentence::${question.id}::group::${groupKey}`
-                : `${block.id}::sentence::${question.id}::slot::${blank.id}`;
-            });
-            const numbering = buildGroupedSlotRootNumbers(slotKeys, nextNumber);
-            nextNumber = numbering.nextNumber;
-
-            question.blanks.forEach((blank, blankIndex) => {
-              result.push({
-                id: `${question.id}:${blank.id}`,
-                blockId: block.id,
-                groupId,
-                groupLabel,
-                isMulti: false,
-                correctCount: 1,
-                answerKey: question.id,
-                answerIndex: blankIndex,
-                block,
-                question,
-                rootId: slotKeys[blankIndex],
-                rootNumber: numbering.rootNumbers[blankIndex],
-              });
-            });
-          }
-
-          return result;
-        })();
+        return buildCompletionSlotDescriptors(block, groupId, groupLabel, startRootNumber, "sentence");
 
       case "NOTE_COMPLETION":
-        return block.questions.flatMap((question) =>
-          question.blanks.map((blank, blankIndex) => ({
-            id: `${question.id}:${blank.id}`,
-            blockId: block.id,
-            groupId,
-            groupLabel,
-            isMulti: false,
-            correctCount: 1,
-            answerKey: question.id,
-            answerIndex: blankIndex,
-            block,
-            question,
-          }))
-        );
+        return buildCompletionSlotDescriptors(block, groupId, groupLabel, startRootNumber, "note");
 
       case "MULTI_MCQ":
         return [buildMultiQuestionDescriptor(block, groupId, groupLabel)];

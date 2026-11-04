@@ -6,8 +6,17 @@ Objective grading exports must use the same exam version that produced the store
 - After an administrator regrades from the latest draft, the persisted schedule objective-grading source takes precedence.
 - When a stored question result has an explicit override, its recorded `correctAnswer` takes precedence for that exported row.
 - CSV/Excel, per-student PDF, and the review workspace must resolve that source consistently.
-- For typed answer keys, including each `TABLE_COMPLETION` cell, every accepted variant is displayed
-  with ` | ` separators; `correctAnswer` is only the primary fallback when no variants are present.
+- Displayed right answers are the **effective grading keys**, in grading precedence order: a type whose
+  grading is additive (`DIAGRAM_LABELING`, `FLOW_CHART` — primary `correctAnswer`; `CLASSIFICATION` —
+  `correctCategory`; `MATCHING_FEATURES` — `correctMatch`) shows the primary key followed by every accepted
+  variant; a type whose grading is single-winner shows the field grading actually wins with, taken in this
+  order:
+  - `acceptedAnswers` first, then the dedicated field: `MATCHING` (`correctHeading`), `CLOZE`,
+    `SHORT_ANSWER`, sentence/note completion blanks, and `TABLE_COMPLETION` (`correctAnswer`);
+  - `correctAnswer` first, then `acceptedAnswers`: `TFNG` and `MAP`.
+
+  A field only counts when it is non-empty, so the list falls through to the next field in the order.
+  Variants are separated with ` | `; `MATCHING` displays heading text for its heading ids.
 - A stored score must never be combined with an answer key reconstructed from a different exam version.
 
 This keeps the exported student answer, right answer, correctness, and score mutually consistent without mutating submitted answers.

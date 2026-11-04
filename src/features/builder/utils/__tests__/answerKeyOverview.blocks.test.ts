@@ -87,4 +87,59 @@ describe('answerKeyOverview.applyAnswerKeyEdit per block type', () => {
       expect(bare.questions).toEqual([{ id: 'q1', answerRule: 'ONE_WORD', blanks: [] }]);
     }
   });
+
+  it('keeps the authoritative primary key when a newly added accepted-answers edit runs', () => {
+    const map = apply(
+      { id: 'block-1', type: 'MAP', instruction: '', assetUrl: '', questions: [{ id: 'q1', label: 'A', correctAnswer: 'bank', acceptedAnswers: ['banknote'], x: 0, y: 0 }] },
+      { kind: 'set_map_accepted_answer_fields', questionId: 'q1', acceptedAnswers: ['banknote', ' bank note ', 'banknote'] },
+    );
+    expect(map.questions).toEqual([
+      { id: 'q1', label: 'A', correctAnswer: 'bank', acceptedAnswers: ['banknote', 'bank note'], x: 0, y: 0 },
+    ]);
+
+    const diagram = apply(
+      { id: 'block-1', type: 'DIAGRAM_LABELING', instruction: '', imageUrl: '', labels: [{ id: 'l1', x: 0, y: 0, correctAnswer: 'valve', acceptedAnswers: ['tap'] }] },
+      { kind: 'set_diagram_label_accepted_answer_fields', labelIndex: 0, acceptedAnswers: ['tap', 'faucet'] },
+    );
+    expect(diagram.labels).toEqual([
+      { id: 'l1', x: 0, y: 0, correctAnswer: 'valve', acceptedAnswers: ['tap', 'faucet'] },
+    ]);
+
+    const flow = apply(
+      { id: 'block-1', type: 'FLOW_CHART', instruction: '', steps: [{ id: 's1', label: 'S', correctAnswer: 'heat', acceptedAnswers: ['boil'] }] },
+      { kind: 'set_flow_step_accepted_answer_fields', stepIndex: 0, acceptedAnswers: ['boil', 'warm'] },
+    );
+    expect(flow.steps).toEqual([
+      { id: 's1', label: 'S', correctAnswer: 'heat', acceptedAnswers: ['boil', 'warm'] },
+    ]);
+
+    const classification = apply(
+      { id: 'block-1', type: 'CLASSIFICATION', instruction: '', categories: ['A', 'B'], items: [{ id: 'i1', text: 'Item', correctCategory: 'A', acceptedAnswers: ['A'] }] },
+      { kind: 'set_classification_accepted_answer_fields', itemIndex: 0, acceptedAnswers: ['B', 'b'] },
+    );
+    expect(classification.items).toEqual([
+      { id: 'i1', text: 'Item', correctCategory: 'A', acceptedAnswers: ['B', 'b'] },
+    ]);
+
+    const features = apply(
+      { id: 'block-1', type: 'MATCHING_FEATURES', instruction: '', options: ['X', 'Y'], features: [{ id: 'f1', text: 'F', correctMatch: 'X', acceptedAnswers: ['Y'] }] },
+      { kind: 'set_matching_feature_accepted_answer_fields', featureIndex: 0, acceptedAnswers: ['Y', 'X'] },
+    );
+    expect(features.features).toEqual([
+      { id: 'f1', text: 'F', correctMatch: 'X', acceptedAnswers: ['Y', 'X'] },
+    ]);
+  });
+
+  it('keeps primary-key edits independent from accepted answers', () => {
+    const state = baseAnswerKeyState();
+    state.reading.passages[0]!.blocks.push(
+      { id: 'block-1', type: 'MAP', instruction: '', assetUrl: '', questions: [{ id: 'q1', label: 'A', correctAnswer: 'bank', acceptedAnswers: ['banknote'], x: 0, y: 0 }] } as QuestionBlock,
+    );
+    const row = { blockId: 'block-1', moduleType: 'reading', groupId: 'passage-1' } as AnswerKeyRow;
+    const next = applyAnswerKeyEdit(state, row, { kind: 'set_text_answer', questionId: 'q1', value: 'shore' })
+      .reading.passages[0]!.blocks[0] as unknown as Record<string, unknown>;
+    expect(next.questions).toEqual([
+      { id: 'q1', label: 'A', correctAnswer: 'shore', acceptedAnswers: ['banknote'], x: 0, y: 0 },
+    ]);
+  });
 });

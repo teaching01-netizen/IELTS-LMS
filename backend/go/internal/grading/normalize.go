@@ -12,8 +12,8 @@ package grading
 //  4. Strip the punctuation set the website removes.
 //  5. Collapse whitespace runs and trim.
 //
-// Matching then ignores upper/lower case. Teacher "exclude this answer"
-// decisions keep comparing case exactly (steps 1-5 only).
+// Default policy: exact case required (IELTS). Opt-out only with explicit
+// `caseSensitive: false`, which uses the case-folded form.
 
 import (
 	"strings"
@@ -61,24 +61,45 @@ func isWebsitePunctuation(r rune) bool {
 	}
 }
 
-// answersMatch is the case-insensitive grading comparison. An empty student
-// answer never matches, even when the key is also empty.
+// answersMatch is the default-policy grading comparison: exact case required
+// (IELTS). An empty student answer never matches, even when the key is also
+// empty. Steps 1-5 apply; case-fold deliberately does not.
 func answersMatch(student, key string) bool {
+	return answersMatchCaseExact(student, key)
+}
+
+// answersMatchCaseExact is used for grading and teacher exclusions: steps 1-5
+// only, so "urwin" does not match "Urwin" and excluding "28 june" does not
+// reject the key's "28 June".
+func answersMatchCaseExact(student, excluded string) bool {
 	normalizedStudent := normalizeAnswer(student)
 	if normalizedStudent == "" {
 		return false
 	}
-	return strings.ToLower(normalizedStudent) == strings.ToLower(normalizeAnswer(key))
+	return normalizedStudent == normalizeAnswer(excluded)
 }
 
-// answersMatchCaseExact is used for teacher exclusions: steps 1-5 only, so
-// excluding "28 june" does not reject the key's "28 June".
-func answersMatchCaseExact(student, excluded string) bool {
-	return normalizeAnswer(student) == normalizeAnswer(excluded)
+// foldAnswerCase is the one opt-out case fold. It is the Go equivalent of the
+// website's foldCaseForMatching: Unicode simple lowercase mapping (JavaScript
+// pre-collapses its two full-mapping divergences to match this).
+func foldAnswerCase(value string) string {
+	return strings.ToLower(value)
 }
 
 // normalizeComparable exposes the case-folded form to tests that assert
 // idempotence and equality without duplicating the folding rule.
 func normalizeComparable(value string) string {
-	return strings.ToLower(normalizeAnswer(value))
+	return answerDedupeKey(normalizeAnswer(value), false)
+}
+
+// answerDedupeKey is the one strictness-aware de-duplication key shared by
+// every accepted-answer list and answer pool: strict keys keep their cleaned
+// case so "Garden" and "garden" are two keys, and an explicit
+// `caseSensitive: false` opt-out folds them into one. Callers pass an already
+// normalized answer.
+func answerDedupeKey(normalized string, caseSensitive bool) string {
+	if caseSensitive {
+		return normalized
+	}
+	return foldAnswerCase(normalized)
 }

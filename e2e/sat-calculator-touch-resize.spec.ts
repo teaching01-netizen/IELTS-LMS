@@ -521,20 +521,18 @@ test.describe("C. visible affordance", () => {
     });
   });
 
-  test("C6 first open teaches the corner/edge gesture", async ({ page }) => {
-    test.skip(kind() !== "ipad", "iPad is where resize exists.");
+  test("C6 first open shows no teaching chip on touch and mobile", async ({ page }) => {
+    test.skip(kind() === "desktop", "Touch and mobile presentations only.");
     await page.goto("/__dev/sat-accessibility?mode=math");
     await waitForDesmos(page);
     await page.getByRole("button", { name: "Calculator", exact: true }).click();
     const panel = calculator(page);
     await expect(panel).toBeVisible();
-    const hint = panel.locator("[data-sat-tool-hint]");
-    await expect(hint).toBeVisible();
-    await expect(hint).toContainText("Drag a corner or edge to resize");
-    // The hint is pointer-transparent: it must not become a tap target.
-    const hintBox = await boxOf(hint);
-    const hit = await hitAt(page, hintBox!.x + hintBox!.w / 2, hintBox!.y + hintBox!.h / 2);
-    expect(hit.resize, "hint is not a resize target").toBeNull();
+    // First-open helper text was removed on every breakpoint (iPad + phone):
+    // the corners and edge bands stay directly grabbable, with no chip.
+    await expect(panel.locator("[data-sat-tool-hint]")).toHaveCount(0);
+    await expect(panel.locator(".sat-tool-hint")).toHaveCount(0);
+    await expect(panel.locator("[data-sat-tool-teaching]")).toHaveCount(0);
   });
 });
 

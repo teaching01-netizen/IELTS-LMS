@@ -1,9 +1,12 @@
 import React from 'react';
-import { FlowChartBlock as FlowChartBlockType } from '../../types';
+import { FlowChartBlock as FlowChartBlockType, type CaseSensitivity } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { CaseSensitivityToggle } from './CaseSensitivityToggle';
+import { mapAcceptedAnswers, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 
 interface FlowChartBlockProps {
   block: FlowChartBlockType;
@@ -30,11 +33,23 @@ export function FlowChartBlock({
     updateBlock({ ...block, instruction });
   };
 
-  const updateStep = (stepId: string, updates: { label?: string; correctAnswer?: string }) => {
+  const updateStep = (
+    stepId: string,
+    updates: { label?: string; correctAnswer?: string; acceptedAnswers?: string[] } & CaseSensitivity,
+  ) => {
     const newSteps = block.steps.map(s =>
       s.id === stepId ? { ...s, ...updates } : s
     );
     updateBlock({ ...block, steps: newSteps });
+  };
+
+  // Accepted answers are alternatives only: keep the authoritative
+  // correctAnswer untouched so editing chips never rewrites the primary key.
+  const updateStepAcceptedAnswers = (stepId: string, next: string[]) => {
+    updateBlock({
+      ...block,
+      steps: mapAcceptedAnswers(block.steps, (step) => step.id === stepId, next),
+    });
   };
 
   const addStep = () => {
@@ -99,7 +114,22 @@ export function FlowChartBlock({
                 className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm"
                 placeholder="Step label..."
               />
-              <input type="text" value={step.correctAnswer} onChange={(e) => updateStep(step.id, { correctAnswer: e.target.value })} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Answer..." />
+              <div>
+                <input type="text" value={step.correctAnswer} onChange={(e) => updateStep(step.id, { correctAnswer: e.target.value })} className="w-32 border border-gray-300 rounded px-2 py-1 text-sm" placeholder="Answer..." />
+                <div className="mt-1">
+                  <AcceptedAnswersEditor
+                    value={resolveAcceptedAnswers(step)}
+                    onChange={(next) => updateStepAcceptedAnswers(step.id, next)}
+                    placeholder="Other accepted answers..."
+                  />
+                </div>
+                <div className="mt-1">
+                  <CaseSensitivityToggle
+                    caseSensitive={step.caseSensitive}
+                    onChange={(caseSensitive) => updateStep(step.id, { caseSensitive })}
+                  />
+                </div>
+              </div>
               <div className="flex items-center gap-1">
                 {onAddSubAnswerAtSlot ? (
                   <button

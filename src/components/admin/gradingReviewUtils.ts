@@ -1,5 +1,5 @@
 import { ACT_SCIENCE_SKILL_CATEGORIES } from '../../types';
-import type { ActScienceSkillCategory, ExamState, SentenceCompletionQuestion } from '../../types';
+import type { ActScienceSkillCategory, ExamState } from '../../types';
 import type {
   ObjectiveManualOverride,
   ObjectiveQuestionResult,
@@ -22,6 +22,10 @@ import {
 import type { AnswerDisplayOptions } from './gradingAnswerUtils';
 import type { StudentAnswerValue } from '../../types/answers';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
+import {
+  getGroupedScoringSlotKey,
+  resolveGroupedScoringRequiredCorrect,
+} from '../../utils/gradingGroups';
 import { scoreObjectiveDescriptors, type ObjectiveScoringResult } from '../../features/grading/objectiveScoring';
 
 export type GradingExportSection =
@@ -411,52 +415,30 @@ function getQuestionSkillCategory(
     : undefined;
 }
 
-function getGroupedScoringSlotKey(descriptor: StudentQuestionDescriptor): string | null {
-  if (typeof descriptor.rootId !== 'string') {
-    return null;
+/**
+ * Score-group key → required-correct threshold for export fallbacks that lack
+ * descriptor context. Keys match the wide-export `scoreGroup:*` column keys.
+ */
+export function buildScoreGroupThresholdMap(
+  descriptors: StudentQuestionDescriptor[],
+): Record<string, number> {
+  const groups = new Map<string, StudentQuestionDescriptor[]>();
+  for (const descriptor of descriptors) {
+    const groupKey = getGroupedScoringSlotKey(descriptor);
+    if (!groupKey) continue;
+    groups.set(groupKey, [...(groups.get(groupKey) ?? []), descriptor]);
   }
-  // Only collapse slots explicitly marked as grouped scoring (e.g. 2-for-1),
-  // not other uses of rootId such as the sub-answer tree.
-  return descriptor.rootId.includes('::group::') ? descriptor.rootId : null;
-}
-
-function resolveGroupedScoringRequiredCorrect(groupQuestions: StudentQuestionDescriptor[]): number {
-  const candidates: number[] = [];
-
-  for (const question of groupQuestions) {
-    if (
-      question.block.type === 'SENTENCE_COMPLETION'
-      && question.question
-      && 'blanks' in question.question
-      && question.answerIndex !== undefined
-    ) {
-      const blank = (question.question as SentenceCompletionQuestion).blanks[question.answerIndex];
-      if (blank?.requiredCorrect !== undefined) {
-        candidates.push(blank.requiredCorrect);
-      }
-      continue;
-    }
-
-    if (question.block.type === 'TABLE_COMPLETION' && question.answerIndex !== undefined) {
-      const block = question.block as unknown as { cells?: Array<{ requiredCorrect?: number }> };
-      const cell = Array.isArray(block.cells) ? block.cells[question.answerIndex] : undefined;
-      if (cell?.requiredCorrect !== undefined) {
-        candidates.push(cell.requiredCorrect);
-      }
-    }
+  const map: Record<string, number> = {};
+  for (const [groupKey, members] of groups) {
+    map[`scoreGroup:${groupKey}`] = resolveGroupedScoringRequiredCorrect(members);
   }
-
-  const normalized = candidates
-    .map((value) => (Number.isFinite(value) ? Math.floor(value) : 0))
-    .filter((value) => value >= 1);
-
-  return normalized.length > 0 ? Math.max(...normalized) : 1;
+  return map;
 }
 
 function getGroupedSlotLabel(descriptor: StudentQuestionDescriptor, index: number): string {
   const fallback = `Answer ${index + 1}`;
 
-  if (descriptor.block.type === 'SENTENCE_COMPLETION') {
+  if (descriptor.block.type === 'SENTENCE_COMPLETION' || descriptor.block.type === 'NOTE_COMPLETION') {
     return typeof descriptor.answerIndex === 'number' ? `Blank ${descriptor.answerIndex + 1}` : fallback;
   }
 
@@ -532,12 +514,19 @@ function buildMultiSelectExportSelection(
     selectedIds[index] && correctIds.has(selectedIds[index]!) ? 1 : 0,
   );
   // The saved partial score is authoritative; the per-selection list only
-  // distributes Yes/No across the builder's question numbers.
+  // distributes Yes/No across the builder's question numbers. Truly-correct
+  // picks keep Yes first so a correct selection is never deprived of credit
+  // in favor of an earlier incorrect one.
   if (awardedScore !== null && awardedScore !== selectionScores.reduce((sum, value) => sum + value, 0)) {
-    let remaining = Math.max(0, awardedScore);
-    for (let index = 0; index < selectionScores.length; index += 1) {
-      selectionScores[index] = remaining > 0 ? 1 : 0;
-      remaining -= selectionScores[index]!;
+    let remaining = Math.max(0, Math.min(awardedScore, selectionScores.length));
+    const order = selectionScores
+      .map((score, index) => ({ score, index: index as number }))
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+    selectionScores.fill(0);
+    for (const { index } of order) {
+      if (remaining <= 0) break;
+      selectionScores[index] = 1;
+      remaining -= 1;
     }
   }
   return {
@@ -588,9 +577,26 @@ function buildGroupedTracebackItem(
   const correctSlots = slotCorrectness.filter((value) => value === true).length;
   const hasUnscored = slotCorrectness.some((value) => value === null);
 
-  const correctness = hasUnscored ? null : correctSlots >= requiredCorrect;
-  const awardedScore = correctness === null ? null : correctness ? 1 : 0;
-  const maxScore = correctness === null ? null : 1;
+  // The server's saved result is authoritative for the group mark. The
+  // representative slot is the only saved result carrying a positive maxScore
+  // (the server awards the group mark once, on the first slot). Old/unscored
+  // submissions without saved results fall back to the computed threshold.
+  const savedResults = sorted
+    .map((descriptor) => results.get(descriptor.id))
+    .filter((questionResult): questionResult is ObjectiveQuestionResult => Boolean(questionResult));
+  const savedGroupResult =
+    savedResults.find((questionResult) => (questionResult.maxScore ?? 0) > 0)
+    ?? savedResults[0]
+    ?? null;
+
+  const computedCorrectness = hasUnscored ? null : correctSlots >= requiredCorrect;
+  const correctness = savedGroupResult?.manualOverride?.isCorrect
+    ?? savedGroupResult?.isCorrect
+    ?? computedCorrectness;
+  const awardedScore = savedGroupResult?.manualOverride?.awardedScore
+    ?? savedGroupResult?.awardedScore
+    ?? (correctness === null ? null : correctness ? 1 : 0);
+  const maxScore = savedGroupResult?.maxScore ?? (correctness === null ? null : 1);
 
   const slotLabels = sorted.map((descriptor, index) => getGroupedSlotLabel(descriptor, index));
   const studentAnswerSlots = sorted.map((descriptor) => getStudentAnswerDisplay(descriptor, answerMap));
@@ -998,9 +1004,13 @@ export function buildWideObjectiveExport({
         )
       : {};
     const derivedTotals = deriveObjectiveTotalsFromTracebackGroups(groups);
-    const derivedTotalScore = derivedTotals.totalScore ?? autoGradingResults?.totalScore ?? null;
-    const derivedMaxScore = derivedTotals.maxScore ?? autoGradingResults?.maxScore ?? null;
-    const derivedPercentage = derivedTotals.percentage ?? autoGradingResults?.percentage ?? null;
+    // Totals come from the same saved per-question results the rows display, so
+    // a row cannot disagree with the summary. The saved section totals are only
+    // a fallback when a saved result cannot be projected into traceback groups
+    // (older or partial submissions).
+    const totalScore = derivedTotals.totalScore ?? autoGradingResults?.totalScore ?? null;
+    const maxScore = derivedTotals.maxScore ?? autoGradingResults?.maxScore ?? null;
+    const percentage = derivedTotals.percentage ?? autoGradingResults?.percentage ?? null;
     const tracebackItemsById = new Map(
       groups.flatMap((group) => group.items).map((item) => [item.questionId, item] as const),
     );
@@ -1031,11 +1041,11 @@ export function buildWideObjectiveExport({
       cohortName: submission.cohortName,
       section: moduleType,
       submittedAt: sectionSubmission?.submittedAt ?? submission.submittedAt,
-      totalScore: mode === 'manual' ? '' : toOptionalNumber(derivedTotalScore),
-      maxScore: toOptionalNumber(derivedMaxScore),
-      percentage: toOptionalNumber(derivedPercentage),
+      totalScore: mode === 'manual' ? '' : toOptionalNumber(totalScore),
+      maxScore: toOptionalNumber(maxScore),
+      percentage: toOptionalNumber(percentage),
       correctCount: countCorrectAnswers(groups),
-      ieltsBandScore: deriveIeltsBandScore(examState, moduleType, derivedTotalScore),
+      ieltsBandScore: deriveIeltsBandScore(examState, moduleType, totalScore),
       ...(moduleType === 'science'
         ? Object.fromEntries(
             ACT_SCIENCE_SKILL_CATEGORIES.map((category) => [
@@ -1119,7 +1129,12 @@ export function buildWideObjectiveExport({
         } else {
           const requiredCorrect = resolveGroupedScoringRequiredCorrect(slot.descriptors);
           const correctSlots = groupResults.filter((result) => result?.isCorrect).length;
-          row[`scoreGroup:${slot.slotKey}`] = correctSlots >= requiredCorrect ? 1 : 0;
+          // Mirror the scorer's group maximum (override maxScore), not a hardcoded 1.
+          const groupMax = Math.max(
+            1,
+            ...groupResults.map((result) => (typeof result?.maxScore === 'number' && Number.isFinite(result.maxScore) ? result.maxScore : 1)),
+          );
+          row[`scoreGroup:${slot.slotKey}`] = correctSlots >= requiredCorrect ? groupMax : 0;
         }
       } else {
         row[`manualCorrectGroup:${slot.slotKey}`] = '';
@@ -1331,6 +1346,31 @@ function numberOrNull(value: unknown): number | null {
 }
 
 /**
+ * Website re-check of one saved section. This is the one recomputation the
+ * review page and the overview warning must share: it owns grouped, pooled and
+ * tree verdicts, so a surface can never re-derive a different answer.
+ *
+ * The saved result remains official; callers use this only to warn when the
+ * snapshot the website re-checks disagrees with what was saved.
+ */
+export function scoreSectionForRecheck(
+  examState: ExamState | null,
+  sectionSubmission: SectionSubmission | null,
+  moduleType: 'reading' | 'listening' | 'science',
+): ObjectiveScoringResult | null {
+  if (!examState || !sectionSubmission) return null;
+  const descriptors = getStudentQuestionsForModule(examState, moduleType);
+  const results = buildQuestionResultMap(sectionSubmission.autoGradingResults?.questionResults);
+  if (results.size === 0) return null;
+  const answerMap = mergePersistedResultAnswers(
+    descriptors,
+    extractObjectiveAnswerMap(sectionSubmission.answers),
+    results,
+  );
+  return scoreObjectiveDescriptors(descriptors, answerMap);
+}
+
+/**
  * Compares the server's saved question results with the website's re-check.
  * The saved result stays official; this list only drives the "saved score is
  * out of date" warning and the client_server_mismatch log.
@@ -1344,12 +1384,8 @@ export function findSavedScoreMismatches(
   const descriptors = getStudentQuestionsForModule(examState, moduleType);
   const results = buildQuestionResultMap(sectionSubmission.autoGradingResults?.questionResults);
   if (results.size === 0) return [];
-  const answerMap = mergePersistedResultAnswers(
-    descriptors,
-    extractObjectiveAnswerMap(sectionSubmission.answers),
-    results,
-  );
-  const websiteScoring = scoreObjectiveDescriptors(descriptors, answerMap);
+  const websiteScoring = scoreSectionForRecheck(examState, sectionSubmission, moduleType);
+  if (!websiteScoring) return [];
   const mismatches: SavedScoreMismatch[] = [];
 
   for (const descriptor of descriptors) {

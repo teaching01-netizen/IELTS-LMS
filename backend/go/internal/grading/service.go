@@ -1418,8 +1418,22 @@ func scoreObjective(answers map[string]any, overrides map[string]json.RawMessage
 			}
 		}
 		if def, ok := keys[qid]; ok && strings.TrimSpace(def) != "" {
-			if key, ok := objectiveKeyAnswer(def); ok {
-				if str, ok := given.(string); ok && answersMatch(str, key) {
+			if sealed, ok := parseObjectiveKey(def); ok {
+				var matched bool
+				if str, ok := given.(string); ok {
+					switch {
+					case sealed.Kind == "single_choice":
+						// Option IDs are identity: raw equality, never cleaned.
+						matched = str != "" && str == sealed.Answer
+					case sealed.CaseSensitive:
+						// Default policy: exact case (IELTS). Opt out only with
+						// an explicit caseSensitive: false in the sealed key.
+						matched = answersMatchCaseExact(str, sealed.Answer)
+					default:
+						matched = answersMatchInsensitive(str, sealed.Answer)
+					}
+				}
+				if matched {
 					out = append(out, ObjectiveResult{QuestionID: qid, Correct: true, Points: 1, MaxPoints: 1})
 				} else {
 					out = append(out, ObjectiveResult{QuestionID: qid, Correct: false, Points: 0, MaxPoints: 1})
@@ -1433,47 +1447,70 @@ func scoreObjective(answers map[string]any, overrides map[string]json.RawMessage
 	return out
 }
 
-// objectiveKeyAnswer extracts the comparable correct answer from a sealed
-// answer_definition payload, accepting the camelCase and snake_case shapes
-// the delivery scorer honors (single_choice correctOptionId; free-text
-// acceptedResponses[0]). Unknown kinds yield ok=false so the caller fails
-// closed instead of guessing.
-func objectiveKeyAnswer(def string) (string, bool) {
+// objectiveKey is the comparable part of one sealed answer_definition: the key
+// the delivery scorer honors, its kind, and whether typed answers must match
+// case exactly (the default).
+type objectiveKey struct {
+	Answer        string
+	Kind          string
+	CaseSensitive bool
+}
+
+// parseObjectiveKey reads one sealed answer_definition exactly once: the key,
+// its kind, and the optional `caseSensitive` / `case_sensitive` boolean. It
+// accepts the camelCase and snake_case shapes the delivery scorer honors
+// (single_choice correctOptionId/correct_option_id; free-text
+// acceptedResponses/accepted_responses[0]); unknown or unreadable definitions
+// yield ok=false so callers fail closed instead of guessing. Case-exact
+// matching is the default, so a definition that never opted out is graded the
+// IELTS way; only an explicit false folds case.
+func parseObjectiveKey(def string) (objectiveKey, bool) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(def), &m); err != nil {
-		return "", false
+		return objectiveKey{}, false
 	}
-	var kind string
+	sealed := objectiveKey{CaseSensitive: true}
 	if raw, ok := m["kind"]; ok {
-		_ = json.Unmarshal(raw, &kind)
+		_ = json.Unmarshal(raw, &sealed.Kind)
 	}
-	switch kind {
+	for _, field := range []string{"caseSensitive", "case_sensitive"} {
+		raw, ok := m[field]
+		if !ok {
+			continue
+		}
+		var optOut bool
+		if json.Unmarshal(raw, &optOut) == nil {
+			sealed.CaseSensitive = optOut
+		}
+		break
+	}
+	switch sealed.Kind {
 	case "single_choice":
 		raw, ok := m["correctOptionId"]
 		if !ok {
 			raw, ok = m["correct_option_id"]
 		}
 		if !ok {
-			return "", false
+			return objectiveKey{}, false
 		}
-		var correct string
-		if err := json.Unmarshal(raw, &correct); err != nil {
-			return "", false
+		if err := json.Unmarshal(raw, &sealed.Answer); err != nil {
+			return objectiveKey{}, false
 		}
-		return correct, true
+		return sealed, true
 	default:
 		raw, ok := m["acceptedResponses"]
 		if !ok {
 			raw, ok = m["accepted_responses"]
 		}
 		if !ok {
-			return "", false
+			return objectiveKey{}, false
 		}
 		var accepted []string
 		if err := json.Unmarshal(raw, &accepted); err != nil || len(accepted) == 0 {
-			return "", false
+			return objectiveKey{}, false
 		}
-		return accepted[0], true
+		sealed.Answer = accepted[0]
+		return sealed, true
 	}
 }
 

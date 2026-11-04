@@ -1,9 +1,12 @@
 import React from 'react';
-import { ClassificationBlock as ClassificationBlockType } from '../../types';
+import { ClassificationBlock as ClassificationBlockType, type CaseSensitivity } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { CaseSensitivityToggle } from './CaseSensitivityToggle';
+import { mapAcceptedAnswers } from '../../utils/acceptedAnswers';
 
 interface ClassificationBlockProps {
   block: ClassificationBlockType;
@@ -31,14 +34,44 @@ export function ClassificationBlock({
   };
 
   const updateCategories = (categories: string[]) => {
-    updateBlock({ ...block, categories });
+    const previous = block.categories;
+    // Value-based rename: an old value absent from the new list was renamed
+    // (reorders keep every value present, so they never map). Removals
+    // intentionally orphan (surfaced as invalid in the answer key).
+    const removed = previous.filter((oldValue) => oldValue !== '' && !categories.includes(oldValue));
+    const added = categories.filter((value, index) => value !== '' && value !== previous[index] && !previous.includes(value));
+    const renamed = new Map<string, string>();
+    removed.forEach((oldValue, i) => {
+      const newValue = added[i];
+      if (newValue !== undefined && !renamed.has(oldValue)) renamed.set(oldValue, newValue);
+    });
+    const items = renamed.size === 0
+      ? block.items
+      : block.items.map((item) => ({
+          ...item,
+          correctCategory: renamed.get(item.correctCategory) ?? item.correctCategory,
+          ...(Array.isArray(item.acceptedAnswers)
+            ? { acceptedAnswers: item.acceptedAnswers.map((entry) => renamed.get(entry) ?? entry) }
+            : {}),
+        }));
+    updateBlock({ ...block, categories, items });
   };
 
-  const updateItem = (itemId: string, updates: { text?: string; correctCategory?: string }) => {
+  const updateItem = (
+    itemId: string,
+    updates: { text?: string; correctCategory?: string; acceptedAnswers?: string[] } & CaseSensitivity,
+  ) => {
     const newItems = block.items.map(i =>
       i.id === itemId ? { ...i, ...updates } : i
     );
     updateBlock({ ...block, items: newItems });
+  };
+
+  const updateItemAcceptedAnswers = (itemId: string, next: string[]) => {
+    updateBlock({
+      ...block,
+      items: mapAcceptedAnswers(block.items, (item) => item.id === itemId, next),
+    });
   };
 
   const addCategory = () => {
@@ -125,7 +158,8 @@ export function ClassificationBlock({
         </div>
         <div className="space-y-2">
           {block.items.map((item, index) => (
-            <div key={item.id} className="border rounded-md p-3 flex items-center gap-3">
+            <div key={item.id} className="border rounded-md p-3">
+              <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-gray-700 w-16">{startNum + index}.</span>
               <input
                 type="text"
@@ -154,6 +188,18 @@ export function ClassificationBlock({
                   </button>
                 ) : null}
                 <button onClick={() => removeItem(item.id)} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
+              </div>
+              </div>
+              <div className="mt-2 ml-16 space-y-1">
+                <AcceptedAnswersEditor
+                  value={item.acceptedAnswers ?? []}
+                  onChange={(next) => updateItemAcceptedAnswers(item.id, next)}
+                  placeholder="Other accepted categories..."
+                />
+                <CaseSensitivityToggle
+                  caseSensitive={item.caseSensitive}
+                  onChange={(caseSensitive) => updateItem(item.id, { caseSensitive })}
+                />
               </div>
             </div>
           ))}

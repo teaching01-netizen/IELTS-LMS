@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { DiagramLabelingBlock as DiagramLabelingBlockType } from '../../types';
+import { DiagramLabelingBlock as DiagramLabelingBlockType, type CaseSensitivity } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { getImageUrlCandidates } from '../../utils/imageUrl';
+import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { CaseSensitivityToggle } from './CaseSensitivityToggle';
+import { mapAcceptedAnswers, resolveAcceptedAnswers } from '../../utils/acceptedAnswers';
 
 interface DiagramLabelingBlockProps {
   block: DiagramLabelingBlockType;
@@ -44,11 +47,23 @@ export function DiagramLabelingBlock({
     updateBlock({ ...block, imageUrl });
   };
 
-  const updateLabel = (labelId: string, updates: { prompt?: string; correctAnswer?: string }) => {
+  const updateLabel = (
+    labelId: string,
+    updates: { prompt?: string; correctAnswer?: string; acceptedAnswers?: string[] } & CaseSensitivity,
+  ) => {
     const newLabels = block.labels.map(l =>
       l.id === labelId ? { ...l, ...updates } : l
     );
     updateBlock({ ...block, labels: newLabels });
+  };
+
+  // Accepted answers are alternatives only: keep the authoritative
+  // correctAnswer untouched so editing chips never rewrites the primary key.
+  const updateLabelAcceptedAnswers = (labelId: string, next: string[]) => {
+    updateBlock({
+      ...block,
+      labels: mapAcceptedAnswers(block.labels, (label) => label.id === labelId, next),
+    });
   };
 
   const addLabel = () => {
@@ -182,14 +197,29 @@ export function DiagramLabelingBlock({
                   placeholder={`Label ${index + 1}`}
                   aria-label={`Prompt for label ${startNum + index}`}
                 />
-                <input
-                  type="text"
-                  value={label.correctAnswer}
-                  onChange={(e) => updateLabel(label.id, { correctAnswer: e.target.value })}
-                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
-                  placeholder="Answer..."
-                  aria-label={`Correct answer for label ${startNum + index}`}
-                />
+                <div>
+                  <input
+                    type="text"
+                    value={label.correctAnswer}
+                    onChange={(e) => updateLabel(label.id, { correctAnswer: e.target.value })}
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm"
+                    placeholder="Answer..."
+                    aria-label={`Correct answer for label ${startNum + index}`}
+                  />
+                  <div className="mt-1">
+                    <AcceptedAnswersEditor
+                      value={resolveAcceptedAnswers(label)}
+                      onChange={(next) => updateLabelAcceptedAnswers(label.id, next)}
+                      placeholder="Other accepted answers..."
+                    />
+                  </div>
+                  <div className="mt-1">
+                    <CaseSensitivityToggle
+                      caseSensitive={label.caseSensitive}
+                      onChange={(caseSensitive) => updateLabel(label.id, { caseSensitive })}
+                    />
+                  </div>
+                </div>
               </div>
               <div className="flex items-center gap-1">
                 {onAddSubAnswerAtSlot ? (

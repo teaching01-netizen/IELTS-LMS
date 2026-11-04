@@ -271,7 +271,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(rows[0]?.awardedScore).toBe(0);
   });
 
-  test('shows all table-cell accepted answers and matches against the full key', () => {
+  test('shows all table-cell accepted answers while the saved result stays official', () => {
     const examState = createInitialExamState('IELTS Mock Test', 'Academic');
     examState.reading.passages = [{
       id: 'passage-1',
@@ -329,7 +329,11 @@ describe('buildExamObjectiveOverviewRows', () => {
       'faces of china | FACES OF CHINA | Faces of China',
     );
     expect(rows[0]?.questionNumberLabel).toBe('q-1');
-    expect(rows[0]?.isCorrect).toBe(true);
+    // Ticket 11: display the saved result; the re-check only raises a warning.
+    expect(rows[0]?.isCorrect).toBe(false);
+    expect(rows[0]?.awardedScore).toBe(0);
+    expect(rows[0]?.websiteIsCorrect).toBe(true);
+    expect(rows[0]?.savedResultOutOfDate).toBe(true);
   });
 
   test('keeps an explicit manual override over the computed text result', () => {
@@ -509,8 +513,8 @@ describe('buildExamObjectiveOverviewRows', () => {
       />,
     );
 
+    fireEvent.click(await screen.findByRole('button', { name: /^All/ }));
     expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Keep incorrect' }));
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Keep incorrect and regrade' }));
@@ -599,8 +603,8 @@ describe('buildExamObjectiveOverviewRows', () => {
             questionId: 'q-correct',
             studentAnswer: ' ANSWER ',
             correctAnswer: 'ANSWER',
-            isCorrect: false,
-            awardedScore: 0,
+            isCorrect: true,
+            awardedScore: 1,
             maxScore: 1,
             scoringRule: 'one_word',
             hasOverride: false,
@@ -782,6 +786,7 @@ describe('buildExamObjectiveOverviewRows', () => {
           correctAnswer: 'Faces of China',
           acceptedAnswers: ['faces of china', 'FACES OF CHINA', 'Faces of China'],
           answerRule: 'ONE_WORD',
+          caseSensitive: true,
         }],
       }],
     }];
@@ -867,6 +872,7 @@ describe('buildExamObjectiveOverviewRows', () => {
           correctAnswer: 'GARDEN HALL',
           acceptedAnswers: ['GARDEN HALL'],
           answerRule: 'ONE_WORD',
+          caseSensitive: true,
         }],
       }],
     }];
@@ -943,6 +949,8 @@ describe('buildExamObjectiveOverviewRows', () => {
         maxScore: 1,
         scoringRule: 'exact_match',
         hasOverride: false,
+        websiteIsCorrect: null,
+        savedResultOutOfDate: false,
         manualOverride: null,
       },
       {
@@ -960,6 +968,8 @@ describe('buildExamObjectiveOverviewRows', () => {
         maxScore: 1,
         scoringRule: 'exact_match',
         hasOverride: false,
+        websiteIsCorrect: null,
+        savedResultOutOfDate: false,
         manualOverride: null,
       },
       {
@@ -977,6 +987,8 @@ describe('buildExamObjectiveOverviewRows', () => {
         maxScore: 1,
         scoringRule: 'exact_match',
         hasOverride: false,
+        websiteIsCorrect: null,
+        savedResultOutOfDate: false,
         manualOverride: null,
       },
     ];
@@ -1323,5 +1335,99 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(screen.queryByRole('status', { name: 'Correct' })).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Incorrect' })).toBeInTheDocument();
     expect(screen.queryByText('Saving…')).not.toBeInTheDocument();
+  });
+
+  test('warns when the saved score is out of date without changing the displayed verdict', async () => {
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [{
+          questionId: 'q-1',
+          // The website recheck treats padding-only differences as a match, so
+          // this row records a saved result (false) that the recheck (true)
+          // disagrees with — the mismatch signal.
+          studentAnswer: ' ANSWER ',
+          correctAnswer: 'ANSWER',
+          isCorrect: false,
+          awardedScore: 0,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: false,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    const banner = await screen.findByRole('alert');
+    expect(banner).toHaveTextContent('Saved score is out of date — regrade');
+    expect(banner).toHaveAttribute('tabindex', '0');
+    banner.focus();
+    expect(banner).toHaveFocus();
+
+    // Ticket 11: the saved result stays the displayed verdict. The website
+    // recheck agreeing with the student must not flip the group to Correct.
+    expect(screen.getByRole('status', { name: 'Incorrect' })).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Correct' })).not.toBeInTheDocument();
+  });
+
+  test('does not warn when the saved score matches the website recheck', async () => {
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [{
+          questionId: 'q-1',
+          studentAnswer: 'ANSWER',
+          correctAnswer: 'Answer',
+          isCorrect: false,
+          awardedScore: 0,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: false,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+      />,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'ANSWER' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved score is out of date — regrade')).not.toBeInTheDocument();
   });
 });

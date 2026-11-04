@@ -17,7 +17,6 @@ export const ROUTE = "/__dev/sat-accessibility?mode=math";
 export const CALC_TOOL = "calculator:portrait-v2";
 export const GEOMETRY_KEY = `sat-tool-geometry:v2:debug-schedule:debug-attempt:debug-module:${CALC_TOOL}`;
 export const VIEW_KEY = "sat-tool-view:v1:debug-schedule:debug-attempt:debug-module";
-export const HINT_KEY = "sat-tool-hint-seen:v1:Calculator";
 
 export const RESIZE_NODE = "[data-sat-resize-edge],[data-sat-resize-handle]";
 export const EDGE_NODE = "[data-sat-resize-edge]";

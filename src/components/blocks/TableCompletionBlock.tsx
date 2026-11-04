@@ -4,6 +4,7 @@ import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { createId } from '../../utils/idUtils';
 import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { CaseSensitivityToggle } from './CaseSensitivityToggle';
 import {
   buildAcceptedAnswerFields,
   resolveAcceptedAnswers,
@@ -261,6 +262,15 @@ export function TableCompletionBlock({
     );
     const upgrade = suggestUpgradedAnswerRule(block.answerRule, requiredWords);
     commitBlock({ ...block, cells: nextCells, ...(upgrade ? { answerRule: upgrade } : {}) });
+  };
+
+  const updateCellCaseSensitivity = (target: TableCellTarget, caseSensitive: boolean | undefined) => {
+    const targetIndex = resolveCellUpdateIndex(block.cells, target);
+    if (targetIndex < 0) return;
+    const nextCells = block.cells.map((cell, index) =>
+      index === targetIndex ? { ...cell, caseSensitive } : cell,
+    );
+    commitBlock({ ...block, cells: nextCells });
   };
 
   const clearCellScoring = (cell: TableCompletionBlockType['cells'][number]) => {
@@ -676,6 +686,12 @@ export function TableCompletionBlock({
                 onChange={(nextAnswers) => updateCellAcceptedAnswers(cell, nextAnswers)}
                 placeholder="Add accepted answer..."
               />
+              <div className="mt-1">
+                <CaseSensitivityToggle
+                  caseSensitive={cell.caseSensitive}
+                  onChange={(caseSensitive) => updateCellCaseSensitivity(cell, caseSensitive)}
+                />
+              </div>
             </div>
           ))}
         </div>

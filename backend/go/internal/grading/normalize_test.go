@@ -70,8 +70,8 @@ func TestAnswerCleaningSharedFixture(t *testing.T) {
 func TestProjectionMatchesRavisaraInvisibleCharacter(t *testing.T) {
 	// Regression: Ravisara's saved answer had a zero-width character after
 	// "waiter". The sealed key is plain text and must still match.
-	if !projectionAnswerMatches("waiter", []string{"waiter\u200b"}, false) {
-		t.Fatal("projectionAnswerMatches rejected an answer differing only by an invisible character")
+	if !projectionAnswerMatchesFull("waiter", []string{"waiter\u200b"}, false, true, false) {
+		t.Fatal("projectionAnswerMatchesFull rejected an answer differing only by an invisible character")
 	}
 	if !answersMatch("waiter", "waiter\u200b") {
 		t.Fatal("answersMatch rejected an answer differing only by an invisible character")
@@ -95,14 +95,14 @@ func FuzzAnswerCleaningIdempotentAndStable(f *testing.F) {
 		if again := normalizeAnswer(cleaned); again != cleaned {
 			t.Fatalf("normalizeAnswer not idempotent: %q -> %q -> %q", student, cleaned, again)
 		}
-		// Extra spaces and different case must not change the verdict.
+		// Extra spaces must not change the verdict (default strict case).
 		spaced := "  " + strings.Join(strings.Fields(student), "   ") + "  "
 		if answersMatch(student, key) != answersMatch(spaced, key) {
 			t.Fatalf("extra spaces changed match: %q vs %q against %q", student, spaced, key)
 		}
-		cased := strings.ToUpper(student)
-		if answersMatch(student, key) != answersMatch(cased, key) {
-			t.Fatalf("case changed match: %q vs %q against %q", student, cased, key)
+		// Default policy is exact case: answersMatch must equal case-exact.
+		if answersMatch(student, key) != answersMatchCaseExact(student, key) {
+			t.Fatalf("default match diverged from case-exact: %q against %q", student, key)
 		}
 	})
 }

@@ -1,6 +1,7 @@
 import type { jsPDF } from 'jspdf';
 
 import type { CsvColumn } from '../../gradingReviewUtils';
+import type { ObjectiveRowContext } from '../types';
 import type { PdfHeaderContext } from '../pdf/header';
 import { renderPdfHeader } from '../pdf/header';
 import { toDisplayValue, writeWrappedText } from '../pdf/text';
@@ -13,6 +14,7 @@ export function renderObjectiveQuestionTable(
   columns: CsvColumn[],
   row: Record<string, unknown>,
   startY: number,
+  context: ObjectiveRowContext = {},
 ): number {
   const left = 14;
   const maxWidth = 180;
@@ -82,7 +84,7 @@ export function renderObjectiveQuestionTable(
     startY += 2;
   }
 
-  const tableRows = buildObjectiveQuestionTableRows(columns, row);
+  const tableRows = buildObjectiveQuestionTableRows(columns, row, context);
   if (tableRows.length === 0) {
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');

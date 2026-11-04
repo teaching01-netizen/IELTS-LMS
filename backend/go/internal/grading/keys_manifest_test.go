@@ -10,8 +10,9 @@ import (
 )
 
 type keySourceManifest struct {
-	Rows    map[string][]string `json:"rows"`
-	Default []string            `json:"default"`
+	Rows         map[string][]string `json:"rows"`
+	AdditiveRows map[string][]string `json:"additiveRows"`
+	Default      []string            `json:"default"`
 }
 
 func loadKeySourceManifest(t *testing.T) keySourceManifest {
@@ -44,6 +45,16 @@ func TestKeySourceTableMatchesSharedManifest(t *testing.T) {
 	for questionType, wantFields := range manifest.Rows {
 		if got := KeySourceFields(questionType); !reflect.DeepEqual(got, wantFields) {
 			t.Fatalf("KeySourceFields(%q) = %v, want %v", questionType, got, wantFields)
+		}
+	}
+	for questionType, wantFields := range manifest.AdditiveRows {
+		if got := AdditiveAnswerFields(questionType); !reflect.DeepEqual(got, wantFields) {
+			t.Fatalf("AdditiveAnswerFields(%q) = %v, want %v", questionType, got, wantFields)
+		}
+		// An additive type must not also appear in the single-winner table,
+		// otherwise the manifest certifies a field grading ignores.
+		if _, listed := manifest.Rows[questionType]; listed {
+			t.Fatalf("%q is listed as both single-winner and additive", questionType)
 		}
 	}
 	if got := KeySourceFields("NEW_QUESTION_TYPE"); !reflect.DeepEqual(got, manifest.Default) {

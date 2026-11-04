@@ -1982,7 +1982,6 @@ math-field.sat-block-mathfield::part(menu-toggle) {
   --sat-tool-align-settle: 110ms;
   --sat-tool-lift-settle: 120ms;
   --sat-tool-press-settle: 90ms;
-  --sat-tool-hint-life: 4s;
   --sat-tool-tip-delay: 400ms;
   --sat-tool-edge-rest: transparent;
   --sat-tool-edge-hover: var(--sat-divider);
@@ -2639,23 +2638,6 @@ button:not(:disabled):active > .sat-annotation-press {
 [data-sat-resizing="true"] .sat-tool-resize-glyph {
   opacity: 1;
 }
-.sat-tool-hint {
-  animation: sat-tool-hint-life var(--sat-tool-hint-life) forwards;
-}
-@keyframes sat-tool-hint-life {
-  0% {
-    opacity: 1;
-    visibility: visible;
-  }
-  80% {
-    opacity: 1;
-    visibility: visible;
-  }
-  100% {
-    opacity: 0;
-    visibility: hidden;
-  }
-}
 .sat-tool-tip {
   position: absolute;
   z-index: 6;
@@ -2695,29 +2677,6 @@ button:not(:disabled):active > .sat-annotation-press {
     --sat-tool-edge-outside: 8px;
     --sat-tool-corner-zone: 44px;
   }
-}
-.sat-tool-hint-grabber {
-  display: inline-block;
-  width: 16px;
-  height: 4px;
-  border-radius: 9999px;
-  background: currentColor;
-}
-.sat-tool-hint-corner {
-  width: 12px;
-  height: 12px;
-}
-/* First open: the grabber and resize corner pulse in sync with the hint so
- * students see exactly where to touch. Reduce Motion keeps the static hint. */
-@media (prefers-reduced-motion: no-preference) {
-  [data-sat-tool-teaching="true"] .sat-tool-grabber,
-  [data-sat-tool-teaching="true"] [data-sat-resize-handle] .sat-tool-resize-glyph {
-    animation: sat-tool-teach-pulse 900ms var(--sat-tool-motion-ease) 300ms 2;
-  }
-}
-@keyframes sat-tool-teach-pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.35); }
 }
 [data-dragging="true"] .sat-tool-tip,
 [data-sat-resizing="true"] .sat-tool-tip {
@@ -2777,10 +2736,6 @@ button:not(:disabled):active > .sat-annotation-press {
   z-index: 6;
   width: var(--sat-control-target);
   height: var(--sat-control-target);
-}
-.sat-tool-ref .sat-tool-hint-chip {
-  font-size: var(--sat-ref-title-size);
-  line-height: 1.3;
 }
 .sat-tool-ref .sat-ref-dotgrip {
   position: absolute;

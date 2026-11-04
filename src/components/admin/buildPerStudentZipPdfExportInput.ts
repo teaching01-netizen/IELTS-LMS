@@ -1,12 +1,16 @@
 import type { ExamState } from '../../types';
 import type { GradingSession, SectionSubmission, StudentSubmission, WritingTaskSubmission } from '../../types/grading';
 
+import { getStudentQuestionsForModule } from '../../features/exam-authoring/api/examAuthoringGateway';
+import { buildCaseSensitiveMap } from './gradingAnswerUtils';
+import { buildScoreGroupThresholdMap } from './gradingReviewUtils';
 import {
   buildWideObjectiveExport,
   buildWideWritingExport,
   type CsvColumn,
 } from './gradingReviewUtils';
 import type {
+  ObjectiveRowContext,
   PerStudentZipPdfExportInput,
   PerStudentZipPdfExportSection,
   PerStudentZipPdfMode,
@@ -21,6 +25,13 @@ export interface BuildPerStudentZipPdfExportInputDeps {
     scheduleId: string,
     publishedVersionId?: string,
   ) => Promise<ExamState | null>;
+  /**
+   * Preferred objective source: the version recorded on each saved section
+   * result (`autoGradingResults.integrity.gradingSourceVersionId`). When
+   * present, submissions are grouped by that version; `resolveExamState`
+   * remains the legacy fallback for callers/tests without version pinning.
+   */
+  resolveExamStateByVersionId?: ((versionId: string) => Promise<ExamState | null>) | undefined;
 }
 
 export interface BuildPerStudentZipPdfExportInputArgs {
@@ -33,7 +44,19 @@ export interface BuildPerStudentZipPdfExportInputArgs {
   exportPlan?: ExportPlan | undefined;
 }
 
-type ExportSectionRow = { columns: CsvColumn[]; row: Record<string, unknown> | null };
+type ExportSectionRow = {
+  columns: CsvColumn[];
+  row: Record<string, unknown> | null;
+  objectiveContext?: ObjectiveRowContext | undefined;
+};
+
+/**
+ * The exam version recorded on the saved section result. Hidden behind one
+ * helper so the nested integrity walk cannot drift between call sites.
+ */
+function savedGradingSourceVersion(sectionSubmission: SectionSubmission | null): string | undefined {
+  return sectionSubmission?.autoGradingResults?.integrity?.gradingSourceVersionId;
+}
 
 function toSessionContext(session: GradingSession) {
   return { sessionId: session.id, examTitle: session.examTitle };
@@ -70,10 +93,24 @@ export async function buildPerStudentZipPdfExportInput(
   );
 
   if (objectiveSections.length > 0) {
-    const examState = await deps.resolveExamState(
-      args.session.scheduleId,
-      args.session.publishedVersionId,
-    );
+    // Default (legacy callers without version pinning): one session-level state.
+    const legacyExamState = deps.resolveExamStateByVersionId
+      ? null
+      : await deps.resolveExamState(args.session.scheduleId, args.session.publishedVersionId);
+    const examStateByVersionId = new Map<string, ExamState | null>();
+
+    const resolveVersionState = async (versionId: string | undefined): Promise<ExamState | null> => {
+      if (!versionId) return legacyExamState;
+      if (examStateByVersionId.has(versionId)) {
+        return examStateByVersionId.get(versionId) ?? null;
+      }
+      const state = deps.resolveExamStateByVersionId
+        ? await deps.resolveExamStateByVersionId(versionId)
+        : legacyExamState;
+      examStateByVersionId.set(versionId, state);
+      return state;
+    };
+
     const sectionSubmissionsBySubmissionId = new Map<string, SectionSubmission[]>(
       await Promise.all(
         args.selectedSubmissions.map(async (submission) => [
@@ -83,20 +120,18 @@ export async function buildPerStudentZipPdfExportInput(
       ),
     );
 
-    for (const objectiveSection of objectiveSections) {
-      const entries = args.selectedSubmissions.map((submission) => {
-        const sections = sectionSubmissionsBySubmissionId.get(submission.id) ?? [];
-        const sectionSubmission = sections.find((item) => item.section === objectiveSection) ?? null;
-        return { submissionId: submission.id, sectionSubmission };
-      });
-
+    const buildObjectiveSection = (
+      objectiveSection: 'reading' | 'listening',
+      entries: Array<{ submissionId: string; sectionSubmission: SectionSubmission | null }>,
+      examState: ExamState | null,
+    ): void => {
       const hasSubmission = new Set(
         entries.filter((entry) => Boolean(entry.sectionSubmission)).map((entry) => entry.submissionId),
       );
 
       const exportData = buildWideObjectiveExport({
         session: sessionContext,
-        submissions: args.selectedSubmissions,
+        submissions: args.selectedSubmissions.filter((submission) => hasSubmission.has(submission.id)),
         sectionSubmissions: entries,
         examState,
         moduleType: objectiveSection,
@@ -107,11 +142,56 @@ export async function buildPerStudentZipPdfExportInput(
         exportData.rows.map((row) => [String(row['submissionId']), row] as const),
       );
 
-      for (const submission of args.selectedSubmissions) {
-        setSectionData(sectionDataBySubmissionId, submission.id, objectiveSection, {
+      const objectiveContext: ObjectiveRowContext | undefined = examState
+        ? (() => {
+            const descriptors = getStudentQuestionsForModule(examState, objectiveSection);
+            return {
+              caseSensitiveByQuestionId: buildCaseSensitiveMap(descriptors),
+              groupThresholdByScoreKey: buildScoreGroupThresholdMap(descriptors),
+            };
+          })()
+        : undefined;
+
+      for (const entry of entries) {
+        setSectionData(sectionDataBySubmissionId, entry.submissionId, objectiveSection, {
           columns: exportData.columns,
-          row: hasSubmission.has(submission.id) ? (rowBySubmissionId.get(submission.id) ?? null) : null,
+          row: hasSubmission.has(entry.submissionId)
+            ? (rowBySubmissionId.get(entry.submissionId) ?? null)
+            : null,
+          objectiveContext,
         });
+      }
+    };
+
+    for (const objectiveSection of objectiveSections) {
+      const entries = args.selectedSubmissions.map((submission) => {
+        const sections = sectionSubmissionsBySubmissionId.get(submission.id) ?? [];
+        const sectionSubmission = sections.find((item) => item.section === objectiveSection) ?? null;
+        return { submissionId: submission.id, sectionSubmission };
+      });
+
+      if (!deps.resolveExamStateByVersionId) {
+        buildObjectiveSection(objectiveSection, entries, legacyExamState);
+        continue;
+      }
+
+      // Each saved section names the version that produced it. Group by that
+      // version so the exported key/display never comes from a different exam
+      // version than the saved score (admin README invariant). An absent
+      // version stays `undefined` all the way to the resolver instead of
+      // round-tripping through a string sentinel.
+      const entriesByVersionId = new Map<string | undefined, typeof entries>();
+      for (const entry of entries) {
+        const versionId = savedGradingSourceVersion(entry.sectionSubmission)
+          ?? args.session.publishedVersionId;
+        const group = entriesByVersionId.get(versionId) ?? [];
+        group.push(entry);
+        entriesByVersionId.set(versionId, group);
+      }
+
+      for (const [versionId, versionEntries] of entriesByVersionId) {
+        const examState = await resolveVersionState(versionId);
+        buildObjectiveSection(objectiveSection, versionEntries, examState);
       }
     }
   }

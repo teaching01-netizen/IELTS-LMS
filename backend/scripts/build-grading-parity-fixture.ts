@@ -127,6 +127,7 @@ const blocks: QuestionBlock[] = [
       { id: 'cloze-5', prompt: 'Accent', correctAnswer: 'café' },
       { id: 'cloze-6', prompt: 'No accent', correctAnswer: 'cafe' },
       { id: 'cloze-7', prompt: 'Apostrophe', correctAnswer: "don't" },
+      { id: 'cloze-8', prompt: 'Whitespace', correctAnswer: 'word' },
     ],
   },
   {
@@ -152,7 +153,10 @@ const blocks: QuestionBlock[] = [
     id: 'b-short',
     type: 'SHORT_ANSWER',
     instruction: '',
-    questions: [{ id: 'short-1', prompt: 'Shape', correctAnswer: 'graph | chart', answerRule: 'ONE_WORD' }],
+    questions: [
+      { id: 'short-1', prompt: 'Shape', correctAnswer: 'graph | chart', answerRule: 'ONE_WORD' },
+      { id: 'short-2', prompt: 'Array', correctAnswer: 'sole', answerRule: 'ONE_WORD' },
+    ],
   },
   {
     id: 'b-sentence',
@@ -186,6 +190,17 @@ const blocks: QuestionBlock[] = [
           { id: 'pb2', position: 1, correctAnswer: 'blue' },
         ],
       },
+      {
+        id: 'pool-2',
+        sentence: 'Mixed ____ and ____.',
+        answerRule: 'ONE_WORD',
+        acceptAnyAnswerKey: true,
+        sharedAcceptedAnswers: ['Garden'],
+        blanks: [
+          { id: 'qb1', position: 0, correctAnswer: 'Garden' },
+          { id: 'qb2', position: 1, correctAnswer: 'Garden', caseSensitive: false },
+        ],
+      },
     ],
   },
   {
@@ -214,6 +229,15 @@ const blocks: QuestionBlock[] = [
         noteText: 'A note',
         answerRule: 'ONE_WORD',
         blanks: [{ id: 'nb1', position: 0, correctAnswer: 'note answer' }],
+      },
+      {
+        id: 'note-2',
+        noteText: 'Grouped note',
+        answerRule: 'ONE_WORD',
+        blanks: [
+          { id: 'ng1', position: 0, correctAnswer: 'group one', scoreGroupId: 'grpn', requiredCorrect: 2 },
+          { id: 'ng2', position: 1, correctAnswer: 'group two', scoreGroupId: 'grpn', requiredCorrect: 2 },
+        ],
       },
     ],
   },
@@ -299,6 +323,16 @@ const blocks: QuestionBlock[] = [
     subAnswerModeEnabled: true,
     answerTree: tree,
   },
+  {
+    id: 'b-single-exact',
+    type: 'SINGLE_MCQ',
+    instruction: '',
+    stem: 'Choose ONE',
+    options: [
+      { id: 'Option-A', text: 'Alpha', isCorrect: true },
+      { id: 'Option-B', text: 'Beta', isCorrect: false },
+    ],
+  },
 ];
 
 const examState = createInitialExamState('Objective grading parity full coverage', 'Academic');
@@ -313,13 +347,17 @@ const answers: Record<string, unknown> = {
   'cloze-5': 'CAFÉ',
   'cloze-6': 'café',
   'cloze-7': 'dont',
+  'cloze-8': '   ',
   'match-1': 'H2',
   'map-1': 'north gate',
   'short-1': 'chart',
+  'short-2': ['sole', 'extra'],
   'sent-1': ['alpha', 'beta'],
   'pool-1': ['blue', 'red'],
+  'pool-2': ['Garden', 'garden'],
   'sg-1': ['one'],
   'note-1': ['note answer'],
+  'note-2': ['group one', 'group two'],
   'b-diagram': ['b'],
   'b-flow': ['mix'],
   'b-table': ['x', 'y', 'z'],
@@ -328,6 +366,7 @@ const answers: Record<string, unknown> = {
   'b-multi-partial': ['po1'],
   'b-multi-override': ['oo1', 'oo2'],
   'b-single': 'so1',
+  'b-single-exact': 'Option-A',
   'b-tree::tree::r1::lf1': 'no',
   'b-tree::tree::r1::lf2': 'yes',
 };

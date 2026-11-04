@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countAnsweredQuestions,
   countQuestionSlots,
   createInitialExamState,
   getQuestionNumberLabel,
   getQuestionStartNumber,
   getStudentQuestionsForModule,
+  isQuestionAnswered,
   isQuestionFullyAnswered,
 } from '../examAdapterService';
 
@@ -250,5 +252,61 @@ describe('student question descriptors (student exam core logic)', () => {
         'table-grouped': ['first', 'second'],
       }),
     ).toBe(true);
+  });
+});
+
+describe('answered-question counting for grouped note completion', () => {
+  it('counts a 2-required note group only when both blanks are answered', () => {
+    const state = createInitialExamState('Exam', 'Academic');
+
+    state.reading.passages[0].blocks = [{
+      id: 'note-group',
+      type: 'NOTE_COMPLETION',
+      instruction: '',
+      answerRule: 'ONE_WORD',
+      questions: [{
+        id: 'n1',
+        noteText: 'A ____ and ____.',
+        answerRule: 'ONE_WORD',
+        blanks: [
+          { id: 'b1', position: 0, correctAnswer: 'one', scoreGroupId: 'g1', requiredCorrect: 2 },
+          { id: 'b2', position: 1, correctAnswer: 'two', scoreGroupId: 'g1', requiredCorrect: 2 },
+        ],
+      }],
+    }];
+
+    const questions = getStudentQuestionsForModule(state, 'reading');
+    expect(questions).toHaveLength(2);
+    expect(countAnsweredQuestions(questions, { n1: ['one', ''] })).toBe(0);
+    expect(countAnsweredQuestions(questions, { n1: ['one', 'two'] })).toBe(1);
+
+    // The navigation footer reads the same group members the scorer reads:
+    // a grouped note slot is answered when any member is answered and fully
+    // answered only once the 2-required threshold is met.
+    expect(isQuestionAnswered(questions[0]!, { n1: ['', 'two'] })).toBe(true);
+    expect(isQuestionFullyAnswered(questions[0]!, { n1: ['one', ''] })).toBe(false);
+    expect(isQuestionFullyAnswered(questions[0]!, { n1: ['one', 'two'] })).toBe(true);
+    expect(isQuestionFullyAnswered(questions[1]!, { n1: ['one', 'two'] })).toBe(true);
+
+    // Sentence completion behaves identically (shared helper).
+    const sentenceState = createInitialExamState('Exam', 'Academic');
+    sentenceState.reading.passages[0].blocks = [{
+      id: 'sentence-group',
+      type: 'SENTENCE_COMPLETION',
+      instruction: '',
+      answerRule: 'ONE_WORD',
+      questions: [{
+        id: 's1',
+        sentence: 'A ____ and ____.',
+        answerRule: 'ONE_WORD',
+        blanks: [
+          { id: 'b1', position: 0, correctAnswer: 'one', scoreGroupId: 'g1', requiredCorrect: 2 },
+          { id: 'b2', position: 1, correctAnswer: 'two', scoreGroupId: 'g1', requiredCorrect: 2 },
+        ],
+      }],
+    }];
+    const sentenceQuestions = getStudentQuestionsForModule(sentenceState, 'reading');
+    expect(isQuestionFullyAnswered(sentenceQuestions[0]!, { s1: ['one', 'two'] })).toBe(true);
+    expect(isQuestionAnswered(sentenceQuestions[0]!, { s1: ['', 'two'] })).toBe(true);
   });
 });

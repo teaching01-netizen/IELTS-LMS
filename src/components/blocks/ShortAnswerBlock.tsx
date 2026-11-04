@@ -1,9 +1,10 @@
 import React from 'react';
-import { ShortAnswerBlock as ShortAnswerBlockType, AnswerRule } from '../../types';
+import { ShortAnswerBlock as ShortAnswerBlockType, AnswerRule, type CaseSensitivity } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { CaseSensitivityToggle } from './CaseSensitivityToggle';
 import {
   buildAcceptedAnswerFields,
   resolveAcceptedAnswers,
@@ -38,7 +39,7 @@ export function ShortAnswerBlock({
 
   const updateQuestion = (
     questionId: string,
-    updates: { prompt?: string; correctAnswer?: string; acceptedAnswers?: string[]; answerRule?: AnswerRule },
+    updates: { prompt?: string; correctAnswer?: string; acceptedAnswers?: string[]; answerRule?: AnswerRule } & CaseSensitivity,
   ) => {
     const newQuestions = block.questions.map((q) => {
       if (q.id !== questionId) return q;
@@ -187,6 +188,12 @@ export function ShortAnswerBlock({
                     onChange={(next) => updateQuestion(question.id, buildAcceptedAnswerFields(next))}
                     placeholder="Enter the accepted answer..."
                   />
+                  <div className="mt-1">
+                    <CaseSensitivityToggle
+                      caseSensitive={question.caseSensitive}
+                      onChange={(caseSensitive) => updateQuestion(question.id, { caseSensitive })}
+                    />
+                  </div>
                 </div>
               </div>
             </div>

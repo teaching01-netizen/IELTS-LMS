@@ -45,6 +45,41 @@ describe('objective scoring groups', () => {
     expect(complete.maxScore).toBe(1);
   });
 
+  it('groups note-completion blanks exactly like sentence-completion blanks', () => {
+    const blocks: QuestionBlock[] = [
+      {
+        id: 'note',
+        type: 'NOTE_COMPLETION',
+        instruction: '',
+        answerRule: 'ONE_WORD',
+        questions: [
+          {
+            id: 'n1',
+            noteText: 'A ____ and ____.',
+            answerRule: 'ONE_WORD',
+            blanks: [
+              { id: 'b1', position: 0, correctAnswer: 'Urwin', scoreGroupId: 'g1', requiredCorrect: 2 },
+              { id: 'b2', position: 1, correctAnswer: 'Garden', scoreGroupId: 'g1', requiredCorrect: 2 },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const descriptors = getStudentQuestionsForModule(stateWith(blocks), 'reading');
+    expect(descriptors.map((descriptor) => descriptor.id)).toEqual(['n1:b1', 'n1:b2']);
+    // The note marker keeps note groups distinct from sentence groups.
+    expect(descriptors[0]?.rootId).toBe(descriptors[1]?.rootId);
+    expect(descriptors[0]?.rootId).toContain('::note::');
+
+    const complete = scoreObjectiveDescriptors(descriptors, { n1: ['Urwin', 'Garden'] });
+    expect(complete.totalScore).toBe(1);
+    expect(complete.maxScore).toBe(1);
+
+    const partial = scoreObjectiveDescriptors(descriptors, { n1: ['urwin', 'Garden'] });
+    expect(partial.totalScore).toBe(0);
+  });
+
   it('consumes a shared sentence pool key once', () => {
     const blocks: QuestionBlock[] = [
       {
@@ -76,6 +111,34 @@ describe('objective scoring groups', () => {
     expect(repeated.byId.get('s1:b1')?.awardedScore).toBe(1);
     expect(repeated.byId.get('s1:b2')?.awardedScore).toBe(0);
     expect(repeated.totalScore).toBe(1);
+  });
+
+  it('keeps a case-variant pool sibling for a later opt-out blank', () => {
+    const blocks: QuestionBlock[] = [
+      {
+        id: 'sentence',
+        type: 'SENTENCE_COMPLETION',
+        instruction: '',
+        questions: [
+          {
+            id: 's1',
+            sentence: 'The ____ and ____.',
+            answerRule: 'ONE_WORD',
+            acceptAnyAnswerKey: true,
+            sharedAcceptedAnswers: ['Garden', 'garden'],
+            blanks: [
+              { id: 'b1', position: 0, correctAnswer: 'Garden' },
+              { id: 'b2', position: 1, correctAnswer: 'garden', caseSensitive: false },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const scoring = score(blocks, { s1: ['Garden', 'garden'] });
+    expect(scoring.byId.get('s1:b1')?.awardedScore).toBe(1);
+    expect(scoring.byId.get('s1:b2')?.awardedScore).toBe(1);
+    expect(scoring.totalScore).toBe(2);
   });
 
   it('matches sub-answer tree leaves unordered and awards the root one mark', () => {
@@ -133,14 +196,14 @@ describe('objective scoring groups', () => {
     expect(score(blocks, { multi: ['o1', 'o2', 'o3'] }).totalScore).toBe(0);
   });
 
-  it('keeps the baseline fixture at the Go grader totals', () => {
+  it('keeps the baseline fixture at the Go grader totals (default strict case)', () => {
     const fixture = JSON.parse(
       readFileSync('testdata/objective-grading-parity/baseline-exam.json', 'utf8'),
     ) as { cases: Array<{ examState: ExamState; answers: Record<string, unknown> }> };
     const testCase = fixture.cases[0]!;
     const descriptors = getStudentQuestionsForModule(testCase.examState, 'reading');
     const scoring = scoreObjectiveDescriptors(descriptors, testCase.answers as never);
-    expect(scoring.totalScore).toBe(10);
+    expect(scoring.totalScore).toBe(8);
     expect(scoring.maxScore).toBe(12);
   });
 });
@@ -237,5 +300,45 @@ describe('group override scoring', () => {
     expect(scoring.byId.get('tree::tree::r1::lf1')?.maxScore).toBe(2);
     expect(scoring.totalScore).toBe(2);
     expect(scoring.maxScore).toBe(2);
+  });
+});
+
+describe('note-completion shared pools', () => {
+  function notePoolBlocks(): QuestionBlock[] {
+    return [
+      {
+        id: 'note-pool',
+        type: 'NOTE_COMPLETION',
+        instruction: '',
+        answerRule: 'ONE_WORD',
+        questions: [
+          {
+            id: 'n1',
+            noteText: 'A ____ and ____.',
+            answerRule: 'ONE_WORD',
+            acceptAnyAnswerKey: true,
+            sharedAcceptedAnswers: ['red', 'blue'],
+            blanks: [
+              { id: 'b1', position: 0, correctAnswer: 'red' },
+              { id: 'b2', position: 1, correctAnswer: 'blue' },
+            ],
+          },
+        ],
+      },
+    ];
+  }
+
+  it('grades a note-completion shared pool exactly like a sentence pool', () => {
+    const descriptors = getStudentQuestionsForModule(stateWith(notePoolBlocks()), 'reading');
+    const permuted = scoreObjectiveDescriptors(descriptors, { n1: ['blue', 'red'] });
+    expect(permuted.byId.get('n1:b1')?.correctness).toBe(true);
+    expect(permuted.byId.get('n1:b2')?.correctness).toBe(true);
+    expect(permuted.totalScore).toBe(2);
+    expect(permuted.maxScore).toBe(2);
+
+    const repeated = scoreObjectiveDescriptors(descriptors, { n1: ['red', 'red'] });
+    expect(repeated.byId.get('n1:b1')?.correctness).toBe(true);
+    expect(repeated.byId.get('n1:b2')?.correctness).toBe(false);
+    expect(repeated.totalScore).toBe(1);
   });
 });

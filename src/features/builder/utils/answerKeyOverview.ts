@@ -10,7 +10,7 @@ import type {
   QuestionBlock,
   SingleMCQBlock,
 } from '../../../types';
-import { buildAcceptedAnswerFields } from '../../../utils/acceptedAnswers';
+import { buildAcceptedAnswerFields, mapAcceptedAnswers } from '../../../utils/acceptedAnswers';
 import { setMultiSelectCorrectOptionIds } from '../../../utils/multiSelectMcq';
 import { getQuestionNumberLabel, getStudentQuestionsForModule, type StudentQuestionDescriptor } from '../../exam-authoring/api/examAuthoringGateway';
 
@@ -183,12 +183,17 @@ export type AnswerKeyEdit =
   | { kind: 'set_single_mcq_correct'; questionId: string; optionId: string }
   | { kind: 'set_multi_mcq_correct'; optionIds: string[] }
   | { kind: 'set_diagram_label_answer'; labelIndex: number; value: string }
+  | { kind: 'set_diagram_label_accepted_answer_fields'; labelIndex: number; acceptedAnswers: string[] }
   | { kind: 'set_flow_step_answer'; stepIndex: number; value: string }
+  | { kind: 'set_flow_step_accepted_answer_fields'; stepIndex: number; acceptedAnswers: string[] }
+  | { kind: 'set_map_accepted_answer_fields'; questionId: string; acceptedAnswers: string[] }
   | { kind: 'set_table_cell_accepted_answer_fields'; cellIndex: number; acceptedAnswers: string[] }
   | { kind: 'set_note_blank_accepted_answer_fields'; questionId: string; blankIndex: number; acceptedAnswers: string[] }
   | { kind: 'set_sentence_blank_accepted_answer_fields'; questionId: string; blankIndex: number; acceptedAnswers: string[] }
   | { kind: 'set_classification_category'; itemIndex: number; category: string }
+  | { kind: 'set_classification_accepted_answer_fields'; itemIndex: number; acceptedAnswers: string[] }
   | { kind: 'set_matching_feature_match'; featureIndex: number; match: string }
+  | { kind: 'set_matching_feature_accepted_answer_fields'; featureIndex: number; acceptedAnswers: string[] }
   | { kind: 'set_sub_answer_leaf_accepted_answers'; leafId: string; acceptedAnswers: string[] };
 
 function updateReadingPassages(
@@ -313,6 +318,18 @@ function updateSubAnswerTreeLeafAcceptedAnswers(
   });
 }
 
+/**
+ * Writes an edited accepted-answer list onto one slot. Both the update and the
+ * sanitize rule live in one helper so every list-slot editor cannot drift.
+ */
+function updateSlotAcceptedAnswers<T extends { acceptedAnswers?: string[] | undefined }>(
+  items: readonly T[],
+  index: number,
+  acceptedAnswers: readonly string[],
+): T[] {
+  return mapAcceptedAnswers(items, (_item, itemIndex) => itemIndex === index, acceptedAnswers);
+}
+
 export function applyAnswerKeyEdit(
   state: ExamState,
   row: AnswerKeyRow,
@@ -393,6 +410,18 @@ export function applyAnswerKeyEdit(
       };
     }
 
+    // Newly added accepted-answer editors are additive: they must never
+    // overwrite the primary key (`correctAnswer`).
+    if (edit.kind === 'set_diagram_label_accepted_answer_fields') {
+      if (block.type !== 'DIAGRAM_LABELING') return block;
+      return {
+        ...block,
+        labels: Array.isArray(block.labels)
+          ? updateSlotAcceptedAnswers(block.labels, edit.labelIndex, edit.acceptedAnswers)
+          : [],
+      };
+    }
+
     if (edit.kind === 'set_flow_step_answer') {
       if (block.type !== 'FLOW_CHART') return block;
       return {
@@ -401,6 +430,26 @@ export function applyAnswerKeyEdit(
           ? block.steps.map((step, index) => (index === edit.stepIndex ? { ...step, correctAnswer: edit.value } : step))
           : [],
       };
+    }
+
+    if (edit.kind === 'set_flow_step_accepted_answer_fields') {
+      if (block.type !== 'FLOW_CHART') return block;
+      return {
+        ...block,
+        steps: Array.isArray(block.steps)
+          ? updateSlotAcceptedAnswers(block.steps, edit.stepIndex, edit.acceptedAnswers)
+          : [],
+      };
+    }
+
+    if (edit.kind === 'set_map_accepted_answer_fields') {
+      if (block.type !== 'MAP') return block;
+      return {
+        ...block,
+        questions: Array.isArray(block.questions)
+          ? mapAcceptedAnswers(block.questions, (question) => question.id === edit.questionId, edit.acceptedAnswers)
+          : [],
+      } as typeof block;
     }
 
     if (edit.kind === 'set_table_cell_accepted_answer_fields') {
@@ -459,12 +508,30 @@ export function applyAnswerKeyEdit(
       };
     }
 
+    if (edit.kind === 'set_classification_accepted_answer_fields') {
+      if (block.type !== 'CLASSIFICATION') return block;
+      const typed = block as ClassificationBlock;
+      return {
+        ...typed,
+        items: updateSlotAcceptedAnswers(typed.items, edit.itemIndex, edit.acceptedAnswers),
+      };
+    }
+
     if (edit.kind === 'set_matching_feature_match') {
       if (block.type !== 'MATCHING_FEATURES') return block;
       const typed = block as MatchingFeaturesBlock;
       return {
         ...typed,
         features: typed.features.map((feature, index) => (index === edit.featureIndex ? { ...feature, correctMatch: edit.match } : feature)),
+      };
+    }
+
+    if (edit.kind === 'set_matching_feature_accepted_answer_fields') {
+      if (block.type !== 'MATCHING_FEATURES') return block;
+      const typed = block as MatchingFeaturesBlock;
+      return {
+        ...typed,
+        features: updateSlotAcceptedAnswers(typed.features, edit.featureIndex, edit.acceptedAnswers),
       };
     }
 

@@ -19,7 +19,6 @@ import { DesmosCalculator, type DesmosOutcomeEvent } from "./DesmosCalculator";
 import { SatFloatingTool } from "./SatFloatingTool";
 import { satToolGeometryKey } from "../../infrastructure/satToolGeometryStore";
 import { useSatMediaQuery } from "../useSatMediaQuery";
-import { satToolViewKey } from "../../infrastructure/satToolStateStore";
 import { useSatExamZoom } from "../zoom/SatExamZoomContext";
 import { readSatCalculatorDragArea, readSatCalculatorSafeArea } from "./satToolPlacementRuntime";
 import { emitStudentObservabilityMetric } from "../../../../utils/studentObservability";
@@ -308,7 +307,6 @@ export function SatCalculatorPanel({
         moduleAttemptId,
         "calculator:portrait-v2"
       )}
-      viewStateKey={satToolViewKey(scheduleId, attemptId, moduleAttemptId)}
       defaultGeometry={defaultGeometry}
       geometryScale={scale}
       safeArea={clampArea}

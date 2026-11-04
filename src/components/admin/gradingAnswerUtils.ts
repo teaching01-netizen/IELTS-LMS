@@ -3,10 +3,10 @@ import type {
 } from '../../features/exam-authoring/api/examAuthoringGateway';
 import { getQuestionAnswer } from '../../features/exam-authoring/api/examAuthoringGateway';
 import type { StudentAnswerValue } from '../../types/answers';
-import type { SentenceCompletionQuestion } from '../../types';
-import { answersMatch, normalizeAnswerForMatching, resolveAcceptedAnswers, sanitizeAcceptedAnswers } from '../../utils/acceptedAnswers';
+import type { NoteCompletionQuestion, QuestionType, SentenceCompletionQuestion } from '../../types';
+import { answersMatchCaseExact, answersMatchForEntry, isCaseSensitiveEntry, normalizeAnswerForMatching, resolveAcceptedAnswers, sanitizeAcceptedAnswers } from '../../utils/acceptedAnswers';
 import { flattenSubAnswerTree } from '../../utils/subAnswerTree';
-import { getSharedSentenceAnswerPool, matchSharedSentenceAnswers } from '../../utils/sentenceCompletionAnswerPool';
+import { createSharedSentencePoolMatcher, getSharedSentenceAnswerPool } from '../../utils/sentenceCompletionAnswerPool';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -24,10 +24,6 @@ export function extractObjectiveAnswerMap(
   }
 
   return {};
-}
-
-function normalizeComparable(value: string): string {
-  return normalizeAnswerForMatching(value);
 }
 
 function stringifyFallback(value: unknown): string {
@@ -101,9 +97,9 @@ function getSingleMcqOptions(
     if (matchedQuestion && Array.isArray(matchedQuestion.options)) {
       return matchedQuestion.options;
     }
-    if (Array.isArray(blockWithQuestions.questions[0]?.options)) {
-      return blockWithQuestions.questions[0].options;
-    }
+    // Unknown answerKey (stale content): no options, so grading resolves to
+    // invalid instead of silently scoring against another question's key.
+    return [];
   }
 
   const blockOptions = (descriptor.block as { options?: Array<{ id: string; text: string; isCorrect?: boolean }> }).options;
@@ -256,13 +252,27 @@ export function getCorrectAnswerDisplay(
     return correctAnswerOverride;
   }
 
-  if (acceptedAnswers && acceptedAnswers.length > 0) {
+  if (acceptedAnswers.length > 0) {
     return acceptedAnswers.join(' | ');
+  }
+
+  // MATCHING and TFNG display the effective grading keys (admin README):
+  // MATCHING reads acceptedAnswers, then correctHeading, then a legacy
+  // correctAnswer, and renders heading ids as heading text; TFNG reads
+  // correctAnswer, then acceptedAnswers.
+  if (block.type === 'MATCHING') {
+    const headings = Array.isArray(block.headings) ? block.headings : [];
+    return getEffectiveAcceptedAnswersForGrading(descriptor)
+      .map((headingId) => lookupHeadingText(headings, headingId))
+      .join(' | ');
+  }
+
+  if (block.type === 'TFNG') {
+    return getEffectiveAcceptedAnswersForGrading(descriptor).join(' | ');
   }
 
   if (
     block.type === 'SENTENCE_COMPLETION' &&
-    acceptedAnswers !== null &&
     question &&
     'blanks' in question &&
     Array.isArray(question.blanks) &&
@@ -286,45 +296,29 @@ export function getCorrectAnswerDisplay(
       : '';
   }
 
-  if (block.type === 'MATCHING') {
-    const headings = Array.isArray(block.headings) ? block.headings : [];
-    return typeof correct === 'string' ? lookupHeadingText(headings, correct) : '';
-  }
-
   return formatAnswerValue(correct);
 }
 
-function getAcceptedAnswersForDescriptor(descriptor: StudentQuestionDescriptor): string[] | null {
-  const { block, question, answerIndex } = descriptor;
-
-  switch (block.type) {
-    case 'CLOZE':
-    case 'SHORT_ANSWER':
-      return question && 'correctAnswer' in question ? resolveAcceptedAnswers(question) : null;
-    case 'SENTENCE_COMPLETION': {
-      if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return null;
-      if (typeof answerIndex !== 'number') return null;
-      const sentenceQuestion = question as SentenceCompletionQuestion;
-      if (sentenceQuestion.acceptAnyAnswerKey === true) {
-        return getSharedSentenceAnswerPool(sentenceQuestion);
-      }
-      const blank = question.blanks[answerIndex];
-      return blank ? resolveAcceptedAnswers(blank) : null;
-    }
-    case 'NOTE_COMPLETION': {
-      if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return null;
-      if (typeof answerIndex !== 'number') return null;
-      const blank = question.blanks[answerIndex];
-      return blank ? resolveAcceptedAnswers(blank) : null;
-    }
-    case 'TABLE_COMPLETION': {
-      if (!Array.isArray(block.cells) || typeof answerIndex !== 'number') return null;
-      const cell = block.cells[answerIndex];
-      return cell ? resolveAcceptedAnswers(cell) : null;
-    }
-    default:
-      return null;
+/**
+ * Displayed accepted-answer list for a descriptor. This delegates to the one
+ * grading resolver instead of re-dispatching on block type, so the review/PDF
+ * surfaces cannot drift from the keys the scorer reads. Choice blocks and the
+ * two special single-winner displays (MATCHING/TFNG) render from the
+ * correct-answer branch below; sub-answer-tree leaves keep their historical
+ * display path.
+ */
+function getAcceptedAnswersForDescriptor(descriptor: StudentQuestionDescriptor): string[] {
+  const { block } = descriptor;
+  if (
+    descriptor.isSubAnswerTreeLeaf
+    || block.type === 'MULTI_MCQ'
+    || block.type === 'SINGLE_MCQ'
+    || block.type === 'MATCHING'
+    || block.type === 'TFNG'
+  ) {
+    return [];
   }
+  return getEffectiveAcceptedAnswersForGrading(descriptor);
 }
 
 export function getStudentAnswerDisplay(
@@ -357,10 +351,15 @@ export function getStudentAnswerDisplay(
   return formatAnswerValue(value);
 }
 
-function getSentenceCompletionQuestion(
+type CompletionPoolQuestion = SentenceCompletionQuestion | NoteCompletionQuestion;
+
+function getCompletionQuestion(
   descriptor: StudentQuestionDescriptor,
-): SentenceCompletionQuestion | null {
-  if (descriptor.block.type !== 'SENTENCE_COMPLETION') {
+): CompletionPoolQuestion | null {
+  if (
+    descriptor.block.type !== 'SENTENCE_COMPLETION'
+    && descriptor.block.type !== 'NOTE_COMPLETION'
+  ) {
     return null;
   }
 
@@ -369,7 +368,7 @@ function getSentenceCompletionQuestion(
     return null;
   }
 
-  return question as SentenceCompletionQuestion;
+  return question as CompletionPoolQuestion;
 }
 
 export function resolveSentenceCompletionCorrectness(
@@ -378,12 +377,12 @@ export function resolveSentenceCompletionCorrectness(
 ): Map<string, boolean | null> {
   const correctnessByDescriptor = new Map<string, boolean | null>();
   const sharedGroups = new Map<string, {
-    question: SentenceCompletionQuestion;
+    question: CompletionPoolQuestion;
     descriptors: StudentQuestionDescriptor[];
   }>();
 
   for (const descriptor of descriptors) {
-    const question = getSentenceCompletionQuestion(descriptor);
+    const question = getCompletionQuestion(descriptor);
     if (!question || question.acceptAnyAnswerKey !== true) {
       correctnessByDescriptor.set(descriptor.id, isStudentAnswerCorrect(descriptor, answerMap));
       continue;
@@ -418,12 +417,20 @@ export function resolveSentenceCompletionCorrectness(
       continue;
     }
 
-    const matches = matchSharedSentenceAnswers(
-      gradableDescriptors.map((descriptor) => getQuestionAnswer(descriptor, answerMap)),
-      getSharedSentenceAnswerPool(question),
-    );
-    gradableDescriptors.forEach((descriptor, index) => {
-      correctnessByDescriptor.set(descriptor.id, matches[index] ?? false);
+    // Per-blank strictness: each blank consumes from the shared pool under its
+    // own rule (mirrors scoreObjectiveDescriptors.applyPoolGroup).
+    const matcher = createSharedSentencePoolMatcher(getSharedSentenceAnswerPool(question));
+    gradableDescriptors.forEach((descriptor) => {
+      const raw = getQuestionAnswer(descriptor, answerMap);
+      const studentText = typeof raw === 'string' ? raw : formatAnswerValue(raw);
+      if (studentText.trim() === '') {
+        correctnessByDescriptor.set(descriptor.id, false);
+        return;
+      }
+      correctnessByDescriptor.set(
+        descriptor.id,
+        matcher.match(studentText, isCaseSensitiveDescriptor(descriptor)),
+      );
     });
   }
 
@@ -440,6 +447,14 @@ function exactIdSetFromUnknown(value: unknown): Set<string> {
     .filter((entry) => entry !== '');
 
   return new Set(items);
+}
+
+/** Exact option-ID set for SINGLE_MCQ (raw identity: no cleaning, no folding). */
+function exactIdSetFromSingle(value: unknown): Set<string> {
+  if (typeof value === 'string') {
+    return value === '' ? new Set<string>() : new Set<string>([value]);
+  }
+  return exactIdSetFromUnknown(value);
 }
 
 export function getMultiSelectAnswerScore(
@@ -485,8 +500,60 @@ function resolveKeyFields(entry: unknown, fields: readonly string[]): string[] {
   return [];
 }
 
+interface AdditiveAcceptedAnswerSlot {
+  readonly listField: 'items' | 'features' | 'labels' | 'steps';
+  readonly answerField: 'correctCategory' | 'correctMatch' | 'correctAnswer';
+}
+
+/**
+ * Types whose effective grading keys are additive: the slot's primary key
+ * comes first, then every written alternative. Classification / matching
+ * features never read a legacy `correctAnswer`; diagram labels and flow steps
+ * use `correctAnswer` as their primary field, so an alternates list can no
+ * longer shadow the authoritative key (review T9).
+ */
+const ADDITIVE_ACCEPTED_ANSWER_SLOTS: Partial<Record<QuestionType, AdditiveAcceptedAnswerSlot>> = {
+  CLASSIFICATION: { listField: 'items', answerField: 'correctCategory' },
+  MATCHING_FEATURES: { listField: 'features', answerField: 'correctMatch' },
+  DIAGRAM_LABELING: { listField: 'labels', answerField: 'correctAnswer' },
+  FLOW_CHART: { listField: 'steps', answerField: 'correctAnswer' },
+};
+
+function getAdditiveAcceptedAnswerEntry(
+  descriptor: StudentQuestionDescriptor,
+  slot: AdditiveAcceptedAnswerSlot,
+): unknown {
+  if (typeof descriptor.answerIndex !== 'number') {
+    return undefined;
+  }
+  const items = (descriptor.block as unknown as Record<string, unknown>)[slot.listField];
+  return Array.isArray(items) ? items[descriptor.answerIndex] : undefined;
+}
+
+function resolveAdditiveSlotAnswers(entry: unknown, slot: AdditiveAcceptedAnswerSlot): string[] {
+  if (!entry || typeof entry !== 'object') {
+    return [];
+  }
+
+  const record = entry as Record<string, unknown>;
+  const primary = record[slot.answerField];
+  const alternatives = record['acceptedAnswers'];
+
+  return sanitizeAcceptedAnswers([
+    typeof primary === 'string' ? primary : '',
+    ...(Array.isArray(alternatives)
+      ? alternatives.filter((value): value is string => typeof value === 'string')
+      : []),
+  ]);
+}
+
 export const OBJECTIVE_KEY_SOURCE_DEFAULT = ['acceptedAnswers', 'correctAnswer'] as const;
 
+/**
+ * Single-winner read order per type. Types whose editors write more than one
+ * graded key field are NOT listed here; they live in ADDITIVE_KEY_SOURCE_FIELDS
+ * below so the manifest never certifies a field that grading ignores.
+ */
 export const OBJECTIVE_KEY_SOURCE_FIELDS: Record<string, readonly string[]> = {
   TFNG: ['correctAnswer', 'acceptedAnswers'],
   CLOZE: ['acceptedAnswers', 'correctAnswer'],
@@ -495,13 +562,17 @@ export const OBJECTIVE_KEY_SOURCE_FIELDS: Record<string, readonly string[]> = {
   SHORT_ANSWER: ['acceptedAnswers', 'correctAnswer'],
   SENTENCE_COMPLETION: ['acceptedAnswers', 'correctAnswer'],
   NOTE_COMPLETION: ['acceptedAnswers', 'correctAnswer'],
-  DIAGRAM_LABELING: ['acceptedAnswers', 'correctAnswer'],
-  FLOW_CHART: ['acceptedAnswers', 'correctAnswer'],
   TABLE_COMPLETION: ['acceptedAnswers', 'correctAnswer'],
-  CLASSIFICATION: ['acceptedAnswers', 'correctCategory', 'correctAnswer'],
-  MATCHING_FEATURES: ['acceptedAnswers', 'correctMatch', 'correctAnswer'],
   SUB_ANSWER_TREE: ['acceptedAnswers', 'correctAnswer'],
   SINGLE_MCQ: ['acceptedAnswers', 'correctAnswer'],
+};
+
+/** Additive read order: every listed field contributes keys, in order. */
+export const ADDITIVE_KEY_SOURCE_FIELDS: Record<string, readonly string[]> = {
+  CLASSIFICATION: ['correctCategory', 'acceptedAnswers'],
+  MATCHING_FEATURES: ['correctMatch', 'acceptedAnswers'],
+  DIAGRAM_LABELING: ['correctAnswer', 'acceptedAnswers'],
+  FLOW_CHART: ['correctAnswer', 'acceptedAnswers'],
 };
 
 export function getKeySourceFieldsForType(questionType: string): readonly string[] {
@@ -528,6 +599,14 @@ export function getEffectiveAcceptedAnswersForGrading(
     return leaf ? sanitizeAcceptedAnswers(leaf.acceptedAnswers) : [];
   }
 
+  const additiveSlot = ADDITIVE_ACCEPTED_ANSWER_SLOTS[block.type];
+  if (additiveSlot) {
+    return resolveAdditiveSlotAnswers(
+      getAdditiveAcceptedAnswerEntry(descriptor, additiveSlot),
+      additiveSlot,
+    );
+  }
+
   const fields = getKeySourceFieldsForType(block.type);
 
   if (block.type === 'SENTENCE_COMPLETION') {
@@ -542,6 +621,10 @@ export function getEffectiveAcceptedAnswersForGrading(
 
   if (block.type === 'NOTE_COMPLETION') {
     if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return [];
+    const noteQuestion = question as NoteCompletionQuestion;
+    if (noteQuestion.acceptAnyAnswerKey === true) {
+      return getSharedSentenceAnswerPool(noteQuestion);
+    }
     if (typeof answerIndex !== 'number') return [];
     return resolveKeyFields(question.blanks[answerIndex], fields);
   }
@@ -551,27 +634,81 @@ export function getEffectiveAcceptedAnswersForGrading(
     return resolveKeyFields(block.cells[answerIndex], fields);
   }
 
-  if (block.type === 'DIAGRAM_LABELING') {
-    if (!Array.isArray(block.labels) || typeof answerIndex !== 'number') return [];
-    return resolveKeyFields(block.labels[answerIndex], fields);
-  }
-
-  if (block.type === 'FLOW_CHART') {
-    if (!Array.isArray(block.steps) || typeof answerIndex !== 'number') return [];
-    return resolveKeyFields(block.steps[answerIndex], fields);
-  }
-
-  if (block.type === 'CLASSIFICATION') {
-    if (!Array.isArray(block.items) || typeof answerIndex !== 'number') return [];
-    return resolveKeyFields(block.items[answerIndex], fields);
-  }
-
-  if (block.type === 'MATCHING_FEATURES') {
-    if (!Array.isArray(block.features) || typeof answerIndex !== 'number') return [];
-    return resolveKeyFields(block.features[answerIndex], fields);
-  }
-
   return resolveKeyFields(question, fields);
+}
+
+type SlotEntryReader = (descriptor: StudentQuestionDescriptor) => unknown;
+
+function readBlanksEntry(descriptor: StudentQuestionDescriptor): unknown {
+  const { question, answerIndex } = descriptor;
+  if (!question || !('blanks' in question) || !Array.isArray(question.blanks)) return undefined;
+  return readListEntry(question.blanks, answerIndex);
+}
+
+function readBlockEntry(descriptor: StudentQuestionDescriptor, field: string): unknown {
+  const list = (descriptor.block as unknown as Record<string, unknown>)[field];
+  return readListEntry(list, descriptor.answerIndex);
+}
+
+function readListEntry(list: unknown, answerIndex: number | undefined): unknown {
+  if (!Array.isArray(list) || typeof answerIndex !== 'number') return undefined;
+  return list[answerIndex];
+}
+
+/** Per-type slot that owns the case-sensitivity flag (default: the question). */
+const CASE_SENSITIVE_SLOT_READERS: Partial<Record<QuestionType, SlotEntryReader>> = {
+  NOTE_COMPLETION: readBlanksEntry,
+  SENTENCE_COMPLETION: readBlanksEntry,
+  TABLE_COMPLETION: (descriptor) => readBlockEntry(descriptor, 'cells'),
+  DIAGRAM_LABELING: (descriptor) => readBlockEntry(descriptor, 'labels'),
+  FLOW_CHART: (descriptor) => readBlockEntry(descriptor, 'steps'),
+  CLASSIFICATION: (descriptor) => readBlockEntry(descriptor, 'items'),
+  MATCHING_FEATURES: (descriptor) => readBlockEntry(descriptor, 'features'),
+};
+
+/** Default policy: exact case required. Opt-out only with explicit `caseSensitive: false`. */
+export function isCaseSensitiveDescriptor(descriptor: StudentQuestionDescriptor): boolean {
+  const { block, question } = descriptor;
+  if (descriptor.isSubAnswerTreeLeaf) {
+    const tree = (block as { answerTree?: unknown }).answerTree;
+    if (Array.isArray(tree)) {
+      const leaves = flattenSubAnswerTree(block.id, tree as never, 1).leaves;
+      const leaf = leaves.find((entry) => entry.id === descriptor.id);
+      const node = findTreeNodeById(tree, leaf?.nodeId);
+      // Missing node defaults to strict.
+      if (node === null) return true;
+      return isCaseSensitiveEntry(node);
+    }
+    return true;
+  }
+  const readSlot = CASE_SENSITIVE_SLOT_READERS[block.type];
+  const entry = readSlot ? readSlot(descriptor) : question;
+  // Missing slot/question content defaults to strict.
+  return entry === undefined ? true : isCaseSensitiveEntry(entry);
+}
+
+/** Descriptor id → strict flag for export fallbacks that lack descriptor context. */
+export function buildCaseSensitiveMap(
+  descriptors: readonly StudentQuestionDescriptor[],
+): Record<string, boolean> {
+  const map: Record<string, boolean> = {};
+  for (const descriptor of descriptors) {
+    map[descriptor.id] = isCaseSensitiveDescriptor(descriptor);
+  }
+  return map;
+}
+
+function findTreeNodeById(nodes: unknown, nodeId: string | undefined): unknown {
+  if (!nodeId || !Array.isArray(nodes)) return null;
+  const stack: unknown[] = [...nodes];
+  while (stack.length > 0) {
+    const current = stack.pop() as Record<string, unknown> | null;
+    if (!current || typeof current !== 'object') continue;
+    if (current['id'] === nodeId) return current;
+    const children = current['children'];
+    if (Array.isArray(children)) stack.push(...children);
+  }
+  return null;
 }
 
 export function isStudentAnswerCorrect(
@@ -580,13 +717,14 @@ export function isStudentAnswerCorrect(
 ): boolean | null {
   const correct = getCorrectAnswerValue(descriptor);
   const student = getQuestionAnswer(descriptor, answerMap);
+  const caseSensitive = isCaseSensitiveDescriptor(descriptor);
   const acceptedAnswers = descriptor.block.type === 'MULTI_MCQ'
     ? null
     : getEffectiveAcceptedAnswersForGrading(descriptor);
 
   if (acceptedAnswers && acceptedAnswers.length > 0) {
     const studentText = formatAnswerValue(student);
-    return acceptedAnswers.some((answer) => answersMatch(studentText, answer));
+    return acceptedAnswers.some((answer) => answersMatchForEntry(studentText, answer, caseSensitive));
   }
 
   if (correct === null || correct === undefined) {
@@ -604,8 +742,27 @@ export function isStudentAnswerCorrect(
     return true;
   }
 
-  const correctText = normalizeComparable(formatAnswerValue(correct));
-  const studentText = normalizeComparable(formatAnswerValue(student));
+  if (descriptor.block.type === 'SINGLE_MCQ') {
+    // Option IDs are identity, not text: compare exactly (no cleaning/folding).
+    const correctSet = exactIdSetFromSingle(correct);
+    const studentSet = exactIdSetFromSingle(student);
+    if (correctSet.size === 0) return null;
+    if (correctSet.size !== 1 || studentSet.size !== 1) return false;
+    for (const value of correctSet) {
+      if (!studentSet.has(value)) return false;
+    }
+    return true;
+  }
+
+  const studentRaw = formatAnswerValue(student);
+  const correctRaw = formatAnswerValue(correct);
+  if (caseSensitive) {
+    return answersMatchCaseExact(studentRaw, correctRaw)
+      ? true
+      : (normalizeAnswerForMatching(correctRaw) === '' ? null : false);
+  }
+  const correctText = normalizeAnswerForMatching(correctRaw);
+  const studentText = normalizeAnswerForMatching(studentRaw);
   if (correctText === '') return null;
   return correctText === studentText;
 }

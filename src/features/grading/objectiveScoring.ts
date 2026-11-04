@@ -2,12 +2,15 @@ import { getQuestionAnswer } from '../exam-authoring/api/examAuthoringGateway';
 import type { StudentQuestionDescriptor } from '../exam-authoring/api/examAuthoringGateway';
 import type { StudentAnswerValue } from '../../types/answers';
 import type { SentenceCompletionQuestion } from '../../types';
-import { answersMatch, answersMatchCaseExact, normalizeAnswerForMatching, sanitizeAcceptedAnswers } from '../../utils/acceptedAnswers';
+import { answersMatchCaseExact, answersMatchForEntry, sanitizeAcceptedAnswers } from '../../utils/acceptedAnswers';
+import { createSharedSentencePoolMatcher } from '../../utils/sentenceCompletionAnswerPool';
 import { isSubAnswerLeafCorrect } from '../../utils/subAnswerTree';
+import { getGroupedScoringSlotKey, resolveGroupedScoringRequiredCorrect } from '../../utils/gradingGroups';
 import {
   formatAnswerValue,
   getEffectiveAcceptedAnswersForGrading,
   getMultiSelectAnswerScore,
+  isCaseSensitiveDescriptor,
   isStudentAnswerCorrect,
 } from '../../components/admin/gradingAnswerUtils';
 
@@ -77,7 +80,8 @@ function overrideScore(
   }
   const student = answerText(answer);
   const excluded = (override.excludedAnswers ?? []).some((value) => answersMatchCaseExact(student, value));
-  const correctness = !excluded && accepted.some((value) => answersMatch(student, value));
+  const caseSensitive = isCaseSensitiveDescriptor(descriptor);
+  const correctness = !excluded && accepted.some((value) => answersMatchForEntry(student, value, caseSensitive));
   const maxScore = override.maxScore && override.maxScore > 0 ? override.maxScore : 1;
   return { correctness, awardedScore: correctness ? maxScore : 0, maxScore };
 }
@@ -95,43 +99,19 @@ export function getScoringGroupKey(descriptor: StudentQuestionDescriptor): strin
   if (descriptor.isSubAnswerTreeLeaf) {
     return descriptor.rootId ?? null;
   }
-  if (typeof descriptor.rootId === 'string' && descriptor.rootId.includes('::group::')) {
-    return descriptor.rootId;
-  }
-  return null;
-}
-
-function requiredCorrectForGroup(descriptors: StudentQuestionDescriptor[]): number {
-  let required = 1;
-  for (const descriptor of descriptors) {
-    const { block, question, answerIndex } = descriptor;
-    if (
-      block.type === 'SENTENCE_COMPLETION'
-      && question
-      && 'blanks' in question
-      && typeof answerIndex === 'number'
-    ) {
-      const blank = (question as SentenceCompletionQuestion).blanks[answerIndex];
-      if (blank?.requiredCorrect !== undefined && Number.isFinite(blank.requiredCorrect)) {
-        required = Math.max(required, Math.floor(blank.requiredCorrect));
-      }
-      continue;
-    }
-    if (block.type === 'TABLE_COMPLETION' && typeof answerIndex === 'number') {
-      const cell = block.cells[answerIndex];
-      if (cell?.requiredCorrect !== undefined && Number.isFinite(cell.requiredCorrect)) {
-        required = Math.max(required, Math.floor(cell.requiredCorrect));
-      }
-    }
-  }
-  return required;
+  return getGroupedScoringSlotKey(descriptor);
 }
 
 function poolGroupKey(descriptor: StudentQuestionDescriptor): string | null {
-  if (descriptor.block.type !== 'SENTENCE_COMPLETION') return null;
+  const { block } = descriptor;
+  if (block.type !== 'SENTENCE_COMPLETION' && block.type !== 'NOTE_COMPLETION') return null;
   const question = descriptor.question;
   if (!question || !('blanks' in question)) return null;
-  return (question as SentenceCompletionQuestion).acceptAnyAnswerKey === true ? `pool:${question.id}` : null;
+  // Both completion types are pooled by the same Go grader branch; the
+  // website must group them identically.
+  return (question as SentenceCompletionQuestion).acceptAnyAnswerKey === true
+    ? `pool:${question.id}`
+    : null;
 }
 
 function treeGroupKey(descriptor: StudentQuestionDescriptor): string | null {
@@ -212,8 +192,9 @@ function applyTreeMatching(
   const candidates = new Map<string, string[]>();
   required.forEach((requiredLeaf) => {
     const accepted = acceptedAnswersForGroupSlot(requiredLeaf, overrides);
+    const strict = isCaseSensitiveDescriptor(requiredLeaf);
     const allowed = studentLeaves
-      .filter((studentLeaf) => isSubAnswerLeafCorrect(accepted, getQuestionAnswer(studentLeaf, answerMap)))
+      .filter((studentLeaf) => isSubAnswerLeafCorrect(accepted, getQuestionAnswer(studentLeaf, answerMap), strict))
       .map((studentLeaf) => studentLeaf.id);
     candidates.set(requiredLeaf.id, allowed);
   });
@@ -253,7 +234,7 @@ function applyRequiredGroup(
   scores: Map<string, ObjectiveDescriptorScore>,
   overrides: Record<string, ObjectiveScoringOverride> | undefined,
 ): void {
-  const requiredCorrect = requiredCorrectForGroup(descriptors);
+  const requiredCorrect = resolveGroupedScoringRequiredCorrect(descriptors);
   const correctCount = descriptors.filter((descriptor) => scores.get(descriptor.id)?.correctness === true).length;
   const groupCorrect = correctCount >= requiredCorrect;
   const anyAnswered = descriptors.some((descriptor) => {
@@ -278,18 +259,15 @@ function applyPoolGroup(
   const sorted = [...descriptors].sort(
     (left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0),
   );
-  const available = new Set<string>();
-  for (const key of getEffectiveAcceptedAnswersForGrading(sorted[0]!)) {
-    const normalized = normalizeAnswerForMatching(key);
-    if (normalized) available.add(normalized);
-  }
+  // Per-blank strictness: each blank consumes one pool key under its own rule.
+  const matcher = createSharedSentencePoolMatcher(
+    getEffectiveAcceptedAnswersForGrading(sorted[0]!),
+  );
   for (const descriptor of sorted) {
     const score = scores.get(descriptor.id);
     if (!score) continue;
     const answer = getQuestionAnswer(descriptor, answerMap);
-    const normalized = typeof answer === 'string' ? normalizeAnswerForMatching(answer) : '';
-    const matched = normalized !== '' && available.has(normalized);
-    if (matched) available.delete(normalized);
+    const matched = matcher.match(answer, isCaseSensitiveDescriptor(descriptor));
     score.correctness = matched;
     score.awardedScore = matched ? 1 : 0;
     score.maxScore = 1;

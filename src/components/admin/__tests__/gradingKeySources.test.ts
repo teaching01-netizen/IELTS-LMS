@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createInitialExamState, getStudentQuestionsForModule } from '../../../services/examAdapterService';
 import type { QuestionBlock } from '../../../types';
-import { getEffectiveAcceptedAnswersForGrading } from '../gradingAnswerUtils';
+import { getEffectiveAcceptedAnswersForGrading, isStudentAnswerCorrect } from '../gradingAnswerUtils';
 
 function descriptorsFor(blocks: QuestionBlock[]) {
   const state = createInitialExamState('Key source table', 'Academic');
@@ -39,6 +39,33 @@ describe('website key-source table', () => {
     expect(getEffectiveAcceptedAnswersForGrading(descriptor!)).toEqual(['B']);
   });
 
+  it('classification keeps the selected category alongside written alternatives', () => {
+    const [descriptor] = descriptorsFor([
+      {
+        id: 'class-block',
+        type: 'CLASSIFICATION',
+        instruction: '',
+        categories: ['A', 'B'],
+        items: [{ id: 'ci1', text: 'Item', correctCategory: 'B', acceptedAnswers: ['bee', 'B'] }],
+      },
+    ]);
+    // Never the legacy correctAnswer; the selected category always stays first.
+    expect(getEffectiveAcceptedAnswersForGrading(descriptor!)).toEqual(['B', 'bee']);
+  });
+
+  it('matching features keeps the selected match alongside written alternatives', () => {
+    const [descriptor] = descriptorsFor([
+      {
+        id: 'feature-block',
+        type: 'MATCHING_FEATURES',
+        instruction: '',
+        options: ['M1', 'M2'],
+        features: [{ id: 'f1', text: 'Feature', correctMatch: 'M2', acceptedAnswers: ['m-two'] }],
+      },
+    ]);
+    expect(getEffectiveAcceptedAnswersForGrading(descriptor!)).toEqual(['M2', 'm-two']);
+  });
+
   it('matching features prefers correctMatch over stale correctAnswer', () => {
     const [descriptor] = descriptorsFor([
       {
@@ -64,14 +91,14 @@ describe('website key-source table', () => {
     expect(getEffectiveAcceptedAnswersForGrading(descriptor!)).toEqual(['F']);
   });
 
-  it('map falls back to correctAnswer', () => {
+  it('map stays a single winner: correctAnswer before acceptedAnswers', () => {
     const [descriptor] = descriptorsFor([
       {
         id: 'map-block',
         type: 'MAP',
         instruction: '',
         assetUrl: 'map.png',
-        questions: [{ id: 'm1', label: 'Gate', correctAnswer: 'north gate', x: 0, y: 0 }],
+        questions: [{ id: 'm1', label: 'Gate', correctAnswer: 'north gate', acceptedAnswers: ['north entrance'], x: 0, y: 0 }],
       },
     ]);
     expect(getEffectiveAcceptedAnswersForGrading(descriptor!)).toEqual(['north gate']);
@@ -90,16 +117,53 @@ describe('website key-source table', () => {
     expect(getEffectiveAcceptedAnswersForGrading(descriptor!)).toEqual(['a', 'b']);
   });
 
-  it('flow steps read correctAnswer', () => {
+  it('diagram labels keep the primary key alongside written alternatives', () => {
+    const [descriptor] = descriptorsFor([
+      {
+        id: 'diagram-block',
+        type: 'DIAGRAM_LABELING',
+        instruction: '',
+        imageUrl: 'diagram.png',
+        labels: [{
+          id: 'l1',
+          x: 0,
+          y: 0,
+          correctAnswer: 'north',
+          acceptedAnswers: ['north gate', 'N', 'north'],
+        }],
+      },
+    ]);
+
+    // Primary first, alternates after, duplicates collapsed.
+    expect(getEffectiveAcceptedAnswersForGrading(descriptor!)).toEqual(['north', 'north gate', 'N']);
+    expect(isStudentAnswerCorrect(descriptor!, { 'diagram-block': ['north'] })).toBe(true);
+    expect(isStudentAnswerCorrect(descriptor!, { 'diagram-block': ['north gate'] })).toBe(true);
+    expect(isStudentAnswerCorrect(descriptor!, { 'diagram-block': ['south'] })).toBe(false);
+  });
+
+  it('flow steps keep the primary key alongside written alternatives', () => {
     const [descriptor] = descriptorsFor([
       {
         id: 'flow-block',
         type: 'FLOW_CHART',
         instruction: '',
-        steps: [{ id: 's1', label: 'Step', correctAnswer: 'mix' }],
+        steps: [{
+          id: 's1',
+          label: 'Step',
+          correctAnswer: 'absorb | take in',
+          acceptedAnswers: ['soak up'],
+        }],
       },
     ]);
-    expect(getEffectiveAcceptedAnswersForGrading(descriptor!)).toEqual(['mix']);
+
+    expect(getEffectiveAcceptedAnswersForGrading(descriptor!)).toEqual([
+      'absorb',
+      'take in',
+      'soak up',
+    ]);
+    expect(isStudentAnswerCorrect(descriptor!, { 'flow-block': ['absorb'] })).toBe(true);
+    expect(isStudentAnswerCorrect(descriptor!, { 'flow-block': ['soak up'] })).toBe(true);
+    expect(isStudentAnswerCorrect(descriptor!, { 'flow-block': ['release'] })).toBe(false);
   });
 
   it('table cells read acceptedAnswers before correctAnswer', () => {

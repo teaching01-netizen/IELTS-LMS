@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import type { QuestionBlock, SubAnswerTreeNode } from '../../types';
 import { createId } from '../../utils/idUtils';
 import { normalizeSubAnswerTree } from '../../utils/subAnswerTree';
+import { CaseSensitivityToggle } from '../blocks/CaseSensitivityToggle';
 import {
   appendSubAnswerLeafAtSlot,
   buildSubAnswerSlotSeeds,
@@ -193,6 +194,17 @@ function NodeRow({
           />
           Required
         </label>
+        {isLeaf ? (
+          <CaseSensitivityToggle
+            caseSensitive={node.caseSensitive}
+            onChange={(caseSensitive) =>
+              onUpdateNode(path, (current) => ({
+                ...current,
+                caseSensitive,
+              }))
+            }
+          />
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-2">

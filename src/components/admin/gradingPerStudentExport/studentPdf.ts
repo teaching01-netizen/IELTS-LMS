@@ -99,6 +99,7 @@ export function buildStudentPdfBytes(
         data.columns,
         data.row,
         y,
+        data.objectiveContext,
       );
     } else {
       const row = data.row;

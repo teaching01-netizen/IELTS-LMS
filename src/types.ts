@@ -60,7 +60,15 @@ export type TFNGMode = "TFNG" | "YNNG";
 export type AnswerRule = "ONE_WORD" | "TWO_WORDS" | "THREE_WORDS";
 export type SlotGroupRule = "all_required" | "at_least_n";
 
-export interface SubAnswerTreeNode {
+/**
+ * Per-answer case policy shared by every keyed answer slot.
+ * Default is strict (exact case); `false` is the explicit opt-out.
+ */
+export interface CaseSensitivity {
+  caseSensitive?: boolean | undefined;
+}
+
+export interface SubAnswerTreeNode extends CaseSensitivity {
   id: string;
   label?: string | undefined;
   acceptedAnswers?: string[] | undefined;
@@ -74,7 +82,7 @@ export interface TFNGQuestion {
   correctAnswer: "T" | "F" | "NG" | "Y" | "N" | "NG";
 }
 
-export interface ClozeQuestion {
+export interface ClozeQuestion extends CaseSensitivity {
   id: string;
   prompt: string;
   correctAnswer: string;
@@ -87,10 +95,11 @@ export interface MatchingQuestion {
   correctHeading: string;
 }
 
-export interface MapQuestion {
+export interface MapQuestion extends CaseSensitivity {
   id: string;
   label: string;
   correctAnswer: string;
+  acceptedAnswers?: string[];
   x: number;
   y: number;
 }
@@ -270,7 +279,7 @@ export interface SingleMCQQuestion {
   skillCategory?: ActScienceSkillCategory | undefined;
 }
 
-export interface ShortAnswerQuestion {
+export interface ShortAnswerQuestion extends CaseSensitivity {
   id: string;
   prompt: string;
   correctAnswer: string;
@@ -285,7 +294,7 @@ export interface ShortAnswerBlock extends BaseQuestionBlock {
   answerTree?: SubAnswerTreeNode[];
 }
 
-export interface SentenceBlank {
+export interface SentenceBlank extends CaseSensitivity {
   id: string;
   correctAnswer: string;
   acceptedAnswers?: string[];
@@ -296,7 +305,7 @@ export interface SentenceBlank {
   requiredCorrect?: number;
 }
 
-export interface SentenceCompletionQuestion {
+export interface SentenceCompletionQuestion extends CaseSensitivity {
   id: string;
   sentence: string;
   blanks: SentenceBlank[];
@@ -312,12 +321,13 @@ export interface SentenceCompletionBlock extends BaseQuestionBlock {
   answerTree?: SubAnswerTreeNode[];
 }
 
-export interface DiagramLabel {
+export interface DiagramLabel extends CaseSensitivity {
   id: string;
   x: number;
   y: number;
   prompt?: string;
   correctAnswer: string;
+  acceptedAnswers?: string[];
 }
 
 export interface DiagramLabelingBlock extends BaseQuestionBlock {
@@ -331,10 +341,11 @@ export interface DiagramLabelingBlock extends BaseQuestionBlock {
   answerTree?: SubAnswerTreeNode[];
 }
 
-export interface FlowChartStep {
+export interface FlowChartStep extends CaseSensitivity {
   id: string;
   label: string;
   correctAnswer: string;
+  acceptedAnswers?: string[];
 }
 
 export interface FlowChartBlock extends BaseQuestionBlock {
@@ -344,7 +355,7 @@ export interface FlowChartBlock extends BaseQuestionBlock {
   answerTree?: SubAnswerTreeNode[];
 }
 
-export interface TableCell {
+export interface TableCell extends CaseSensitivity {
   id: string;
   correctAnswer: string;
   acceptedAnswers?: string[];
@@ -369,18 +380,25 @@ export interface TableCompletionBlock extends BaseQuestionBlock {
   answerTree?: SubAnswerTreeNode[];
 }
 
-export interface NoteBlank {
+export interface NoteBlank extends CaseSensitivity {
   id: string;
   correctAnswer: string;
   acceptedAnswers?: string[];
   position: number;
+  scoreGroupId?: string | undefined;
+  scoreWeight?: number | undefined;
+  groupRule?: SlotGroupRule | undefined;
+  requiredCorrect?: number | undefined;
 }
 
-export interface NoteCompletionQuestion {
+export interface NoteCompletionQuestion extends CaseSensitivity {
   id: string;
   noteText: string;
   blanks: NoteBlank[];
   answerRule: AnswerRule;
+  /** Shared "accept any key" pool, graded exactly like sentence completion. */
+  acceptAnyAnswerKey?: boolean;
+  sharedAcceptedAnswers?: string[];
 }
 
 export interface NoteCompletionBlock extends BaseQuestionBlock {
@@ -390,10 +408,11 @@ export interface NoteCompletionBlock extends BaseQuestionBlock {
   answerTree?: SubAnswerTreeNode[];
 }
 
-export interface ClassificationItem {
+export interface ClassificationItem extends CaseSensitivity {
   id: string;
   text: string;
   correctCategory: string;
+  acceptedAnswers?: string[];
 }
 
 export interface ClassificationBlock extends BaseQuestionBlock {
@@ -404,10 +423,11 @@ export interface ClassificationBlock extends BaseQuestionBlock {
   answerTree?: SubAnswerTreeNode[];
 }
 
-export interface MatchingFeature {
+export interface MatchingFeature extends CaseSensitivity {
   id: string;
   text: string;
   correctMatch: string;
+  acceptedAnswers?: string[];
 }
 
 export interface MatchingFeaturesBlock extends BaseQuestionBlock {

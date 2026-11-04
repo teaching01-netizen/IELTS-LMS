@@ -1,4 +1,4 @@
-I haven't changed any code. I only created an empty local branch (`fix/objective-grading-parity`) in my copy, and nothing was pushed. One thing to know before implementing: the backend needs Go 1.26.3, and that download is blocked in my workspace. The Go tests will need to run on your machine or in CI.
+I wrote this plan before implementing; the working tree now contains the implementation. It was written on a copy without Go 1.26.3 available, so the Go tests were expected to run in the owner's environment or CI.
 
 ## Goal
 
@@ -20,10 +20,13 @@ Write a script that replays every unreleased **and** released IELTS submission. 
    - Turn curly quotes and the various dash characters into plain ones.
    - Strip the punctuation set the website already removes.
    - Collapse runs of spaces and trim the ends.
-   - Ignore upper/lower case.
-3. **Decision needed: should grading ignore upper/lower case?** I recommend yes. The server already does, so saved scores won't drop. Teachers' case-specific "exclude this answer" overrides should keep comparing case exactly.
-4. **Go side:** replace `projectionNormalize`, `projectionAnswerMatches`, `projectionAnswerExcluded` and the older `objectiveAnswerEqual` with one function. NFKC needs `golang.org/x/text/unicode/norm`; check whether `go.mod` already includes it.
-5. **TypeScript side:** make `normalizeAnswerForMatching` ignore case and strip invisible characters. Leave the separate de-duplication function for displayed keys as it is, so key lists don't change on screen.
+   - Require exact case by default (decided: `urwin` ≠ `Urwin`). Opt-out only with explicit `caseSensitive: false`.
+   - `|` separates accepted variants on both stacks; a literal pipe cannot be represented in keys or answers.
+3. **Decided: grading requires exact case.** Saved scores will drop on regrade for case-only variants (baseline 10→8, full-coverage 27→25). Use regrade preview. Teachers' "exclude this answer" overrides keep comparing case exactly. The submit-time `GradeObjective` path honours the same opt-out from the sealed `answer_definition`, so listening/reading/science grading cannot silently stay case-insensitive.
+   - Additional corrections applied on both stacks for parity: whitespace-only answers count as unanswered; an array answer to a single-value question fails closed instead of matching its first element; `SINGLE_MCQ` compares option IDs as raw identity (no cleaning or folding).
+4. **Go side:** replace `projectionNormalize`, `projectionAnswerMatches` and the older `objectiveAnswerEqual` with one strict matcher (`answersMatch` → `answersMatchCaseExact`), one folded matcher used only by the explicit opt-out, and `projectionAnswerMatchesFull` for slots. NFKC uses `golang.org/x/text/unicode/norm`.
+5. **TypeScript side:** `answersMatch` requires exact case (steps 1–5, no case fold); `normalizeAnswerForMatching` remains only for the explicit `caseSensitive: false` opt-out path. Leave the separate de-duplication function for displayed keys as it is, so key lists don't change on screen.
+6. **Shared answer pool:** the "accept any key" pool is consumed one key per blank, in blank order. Consuming one case-distinct key must not consume its case-variant sibling, and both stacks must dedupe the pool under the same strictness rule (strict by default; fold only when the question or every blank opts out).
 
 ## Phase 2: Read each question type's key from the same place
 
@@ -31,13 +34,14 @@ Put this mapping in a table on each side, with a test for every row:
 
 | Type | Fix |
 |---|---|
-| Matching headings | Server must read `correctHeading`. Today it can't see that key at all. |
-| Classification / matching features | Both sides prefer `correctCategory` / `correctMatch`, so an old `correctAnswer` can't win. |
-| TFNG / map | Same order on both sides (`correctAnswer`, then `acceptedAnswers`). |
-| Diagram labels / flow chart | The website must split `a \| b` into separate accepted answers like the server does. Today it compares the whole string. |
+| Matching headings | Server reads `correctHeading`, after `acceptedAnswers` and before any legacy `correctAnswer`; removing that fallback is a regression, not a fix. |
+| Classification / matching features | Effective keys are the specific field (`correctCategory` / `correctMatch`) plus `acceptedAnswers`; a stale legacy `correctAnswer` never wins, and writing alternatives never drops the selected category. |
+| TFNG / map | Same order on both sides (`correctAnswer`, then `acceptedAnswers`). A TFNG key stored only in `acceptedAnswers` must still publish and grade. |
+| Diagram labels / flow chart | The website must split `a \| b` into separate accepted answers like the server does. Effective keys are additive: the `correctAnswer` variants come first, then `acceptedAnswers`, so an alternatives list can never shadow the primary answer. |
 | Sentence completion with "accept any key" | Check the server supports the shared answer pool the website uses. |
-| Grouped table cells / sub-answer trees | Check that both sides count the same "required correct" number and identify each slot the same way. |
-| Multiple choice (choose 2–3) | **Decision needed:** partial credit (the website now, and real IELTS) or all-or-nothing (the server now). This changes the maximum score. |
+| Note completion | Same grouped-slot and shared-pool rules as sentence completion; the website must collapse grouped note blanks exactly like the server (already server-side, so the website wiring is required parity, not scope creep). |
+| Grouped table cells / sentence + note blanks / sub-answer trees | Check that both sides count the same "required correct" number and identify each slot the same way. |
+| Multiple choice (choose 2–3) | **Decision needed:** partial credit (the website now, and real IELTS) or all-or-nothing (the server now). This changes the maximum score. Option IDs are identity: compared raw, never cleaned. |
 
 Also add an exam-publish check: refuse to publish if any objective question has a key the server can't read.
 
@@ -45,25 +49,26 @@ Also add an exam-publish check: refuse to publish if any objective question has 
 
 - **Review page:** show the server's saved result. Still re-check it on the website, and if the two differ, show a warning ("Saved score is out of date — regrade") instead of silently showing a different answer.
 - **PDF and CSV export:** take each row, the total, the band and grouped (2-for-1) questions from those same results, so the Yes rows always add up to the Total. Include teacher "Set result" changes.
-- **`tableRows.ts` fallback:** when a score is missing, compare the student answer against each accepted answer separately, not against the whole joined string.
+- **`tableRows.ts` fallback:** when a score is missing, compare the student answer against each accepted answer separately, not against the whole joined string. Merged group rows use a display separator that cannot be mistaken for the `|` accepted-variant separator.
 
 ## Phase 4: Fix the saved scores
 
 - Add a **preview mode** to regrade that lists what would change without saving.
 - Deploy, preview, then regrade each schedule.
 - **Decision needed: released results.** Regrading skips them on purpose. Either add an audited "regrade released" action, or produce a list for teachers to correct manually.
-- Tell teachers beforehand that some scores will change, mostly upward.
+- Tell teachers beforehand that some scores will change (mostly upward from partial credit and answer cleaning, some downward from the exact-case decision).
 
 ## Phase 5: Tests that cover every case
 
-1. **Shared answer-cleaning tests:** both test suites read the same file, including dots, commas, quotes, invisible characters, full-width letters, Thai text, accented letters, dashes, line breaks, empty answers and mixed case.
+1. **Shared answer-cleaning tests:** both test suites read the same file, including dots, commas, quotes, invisible characters, full-width letters, Thai text, accented letters, dashes, line breaks, empty answers and mixed case. `student-input-vectors.json` extends the same contract to every input class (case/whitespace/punctuation/invisible/full-width/accent/empty/dates/numbers/phrases) under strict + opt-out.
 2. **Full-coverage exam:** one test exam containing every question type in every form (blanks, grouped slots, sub-answer trees, overrides, exclusions). The Go grader and the website grader each produce per-question results, and those must match one saved expected file.
 3. **Regression tests for the three real cases:**
    - Ravisara: an invisible character after "waiter".
    - An out-of-date saved score showing in the export.
    - A matching-headings key the server can't see.
-4. **Go fuzz test:** cleaning an already-cleaned answer changes nothing, and matching gives the same result whether an answer has extra spaces or different case.
+4. **Go fuzz test:** cleaning an already-cleaned answer changes nothing, and matching gives the same result whether an answer has extra spaces. Different letter case matches only when the slot explicitly opted out (`caseSensitive: false`).
 5. **Export test:** in every generated PDF, the number of Yes rows equals the Correct count.
+6. **Vertical-slice logic tests:** `e2e/ielts-case-sensitive-note.spec.ts`, `e2e/ielts-question-type-matrices.spec.ts` and `e2e/ielts-student-to-pdf-flow.spec.ts` exercise the real website functions end to end (student → scorer → traceback → overview → export → PDF) without a server; they run with `bun run e2e:ielts-case` and share their fixture scaffolding through `e2e/helpers`.
 
 ## Phase 6: Prevent it coming back
 
@@ -73,7 +78,7 @@ Also add an exam-publish check: refuse to publish if any objective question has 
 **Suggested order:** Phase 0 → 1 → 2 → 5 (tests alongside) → 3 → deploy → 4 → 6.
 
 **Three decisions only you can make:**
-- Should grading ignore upper/lower case?
+- ~~Should grading ignore upper/lower case?~~ Decided: exact case by default, opt-out via `caseSensitive: false`.
 - Partial credit or all-or-nothing for multiple choice?
 - How should released results be handled?
 

@@ -36,6 +36,18 @@ export interface PerStudentZipPdfPlanSnapshot {
   }[];
 }
 
+/**
+ * Everything the objective export fallback needs from the exam version that
+ * produced the saved score. These always travel together because the row
+ * fallback reads both when a saved score column is missing.
+ */
+export interface ObjectiveRowContext {
+  /** Descriptor id → strict flag for score-absent export fallback. Omit = strict default. */
+  caseSensitiveByQuestionId?: Record<string, boolean> | undefined;
+  /** scoreGroup column key → required-correct threshold for score-absent group fallback. Omit = any-correct. */
+  groupThresholdByScoreKey?: Record<string, number> | undefined;
+}
+
 export interface PerStudentZipPdfSectionData {
   columns: CsvColumn[];
   /**
@@ -44,6 +56,8 @@ export interface PerStudentZipPdfSectionData {
    */
   row: Record<string, unknown> | null;
   writingTasks?: WritingTaskSubmission[] | undefined;
+  /** Objective fallback policy for this section; omitted when no exam state resolved. */
+  objectiveContext?: ObjectiveRowContext | undefined;
 }
 
 export interface PerStudentZipPdfStudentInput {

@@ -1,9 +1,12 @@
 import React from 'react';
-import { MatchingFeaturesBlock as MatchingFeaturesBlockType } from '../../types';
+import { MatchingFeaturesBlock as MatchingFeaturesBlockType, type CaseSensitivity } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { InsertedImagesEditor } from './InsertedImagesEditor';
+import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { CaseSensitivityToggle } from './CaseSensitivityToggle';
+import { mapAcceptedAnswers } from '../../utils/acceptedAnswers';
 
 interface MatchingFeaturesBlockProps {
   block: MatchingFeaturesBlockType;
@@ -30,11 +33,21 @@ export function MatchingFeaturesBlock({
     updateBlock({ ...block, instruction });
   };
 
-  const updateFeature = (featureId: string, updates: { text?: string; correctMatch?: string }) => {
+  const updateFeature = (
+    featureId: string,
+    updates: { text?: string; correctMatch?: string; acceptedAnswers?: string[] } & CaseSensitivity,
+  ) => {
     const newFeatures = block.features.map(f =>
       f.id === featureId ? { ...f, ...updates } : f
     );
     updateBlock({ ...block, features: newFeatures });
+  };
+
+  const updateFeatureAcceptedAnswers = (featureId: string, next: string[]) => {
+    updateBlock({
+      ...block,
+      features: mapAcceptedAnswers(block.features, (feature) => feature.id === featureId, next),
+    });
   };
 
   const updateOption = (index: number, value: string) => {
@@ -42,11 +55,15 @@ export function MatchingFeaturesBlock({
     const options = block.options.map((option, optionIndex) => (
       optionIndex === index ? value : option
     ));
-    const features = block.features.map((feature) => (
-      previousValue !== '' && feature.correctMatch === previousValue
-        ? { ...feature, correctMatch: value }
-        : feature
-    ));
+    const features = block.features.map((feature) => {
+      if (previousValue === '' || previousValue === undefined) return feature;
+      const next: typeof feature = { ...feature };
+      if (next.correctMatch === previousValue) next.correctMatch = value;
+      if (Array.isArray(next.acceptedAnswers)) {
+        next.acceptedAnswers = next.acceptedAnswers.map((entry) => (entry === previousValue ? value : entry));
+      }
+      return next;
+    });
     updateBlock({ ...block, options, features });
   };
 
@@ -141,7 +158,8 @@ export function MatchingFeaturesBlock({
         </div>
         <div className="space-y-2">
           {block.features.map((feature, index) => (
-            <div key={feature.id} className="border rounded-md p-3 flex items-center gap-3">
+            <div key={feature.id} className="border rounded-md p-3">
+              <div className="flex items-center gap-3">
               <span className="text-sm font-medium text-gray-700 w-16">{startNum + index}.</span>
               <input
                 type="text"
@@ -175,6 +193,18 @@ export function MatchingFeaturesBlock({
                   </button>
                 ) : null}
                 <button onClick={() => removeFeature(feature.id)} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
+              </div>
+              </div>
+              <div className="mt-2 ml-16 space-y-1">
+                <AcceptedAnswersEditor
+                  value={feature.acceptedAnswers ?? []}
+                  onChange={(next) => updateFeatureAcceptedAnswers(feature.id, next)}
+                  placeholder="Other accepted matches..."
+                />
+                <CaseSensitivityToggle
+                  caseSensitive={feature.caseSensitive}
+                  onChange={(caseSensitive) => updateFeature(feature.id, { caseSensitive })}
+                />
               </div>
             </div>
           ))}

@@ -1,10 +1,11 @@
 import React from 'react';
-import { NoteCompletionBlock as NoteCompletionBlockType, AnswerRule } from '../../types';
+import { NoteCompletionBlock as NoteCompletionBlockType, AnswerRule, type CaseSensitivity } from '../../types';
 import { ArrowUp, ArrowDown, Trash2, Plus } from 'lucide-react';
 import { createId } from '../../utils/idUtils';
 import { countBlankPlaceholders } from '../../utils/blankPlaceholders';
 import { handleBoldHotkey } from '../../utils/boldMarkdown';
 import { AcceptedAnswersEditor } from './AcceptedAnswersEditor';
+import { CaseSensitivityToggle } from './CaseSensitivityToggle';
 import {
   buildAcceptedAnswerFields,
   resolveAcceptedAnswers,
@@ -77,7 +78,7 @@ export function NoteCompletionBlock({
   const updateBlank = (
     questionId: string,
     blankId: string,
-    updates: { correctAnswer?: string; acceptedAnswers?: string[] },
+    updates: { correctAnswer?: string; acceptedAnswers?: string[] } & CaseSensitivity,
   ) => {
     const newQuestions = block.questions.map((q) => {
       if (q.id !== questionId) return q;
@@ -223,6 +224,14 @@ export function NoteCompletionBlock({
                               }
                               placeholder="Answer..."
                             />
+                            <div className="mt-1">
+                              <CaseSensitivityToggle
+                                caseSensitive={blank.caseSensitive}
+                                onChange={(caseSensitive) =>
+                                  updateBlank(question.id, blank.id, { caseSensitive })
+                                }
+                              />
+                            </div>
                           </div>
                         </div>
                         );

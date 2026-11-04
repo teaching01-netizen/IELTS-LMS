@@ -19,10 +19,22 @@ func TestKeySourceTableRows(t *testing.T) {
 			want:         []string{"H2"},
 		},
 		{
+			name:         "matching prefers acceptedAnswers, then correctHeading, then correctAnswer",
+			questionType: "MATCHING",
+			question:     map[string]any{"acceptedAnswers": []any{"H3"}, "correctHeading": "H2", "correctAnswer": "H1"},
+			want:         []string{"H3"},
+		},
+		{
 			name:         "matching prefers correctHeading over stale correctAnswer",
 			questionType: "MATCHING",
 			question:     map[string]any{"correctHeading": "H2", "correctAnswer": "H1"},
 			want:         []string{"H2"},
+		},
+		{
+			name:         "classification grades the union of correctCategory and acceptedAnswers",
+			questionType: "CLASSIFICATION",
+			question:     map[string]any{"correctCategory": "B", "acceptedAnswers": []any{"B", "C"}},
+			want:         []string{"B", "C"},
 		},
 		{
 			name:         "classification prefers correctCategory over stale correctAnswer",
@@ -31,16 +43,40 @@ func TestKeySourceTableRows(t *testing.T) {
 			want:         []string{"B"},
 		},
 		{
+			name:         "classification never grades a legacy correctAnswer",
+			questionType: "CLASSIFICATION",
+			question:     map[string]any{"correctAnswer": "A"},
+			want:         []string{},
+		},
+		{
+			name:         "matching features grades the union of correctMatch and acceptedAnswers",
+			questionType: "MATCHING_FEATURES",
+			question:     map[string]any{"correctMatch": "M2", "acceptedAnswers": []any{"M1"}, "correctAnswer": "M0"},
+			want:         []string{"M2", "M1"},
+		},
+		{
 			name:         "matching features prefers correctMatch over stale correctAnswer",
 			questionType: "MATCHING_FEATURES",
 			question:     map[string]any{"correctMatch": "M2", "correctAnswer": "M1"},
 			want:         []string{"M2"},
 		},
 		{
+			name:         "matching features never grades a legacy correctAnswer",
+			questionType: "MATCHING_FEATURES",
+			question:     map[string]any{"correctAnswer": "M1"},
+			want:         []string{},
+		},
+		{
 			name:         "tfng reads correctAnswer before acceptedAnswers",
 			questionType: "TFNG",
 			question:     map[string]any{"acceptedAnswers": []any{"T", "TRUE"}, "correctAnswer": "F"},
 			want:         []string{"F"},
+		},
+		{
+			name:         "tfng reads acceptedAnswers when correctAnswer is absent",
+			questionType: "TFNG",
+			question:     map[string]any{"acceptedAnswers": []any{"TRUE"}},
+			want:         []string{"TRUE"},
 		},
 		{
 			name:         "map reads correctAnswer when acceptedAnswers is absent",
@@ -79,10 +115,52 @@ func TestKeySourceTableRows(t *testing.T) {
 			want:         []string{"wheel"},
 		},
 		{
+			name:         "diagram label keeps the primary key when alternates are present",
+			questionType: "DIAGRAM_LABELING",
+			question:     map[string]any{"correctAnswer": "wheel", "acceptedAnswers": []any{"tyre", "rim"}},
+			want:         []string{"wheel", "tyre", "rim"},
+		},
+		{
+			name:         "diagram label splits pipe variants in every key field",
+			questionType: "DIAGRAM_LABELING",
+			question:     map[string]any{"correctAnswer": "a | b", "acceptedAnswers": []any{"c|d"}},
+			want:         []string{"a", "b", "c", "d"},
+		},
+		{
+			name:         "diagram label dedupes candidates across both key fields",
+			questionType: "DIAGRAM_LABELING",
+			question:     map[string]any{"correctAnswer": "wheel | Wheel", "acceptedAnswers": []any{"wheel", "tyre"}},
+			want:         []string{"wheel", "Wheel", "tyre"},
+		},
+		{
+			name:         "diagram label folds dedupe on caseSensitive false",
+			questionType: "DIAGRAM_LABELING",
+			question:     map[string]any{"correctAnswer": "Wheel", "acceptedAnswers": []any{"wheel"}, "caseSensitive": false},
+			want:         []string{"Wheel"},
+		},
+		{
 			name:         "flow step reads correctAnswer",
 			questionType: "FLOW_CHART",
 			question:     map[string]any{"correctAnswer": "mix"},
 			want:         []string{"mix"},
+		},
+		{
+			name:         "flow step keeps the primary key when alternates are present",
+			questionType: "FLOW_CHART",
+			question:     map[string]any{"correctAnswer": "mix", "acceptedAnswers": []any{"stir", "blend"}},
+			want:         []string{"mix", "stir", "blend"},
+		},
+		{
+			name:         "flow step splits pipe variants in every key field",
+			questionType: "FLOW_CHART",
+			question:     map[string]any{"correctAnswer": "mix|stir", "acceptedAnswers": []any{"blend | combine"}},
+			want:         []string{"mix", "stir", "blend", "combine"},
+		},
+		{
+			name:         "map stays single-winner with correctAnswer first",
+			questionType: "MAP",
+			question:     map[string]any{"correctAnswer": "north gate", "acceptedAnswers": []any{"south gate"}},
+			want:         []string{"north gate"},
 		},
 		{
 			name:         "table cell reads acceptedAnswers",

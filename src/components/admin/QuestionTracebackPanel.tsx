@@ -464,7 +464,7 @@ export function QuestionTracebackPanel({
           <div className="min-w-0">
             <h3 className="font-bold text-gray-900">Traceback View</h3>
             <p className="break-words text-xs text-gray-600 capitalize">
-              {section} section answer replay · text matches ignore letter case
+              {section} section answer replay · text matches require exact case unless the key opts out
             </p>
           </div>
         </div>

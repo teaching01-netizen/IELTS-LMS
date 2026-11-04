@@ -30,9 +30,10 @@ describe('acceptedAnswers', () => {
     );
   });
 
-  it('removes invisible characters before matching', () => {
+  it('removes invisible characters before matching (exact case by default)', () => {
     expect(answersMatch('waiter', 'waiter\u200B')).toBe(true);
-    expect(answersMatch('Gar\u00ADden\u2060 hall', 'garden hall')).toBe(true);
+    expect(answersMatch('Gar\u00ADden\u2060 hall', 'Garden hall')).toBe(true);
+    expect(answersMatch('Gar\u00ADden\u2060 hall', 'garden hall')).toBe(false);
   });
 
   it('does not match an empty student answer to an empty key', () => {

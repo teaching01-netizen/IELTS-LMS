@@ -201,6 +201,12 @@ export function ExamObjectiveOverviewPanel({
 
   const rows = useMemo(() => buildExamObjectiveOverviewRows(bundles, { examState }), [bundles, examState]);
   const groups = useMemo(() => groupExamObjectiveOverviewRows(rows), [rows]);
+  // Ticket 11: the saved result stays official. The website re-check only feeds
+  // this warning; the displayed verdicts below keep reading `row.isCorrect`.
+  const savedResultOutOfDateCount = useMemo(
+    () => rows.filter((row) => row.savedResultOutOfDate).length,
+    [rows],
+  );
   const groupStatuses = useMemo(() => new Map(
     groups.map((group) => {
       const optimistic = optimisticDecisions.get(group.groupId);
@@ -419,6 +425,24 @@ export function ExamObjectiveOverviewPanel({
           Typed answers that differ from the answer key only by capitalization or spacing. Decide each group once — the result applies to every matching student and question in this exam session.
         </p>
       </div>
+
+      {savedResultOutOfDateCount > 0 ? (
+        <div
+          role="alert"
+          aria-live="assertive"
+          tabIndex={0}
+          className="mx-4 mt-4 flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 focus-visible:ring-offset-2 sm:mx-6"
+        >
+          <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-700" aria-hidden="true" />
+          <div>
+            <p className="font-semibold">Saved score is out of date — regrade</p>
+            <p className="mt-1">
+              {savedResultOutOfDateCount} answer {savedResultOutOfDateCount === 1 ? 'entry disagrees' : 'entries disagree'} with the saved result.
+              The saved score is shown as the official score until this exam session is regraded.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {successMessage ? (
         <div className="flex items-start justify-between gap-3 border-b border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 sm:px-6" role="status" aria-live="polite">

@@ -199,7 +199,7 @@ test("native touch drags the dot grip without showing touch hints", async ({
   await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await expect.poll(async () => (await panel.boundingBox())!.x).toBeCloseTo(before.x + 120, 0);
   await expect(panel).toHaveAttribute("data-sat-touch-interaction", "true");
-  for (const hint of await panel.locator(".sat-tool-tip, .sat-tool-hint").all())
+  for (const hint of await panel.locator(".sat-tool-tip").all())
     await expect(hint).toBeHidden();
   await session.detach();
 });

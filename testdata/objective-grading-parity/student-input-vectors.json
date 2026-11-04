@@ -1,0 +1,718 @@
+{
+  "description": "Student-input vectors: every input class a student can type, with policy-expected verdicts. Read by TS (studentInputVectors.test.ts) and Go (student_input_vectors_test.go); a mismatch on either side is a grading defect.",
+  "policy": "exact case by default; optOut folds case only. Cleaning (both): NFKC, invisible strip, quotes/dashes, punctuation strip, space collapse+trim.",
+  "vectors": [
+    {
+      "id": "name-01",
+      "group": "proper-noun",
+      "key": "Urwin",
+      "student": "Urwin",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "name-02",
+      "group": "proper-noun",
+      "key": "Urwin",
+      "student": "urwin",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "name-03",
+      "group": "proper-noun",
+      "key": "Urwin",
+      "student": "URWIN",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "name-04",
+      "group": "proper-noun",
+      "key": "Urwin",
+      "student": "uRwIn",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "name-05",
+      "group": "proper-noun",
+      "key": "Urwin",
+      "student": "urwin",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "name-06",
+      "group": "proper-noun",
+      "key": "Urwin",
+      "student": "URWIN",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "hall-01",
+      "group": "case",
+      "key": "Garden Hall",
+      "student": "Garden Hall",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "hall-02",
+      "group": "case",
+      "key": "Garden Hall",
+      "student": "garden Hall",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "hall-03",
+      "group": "case",
+      "key": "Garden Hall",
+      "student": "GARDEN HALL",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "hall-04",
+      "group": "case",
+      "key": "Garden Hall",
+      "student": "gArDeN hAlL",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "hall-05",
+      "group": "case",
+      "key": "Garden Hall",
+      "student": "garden Hall",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "hall-06",
+      "group": "case",
+      "key": "Garden Hall",
+      "student": "GARDEN HALL",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "ws-01",
+      "group": "whitespace",
+      "key": "Garden Hall",
+      "student": "  Garden Hall",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "ws-02",
+      "group": "whitespace",
+      "key": "Garden Hall",
+      "student": "Garden Hall  ",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "ws-03",
+      "group": "whitespace",
+      "key": "Garden Hall",
+      "student": "  Garden Hall  ",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "ws-04",
+      "group": "whitespace",
+      "key": "Garden Hall",
+      "student": "Garden   Hall",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "ws-05",
+      "group": "whitespace",
+      "key": "Garden Hall",
+      "student": "Garden\nHall",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "ws-06",
+      "group": "whitespace",
+      "key": "Garden Hall",
+      "student": "Garden\tHall",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "ws-07",
+      "group": "whitespace",
+      "key": "Garden Hall",
+      "student": "　Garden Hall　",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "order-01",
+      "group": "order",
+      "key": "Garden Hall",
+      "student": "Hall Garden",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "order-02",
+      "group": "order",
+      "key": "Garden Hall",
+      "student": "Garden",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "order-03",
+      "group": "order",
+      "key": "Garden Hall",
+      "student": "Garden Halls",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "order-04",
+      "group": "order",
+      "key": "Garden Hall",
+      "student": "The Garden Hall",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "dash-01",
+      "group": "punctuation",
+      "key": "state-of-the-art",
+      "student": "state-of-the-art",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "dash-02",
+      "group": "punctuation",
+      "key": "state-of-the-art",
+      "student": "state of the art",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "dash-03",
+      "group": "punctuation",
+      "key": "state-of-the-art",
+      "student": "State of the art",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "dash-04",
+      "group": "punctuation",
+      "key": "state-of-the-art",
+      "student": "State of the art",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "dash-05",
+      "group": "punctuation",
+      "key": "state-of-the-art",
+      "student": "state_of_the_art",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "dash-06",
+      "group": "punctuation",
+      "key": "state-of-the-art",
+      "student": "state_of_the_art",
+      "optOut": true,
+      "expected": false
+    },
+    {
+      "id": "apos-01",
+      "group": "punctuation",
+      "key": "don't",
+      "student": "don't",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "apos-02",
+      "group": "punctuation",
+      "key": "don't",
+      "student": "dont",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "apos-03",
+      "group": "punctuation",
+      "key": "don't",
+      "student": "Don't",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "apos-04",
+      "group": "punctuation",
+      "key": "don't",
+      "student": "Don't",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "dot-01",
+      "group": "punctuation",
+      "key": "Dr Smith",
+      "student": "Dr. Smith",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "dot-02",
+      "group": "punctuation",
+      "key": "Dr Smith",
+      "student": "dr smith",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "dot-03",
+      "group": "punctuation",
+      "key": "Dr Smith",
+      "student": "dr smith",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "comma-01",
+      "group": "punctuation",
+      "key": "red blue",
+      "student": "red, blue",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "quote-01",
+      "group": "punctuation",
+      "key": "hello",
+      "student": "“hello”",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "quote-02",
+      "group": "punctuation",
+      "key": "hello",
+      "student": "'hello'",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "quote-03",
+      "group": "punctuation",
+      "key": "hello",
+      "student": "HELLO",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "quote-04",
+      "group": "punctuation",
+      "key": "hello",
+      "student": "HELLO",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "dash2-01",
+      "group": "punctuation",
+      "key": "half way",
+      "student": "half-way",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "dash2-02",
+      "group": "punctuation",
+      "key": "half way",
+      "student": "half–way",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "dash2-03",
+      "group": "punctuation",
+      "key": "half way",
+      "student": "HALF-WAY",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "dash2-04",
+      "group": "punctuation",
+      "key": "half way",
+      "student": "HALF-WAY",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "inv-01",
+      "group": "invisible",
+      "key": "waiter",
+      "student": "waiter​",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "inv-02",
+      "group": "invisible",
+      "key": "waiter",
+      "student": "wai‍ter",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "inv-03",
+      "group": "invisible",
+      "key": "waiter",
+      "student": "wai­ter",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "inv-04",
+      "group": "invisible",
+      "key": "Garden hall",
+      "student": "Gar­den⁠ hall",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "inv-05",
+      "group": "invisible",
+      "key": "garden hall",
+      "student": "Gar­den⁠ hall",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "inv-06",
+      "group": "invisible",
+      "key": "garden hall",
+      "student": "Gar­den⁠ hall",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "fw-01",
+      "group": "fullwidth",
+      "key": "ABC",
+      "student": "ＡＢＣ",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "fw-02",
+      "group": "fullwidth",
+      "key": "ABC",
+      "student": "ａｂｃ",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "fw-03",
+      "group": "fullwidth",
+      "key": "ABC",
+      "student": "ａｂｃ",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "fw-04",
+      "group": "fullwidth",
+      "key": "Urwin",
+      "student": "Ｕｒｗｉｎ",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "fw-05",
+      "group": "fullwidth",
+      "key": "Urwin",
+      "student": "ｕｒｗｉｎ",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "fw-06",
+      "group": "fullwidth",
+      "key": "Urwin",
+      "student": "ｕｒｗｉｎ",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "acc-01",
+      "group": "accent",
+      "key": "café",
+      "student": "café",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "acc-02",
+      "group": "accent",
+      "key": "café",
+      "student": "cafe",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "acc-03",
+      "group": "accent",
+      "key": "café",
+      "student": "cafe",
+      "optOut": true,
+      "expected": false
+    },
+    {
+      "id": "acc-04",
+      "group": "accent",
+      "key": "café",
+      "student": "CAFÉ",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "acc-05",
+      "group": "accent",
+      "key": "café",
+      "student": "CAFÉ",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "empty-01",
+      "group": "empty",
+      "key": "",
+      "student": "",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "empty-02",
+      "group": "empty",
+      "key": "",
+      "student": "   ",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "empty-03",
+      "group": "empty",
+      "key": "...",
+      "student": "...",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "empty-04",
+      "group": "empty",
+      "key": "done",
+      "student": "...",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "thai-01",
+      "group": "unicode",
+      "key": "ภาษาไทย",
+      "student": "ภาษาไทย",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "date-01",
+      "group": "date",
+      "key": "28 June",
+      "student": "28 June",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "date-02",
+      "group": "date",
+      "key": "28 June",
+      "student": "28 june",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "date-03",
+      "group": "date",
+      "key": "28 June",
+      "student": "28 june",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "date-04",
+      "group": "date",
+      "key": "28 June",
+      "student": "28, June",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "date-05",
+      "group": "date",
+      "key": "28 June",
+      "student": "28th June",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "date-06",
+      "group": "date",
+      "key": "28 June",
+      "student": "28th June",
+      "optOut": true,
+      "expected": false
+    },
+    {
+      "id": "num-01",
+      "group": "number",
+      "key": "1790",
+      "student": "1790",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "num-02",
+      "group": "number",
+      "key": "1790",
+      "student": "in 1790",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "place-01",
+      "group": "proper-noun",
+      "key": "Paris",
+      "student": "Paris",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "place-02",
+      "group": "proper-noun",
+      "key": "Paris",
+      "student": "paris",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "place-03",
+      "group": "proper-noun",
+      "key": "Paris",
+      "student": "PARIS",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "place-04",
+      "group": "proper-noun",
+      "key": "Paris",
+      "student": "paris",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "phrase-01",
+      "group": "phrase",
+      "key": "town council",
+      "student": "town council",
+      "optOut": false,
+      "expected": true
+    },
+    {
+      "id": "phrase-02",
+      "group": "phrase",
+      "key": "town council",
+      "student": "Town Council",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "phrase-03",
+      "group": "phrase",
+      "key": "town council",
+      "student": "Town Council",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "phrase-04",
+      "group": "phrase",
+      "key": "town council",
+      "student": "the town council",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "phrase-05",
+      "group": "phrase",
+      "key": "town council",
+      "student": "the town council",
+      "optOut": true,
+      "expected": false
+    },
+    {
+      "id": "fold-turkish-01",
+      "group": "case-fold",
+      "key": "İstanbul",
+      "student": "istanbul",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "fold-turkish-02",
+      "group": "case-fold",
+      "key": "İstanbul",
+      "student": "istanbul",
+      "optOut": false,
+      "expected": false
+    },
+    {
+      "id": "fold-greek-01",
+      "group": "case-fold",
+      "key": "ΟΣ",
+      "student": "οσ",
+      "optOut": true,
+      "expected": true
+    },
+    {
+      "id": "fold-simple-01",
+      "group": "case-fold",
+      "key": "Straße",
+      "student": "STRASSE",
+      "optOut": true,
+      "expected": false
+    },
+    {
+      "id": "clean-nel-01",
+      "group": "whitespace",
+      "key": "a\u0085b",
+      "student": "a b",
+      "optOut": false,
+      "expected": true
+    }
+  ]
+}
