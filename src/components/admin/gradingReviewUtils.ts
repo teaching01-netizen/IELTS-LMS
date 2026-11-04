@@ -15,7 +15,10 @@ import {
 import type { StudentQuestionDescriptor } from '../../features/exam-authoring/api/examAuthoringGateway';
 import {
   extractObjectiveAnswerMap,
+  formatAnswerValue,
   getCorrectAnswerDisplay,
+  getCorrectAnswerValue,
+  getEffectiveAcceptedAnswersForGrading,
   getQuestionPrompt,
   getStudentAnswerDisplay,
 } from './gradingAnswerUtils';
@@ -449,26 +452,112 @@ function getGroupedSlotLabel(descriptor: StudentQuestionDescriptor, index: numbe
   return fallback;
 }
 
+/**
+ * True when the loaded exam snapshot carries a readable key the website
+ * re-check can score. Submissions graded from a sealed answer definition whose
+ * snapshot key the loaded version no longer holds must keep their saved
+ * verdict: the key-less re-check would otherwise report a decisive
+ * "Incorrect" and flip a saved Correct answer.
+ */
+export function descriptorHasRecheckableKey(descriptor: StudentQuestionDescriptor): boolean {
+  if (getEffectiveAcceptedAnswersForGrading(descriptor).some((answer) => answer.trim() !== '')) {
+    return true;
+  }
+  const correct = getCorrectAnswerValue(descriptor);
+  if (correct === null || correct === undefined) return false;
+  if (formatAnswerValue(correct).trim() !== '') return true;
+  return Array.isArray(correct) && correct.length > 0;
+}
+
+export interface DisplayedObjectiveValues {
+  readonly correctness: boolean | null;
+  readonly awardedScore: number | null;
+  readonly maxScore: number | null;
+  /** True when the saved result disagrees with a decisive re-check. */
+  readonly outOfDate: boolean;
+}
+
+/**
+ * The saved result is the official score, but a stored `Correct` that the
+ * current exact-case IELTS rule says is Incorrect (or vice versa) must never be
+ * displayed as the answer's verdict: grading screens and exports show the
+ * re-checked verdict so the rules staff and PDFs report are the ones that
+ * actually decide an answer. `outOfDate` still drives the "regrade" warning,
+ * and the saved score stays official until the session is regraded.
+ *
+ * Only a boolean verdict change is corrected. Numeric-only differences are left
+ * on the saved result: partial-credit policy for choose-N is still an open
+ * product decision, so the display must not silently adopt one side's totals.
+ * A re-check only counts when it reaches a boolean verdict; a null (unanswered
+ * or key-less) re-check never overrides a saved result either, and schedule or
+ * per-student overrides are handled by callers before this helper.
+ */
+export function resolveDisplayedObjectiveValues(
+  savedCorrectness: boolean | null | undefined,
+  savedAwardedScore: number | null | undefined,
+  savedMaxScore: number | null | undefined,
+  recheck: {
+    readonly correctness: boolean | null;
+    readonly awardedScore: number | null;
+    readonly maxScore: number | null;
+  } | null | undefined,
+): DisplayedObjectiveValues {
+  const saved: DisplayedObjectiveValues = {
+    correctness: savedCorrectness ?? null,
+    awardedScore: numberOrNull(savedAwardedScore),
+    maxScore: numberOrNull(savedMaxScore),
+    outOfDate: false,
+  };
+  if (!recheck || typeof recheck.correctness !== 'boolean') {
+    return saved;
+  }
+  if (typeof saved.correctness !== 'boolean' || saved.correctness === recheck.correctness) {
+    return saved;
+  }
+
+  return {
+    correctness: recheck.correctness,
+    awardedScore: recheck.awardedScore ?? saved.awardedScore,
+    maxScore: recheck.maxScore ?? saved.maxScore,
+    outOfDate: true,
+  };
+}
+
 function buildTracebackItem(
   descriptor: StudentQuestionDescriptor,
   descriptors: StudentQuestionDescriptor[],
   answerMap: Record<string, StudentAnswerValue | undefined>,
   results: Map<string, ObjectiveQuestionResult>,
   websiteScoring: ObjectiveScoringResult,
+  applyRecheck: boolean,
 ): ObjectiveTracebackItem {
   const questionResult = results.get(descriptor.id);
   const websiteScore = websiteScoring.byId.get(descriptor.id);
-  // The server's saved result is the official score. The website re-check is
-  // only a fallback for results saved before a question result existed.
-  const correctness = questionResult?.manualOverride?.isCorrect
+  const savedCorrectness = questionResult?.manualOverride?.isCorrect
     ?? questionResult?.isCorrect
-    ?? websiteScore?.correctness
     ?? null;
-  const awardedScore = questionResult?.manualOverride?.awardedScore
+  const savedAwardedScore = questionResult?.manualOverride?.awardedScore
     ?? questionResult?.awardedScore
-    ?? websiteScore?.awardedScore
     ?? null;
-  const maxScore = questionResult?.maxScore ?? websiteScore?.maxScore ?? null;
+  const savedMaxScore = questionResult?.maxScore ?? null;
+  // Saved overrides win outright. Otherwise the displayed verdict follows the
+  // current exact-case re-check whenever the saved row is out of date; with no
+  // usable saved result the re-check is the only source.
+  const displayed = applyRecheck
+    && descriptorHasRecheckableKey(descriptor)
+    && questionResult !== undefined
+    && !questionResult.manualOverride
+    && questionResult.hasOverride !== true
+    ? resolveDisplayedObjectiveValues(savedCorrectness, savedAwardedScore, savedMaxScore, websiteScore ?? null)
+    : {
+        correctness: savedCorrectness ?? websiteScore?.correctness ?? null,
+        awardedScore: savedAwardedScore ?? websiteScore?.awardedScore ?? null,
+        maxScore: savedMaxScore ?? websiteScore?.maxScore ?? null,
+        outOfDate: false,
+      };
+  const correctness = displayed.correctness;
+  const awardedScore = displayed.awardedScore;
+  const maxScore = displayed.maxScore;
   const selection = descriptor.block.type === 'MULTI_MCQ'
     ? buildMultiSelectExportSelection(descriptor, answerMap, awardedScore)
     : null;
@@ -543,6 +632,7 @@ function buildGroupedTracebackItem(
   answerMap: Record<string, StudentAnswerValue | undefined>,
   results: Map<string, ObjectiveQuestionResult>,
   websiteScoring: ObjectiveScoringResult,
+  applyRecheck: boolean,
 ): ObjectiveTracebackItem {
   const sorted = [...groupDescriptors].sort((left, right) => (left.answerIndex ?? 0) - (right.answerIndex ?? 0));
   const representative = sorted[0];
@@ -561,14 +651,34 @@ function buildGroupedTracebackItem(
     };
   }
 
-  const slotCorrectness = sorted.map((descriptor) => {
+  const groupHasRecheckableKey = sorted.every((descriptor) => descriptorHasRecheckableKey(descriptor));
+  const slotDisplayed = sorted.map((descriptor) => {
     const questionResult = results.get(descriptor.id);
     const websiteScore = websiteScoring.byId.get(descriptor.id);
-    return questionResult?.manualOverride?.isCorrect
+    const savedCorrectness = questionResult?.manualOverride?.isCorrect
       ?? questionResult?.isCorrect
-      ?? websiteScore?.correctness
       ?? null;
+    const savedAwardedScore = questionResult?.manualOverride?.awardedScore
+      ?? questionResult?.awardedScore
+      ?? null;
+    const savedMaxScore = questionResult?.maxScore ?? null;
+    if (
+      applyRecheck
+      && groupHasRecheckableKey
+      && questionResult !== undefined
+      && !questionResult.manualOverride
+      && questionResult.hasOverride !== true
+    ) {
+      return resolveDisplayedObjectiveValues(savedCorrectness, savedAwardedScore, savedMaxScore, websiteScore ?? null);
+    }
+    return {
+      correctness: savedCorrectness ?? websiteScore?.correctness ?? null,
+      awardedScore: savedAwardedScore ?? websiteScore?.awardedScore ?? null,
+      maxScore: savedMaxScore ?? websiteScore?.maxScore ?? null,
+      outOfDate: false,
+    };
   });
+  const slotCorrectness = slotDisplayed.map((value) => value.correctness);
   const slotManualOverrides = sorted.map(
     (descriptor) => results.get(descriptor.id)?.manualOverride ?? null,
   );
@@ -590,13 +700,37 @@ function buildGroupedTracebackItem(
     ?? null;
 
   const computedCorrectness = hasUnscored ? null : correctSlots >= requiredCorrect;
-  const correctness = savedGroupResult?.manualOverride?.isCorrect
-    ?? savedGroupResult?.isCorrect
-    ?? computedCorrectness;
-  const awardedScore = savedGroupResult?.manualOverride?.awardedScore
-    ?? savedGroupResult?.awardedScore
-    ?? (correctness === null ? null : correctness ? 1 : 0);
-  const maxScore = savedGroupResult?.maxScore ?? (correctness === null ? null : 1);
+  const anySlotOutOfDate = slotDisplayed.some((value) => value.outOfDate);
+  const hasSavedOverride = sorted.some((descriptor) => {
+    const questionResult = results.get(descriptor.id);
+    return Boolean(questionResult?.manualOverride) || questionResult?.hasOverride === true;
+  });
+  const isTreeGroup = sorted.some((descriptor) => descriptor.isSubAnswerTreeLeaf);
+  const recheckGroupMark = anySlotOutOfDate
+    ? websiteScoring.byId.get(representative.id)
+    : undefined;
+
+  let correctness: boolean | null;
+  let awardedScore: number | null;
+  let maxScore: number | null;
+  if (applyRecheck && groupHasRecheckableKey && anySlotOutOfDate && !hasSavedOverride) {
+    // The group mark follows the re-check too: a stale lenient group mark must
+    // not survive once one of its slots is re-graded as incorrect. Tree roots
+    // own their group verdict in the re-check, so prefer that when present.
+    correctness = isTreeGroup && typeof recheckGroupMark?.correctness === 'boolean'
+      ? recheckGroupMark.correctness
+      : computedCorrectness;
+    maxScore = recheckGroupMark?.maxScore ?? savedGroupResult?.maxScore ?? (correctness === null ? null : 1);
+    awardedScore = correctness === null ? null : correctness ? maxScore : 0;
+  } else {
+    correctness = savedGroupResult?.manualOverride?.isCorrect
+      ?? savedGroupResult?.isCorrect
+      ?? computedCorrectness;
+    awardedScore = savedGroupResult?.manualOverride?.awardedScore
+      ?? savedGroupResult?.awardedScore
+      ?? (correctness === null ? null : correctness ? 1 : 0);
+    maxScore = savedGroupResult?.maxScore ?? (correctness === null ? null : 1);
+  }
 
   const slotLabels = sorted.map((descriptor, index) => getGroupedSlotLabel(descriptor, index));
   const studentAnswerSlots = sorted.map((descriptor) => getStudentAnswerDisplay(descriptor, answerMap));
@@ -652,6 +786,10 @@ export function buildQuestionTracebackGroups(
     results,
   );
   const websiteScoring = scoreObjectiveDescriptors(descriptors, answerMap);
+  // IELTS reading/listening require exact-case answers; when a saved row was
+  // graded before that rule was enforced (or by a stale grader), the displayed
+  // verdict follows the shared re-check. ACT science keeps its saved verdicts.
+  const applyRecheck = moduleType !== 'science';
   const groups = new Map<string, ObjectiveTracebackGroup>();
   const groupedSlotsByGroup = new Map<string, Map<string, StudentQuestionDescriptor[]>>();
 
@@ -684,17 +822,49 @@ export function buildQuestionTracebackGroups(
       const groupKey = getGroupedScoringSlotKey(slotDescriptors[0] ?? ({} as StudentQuestionDescriptor));
       if (groupKey) {
         group.items.push(
-          buildGroupedTracebackItem(slotKey, slotDescriptors, descriptors, answerMap, results, websiteScoring),
+          buildGroupedTracebackItem(slotKey, slotDescriptors, descriptors, answerMap, results, websiteScoring, applyRecheck),
         );
       } else {
         const descriptor = slotDescriptors[0];
         if (!descriptor) continue;
-        group.items.push(buildTracebackItem(descriptor, descriptors, answerMap, results, websiteScoring));
+        group.items.push(buildTracebackItem(descriptor, descriptors, answerMap, results, websiteScoring, applyRecheck));
       }
     }
   }
 
   return Array.from(groups.values());
+}
+
+export interface ObjectiveSectionDisplaySummary {
+  readonly totalScore: number | null;
+  readonly maxScore: number | null;
+  readonly percentage: number | null;
+  readonly correctCount: number;
+  /** True when at least one saved result disagrees with the current rule. */
+  readonly savedOutOfDate: boolean;
+}
+
+/**
+ * The one summary a grading or export surface should show for one objective
+ * section when it must agree with the displayed per-question verdicts. It is
+ * derived from the corrected traceback items (exact-case re-check where the
+ * saved row is out of date), so a section total can never claim a mark the
+ * visible rows do not award.
+ */
+export function buildObjectiveSectionDisplaySummary(
+  examState: ExamState | null,
+  sectionSubmission: SectionSubmission | null,
+  moduleType: 'reading' | 'listening' | 'science',
+): ObjectiveSectionDisplaySummary | null {
+  if (!examState || !sectionSubmission) return null;
+  const groups = buildQuestionTracebackGroups(examState, sectionSubmission, moduleType);
+  if (groups.length === 0) return null;
+  const totals = deriveObjectiveTotalsFromTracebackGroups(groups);
+  return {
+    ...totals,
+    correctCount: countCorrectAnswers(groups),
+    savedOutOfDate: findSavedScoreMismatches(examState, sectionSubmission, moduleType).length > 0,
+  };
 }
 
 export interface ObjectiveExportRowInput {
@@ -1092,8 +1262,11 @@ export function buildWideObjectiveExport({
           answerDisplayOptions,
         );
         if (mode === 'auto') {
+          // The traceback item already resolves saved-vs-recheck, so the
+          // exported score can never disagree with the review screen or the PDF
+          // row verdicts.
           row[`score:${descriptor.id}`] = toOptionalNumber(
-            scoredResult?.awardedScore ?? fallbackItem?.awardedScore,
+            fallbackItem?.awardedScore ?? scoredResult?.awardedScore,
           );
           if (fallbackItem?.selectionScores) {
             row[`selectionScores:${descriptor.id}`] = fallbackItem.selectionScores;
@@ -1123,19 +1296,19 @@ export function buildWideObjectiveExport({
       }
 
       if (mode === 'auto') {
-        const groupResults = slot.descriptors.map((descriptor) => scoredResults.get(descriptor.id));
-        if (groupResults.some((result) => !result)) {
-          row[`scoreGroup:${slot.slotKey}`] = '';
-        } else {
-          const requiredCorrect = resolveGroupedScoringRequiredCorrect(slot.descriptors);
-          const correctSlots = groupResults.filter((result) => result?.isCorrect).length;
-          // Mirror the scorer's group maximum (override maxScore), not a hardcoded 1.
-          const groupMax = Math.max(
-            1,
-            ...groupResults.map((result) => (typeof result?.maxScore === 'number' && Number.isFinite(result.maxScore) ? result.maxScore : 1)),
-          );
-          row[`scoreGroup:${slot.slotKey}`] = correctSlots >= requiredCorrect ? groupMax : 0;
-        }
+        // The representative traceback item owns the corrected group mark, so
+        // exported rows, the export total and the PDF summary all agree. Blank
+        // the cell when a member has neither a saved result nor a re-checked
+        // item, matching the previous "incomplete group" behaviour.
+        const representativeItem = tracebackItemsById.get(slot.representativeId);
+        const allMembersKnown = slot.descriptors.every(
+          (descriptor) => scoredResults.has(descriptor.id) || tracebackItemsById.has(descriptor.id),
+        );
+        row[`scoreGroup:${slot.slotKey}`] = !allMembersKnown
+          || representativeItem?.awardedScore === null
+          || representativeItem?.awardedScore === undefined
+          ? ''
+          : representativeItem.awardedScore;
       } else {
         row[`manualCorrectGroup:${slot.slotKey}`] = '';
       }
@@ -1394,9 +1567,12 @@ export function findSavedScoreMismatches(
     // A schedule answer-key override deliberately differs from the snapshot
     // the website re-checks; it is not an out-of-date saved score.
     if (saved.hasOverride === true) continue;
+    // A per-student manual override is a deliberate human decision; the
+    // website re-check cannot second-guess it, so it is not staleness either.
+    if (saved.manualOverride) continue;
     const website = websiteScoring.byId.get(descriptor.id);
-    const savedCorrectness = saved.manualOverride?.isCorrect ?? saved.isCorrect ?? null;
-    const savedAwardedScore = saved.manualOverride?.awardedScore ?? numberOrNull(saved.awardedScore);
+    const savedCorrectness = saved.isCorrect ?? null;
+    const savedAwardedScore = numberOrNull(saved.awardedScore);
     const savedMaxScore = numberOrNull(saved.maxScore);
     const websiteCorrectness = website?.correctness ?? null;
     const websiteAwardedScore = website?.awardedScore ?? null;

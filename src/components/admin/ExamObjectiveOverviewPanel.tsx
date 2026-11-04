@@ -201,8 +201,9 @@ export function ExamObjectiveOverviewPanel({
 
   const rows = useMemo(() => buildExamObjectiveOverviewRows(bundles, { examState }), [bundles, examState]);
   const groups = useMemo(() => groupExamObjectiveOverviewRows(rows), [rows]);
-  // Ticket 11: the saved result stays official. The website re-check only feeds
-  // this warning; the displayed verdicts below keep reading `row.isCorrect`.
+  // The displayed verdicts follow the current exact-case rule (see
+  // buildExamObjectiveOverviewRows) while the saved result stays the official
+  // score; this count drives the warning that a regrade is still needed.
   const savedResultOutOfDateCount = useMemo(
     () => rows.filter((row) => row.savedResultOutOfDate).length,
     [rows],
@@ -438,7 +439,7 @@ export function ExamObjectiveOverviewPanel({
             <p className="font-semibold">Saved score is out of date — regrade</p>
             <p className="mt-1">
               {savedResultOutOfDateCount} answer {savedResultOutOfDateCount === 1 ? 'entry disagrees' : 'entries disagree'} with the saved result.
-              The saved score is shown as the official score until this exam session is regraded.
+              The corrected IELTS verdict is shown here; the saved score stays the official score until this exam session is regraded.
             </p>
           </div>
         </div>

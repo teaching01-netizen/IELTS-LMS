@@ -26,6 +26,29 @@ describe('buildObjectiveQuestionTableRows', () => {
     });
   });
 
+  test('renders No for an export row whose stale saved Correct was re-checked to 0', () => {
+    const columns: CsvColumn[] = [
+      { key: 'answer:q28', label: 'Q28 Answer' },
+      { key: 'rightAnswer:q28', label: 'Q28 Right Answer' },
+      { key: 'score:q28', label: 'Q28 Score' },
+    ];
+
+    // The saved row awarded 1 for `28th june` vs key `28th June`; the row the
+    // PDF/CSV table reads already carries the exact-case re-check score of 0.
+    const rows = buildObjectiveQuestionTableRows(columns, {
+      'answer:q28': '28th june',
+      'rightAnswer:q28': '28th June | 28 June',
+      'score:q28': 0,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      studentAnswer: '28th june',
+      correct: 'No',
+      score: '0',
+    });
+  });
+
   test('requires exact case by default when score is missing', () => {
     const columns: CsvColumn[] = [{ key: 'answer:q1', label: 'Q1 Answer' }];
 

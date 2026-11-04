@@ -140,13 +140,24 @@ export function useReviewWorkspaceController({ submissionId, teacherId, teacherN
   const submission: StudentSubmission | null = submissionQuery.data ?? null;
   const historicalRef = useRef(false);
   historicalRef.current = submission?.historical === true;
-  // Published-first pinning (S2-C13): the student took the published version,
-  // so traceback resolves to it.
+  // Version pinning: saved objective results record the version they were
+  // graded from. A schedule regraded from a draft stores draft-version results,
+  // so the traceback must re-check against that same version — otherwise a
+  // legitimate draft-only key change would look like a stale saved score and
+  // the corrected display would show the wrong verdict. Fall back to the
+  // published version (students take the published version) when no saved
+  // source is recorded.
   const publishedVersionId = submission?.publishedVersionId ?? '';
+  const objectiveSectionsSettled = sectionsQuery.isSuccess || sectionsQuery.isError;
+  const savedGradingSourceVersionId = (sectionsQuery.data ?? [])
+    .filter((section) => section.section === 'reading' || section.section === 'listening')
+    .map((section) => section.autoGradingResults?.integrity?.gradingSourceVersionId)
+    .find((value): value is string => typeof value === 'string' && value.trim() !== '') ?? '';
+  const tracebackVersionId = savedGradingSourceVersionId || publishedVersionId;
   const versionQuery = useQuery({
-    queryKey: gradingKeys.publishedVersion(publishedVersionId),
-    queryFn: () => examRepository.getVersionById(publishedVersionId),
-    enabled: publishedVersionId.length > 0,
+    queryKey: gradingKeys.publishedVersion(tracebackVersionId),
+    queryFn: () => examRepository.getVersionById(tracebackVersionId),
+    enabled: objectiveSectionsSettled && tracebackVersionId.length > 0,
     ...reviewReadPolicy,
   });
   const examState = useMemo<ExamState | null>(
@@ -507,7 +518,7 @@ export function useReviewWorkspaceController({ submissionId, teacherId, teacherN
     writingLoading: writingQuery.isPending,
     writingError: writingQuery.isError ? errorText(writingQuery.error, 'Failed to load writing payload.') : null,
     draftError: draftQuery.isError ? errorText(draftQuery.error, 'Failed to load review draft.') : null,
-    examLoading: publishedVersionId.length > 0 && versionQuery.isPending,
+    examLoading: !objectiveSectionsSettled || (tracebackVersionId.length > 0 && versionQuery.isPending),
     examError,
     saving,
     releaseAction,

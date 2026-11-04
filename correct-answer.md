@@ -48,6 +48,7 @@ Also add an exam-publish check: refuse to publish if any objective question has 
 ## Phase 3: One source for the score in the website and PDF
 
 - **Review page:** show the server's saved result. Still re-check it on the website, and if the two differ, show a warning ("Saved score is out of date — regrade") instead of silently showing a different answer.
+  - **Owner follow-up (2026-11-04):** the saved result stays the official score, but the **displayed verdict must follow the current exact-case rule**. When the saved result disagrees with the re-check and the question has no per-student/schedule override, the review page, grading exports and per-student PDF/CSV show the re-checked verdict and score, with totals and band derived from them; the regrade warning stays until the session is regraded.
 - **PDF and CSV export:** take each row, the total, the band and grouped (2-for-1) questions from those same results, so the Yes rows always add up to the Total. Include teacher "Set result" changes.
 - **`tableRows.ts` fallback:** when a score is missing, compare the student answer against each accepted answer separately, not against the whole joined string. Merged group rows use a display separator that cannot be mistaken for the `|` accepted-variant separator.
 

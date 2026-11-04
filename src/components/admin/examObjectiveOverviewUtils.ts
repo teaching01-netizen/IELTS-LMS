@@ -13,7 +13,11 @@ import {
 import type { StudentQuestionDescriptor } from '../../features/exam-authoring/api/examAuthoringGateway';
 import { answersMatchForEntry } from '../../utils/acceptedAnswers';
 import { formatAnswerValue, getCorrectAnswerDisplay, getCorrectAnswerValue } from './gradingAnswerUtils';
-import { scoreSectionForRecheck } from './gradingReviewUtils';
+import {
+  descriptorHasRecheckableKey,
+  resolveDisplayedObjectiveValues,
+  scoreSectionForRecheck,
+} from './gradingReviewUtils';
 
 export interface ExamObjectiveOverviewBundle {
   readonly submission: Pick<StudentSubmission, 'id' | 'studentName'>;
@@ -256,7 +260,6 @@ export function buildExamObjectiveOverviewRows(
         // review page (and clears after a regrade).
         const recheck = scoreSectionForRecheck(options.examState ?? null, section, section.section);
         return candidates.map(({ result, descriptor, correctAnswer }) => {
-          // Saved result is official; the re-check is only a warning signal.
           const savedResult = resolveSavedResultValues(result);
           const scoredRecheck = recheck?.byId.get(result.questionId);
           const websiteIsCorrect = result.manualOverride
@@ -265,6 +268,34 @@ export function buildExamObjectiveOverviewRows(
               ?? (scoredRecheck === undefined
                 ? fallbackTextRecheck(result.studentAnswer, correctAnswer)
                 : null);
+          // The displayed verdict follows the current exact-case rule when the
+          // saved row is out of date: a stored `Correct` that the rule now says
+          // is Incorrect must not be shown as Correct here. Saved overrides
+          // stay authoritative, the snapshot must actually carry a readable key
+          // for the re-check, and the saved score stays official until the
+          // session is regraded (that is what the warning reports).
+          const canCorrect = !result.manualOverride
+            && result.hasOverride !== true
+            && scoredRecheck !== undefined
+            && descriptor !== undefined
+            && descriptorHasRecheckableKey(descriptor);
+          const resolved = canCorrect
+            ? resolveDisplayedObjectiveValues(
+                savedResult.isCorrect,
+                savedResult.awardedScore,
+                result.maxScore,
+                scoredRecheck,
+              )
+            : null;
+          const displayedIsCorrect = resolved?.correctness ?? savedResult.isCorrect;
+          const displayedAwardedScore = resolved?.awardedScore ?? savedResult.awardedScore;
+          const savedResultOutOfDate = canCorrect
+            ? (resolved?.outOfDate ?? false)
+            : !result.manualOverride
+              && result.hasOverride !== true
+              && (descriptor === undefined || descriptorHasRecheckableKey(descriptor))
+              && websiteIsCorrect !== null
+              && websiteIsCorrect !== savedResult.isCorrect;
           const row: ExamObjectiveOverviewRow = {
             rowId: `${submission.id}:${section.id}:${result.questionId}`,
             submissionId: submission.id,
@@ -278,10 +309,10 @@ export function buildExamObjectiveOverviewRows(
             maxScore: result.maxScore,
             scoringRule: result.scoringRule,
             hasOverride: result.hasOverride,
-            ...savedResult,
+            isCorrect: displayedIsCorrect,
+            awardedScore: displayedAwardedScore,
             websiteIsCorrect,
-            savedResultOutOfDate:
-              websiteIsCorrect !== null && websiteIsCorrect !== savedResult.isCorrect,
+            savedResultOutOfDate,
             manualOverride: result.manualOverride ?? null,
           };
           return row;

@@ -486,8 +486,8 @@ export function QuestionTracebackPanel({
             <p className="font-semibold">Saved score is out of date — regrade</p>
             <p className="mt-1">
               {savedScoreMismatches.length} question
-              {savedScoreMismatches.length === 1 ? '' : 's'} disagree with the saved result. The saved
-              score is shown as the official score until this submission is regraded.
+              {savedScoreMismatches.length === 1 ? '' : 's'} disagree with the saved result. The corrected
+              IELTS verdict is shown here; the saved score stays the official score until this submission is regraded.
             </p>
           </div>
         </div>

@@ -180,3 +180,27 @@ the shared e2e fixture helper and `playwright.ielts-case.config.ts`.
 - Affected vitest suites (grading, admin, builder, adapter, pool, tree) — pass;
   remaining failures are the pre-existing SAT ones listed above.
 - `bun run e2e:ielts-case` — pass (now also covers grouped-note answered state).
+
+## Owner follow-up: displayed verdict for out-of-date saved results (2026-11-04, evening)
+
+Production still showed a pre-fix saved `Correct` for a case-only variant (`28th june` vs key `28th June`)
+in the grading screens and per-student PDF. The saved score is the official score until a regrade, but
+threshold rules that staff and PDFs report must be the current IELTS exact-case rule.
+
+- New `resolveDisplayedObjectiveValues` (gradingReviewUtils) and `buildObjectiveSectionDisplaySummary`
+  make the review traceback, grading exports/CSV, per-student ZIP PDF input, the section band preview and
+  the overall-answer-check rows display the re-checked verdict/score when the saved boolean verdict
+  disagrees with the website re-check. Totals, percentage and band derive from the corrected verdicts, so
+  Yes rows and totals cannot disagree.
+- Precedence preserved: per-student `manualOverride`, schedule `hasOverride`, ACT `science`, and rows whose
+  loaded exam version has no readable snapshot key keep their saved values. `findSavedScoreMismatches` now
+  ignores both override kinds. Numeric-only differences are not corrected (choose-N partial credit is still
+  an open owner decision).
+- Version pinning: the review workspace now re-checks against the version recorded on the saved result
+  (`autoGradingResults.integrity.gradingSourceVersionId`) before falling back to the published version.
+- The `Saved score is out of date — regrade` warning stays on both the traceback and the overall answer
+  check until a regrade persists the corrected official score.
+- Regression coverage: `src/components/admin/__tests__/gradingStaleSavedVerdictDisplay.test.ts` (overview,
+  traceback, wide/CSV, PDF bytes) plus updated saved-result/display tests; Go grader strictness is pinned by
+  `backend/go/internal/grading/prod_case_variant_test.go`. Remediation for existing prod rows remains the
+  human-run regrade rollout described above.

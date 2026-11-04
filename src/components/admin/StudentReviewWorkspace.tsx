@@ -16,7 +16,7 @@ import { ConfirmModal } from '../ConfirmModal';
 import { Dialog } from '@components/ui/Dialog';
 import { StudentReportPreview } from './StudentReportPreview';
 import { QuestionTracebackPanel } from './QuestionTracebackPanel';
-import { deriveIeltsBandScore } from './gradingReviewUtils';
+import { buildObjectiveSectionDisplaySummary, deriveIeltsBandScore } from './gradingReviewUtils';
 import { SectionLoadingSkeleton } from '@components/ui';
 import { htmlToPlainText, htmlToPlainTextPreserveLineBreaks } from '../../utils/htmlText';
 import { sanitizeHtml } from '../../utils/sanitizeHtml';
@@ -394,16 +394,21 @@ export const StudentReviewWorkspace = React.memo(function StudentReviewWorkspace
             ? task1Band
             : Math.round(((task1Band + task2Band) / 2) * 2) / 2;
 
-    const savedObjectiveBand = (module: 'listening' | 'reading'): number => {
-      const saved = sectionSubmissions.find((entry) => entry.section === module)?.autoGradingResults;
-      if (!saved || typeof saved.totalScore !== 'number') return 0;
-      const band = deriveIeltsBandScore(examState, module, saved.totalScore);
+    const objectiveBand = (module: 'listening' | 'reading'): number => {
+      const sectionSubmission = sectionSubmissions.find((entry) => entry.section === module) ?? null;
+      // Band preview must follow the verdicts shown in the traceback: a stale
+      // saved result that the exact-case rule now rejects is not a pass.
+      const summary = buildObjectiveSectionDisplaySummary(examState, sectionSubmission, module);
+      const totalScore = summary?.totalScore
+        ?? sectionSubmission?.autoGradingResults?.totalScore;
+      if (typeof totalScore !== 'number') return 0;
+      const band = deriveIeltsBandScore(examState, module, totalScore);
       return typeof band === 'number' ? band : 0;
     };
 
     return {
-      listening: savedObjectiveBand('listening') || reviewDraft.sectionDrafts.listening?.overallBand || 0,
-      reading: savedObjectiveBand('reading') || reviewDraft.sectionDrafts.reading?.overallBand || 0,
+      listening: objectiveBand('listening') || reviewDraft.sectionDrafts.listening?.overallBand || 0,
+      reading: objectiveBand('reading') || reviewDraft.sectionDrafts.reading?.overallBand || 0,
       writing: writingBand,
       speaking: reviewDraft.sectionDrafts.speaking?.overallBand ?? 0,
     };

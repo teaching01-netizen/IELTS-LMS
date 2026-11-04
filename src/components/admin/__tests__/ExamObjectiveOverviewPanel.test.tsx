@@ -271,7 +271,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(rows[0]?.awardedScore).toBe(0);
   });
 
-  test('shows all table-cell accepted answers while the saved result stays official', () => {
+  test('shows all table-cell accepted answers and the corrected re-check verdict', () => {
     const examState = createInitialExamState('IELTS Mock Test', 'Academic');
     examState.reading.passages = [{
       id: 'passage-1',
@@ -329,9 +329,11 @@ describe('buildExamObjectiveOverviewRows', () => {
       'faces of china | FACES OF CHINA | Faces of China',
     );
     expect(rows[0]?.questionNumberLabel).toBe('q-1');
-    // Ticket 11: display the saved result; the re-check only raises a warning.
-    expect(rows[0]?.isCorrect).toBe(false);
-    expect(rows[0]?.awardedScore).toBe(0);
+    // The saved row (Incorrect) is stale: the re-check accepts the exact-case
+    // accepted variant, so the displayed verdict follows it while the warning
+    // still reports that the official saved score needs a regrade.
+    expect(rows[0]?.isCorrect).toBe(true);
+    expect(rows[0]?.awardedScore).toBe(1);
     expect(rows[0]?.websiteIsCorrect).toBe(true);
     expect(rows[0]?.savedResultOutOfDate).toBe(true);
   });
@@ -1337,7 +1339,7 @@ describe('buildExamObjectiveOverviewRows', () => {
     expect(screen.queryByText('Saving…')).not.toBeInTheDocument();
   });
 
-  test('warns when the saved score is out of date without changing the displayed verdict', async () => {
+  test('warns when the saved score is out of date and displays the corrected verdict', async () => {
     const section = {
       id: 'section-1',
       submissionId: 'submission-1',
@@ -1371,9 +1373,25 @@ describe('buildExamObjectiveOverviewRows', () => {
     ]);
     vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
 
+    // The corrected display needs the full re-check, which needs the exam
+    // version snapshot. Load the real key so the padding-only variant matches.
+    const examState = createInitialExamState('IELTS Mock Test', 'Academic');
+    examState.reading.passages[0]!.blocks = [{
+      id: 'short-answer-block',
+      type: 'SHORT_ANSWER',
+      instruction: '',
+      questions: [{ id: 'q-1', prompt: 'Type the word', correctAnswer: 'ANSWER', answerRule: 'ONE_WORD' }],
+    }];
+    vi.mocked(examRepository.getVersionById).mockResolvedValue({ contentSnapshot: examState } as never);
+
     render(
       <ExamObjectiveOverviewPanel
-        session={{ examTitle: 'IELTS Mock Test', id: 'session-1', scheduleId: 'schedule-1' } as never}
+        session={{
+          examTitle: 'IELTS Mock Test',
+          id: 'session-1',
+          scheduleId: 'schedule-1',
+          publishedVersionId: 'published-version-1',
+        } as never}
       />,
     );
 
@@ -1383,9 +1401,65 @@ describe('buildExamObjectiveOverviewRows', () => {
     banner.focus();
     expect(banner).toHaveFocus();
 
-    // Ticket 11: the saved result stays the displayed verdict. The website
-    // recheck agreeing with the student must not flip the group to Correct.
-    expect(screen.getByRole('status', { name: 'Incorrect' })).toBeInTheDocument();
+    // The stale saved result (Incorrect) does not suppress the warning, but the
+    // displayed verdict follows the current rule: the re-check accepts the
+    // padding-only variant, so the group is Correct (and no longer matches the
+    // default "Incorrect" filter) while the banner still tells the operator to
+    // regrade before the saved score becomes official.
+    fireEvent.click(screen.getByRole('button', { name: /^Correct/ }));
+    expect(await screen.findByRole('status', { name: 'Correct' })).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Incorrect' })).not.toBeInTheDocument();
+  });
+
+  test('keeps the saved verdict when the exam version is unavailable but still warns', async () => {
+    const section = {
+      id: 'section-1',
+      submissionId: 'submission-1',
+      section: 'reading',
+      answers: { type: 'reading', passages: [] },
+      autoGradingResults: {
+        generatedAt: '2026-01-01T00:00:00.000Z',
+        totalScore: 0,
+        maxScore: 1,
+        percentage: 0,
+        questionResults: [{
+          questionId: 'q-1',
+          studentAnswer: ' ANSWER ',
+          correctAnswer: 'ANSWER',
+          isCorrect: false,
+          awardedScore: 0,
+          maxScore: 1,
+          scoringRule: 'one_word',
+          hasOverride: false,
+        }],
+      },
+      gradingStatus: 'auto_graded',
+      submittedAt: '2026-01-01T00:00:00.000Z',
+    } satisfies SectionSubmission;
+
+    vi.mocked(gradingRepository.getSubmissionsBySession).mockResolvedValue([
+      { id: 'submission-1', studentName: 'Narin Example' } as never,
+    ]);
+    vi.mocked(gradingRepository.getSectionSubmissionsBySubmissionId).mockResolvedValue([section]);
+    vi.mocked(examRepository.getVersionById).mockResolvedValue(null);
+
+    render(
+      <ExamObjectiveOverviewPanel
+        session={{
+          examTitle: 'IELTS Mock Test',
+          id: 'session-1',
+          scheduleId: 'schedule-1',
+          publishedVersionId: 'published-version-1',
+        } as never}
+      />,
+    );
+
+    const banner = await screen.findByRole('alert');
+    expect(banner).toHaveTextContent('Saved score is out of date — regrade');
+
+    // Without the exam snapshot the re-check cannot decide, so the panel keeps
+    // the official saved verdict and only raises the regrade warning.
+    expect(await screen.findByRole('status', { name: 'Incorrect' })).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Correct' })).not.toBeInTheDocument();
   });
 

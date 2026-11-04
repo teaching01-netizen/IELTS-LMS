@@ -96,14 +96,18 @@ describe('overview saved-score warning', () => {
     expect(representative?.savedResultOutOfDate).toBe(false);
   });
 
-  it('still warns when the saved group mark really is stale', () => {
+  it('displays the corrected group verdict while still warning that the saved mark is stale', () => {
     const rows = overviewRows(examWithTableGroup(), sectionWith([
       result({ questionId: 'table-1:c1', studentAnswer: 'Garden hall', correctAnswer: 'garden hall', isCorrect: false, awardedScore: 0, maxScore: 1 }),
       result({ questionId: 'table-1:c2', studentAnswer: 'blue', correctAnswer: 'blue', isCorrect: true, awardedScore: 0, maxScore: 0 }),
     ]));
 
     const representative = rows.find((row) => row.questionId === 'table-1:c1');
-    expect(representative?.isCorrect).toBe(false);
+    // The saved group mark (Incorrect) is stale; the displayed verdict follows
+    // the re-check (the group passes on the second cell) while the warning
+    // still flags that the official saved score has not been regraded.
+    expect(representative?.isCorrect).toBe(true);
+    expect(representative?.awardedScore).toBe(1);
     expect(representative?.websiteIsCorrect).toBe(true);
     expect(representative?.savedResultOutOfDate).toBe(true);
   });

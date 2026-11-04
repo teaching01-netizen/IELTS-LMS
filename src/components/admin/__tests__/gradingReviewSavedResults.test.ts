@@ -55,15 +55,18 @@ function submission(overrides: Partial<SectionSubmission> = {}): SectionSubmissi
   } as SectionSubmission;
 }
 
-describe('saved objective results are official', () => {
-  it('shows the saved score instead of the website re-check and reports the mismatch', () => {
+describe('out-of-date saved objective results display the website re-check', () => {
+  it('displays the corrected verdict and still reports the saved score as stale', () => {
     const examState = examWith(shortAnswerBlocks);
     const sectionSubmission = submission();
     const groups = buildQuestionTracebackGroups(examState, sectionSubmission, 'reading');
     const item = groups.flatMap((group) => group.items)[0]!;
 
-    expect(item.correctness).toBe(false);
-    expect(item.awardedScore).toBe(0);
+    // The saved row is stale (false/0) but the current rule accepts the answer.
+    // The displayed verdict follows the re-check while the mismatch list keeps
+    // signalling that the saved, official score still needs a regrade.
+    expect(item.correctness).toBe(true);
+    expect(item.awardedScore).toBe(1);
     expect(findSavedScoreMismatches(examState, sectionSubmission, 'reading')).toHaveLength(1);
 
     const rows = buildObjectiveExportRows({
@@ -80,8 +83,8 @@ describe('saved objective results are official', () => {
       examState,
       moduleType: 'reading',
     });
-    expect(rows[0]?.isCorrect).toBe('Incorrect');
-    expect(rows[0]?.autoScore).toBe(0);
+    expect(rows[0]?.isCorrect).toBe('Correct');
+    expect(rows[0]?.autoScore).toBe(1);
   });
 
   it('includes a teacher Set result change in the export', () => {
