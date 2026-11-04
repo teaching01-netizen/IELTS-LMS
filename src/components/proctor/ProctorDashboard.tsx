@@ -24,6 +24,11 @@ import {
 } from './proctorOverviewSessions';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 
+/** Only a running or paused room can be ended; a completed room is already closed. */
+function isRoomEndable(group: ExamGroup): boolean {
+  return group.runtimeStatus === 'live' || group.runtimeStatus === 'paused';
+}
+
 interface ProctorDashboardProps {
   schedules: ExamSchedule[];
   runtimeSnapshots: ExamSessionRuntime[];
@@ -89,6 +94,12 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   const [drawerTab, setDrawerTab] = useState<StudentDrawerTab>('timeline');
   const [overviewBucket, setOverviewBucket] = useState<OverviewBucket>('active');
   const [pastStatusFilter, setPastStatusFilter] = useState<PastSessionStatusFilter>('all');
+  // Room-level bulk selection (ending exams), distinct from the student
+  // selection above: the unit here is a whole cohort room.
+  const [isRoomSelectionMode, setIsRoomSelectionMode] = useState(false);
+  const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
+  const [roomBulkEndConfirmOpen, setRoomBulkEndConfirmOpen] = useState(false);
+  const [roomBulkEndRunning, setRoomBulkEndRunning] = useState(false);
   // Pending cohort commands by room: one room's in-flight command never
   // busies, or reports into, another room's controls.
   const [pendingCohortActions, setPendingCohortActions] = useState<Readonly<Record<string, CohortControlAction>>>({});
@@ -251,6 +262,14 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
         : pastStatusFilter === 'cancelled'
           ? 'No cancelled sessions'
           : 'No past sessions';
+  // Bulk End exam targets only what the current tab shows and only what can
+  // actually be ended, so a stale selection can never close a completed room.
+  const endableSessionGroups = useMemo(() => overviewSessionGroups.filter(isRoomEndable), [overviewSessionGroups]);
+  const selectedRoomGroups = useMemo(
+    () => overviewSessionGroups.filter((group) => selectedRoomIds.has(group.scheduleId) && isRoomEndable(group)),
+    [overviewSessionGroups, selectedRoomIds],
+  );
+  const selectedRoomCount = selectedRoomGroups.length;
   const selectedScheduleAlerts = alerts.filter((alert) =>
     selectedScheduleId ? enrichedSessions.some((session) => session.scheduleId === selectedScheduleId && session.studentId === alert.studentId) : true,
   );
@@ -261,6 +280,16 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
   useEffect(() => {
     setShowViolationRules(false);
   }, [selectedScheduleId]);
+
+  // Leaving the room overview (other tab or entering a room) abandons the
+  // selection, so End exam never acts on cards the proctor can no longer see.
+  useEffect(() => {
+    if (overviewBucket !== 'active' || selectedScheduleId) {
+      setIsRoomSelectionMode(false);
+      setSelectedRoomIds(new Set());
+      setRoomBulkEndConfirmOpen(false);
+    }
+  }, [overviewBucket, selectedScheduleId]);
 
 
   // Proctor presence: idempotent join (guarded so StrictMode double-mount
@@ -544,6 +573,58 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     },
     [runBulkAction, selectedStudentIds],
   );
+
+  /**
+   * End every selected room's exam, in batches of five with no fail-fast: one
+   * refused room must not cancel the others, and the toast names the failures.
+   */
+  const runRoomBulkEnd = useCallback(async () => {
+    const targets = selectedRoomGroups;
+    if (targets.length === 0) return;
+    setRoomBulkEndConfirmOpen(false);
+    setRoomBulkEndRunning(true);
+    const ended: string[] = [];
+    const failed: string[] = [];
+    for (let offset = 0; offset < targets.length; offset += 5) {
+      const batch = targets.slice(offset, offset + 5);
+      const outcomes = await Promise.allSettled(batch.map(async (group) => { await onCompleteExam(group.scheduleId); }));
+      outcomes.forEach((outcome, index) => {
+        const group = batch[index] as ExamGroup;
+        if (outcome.status === 'fulfilled') ended.push(group.cohortName);
+        else failed.push(group.cohortName);
+      });
+    }
+    setRoomBulkEndRunning(false);
+    setSelectedRoomIds(new Set());
+    setIsRoomSelectionMode(false);
+    if (ended.length > 0) {
+      pushToast({
+        variant: 'success',
+        title: 'Rooms ended',
+        message: `${ended.length} room${ended.length === 1 ? '' : 's'} ended.`,
+      });
+    }
+    if (failed.length > 0) {
+      pushToast({
+        variant: 'error',
+        title: 'Some rooms did not end',
+        message: `${failed.length} failed: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? ` (+${failed.length - 5} more)` : ''}.`,
+      });
+    }
+  }, [onCompleteExam, pushToast, selectedRoomGroups]);
+
+  const toggleRoomSelection = useCallback((scheduleId: string) => {
+    setSelectedRoomIds((current) => {
+      const next = new Set(current);
+      if (next.has(scheduleId)) next.delete(scheduleId);
+      else next.add(scheduleId);
+      return next;
+    });
+  }, []);
+
+  const selectAllEndableRooms = useCallback(() => {
+    setSelectedRoomIds(new Set(endableSessionGroups.map((group) => group.scheduleId)));
+  }, [endableSessionGroups]);
 
   const updateFilterCriterion = <K extends keyof typeof filterCriteria>(key: K, value: (typeof filterCriteria)[K]) => {
     setFilterCriteria((previous) => {
@@ -1018,6 +1099,16 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
         }}
       />
 
+      <ConfirmModal
+        isOpen={roomBulkEndConfirmOpen}
+        onClose={() => { if (!roomBulkEndRunning) setRoomBulkEndConfirmOpen(false); }}
+        title={`End exam in ${selectedRoomCount} room${selectedRoomCount === 1 ? '' : 's'}?`}
+        description="Students in the selected rooms move to the post-exam phase now. This action cannot be undone."
+        confirmLabel={`End ${selectedRoomCount} exam${selectedRoomCount === 1 ? '' : 's'}`}
+        tone="danger"
+        onConfirm={runRoomBulkEnd}
+      />
+
       <section className="min-h-0 overflow-auto px-6 py-5">
         {!selectedScheduleId ? (
           <div className="grid gap-4">
@@ -1046,6 +1137,20 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                   <span className={`text-xs ${overviewBucket === 'past' ? 'text-slate-300' : 'text-slate-400'}`}>{allPastSessionGroups.length}</span>
                 </button>
               </div>
+              {overviewBucket === 'active' ? (
+                <button
+                  type="button"
+                  aria-pressed={isRoomSelectionMode}
+                  onClick={() => {
+                    setIsRoomSelectionMode((current) => !current);
+                    setSelectedRoomIds(new Set());
+                  }}
+                  className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 ${isRoomSelectionMode ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  <CheckSquare size={16} />
+                  Select rooms
+                </button>
+              ) : null}
               {overviewBucket === 'past' ? (
                 <select
                   aria-label="Past status"
@@ -1065,10 +1170,49 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
               ) : null}
             </div>
 
+            {overviewBucket === 'active' && isRoomSelectionMode ? (
+              <div role="group" aria-label="Bulk room actions" className="flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-white px-4 py-3">
+                <span className="text-sm font-medium text-slate-700">{selectedRoomCount} selected</span>
+                <button
+                  type="button"
+                  onClick={selectAllEndableRooms}
+                  disabled={endableSessionGroups.length === 0}
+                  className="text-sm font-medium text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRoomIds(new Set())}
+                  disabled={selectedRoomCount === 0}
+                  className="text-sm font-medium text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline disabled:cursor-not-allowed disabled:text-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                >
+                  Clear
+                </button>
+                <span className="text-sm text-slate-500">Only running or paused rooms can be ended.</span>
+                <button
+                  type="button"
+                  onClick={() => setRoomBulkEndConfirmOpen(true)}
+                  disabled={selectedRoomCount === 0 || roomBulkEndRunning}
+                  className="ml-auto inline-flex min-h-9 items-center gap-2 rounded-md bg-red-600 px-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+                >
+                  {roomBulkEndRunning ? 'Ending…' : 'End exam'}
+                </button>
+              </div>
+            ) : null}
+
             {overviewSessionGroups.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {overviewSessionGroups.map((group) => (
-                  <ExamGroupCard key={group.id} group={group} onClick={() => handleSelectSchedule(group.scheduleId)} />
+                  <ExamGroupCard
+                    key={group.id}
+                    group={group}
+                    onClick={() => handleSelectSchedule(group.scheduleId)}
+                    selectionMode={overviewBucket === 'active' && isRoomSelectionMode}
+                    selected={selectedRoomIds.has(group.scheduleId)}
+                    onToggleSelect={() => toggleRoomSelection(group.scheduleId)}
+                    selectionEnabled={isRoomEndable(group)}
+                  />
                 ))}
               </div>
             ) : (

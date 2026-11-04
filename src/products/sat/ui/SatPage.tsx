@@ -494,6 +494,7 @@ export function SatListRow({
   index,
   rowId,
   current = false,
+  pressed,
 }: {
   onOpen: () => void;
   ariaLabel?: string;
@@ -505,12 +506,15 @@ export function SatListRow({
   rowId?: string;
   /** The record the reviewer last opened from this list. */
   current?: boolean;
+  /** Selection mode: the row is a toggle, so its pressed state is exposed. */
+  pressed?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onOpen}
       aria-label={ariaLabel}
+      aria-pressed={pressed}
       aria-current={current ? 'true' : undefined}
       data-sat-row-id={rowId}
       disabled={disabled}

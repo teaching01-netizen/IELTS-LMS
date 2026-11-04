@@ -1,6 +1,6 @@
 import { useSatNavigate } from "../ui/useSatNavigate";
-import { useMemo, useState } from 'react';
-import { ArrowRight, CalendarPlus, Radio, SearchX, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ArrowRight, CalendarPlus, Check, Radio, SearchX, X } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuthSession } from '../../../features/auth/authSession';
 import { requestAuthoringDraftOnEntry } from '../../../features/exam-authoring/api/authoringEntryIntent';
@@ -9,10 +9,13 @@ import { useExamListQuery } from '../../../features/exam-authoring/api/examQueri
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { proctorKeys, useProctorSessionSummaries } from '../../../features/proctor/api/proctorQueries';
 import { proctorFacade } from '../../../features/proctor/api/proctorFacade';
+import { proctorMutations } from '../../../features/proctor/api/proctorMutations';
+import { isCommandConfirmed } from '../../../features/proctor/api/proctorRoomApi';
 import { SatSegmentedControl } from '../ui/SegmentedControl';
 import { useSatListParams, type SatListBucket } from '../ui/useSatListParams';
 import { useSatListReturn } from '../ui/useSatListReturn';
 import { viewerTimeZoneLabel } from './satTestTime';
+import { SatConfirmDialog } from '../ui/ConfirmDialog';
 import {
   SAT_ROW_STACK,
   SatButton,
@@ -70,6 +73,17 @@ const BUCKET_LABEL: Record<SatListBucket, string> = { upcoming: 'Upcoming', live
 /** Shared by the column labels and every row: Room / Starts / Students / Exam status. */
 const ROW_GRID = 'grid-cols-[minmax(0,1fr)_16px] gap-x-4 md:grid-cols-[minmax(0,1fr)_184px_112px_136px_16px]';
 
+/**
+ * Selection mode adds the checkbox column and drops the chevron: the row is a
+ * toggle, not a destination, so nothing promises a drill-in that will not happen.
+ */
+const SELECT_ROW_GRID = 'grid-cols-[20px_minmax(0,1fr)] gap-x-3 md:grid-cols-[20px_minmax(0,1fr)_184px_112px_136px]';
+
+/** Status drops under the room name, clearing the checkbox column. */
+const SELECT_STATUS_STACK = 'col-start-2 row-start-2 mt-2 flex md:col-start-auto md:row-start-auto md:mt-0';
+
+type BulkNotice = { tone: 'success' | 'error'; text: string };
+
 export function SatSessionsRoute() {
   const navigate = useSatNavigate();
   const queryClient = useQueryClient();
@@ -107,6 +121,70 @@ export function SatSessionsRoute() {
   }, [bucket, search, sort, summaries]);
 
   const loadError = summariesQuery.error ? (summariesQuery.error instanceof Error ? summariesQuery.error.message : 'Rooms are unavailable.') : null;
+
+  // ---------------------------------------------------------- bulk end of exams
+  // Ending an exam is irreversible, so selection exists only where it applies:
+  // live rooms. Leaving the view (tab or search) resets it.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [confirmEndOpen, setConfirmEndOpen] = useState(false);
+  const [endPending, setEndPending] = useState(false);
+  const [bulkNotice, setBulkNotice] = useState<BulkNotice | null>(null);
+  const bucketIsLive = bucket === 'live';
+  const selectedCount = visible.reduce((count, summary) => (selectedIds.has(summary.schedule.id) ? count + 1 : count), 0);
+  const allVisibleSelected = visible.length > 0 && selectedCount === visible.length;
+
+  useEffect(() => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setConfirmEndOpen(false);
+    setBulkNotice(null);
+  }, [bucket, search]);
+
+  const toggleRowSelection = useCallback((scheduleId: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(scheduleId)) next.delete(scheduleId);
+      else next.add(scheduleId);
+      return next;
+    });
+  }, []);
+
+  /**
+   * One command per room, in batches of five. No fail-fast: every selected room
+   * gets its own attempt, and the notice names the ones that failed.
+   */
+  const endSelectedExams = async () => {
+    const ids = visible.map((summary) => summary.schedule.id).filter((id) => selectedIds.has(id));
+    if (ids.length === 0) return;
+    const namesById = new Map(visible.map((summary) => [summary.schedule.id, summary.schedule.cohortName]));
+    setConfirmEndOpen(false);
+    setEndPending(true);
+    const ended: string[] = [];
+    const failed: string[] = [];
+    for (let offset = 0; offset < ids.length; offset += 5) {
+      const batch = ids.slice(offset, offset + 5);
+      const outcomes = await Promise.allSettled(batch.map(async (scheduleId) => {
+        const outcome = await proctorMutations.completeRuntime(scheduleId, 'Proctor');
+        if (!isCommandConfirmed(outcome)) throw new Error(outcome.error);
+      }));
+      outcomes.forEach((outcome, index) => {
+        const scheduleId = batch[index] as string;
+        if (outcome.status === 'fulfilled') ended.push(scheduleId);
+        else failed.push(namesById.get(scheduleId) ?? scheduleId);
+      });
+    }
+    setEndPending(false);
+    setSelectedIds(new Set());
+    setSelectMode(false);
+    setBulkNotice(failed.length
+      ? {
+        tone: 'error',
+        text: `${ended.length} ended, ${failed.length} failed: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? ` (+${failed.length - 5} more)` : ''}.`,
+      }
+      : { tone: 'success', text: `${ended.length} room${ended.length === 1 ? '' : 's'} ended.` });
+    await queryClient.invalidateQueries({ queryKey: proctorKeys.sessions('sat') });
+  };
 
   return (
     <SatContainer>
@@ -166,11 +244,74 @@ export function SatSessionsRoute() {
           ]}
           onChange={(next) => setParams({ sort: next })}
         />
+        {/* Only live rooms can be ended, so the entry point lives on that tab. */}
+        {bucketIsLive && visible.length > 0 ? (
+          <SatButton
+            variant="secondary"
+            aria-pressed={selectMode}
+            onClick={() => {
+              setSelectMode((current) => !current);
+              setSelectedIds(new Set());
+              setBulkNotice(null);
+            }}
+          >
+            Select rooms
+          </SatButton>
+        ) : null}
       </SatListToolbar>
 
       <p className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
         Room start times use your local timezone ({viewerTimeZoneLabel()}). The live run sheet uses Thailand time · ICT (UTC+7).
       </p>
+
+      {selectMode ? (
+        <div
+          role="group"
+          aria-label="Bulk room actions"
+          className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))] px-4 py-2"
+        >
+          <label htmlFor="sat-room-select-all" className="inline-flex min-h-11 items-center gap-2 text-[14px] font-medium text-[var(--sat-staff-text-primary,#1d1d1f)]">
+            <input
+              id="sat-room-select-all"
+              type="checkbox"
+              aria-label="Select all"
+              checked={allVisibleSelected}
+              ref={(node) => { if (node) node.indeterminate = selectedCount > 0 && !allVisibleSelected; }}
+              onChange={(event) => setSelectedIds(event.target.checked ? new Set(visible.map((summary) => summary.schedule.id)) : new Set())}
+              className="h-4 w-4 shrink-0 accent-[var(--sat-staff-accent,#0071e3)]"
+            />
+            Select all
+          </label>
+          <p role="status" aria-live="polite" className="text-[14px] font-medium tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">
+            {selectedCount} selected
+          </p>
+          <span className="ml-auto flex flex-wrap items-center gap-2">
+            <SatButton variant="quiet" onClick={() => setSelectedIds(new Set())} disabled={selectedCount === 0}>Clear</SatButton>
+            <SatButton variant="danger" onClick={() => setConfirmEndOpen(true)} disabled={selectedCount === 0} pending={endPending}>
+              End exam
+            </SatButton>
+          </span>
+        </div>
+      ) : null}
+
+      {bulkNotice ? (
+        <div
+          role={bulkNotice.tone === 'error' ? 'alert' : 'status'}
+          className="mt-3 flex items-start gap-3 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-4 py-3"
+        >
+          <p className={'min-w-0 flex-1 text-[14px] leading-5 ' + (bulkNotice.tone === 'error' ? 'text-[var(--sat-staff-danger,#b42318)]' : 'text-[var(--sat-staff-text-primary,#1d1d1f)]')}>
+            {bulkNotice.text}
+          </p>
+          <button
+            type="button"
+            onClick={() => setBulkNotice(null)}
+            aria-label="Dismiss room result"
+            className="sat-press flex h-8 w-8 shrink-0 -my-1 items-center justify-center rounded-full text-[var(--sat-staff-text-tertiary,#6e6e73)] hover:text-[var(--sat-staff-text-primary,#1d1d1f)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent/40"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
 
       {loadError ? (
         <SatInlineError title="Rooms could not load" description={loadError} onRetry={() => void summariesQuery.refetch()} />
@@ -180,7 +321,12 @@ export function SatSessionsRoute() {
         <>
         <SatResultCount total={counts[bucket]} visible={visible.length} itemLabel={visible.length === 1 ? 'room' : 'rooms'} />
         <SatList>
-          <SatListColumns gridClassName={ROW_GRID} columns={[{ label: 'Room' }, { label: 'Starts' }, { label: 'Students', align: 'end' }, { label: 'Exam status' }, { label: '' }]} />
+          <SatListColumns
+            gridClassName={selectMode ? SELECT_ROW_GRID : ROW_GRID}
+            columns={selectMode
+              ? [{ label: '' }, { label: 'Room' }, { label: 'Starts' }, { label: 'Students', align: 'end' }, { label: 'Exam status' }]
+              : [{ label: 'Room' }, { label: 'Starts' }, { label: 'Students', align: 'end' }, { label: 'Exam status' }, { label: '' }]}
+          />
           {visible.map((summary, rowIndex) => {
             const state = bucketFor(summary.schedule.status, summary.runtime.status);
             const status: SessionStatus = summary.runtime.status === 'paused'
@@ -190,6 +336,47 @@ export function SatSessionsRoute() {
             const target = '/sat/sessions/' + summary.schedule.id;
             const joined = summary.studentCount ?? 0;
             const active = summary.activeCount ?? 0;
+            const selected = selectMode && selectedIds.has(summary.schedule.id);
+            const roomCell = (
+              <span className="min-w-0">
+                <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{summary.schedule.cohortName}</span>
+                <span className="block truncate text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{summary.schedule.examTitle} · {satPublishScopeCopy(summary.schedule.publishScope ?? 'full')}{summary.schedule.institution ? ' · ' + summary.schedule.institution : ''}</span>
+                <span className="block truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:hidden">{formatSessionTime(summary.schedule.startTime)} · {joined} joined</span>
+              </span>
+            );
+            if (selectMode) {
+              // Selecting ends the exam, so the whole row is the toggle and the
+              // chevron is gone: nothing promises a drill-in that will not happen.
+              return (
+                <SatListRow
+                  key={summary.schedule.id}
+                  index={Math.min(rowIndex, 5)}
+                  rowId={summary.schedule.id}
+                  current={false}
+                  ariaLabel={`${selected ? 'Deselect' : 'Select'} ${summary.schedule.cohortName}`}
+                  pressed={selected}
+                  onOpen={() => toggleRowSelection(summary.schedule.id)}
+                >
+                  <span className={'grid w-full items-center py-3 ' + SELECT_ROW_GRID}>
+                    <span
+                      aria-hidden="true"
+                      className={'flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border ' + (selected
+                        ? 'border-[var(--sat-staff-accent,#0071e3)] bg-[var(--sat-staff-accent,#0071e3)] text-white'
+                        : 'border-[var(--sat-staff-border-control,rgba(0,0,0,0.42))] bg-[var(--sat-staff-surface,#fff)]')}
+                    >
+                      {selected ? <Check size={12} strokeWidth={3} /> : null}
+                    </span>
+                    {roomCell}
+                    <span className="hidden truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:block">{formatSessionTime(summary.schedule.startTime)}</span>
+                    <span className="hidden text-right text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:block">
+                      <span className="block text-[var(--sat-staff-text-primary,#1d1d1f)]">{joined} joined</span>
+                      {state === 'live' ? <span className="block">{active} active</span> : null}
+                    </span>
+                    <span className={SELECT_STATUS_STACK}><SatStatusPill tone={pill.tone} pulse={pill.pulse}>{status}</SatStatusPill></span>
+                  </span>
+                </SatListRow>
+              );
+            }
             return (
               <SatListRow
                 key={summary.schedule.id}
@@ -199,11 +386,7 @@ export function SatSessionsRoute() {
                 onOpen={() => openRecord(summary.schedule.id, target)}
               >
                 <span className={'grid w-full items-center py-3 ' + ROW_GRID}>
-                  <span className="min-w-0">
-                    <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{summary.schedule.cohortName}</span>
-                    <span className="block truncate text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{summary.schedule.examTitle} · {satPublishScopeCopy(summary.schedule.publishScope ?? 'full')}{summary.schedule.institution ? ' · ' + summary.schedule.institution : ''}</span>
-                    <span className="block truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:hidden">{formatSessionTime(summary.schedule.startTime)} · {joined} joined</span>
-                  </span>
+                  {roomCell}
                   <span className="hidden truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:block">{formatSessionTime(summary.schedule.startTime)}</span>
                   <span className="hidden text-right text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] md:block">
                     <span className="block text-[var(--sat-staff-text-primary,#1d1d1f)]">{joined} joined</span>
@@ -230,6 +413,16 @@ export function SatSessionsRoute() {
         />
         </>
       )}
+
+      <SatConfirmDialog
+        open={confirmEndOpen}
+        title={`End exam in ${selectedCount} room${selectedCount === 1 ? '' : 's'}?`}
+        description="Students in the selected rooms move to the post-exam phase now. This cannot be undone."
+        confirmLabel={`End ${selectedCount} exam${selectedCount === 1 ? '' : 's'}`}
+        destructive
+        onCancel={() => setConfirmEndOpen(false)}
+        onConfirm={() => { void endSelectedExams(); }}
+      />
 
       {createOpen ? (
         <SatNewSessionFlow

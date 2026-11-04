@@ -1188,4 +1188,102 @@ describe('ProctorDashboard runtime controls', () => {
       expect(screen.getByText(/1 students/i)).toBeInTheDocument();
     });
   });
+
+  describe('bulk end of exams from the room overview', () => {
+    const overviewProps = (overrides: Partial<DashboardProps> = {}) => ({
+      schedules: [{ ...baseSchedule, status: 'live' as const, startTime: '2026-01-01T00:00:00.000Z' }],
+      runtimeSnapshots: [liveRuntime],
+      sessions: [],
+      alerts: [] as DashboardProps['alerts'],
+      onStartScheduledSession: vi.fn(),
+      onPauseCohort: vi.fn(),
+      onResumeCohort: vi.fn(),
+      onEndSectionNow: vi.fn(),
+      onExtendCurrentSection: vi.fn(),
+      onCompleteExam: vi.fn(),
+      ...overrides,
+    });
+
+    it('selects a live room and ends it from one confirmation', async () => {
+      const onCompleteExam = vi.fn().mockResolvedValue(undefined);
+      render(<DashboardHarness {...overviewProps({ onCompleteExam })} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /select rooms/i }));
+      const card = screen.getByRole('button', { name: /select mock exam for cohort cohort a/i });
+      fireEvent.click(card);
+
+      expect(card).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('group', { name: /bulk room actions/i })).toHaveTextContent('1 selected');
+
+      fireEvent.click(screen.getByRole('button', { name: /^end exam$/i }));
+      expect(screen.getByText(/end exam in 1 room\?/i)).toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /end 1 exam/i }));
+      });
+
+      expect(onCompleteExam).toHaveBeenCalledWith('sched-1');
+      expect(screen.getByText('1 room ended.')).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: /bulk room actions/i })).not.toBeInTheDocument();
+    });
+
+    it('ends every selected room and names the one that failed', async () => {
+      const secondSchedule = {
+        ...baseSchedule,
+        id: 'sched-2',
+        examId: 'exam-2',
+        cohortName: 'Cohort B',
+        proctorDisplayName: 'Mock Exam B',
+        status: 'live' as const,
+        startTime: '2026-01-01T00:20:00.000Z',
+      };
+      const secondRuntime = { ...liveRuntime, id: 'runtime-2', scheduleId: 'sched-2', cohortName: 'Cohort B', examId: 'exam-2' };
+      const onCompleteExam = vi.fn((scheduleId: string) => scheduleId === 'sched-2'
+        ? Promise.reject(new Error('room is locked'))
+        : Promise.resolve(undefined));
+      render(<DashboardHarness {...overviewProps({
+        schedules: [overviewProps().schedules[0] as ExamSchedule, secondSchedule],
+        runtimeSnapshots: [liveRuntime, secondRuntime],
+        onCompleteExam,
+      })} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /select rooms/i }));
+      fireEvent.click(screen.getByRole('button', { name: /select all/i }));
+      expect(screen.getByRole('group', { name: /bulk room actions/i })).toHaveTextContent('2 selected');
+
+      fireEvent.click(screen.getByRole('button', { name: /^end exam$/i }));
+      expect(screen.getByText(/end exam in 2 rooms\?/i)).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /end 2 exams/i }));
+      });
+
+      expect(onCompleteExam).toHaveBeenCalledTimes(2);
+      expect(onCompleteExam.mock.calls.map((call) => call[0])).toEqual(['sched-1', 'sched-2']);
+      expect(screen.getByText('1 room ended.')).toBeInTheDocument();
+      expect(screen.getByText('1 failed: Cohort B.')).toBeInTheDocument();
+    });
+
+    it('offers no room selection on Past and blocks rooms that cannot be ended', () => {
+      const completedSchedule = {
+        ...baseSchedule,
+        id: 'sched-completed',
+        cohortName: 'Completed Cohort',
+        status: 'completed' as const,
+      };
+      render(<DashboardHarness {...overviewProps({
+        schedules: [
+          { ...baseSchedule, id: 'sched-upcoming', cohortName: 'Upcoming Cohort', status: 'scheduled' as const },
+          completedSchedule,
+        ],
+        runtimeSnapshots: [],
+      })} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /select rooms/i }));
+      expect(screen.getByRole('button', { name: /select mock exam for cohort upcoming cohort/i })).toBeDisabled();
+
+      fireEvent.click(screen.getByRole('tab', { name: /past sessions/i }));
+      expect(screen.queryByRole('button', { name: /select rooms/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: /bulk room actions/i })).not.toBeInTheDocument();
+    });
+  });
 });

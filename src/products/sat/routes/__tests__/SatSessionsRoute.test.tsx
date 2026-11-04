@@ -46,6 +46,10 @@ vi.mock('../../../../features/exam-authoring/realtime/coedit', async (importOrig
 vi.mock('../../../../features/proctor/application/proctorFacade', () => ({
   proctorFacade: { isPreviewRuntimeCohortName: () => false },
 }));
+const completeRuntimeMock = vi.hoisted(() => vi.fn());
+vi.mock('../../../../features/proctor/api/proctorMutations', () => ({
+  proctorMutations: { completeRuntime: completeRuntimeMock, endSection: vi.fn(), extendSection: vi.fn(), startRuntime: vi.fn(), pauseRuntime: vi.fn(), resumeRuntime: vi.fn() },
+}));
 vi.mock('../../../../features/auth/authSession', () => ({
   useAuthSession: () => ({ session: { user: { role: 'admin' } } }),
   useOptionalAuthSession: () => null,
@@ -84,6 +88,22 @@ const receipt = {
   version: { id: 'v-new', number: 1, scope: 'full', createdNow: true },
   exam: { revision: 5 },
 };
+
+/** A room whose runtime is already running: the only state bulk End exam applies to. */
+function liveSummary(id: string, cohortName: string, startTime: string, runtimeStatus: 'live' | 'paused' = 'live') {
+  return {
+    ...summary,
+    schedule: { ...summary.schedule, id, cohortName, status: 'live', startTime },
+    runtime: {
+      ...summary.runtime,
+      id: 'runtime-' + id,
+      scheduleId: id,
+      cohortName,
+      status: runtimeStatus,
+      actualStartAt: '2026-09-01T02:00:00Z',
+    },
+  };
+}
 
 function LocationProbe() {
   return <p data-testid="location">{useLocation().pathname}</p>;
@@ -376,5 +396,75 @@ describe('SatSessionsRoute', () => {
     // Staff metadata never drops below 14px.
     expect(meta?.className).toMatch(/text-\[14px\]/);
     expect(container.innerHTML).not.toMatch(/bg-gradient|backdrop-blur/);
+  });
+});
+
+describe('SatSessionsRoute bulk end of exams', () => {
+  const liveRooms = [
+    liveSummary('sched-a', 'Alpha Room', '2026-09-01T02:00:00Z'),
+    liveSummary('sched-b', 'Beta Room', '2026-09-01T03:00:00Z'),
+    liveSummary('sched-c', 'Paused Room', '2026-09-01T04:00:00Z', 'paused'),
+  ];
+
+  beforeEach(() => {
+    completeRuntimeMock.mockClear();
+    completeRuntimeMock.mockResolvedValue({ kind: 'confirmed' });
+  });
+
+  it('offers selection only on the Live tab, never on Upcoming', () => {
+    useSummariesMock.mockReturnValue({ data: [summary, ...liveRooms], isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute('/sat/sessions?bucket=upcoming');
+    expect(screen.queryByRole('button', { name: 'Select rooms' })).not.toBeInTheDocument();
+  });
+
+  it('selects rooms and ends them all from one confirmation', async () => {
+    useSummariesMock.mockReturnValue({ data: liveRooms, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute('/sat/sessions?bucket=live');
+    fireEvent.click(screen.getByRole('button', { name: 'Select rooms' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select Alpha Room' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Beta Room' }));
+    expect(screen.getByRole('button', { name: 'Deselect Alpha Room' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('group', { name: 'Bulk room actions' })).toHaveTextContent('2 selected');
+
+    fireEvent.click(screen.getByRole('button', { name: 'End exam' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveTextContent('End exam in 2 rooms?');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'End 2 exams' }));
+
+    await waitFor(() => expect(completeRuntimeMock).toHaveBeenCalledTimes(2));
+    expect(completeRuntimeMock.mock.calls.map((call) => call[0])).toEqual(['sched-a', 'sched-b']);
+    expect(completeRuntimeMock.mock.calls.map((call) => call[1])).toEqual(['Proctor', 'Proctor']);
+    await waitFor(() => expect(screen.getByText('2 rooms ended.')).toBeInTheDocument());
+    // The bar closes with the run, so a second press cannot re-send the command.
+    expect(screen.queryByRole('group', { name: 'Bulk room actions' })).not.toBeInTheDocument();
+  });
+
+  it('selects every visible room with Select all and clears the selection', () => {
+    useSummariesMock.mockReturnValue({ data: liveRooms, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute('/sat/sessions?bucket=live');
+    fireEvent.click(screen.getByRole('button', { name: 'Select rooms' }));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
+    expect(screen.getByRole('group', { name: 'Bulk room actions' })).toHaveTextContent('3 selected');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.getByRole('group', { name: 'Bulk room actions' })).toHaveTextContent('0 selected');
+    expect(screen.getByRole('button', { name: 'End exam' })).toBeDisabled();
+  });
+
+  it('names the rooms the server refused instead of claiming every end succeeded', async () => {
+    useSummariesMock.mockReturnValue({ data: liveRooms, isLoading: false, error: null, refetch: vi.fn() });
+    completeRuntimeMock.mockImplementation((scheduleId: string) => scheduleId === 'sched-b'
+      ? Promise.resolve({ kind: 'rejected', error: 'The room is locked.' })
+      : Promise.resolve({ kind: 'confirmed' }));
+    renderRoute('/sat/sessions?bucket=live');
+    fireEvent.click(screen.getByRole('button', { name: 'Select rooms' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
+    fireEvent.click(screen.getByRole('button', { name: 'End exam' }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'End 3 exams' }));
+
+    await waitFor(() => expect(completeRuntimeMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByText(/2 ended, 1 failed: Beta Room/)).toBeInTheDocument());
   });
 });
