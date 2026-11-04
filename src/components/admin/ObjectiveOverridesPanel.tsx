@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCoalescedReload } from '../../hooks/useCoalescedReload';
 import { AlertTriangle, CheckCircle2, ChevronRight, ListChecks, LoaderCircle, MousePointerClick, SlidersHorizontal } from 'lucide-react';
 import type { ExamState, ModuleType } from '../../types';
-import { examRepository, getStudentQuestionsForModule } from '../../features/exam-authoring/api/examAuthoringGateway';
+import { examRepository, getQuestionNumberLabel, getStudentQuestionsForModule } from '../../features/exam-authoring/api/examAuthoringGateway';
 import {
   gradingErrorMessage,
   gradingService,
@@ -24,6 +24,7 @@ type ObjectiveModule = Extract<ModuleType, 'reading' | 'listening'>;
 
 type ObjectiveQuestionItem = {
   moduleType: ObjectiveModule;
+  previewLabel: string;
   descriptor: StudentQuestionDescriptor;
   prompt: string;
   defaultCorrectAnswer: string;
@@ -166,9 +167,12 @@ function buildQuestionItems(examState: ExamState): ObjectiveQuestionItem[] {
   const items: ObjectiveQuestionItem[] = [];
   (['reading', 'listening'] as const).forEach((moduleType) => {
     const descriptors = getStudentQuestionsForModule(examState, moduleType);
+    const groups = moduleType === 'reading' ? examState.reading.passages : examState.listening.parts;
     descriptors.forEach((descriptor) => {
+      const sectionNumber = groups.findIndex((group) => group.id === descriptor.groupId) + 1;
       items.push({
         moduleType,
+        previewLabel: `${moduleType === 'reading' ? 'Reading' : 'Listening'} · Section ${sectionNumber}: Q${getQuestionNumberLabel(descriptors, descriptor.id)}`,
         descriptor,
         prompt: getQuestionPrompt(descriptor),
         defaultCorrectAnswer: getCorrectAnswerDisplay(descriptor),
@@ -227,6 +231,10 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
     questions.forEach((q, index) => map.set(q.descriptor.id, index + 1));
     return map;
   }, [questions]);
+
+  const previewLabelByQuestion = useMemo(() => new Map(
+    questions.map((question) => [`${question.moduleType}:${question.descriptor.id}`, question.previewLabel]),
+  ), [questions]);
 
   const overridesByQuestionId = useMemo(() => {
     const map = new Map<string, GradingScheduleObjectiveOverrideRow>();
@@ -595,8 +603,9 @@ export function ObjectiveOverridesPanel(props: { scheduleId: string; examId?: st
                             submission.changes.map((change) => (
                               <tr key={`${change.submissionId}:${change.section}:${change.questionId}`} className="border-t border-gray-100">
                                 <td className="px-2 py-1.5 text-gray-800">{submission.studentName || submission.studentId}</td>
-                                <td className="px-2 py-1.5 font-mono text-[11px] text-gray-700">
-                                  {change.section}:{change.questionId}
+                                <td className="px-2 py-1.5 text-gray-700" title={`${change.section}:${change.questionId}`}>
+                                  {previewLabelByQuestion.get(`${change.section}:${change.questionId}`)
+                                    ?? `${change.section === 'reading' ? 'Reading' : change.section === 'listening' ? 'Listening' : change.section}: Question unavailable (${change.questionId})`}
                                 </td>
                                 <td className="px-2 py-1.5 text-gray-700">
                                   {change.oldAwardedScore ?? '—'}/{change.oldMaxScore ?? '—'}

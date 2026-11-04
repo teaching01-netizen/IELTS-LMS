@@ -412,10 +412,13 @@ describe('ObjectiveOverridesPanel released regrade', () => {
 
     fireEvent.click(screen.getByText('Preview regrade'));
     await waitFor(() => expect(gradingService.previewObjectiveRegrade).toHaveBeenCalledWith('sched-1', 'unreleased'));
+    expect(await screen.findByText('Reading · Section 1: Q1')).toBeTruthy();
+    expect(screen.queryByText('reading:q1')).toBeNull();
 
     fireEvent.click(screen.getByText('Preview released results'));
     await waitFor(() => expect(gradingService.previewObjectiveRegrade).toHaveBeenCalledWith('sched-1', 'released'));
     expect(await screen.findByText(/1 submission\(s\) \/ 1 question\(s\) would change/i)).toBeTruthy();
+    expect(screen.getByText('Reading · Section 1: Q1')).toBeTruthy();
 
     fireEvent.click(screen.getByText('Apply released regrade'));
     await waitFor(() =>
@@ -425,5 +428,57 @@ describe('ObjectiveOverridesPanel released regrade', () => {
       })),
     );
     expect(await screen.findByText(/Released regrade applied/i)).toBeTruthy();
+  });
+
+  it('uses module-specific student numbering for completion blanks and identifies unknown questions', async () => {
+    const { examRepository } = await import('../../../services/examRepository');
+    const { gradingService } = await import('../../../services/gradingService');
+    vi.mocked(examRepository.getVersionById).mockResolvedValue({
+      contentSnapshot: {
+        reading: { passages: [{ id: 'p1', title: 'Passage 1', blocks: [{
+          id: 'reading-block', type: 'SHORT_ANSWER', instruction: 'Answer',
+          questions: [{ id: 'reading-question', prompt: 'Reading question?', correctAnswer: 'Top' }],
+        }] }] },
+        listening: { parts: [
+          { id: 'part-1', title: 'Part 1', blocks: [{
+            id: 'listening-block', type: 'SHORT_ANSWER', instruction: 'Answer',
+            questions: [{ id: 'listening-question', prompt: 'Listening question?', correctAnswer: 'Top' }],
+          }] },
+          { id: 'part-2', title: 'Part 2', blocks: [{
+            id: 'note-block', type: 'NOTE_COMPLETION', instruction: 'Complete the notes',
+            questions: [{ id: 'note-question', noteText: 'Two blanks', blanks: [
+              { id: 'blank-1', correctAnswer: 'One' },
+              { id: 'blank-2', correctAnswer: 'Two' },
+            ] }],
+          }] },
+        ] },
+      },
+    } as never);
+    vi.mocked(gradingService.getObjectiveOverrides).mockResolvedValue({ success: true, data: [] });
+    vi.mocked(gradingService.getObjectiveGradingSource).mockResolvedValue({ success: true, data: { draftVersionId: null } } as never);
+    vi.mocked(gradingService.previewObjectiveRegrade).mockResolvedValue({
+      success: true,
+      data: {
+        scope: 'unreleased',
+        summary: { changedSubmissions: 1, questionChanges: 4, released: 0, unreleased: 1, scoreDelta: -4 },
+        submissions: [{ submissionId: 'sub-1', studentId: 'stu-1', studentName: 'Student One', changes: [
+          { section: 'reading', questionId: 'reading-question' },
+          { section: 'listening', questionId: 'listening-question' },
+          { section: 'listening', questionId: 'note-question:blank-2' },
+          { section: 'listening', questionId: 'removed-question' },
+        ] }],
+      },
+    } as never);
+
+    render(<ObjectiveOverridesPanel scheduleId="sched-1" publishedVersionId="ver-1" />);
+    fireEvent.click(screen.getByText('Session Settings'));
+    await screen.findByText(/READING • Q1/i);
+    fireEvent.click(screen.getByText('Preview regrade'));
+
+    expect(await screen.findByText('Reading · Section 1: Q1')).toBeTruthy();
+    expect(screen.getByText('Listening · Section 1: Q1')).toBeTruthy();
+    expect(screen.getByText('Listening · Section 2: Q3')).toBeTruthy();
+    expect(screen.getByText('Listening: Question unavailable (removed-question)')).toBeTruthy();
+    expect(screen.queryByText('listening:note-question:blank-2')).toBeNull();
   });
 });
