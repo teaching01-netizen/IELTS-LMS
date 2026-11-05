@@ -42,9 +42,15 @@ export function SatSessionControls({
 
   // A completed room never regains Pause or Extend; only explicit closure.
   const endOnly = runtimeStatus === 'completed' && evaOpen;
+  // Ending is not gated on starting. A room nobody started still has to be
+  // closeable: the server writes its terminal runtime row (nothing ran, so
+  // nothing is submitted), and requiring Start first would leave a room that
+  // will never be used sitting in Upcoming forever.
+  const endWithoutStart = runtimeStatus === 'not_started';
   const endBusy = pendingActions.has('complete');
+  const endAvailable = endOnly || endWithoutStart;
 
-  if (!active && !onViewResponses && !endOnly) return null;
+  if (!active && !onViewResponses && !endAvailable) return null;
 
   return (
     <div role="group" aria-label="Room controls" className="sat-room__controls flex shrink-0 flex-wrap items-center gap-2">
@@ -54,7 +60,7 @@ export function SatSessionControls({
           View responses
         </button>
       ) : null}
-      {endOnly ? (
+      {endAvailable ? (
         <button
           type="button"
           onClick={(event) => { if (!endBusy) onComplete(event.currentTarget); }}

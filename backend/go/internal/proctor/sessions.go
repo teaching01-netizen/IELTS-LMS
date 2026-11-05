@@ -737,9 +737,53 @@ func hydrateSessionRuntime(row sessionRuntimeRow, sections []SessionRuntimeSecti
 	}
 }
 
-// notStartedSessionRuntime synthesizes the pre-start projection, mirroring
-// Rust build_not_started_runtime minus the version-plan load (see package
-// doc): empty plan/sections arrays keep the wire shape.
+// TerminalRuntimeStatusForSchedule maps a finished schedule onto the runtime
+// vocabulary the projection publishes. It reports false for everything that is
+// not terminal, so the synthesis only changes state for rooms that can never
+// start again.
+func TerminalRuntimeStatusForSchedule(scheduleStatus string) (string, bool) {
+	switch scheduleStatus {
+	case examruntime.StatusCompleted:
+		return examruntime.StatusCompleted, true
+	case examruntime.StatusCancelled:
+		return examruntime.StatusCancelled, true
+	}
+	return "", false
+}
+
+// ApplyTerminalScheduleStatus projects a terminal schedule status onto a
+// synthesized runtime for a schedule that has no exam_session_runtimes row.
+//
+// End Exam closes a room that never started on the schedule row alone (nothing
+// ran, so nothing is submitted), so the schedule is the ONLY record of that
+// room's final state. Every reader that synthesizes a runtime must apply this
+// or it reports not_started for a finished room — the room page keeps offering
+// Start, the list keeps it Upcoming, and the student bootstrap keeps opening
+// entry for an exam that is over.
+func ApplyTerminalScheduleStatus(runtime *SessionRuntime, scheduleStatus string, revision int64, updatedAt, now time.Time) {
+	terminal, ok := TerminalRuntimeStatusForSchedule(scheduleStatus)
+	if !ok {
+		return
+	}
+	ended := updatedAt
+	if ended.IsZero() {
+		ended = now
+	}
+	runtime.Status = terminal
+	runtime.ActualEndAt = &ended
+	runtime.UpdatedAt = ended
+	runtime.Revision = revision
+}
+
+// notStartedSessionRuntime synthesizes the runtime projection for a schedule
+// with no exam_session_runtimes row yet: the pre-start shape by default,
+// mirroring Rust build_not_started_runtime minus the version-plan load (see
+// package doc), with empty plan/sections arrays keeping the wire shape.
+//
+// A room that was ended before it ever started is the one exception: the
+// schedule's terminal status is projected onto it (see
+// ApplyTerminalScheduleStatus) so the room reports the state the staff action
+// actually committed.
 func notStartedSessionRuntime(schedule SessionSchedule, now time.Time) SessionRuntime {
 	choice := ""
 	if strings.EqualFold(schedule.ProviderKey, "ielts") && schedule.IeltsTimingModel != nil {
@@ -747,7 +791,9 @@ func notStartedSessionRuntime(schedule SessionSchedule, now time.Time) SessionRu
 	} else if schedule.SatTimingModel != nil {
 		choice = *schedule.SatTimingModel
 	}
-	return NotStartedRuntimeWithChoice(schedule.ID, schedule.ExamID, schedule.ProviderKey, choice, now)
+	runtime := NotStartedRuntimeWithChoice(schedule.ID, schedule.ExamID, schedule.ProviderKey, choice, now)
+	ApplyTerminalScheduleStatus(&runtime, schedule.Status, schedule.Revision, schedule.UpdatedAt, now)
+	return runtime
 }
 
 // NotStartedRuntimeForProvider is the ONE pre-start projection for a schedule
@@ -1103,9 +1149,9 @@ func LoadSessionRuntimeBySchedule(ctx context.Context, db *sql.DB, scheduleID st
 	var schedule SessionSchedule
 	var satTimingModel, ieltsTimingModel sql.NullString
 	if err := db.QueryRowContext(ctx, `
-		SELECT id, exam_id, provider_key, sat_timing_model, ielts_timing_model
+		SELECT id, exam_id, provider_key, sat_timing_model, ielts_timing_model, status, revision, updated_at
 		FROM exam_schedules
-		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel, &ieltsTimingModel); err != nil {
+		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel, &ieltsTimingModel, &schedule.Status, &schedule.Revision, &schedule.UpdatedAt); err != nil {
 		return SessionRuntime{}, err
 	}
 	schedule.SatTimingModel = nullStringPtr(satTimingModel)
@@ -1141,9 +1187,9 @@ func LoadSessionRuntimeByStatus(ctx context.Context, db sessionQuerier, schedule
 	var schedule SessionSchedule
 	var satTimingModel, ieltsTimingModel sql.NullString
 	if err := db.QueryRowContext(ctx, `
-		SELECT id, exam_id, provider_key, sat_timing_model, ielts_timing_model
+		SELECT id, exam_id, provider_key, sat_timing_model, ielts_timing_model, status, revision, updated_at
 		FROM exam_schedules
-		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel, &ieltsTimingModel); err != nil {
+		WHERE id = ?`, scheduleID).Scan(&schedule.ID, &schedule.ExamID, &schedule.ProviderKey, &satTimingModel, &ieltsTimingModel, &schedule.Status, &schedule.Revision, &schedule.UpdatedAt); err != nil {
 		return SessionRuntime{}, err
 	}
 	schedule.SatTimingModel = nullStringPtr(satTimingModel)

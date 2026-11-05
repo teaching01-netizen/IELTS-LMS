@@ -237,8 +237,9 @@ func TestAutoSubmitScheduleAfterEndSectionUsesProctorEndReason(t *testing.T) {
 
 // A room that never started has no runtime row (the proctor list synthesizes a
 // not-started runtime on read). End Exam must still close it: the schedule is
-// the terminal entity in that case, so completing it is a schedule-only write
-// with the same audit and outbox wakeups the runtime path emits.
+// the terminal entity in that case: completing it writes the terminal runtime
+// row plus the schedule status, with the same audit and outbox wakeups the
+// runtime path emits.
 func TestCompleteExamEndsScheduleThatNeverStarted(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -269,10 +270,11 @@ func TestCompleteExamEndsScheduleThatNeverStarted(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
-	// Schedule-only terminal transition.
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT status, revision FROM exam_schedules WHERE id = ?")).
-		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"status", "revision"}).AddRow("scheduled", 4))
+	// The room gets its terminal runtime row: every reader keys off it, so a
+	// schedule-only write would leave the room reporting not_started.
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO exam_session_runtimes (id, schedule_id, exam_id, provider_key, status, plan_snapshot, timing_model, actual_end_at, revision) VALUES (?, ?, ?, ?, 'completed', '[]', ?, UTC_TIMESTAMP(6), 1)")).
+		WithArgs(sqlmock.AnyArg(), "sched-1", "exam-1", "ielts", "legacy_section_v1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET status = 'completed', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?")).
 		WithArgs("sched-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -331,9 +333,6 @@ func TestCompleteExamWithoutRuntimeIsIdempotentOnceTerminal(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
 		WithArgs("sched-1").
 		WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT status, revision FROM exam_schedules WHERE id = ?")).
-		WithArgs("sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"status", "revision"}).AddRow("completed", 9))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_lifecycle_receipts")).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 

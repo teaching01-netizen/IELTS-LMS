@@ -1022,7 +1022,8 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 		// holds it while waiting for the runtime row locked below. Taking the
 		// runtime first closed a lock cycle with check-in (global order:
 		// schedule -> registration -> attempt -> runtime -> section).
-		if _, err := examruntime.LockScheduleRow(ctx, q, scheduleID); err != nil {
+		lockedSchedule, err := examruntime.LockScheduleRow(ctx, q, scheduleID)
+		if err != nil {
 			return err
 		}
 		if err := lockScheduleScope(ctx, q, scheduleID); err != nil {
@@ -1050,12 +1051,14 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 			}
 			// A room that never started has no runtime row: the proctor list
 			// synthesizes a not-started runtime on read, so End Exam must still
-			// close it. With nothing running there is nothing to submit, so the
-			// terminal write lands on the schedule itself — the same completed
-			// status CompleteInTx would have written — with the same audit and
-			// outbox wakeups. Repeating it on an already-terminal schedule is a
-			// no-op success (idempotent under retry).
-			endedRevision, changed, err := completeScheduleWithoutRuntime(ctx, q, scheduleID)
+			// close it. Nothing ran, so nothing is submitted, but the room still
+			// needs a terminal state everywhere it is read — the runtime row is
+			// written here (status completed, empty plan, no sections) so the
+			// room page, the room list, the staff runtime read and the student
+			// bootstrap all report the same completed state the schedule commits.
+			// Repeating it on an already-terminal schedule is a no-op success
+			// (idempotent under retry).
+			endedRevision, changed, err := completeScheduleWithoutRuntime(ctx, q, lockedSchedule)
 			if err != nil {
 				return err
 			}
@@ -1109,35 +1112,67 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 	return nil
 }
 
-// completeScheduleWithoutRuntime ends a schedule that never had a runtime row.
+// completeScheduleWithoutRuntime ends a room that never had a runtime row.
 //
 // The proctor session reads synthesize a not-started runtime for such rooms
-// (see sessions.go), so staff can End Exam on a room the runtime writes never
-// touched. There is no runtime to complete and nothing to submit; the schedule
-// is the terminal entity, so it gets the same 'completed' status CompleteInTx
-// writes and the bumped revision the caller uses for its outbox wakeups.
+// (see sessions.go), so staff can End Exam before anyone starts. Closing one is
+// a two-part terminal write, because "no runtime row" is a projection, not a
+// state the rest of the system understands:
+//
+//   - the runtime row itself, written completed with an empty plan and no
+//     sections. Every reader of the room — the room list, the room page, the
+//     staff schedule runtime read, the student bootstrap — keys off
+//     exam_session_runtimes, so without this row the room kept reporting
+//     not_started after a confirmed End Exam: it stayed in Upcoming, still
+//     offered Start, and student entry still opened for a finished exam.
+//   - the schedule row, the same 'completed' status CompleteInTx writes.
+//
+// Nothing ran, so nothing is submitted. The returned revision is the bumped
+// schedule revision the caller uses for its outbox wakeup.
 //
 // The bool reports whether this call performed the transition. A schedule that
 // is already terminal returns false so the caller can store the lifecycle
 // receipt without duplicating the audit row or re-bumping the revision.
-func completeScheduleWithoutRuntime(ctx context.Context, q tx.Tx, scheduleID string) (int64, bool, error) {
-	const sel = "SELECT status, revision FROM exam_schedules WHERE id = ?"
-	var status string
-	var revision int64
-	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&status, &revision); err != nil {
-		if err == sql.ErrNoRows {
-			return 0, false, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Schedule not found.", HTTPStatus: 404}
+func completeScheduleWithoutRuntime(ctx context.Context, q tx.Tx, sch *examruntime.StartSchedule) (int64, bool, error) {
+	if sch == nil {
+		return 0, false, &apperrors.Error{Code: apperrors.CodeInternal, Message: "Schedule is not locked.", HTTPStatus: 500}
+	}
+	if sch.Status == "completed" || sch.Status == "cancelled" {
+		return sch.Revision, false, nil
+	}
+	choice := sch.SatTimingModel
+	if strings.EqualFold(sch.ProviderKey, "ielts") && sch.IeltsTimingModel != "" {
+		choice = sch.IeltsTimingModel
+	}
+	timingModel := examruntime.ResolveTimingModel(sch.ProviderKey, choice)
+	// Empty plan and no sections: the room never ran, so there is no clock to
+	// project. actual_start_at stays NULL — the exam never started.
+	const insRuntime = "INSERT INTO exam_session_runtimes (id, schedule_id, exam_id, provider_key, status, plan_snapshot, timing_model, actual_end_at, revision) VALUES (?, ?, ?, ?, 'completed', '[]', ?, UTC_TIMESTAMP(6), 1)"
+	if _, err := q.ExecContext(ctx, insRuntime, uuid.NewString(), sch.ID, sch.ExamID, sch.ProviderKey, timingModel); err != nil {
+		// A row that appeared under us (another End Exam won the lock race)
+		// means the room is already being closed; the caller's next read
+		// reports the winner's state.
+		if isDuplicateKey(err) {
+			return sch.Revision, false, nil
 		}
 		return 0, false, err
 	}
-	if status == "completed" || status == "cancelled" {
-		return revision, false, nil
-	}
 	const done = "UPDATE exam_schedules SET status = 'completed', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
-	if _, err := q.ExecContext(ctx, done, scheduleID); err != nil {
+	if _, err := q.ExecContext(ctx, done, sch.ID); err != nil {
 		return 0, false, err
 	}
-	return revision + 1, true, nil
+	return sch.Revision + 1, true, nil
+}
+
+// isDuplicateKey reports whether err is MySQL's duplicate-entry error for the
+// unique schedule_id index. The caller treats it as "another writer already
+// closed this room" rather than a failure.
+func isDuplicateKey(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate") || strings.Contains(message, "1062")
 }
 
 // AutoSubmitAfterComplete seals one remaining attempt as auto-submit

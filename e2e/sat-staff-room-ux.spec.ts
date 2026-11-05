@@ -136,6 +136,14 @@ interface RoomTransportOptions {
   deviceTransfers?: Record<string, unknown>[];
   routeQueue?: { enabled: boolean; items: Record<string, unknown>[] };
   routeQueueFailures?: number;
+  /**
+   * Room state the transport starts in. `not_started` is a room nobody has
+   * begun: the server has no exam_session_runtimes row at all, so every read
+   * projects the pre-start shape (and, once ended, the terminal one).
+   */
+  runtimeStatus?: "not_started" | "live" | "paused" | "completed";
+  /** The complete-exam command is refused with the given status instead of applied. */
+  completeRejection?: { status: number; message: string };
 }
 
 const SETUP_EXAM = {
@@ -170,7 +178,8 @@ const SETUP_PUBLISHED_VERSION = {
 };
 
 async function installRoomTransport(page: Page, options: RoomTransportOptions = {}) {
-  const schedule = { ...SCHEDULE, satStartMode: options.satStartMode ?? "proctor" };
+  let scheduleStatus = options.runtimeStatus === "completed" ? "completed" : SCHEDULE.status;
+  const schedule = { ...SCHEDULE, satStartMode: options.satStartMode ?? "proctor", status: scheduleStatus };
   const student = { ...STUDENT, ...options.student };
   const alerts = options.alerts ?? [];
   const expectedRoster = options.expectedRoster ?? [];
@@ -181,6 +190,37 @@ async function installRoomTransport(page: Page, options: RoomTransportOptions = 
   let startCodeGeneration = START_CODE_VIEW.generation;
   const routeAssignments: unknown[] = [];
   const codeRotations: unknown[] = [];
+  const completeCommands: Array<Record<string, unknown>> = [];
+  // A room with no runtime row reads exactly like the server's synthesis: the
+  // pre-start shape, or the terminal shape once the schedule is completed.
+  let runtimeStatus = options.runtimeStatus ?? "live";
+  // Completing a room bumps both revisions server-side, and the client only
+  // accepts a projection that is newer: same-revision reads keep the runtime
+  // already held (mergeProctorRuntime). The mock has to move the revision the
+  // way CompleteInTx does or a completed room reads as stale forever.
+  let runtimeRevision = RUNTIME.revision;
+  let scheduleRevision = SCHEDULE.revision;
+  let completedAt = NOW;
+  const runtimeView = () => {
+    if (runtimeStatus === "live" || runtimeStatus === "paused") return { ...RUNTIME, revision: runtimeRevision };
+    const terminal = runtimeStatus === "completed";
+    return {
+      ...RUNTIME,
+      status: runtimeStatus,
+      revision: runtimeRevision,
+      updatedAt: terminal ? completedAt : NOW,
+      serverNow: terminal ? completedAt : NOW,
+      actualStartAt: null,
+      actualEndAt: terminal ? completedAt : null,
+      activeSectionKey: null,
+      currentSectionKey: null,
+      currentSectionRemainingSeconds: 0,
+      currentSectionDeadlineAt: null,
+      waitingForNextSection: false,
+      sections: [],
+    };
+  };
+  const scheduleView = () => ({ ...schedule, status: scheduleStatus, revision: scheduleRevision });
 
   await page.route("**/api/v1/auth/session", (route) => route.fulfill({
     status: 200,
@@ -198,11 +238,31 @@ async function installRoomTransport(page: Page, options: RoomTransportOptions = 
 
   await page.route("**/api/v1/proctor/sessions**", async (route) => {
     const url = new URL(route.request().url());
+    if (route.request().method() === "POST" && url.pathname.endsWith("/control/complete-exam")) {
+      completeCommands.push((route.request().postDataJSON() ?? {}) as Record<string, unknown>);
+      if (options.completeRejection) {
+        await route.fulfill({
+          status: options.completeRejection.status,
+          contentType: "application/json",
+          body: JSON.stringify({ success: false, error: { code: "CONFLICT", message: options.completeRejection.message } }),
+        });
+        return;
+      }
+      // Ending a room that never started writes its terminal runtime row (and
+      // the schedule status); every later read reports the completed state.
+      runtimeStatus = "completed";
+      scheduleStatus = "completed";
+      runtimeRevision += 1;
+      scheduleRevision += 1;
+      completedAt = new Date(Date.parse(NOW) + 60_000).toISOString();
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: { ok: true } }) });
+      return;
+    }
     if (url.pathname === "/api/v1/proctor/sessions" && url.searchParams.get("providerKey") === "sat") {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ success: true, data: [{ schedule, runtime: RUNTIME, studentCount: 1, activeCount: 1, joinReadyCount: 1, joinTotalCount: 1, degradedLiveMode: false }] }),
+        body: JSON.stringify({ success: true, data: [{ schedule: scheduleView(), runtime: runtimeView(), studentCount: 1, activeCount: 1, joinReadyCount: 1, joinTotalCount: 1, degradedLiveMode: false }] }),
       });
       return;
     }
@@ -212,7 +272,7 @@ async function installRoomTransport(page: Page, options: RoomTransportOptions = 
         contentType: "application/json",
         body: JSON.stringify({
           success: true,
-          data: { schedule, runtime: RUNTIME, sessions: [student], alerts, auditLogs: [], notes: [], presence: [], violationRules: [], degradedLiveMode: false },
+          data: { schedule: scheduleView(), runtime: runtimeView(), sessions: [student], alerts, auditLogs: [], notes: [], presence: [], violationRules: [], degradedLiveMode: false },
         }),
       });
       return;
@@ -276,9 +336,28 @@ async function installRoomTransport(page: Page, options: RoomTransportOptions = 
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: {} }) });
   });
 
+  // Staff commands re-read the authoritative projection afterwards
+  // (getRuntimeSnapshot: schedule + runtime). A room that never started has no
+  // exam_session_runtimes row, and the server answers with its synthesized
+  // projection rather than a 404 — 404ing here is exactly what made a
+  // confirmed End Exam look like a failed one.
+  await page.route("**/api/v1/schedules/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/runtime")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: runtimeView() }) });
+      return;
+    }
+    if (url.pathname.endsWith("/commands")) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: runtimeView() }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ success: true, data: scheduleView() }) });
+  });
+
   return {
     routeAssignments,
     codeRotations,
+    completeCommands,
     recoverRouteQueue: () => { routeQueueFailuresRemaining = 0; },
   };
 }
@@ -553,6 +632,51 @@ test.describe("SAT staff live-room UX", () => {
     await page.keyboard.press("Escape");
     await expect(confirmation).toHaveCount(0);
     await expect(page.getByRole("button", { name: "More" })).toBeFocused();
+  });
+
+  test("ends a room that never started, without starting it first", async ({ page }) => {
+    const transport = await installRoomTransport(page, { runtimeStatus: "not_started" });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/sat/sessions/sched-ux-1");
+
+    // Nobody has started this room, and starting is not a precondition for
+    // closing it: End exam is offered beside the pre-start room state.
+    await expect(page.getByRole("button", { name: "End exam" })).toBeVisible();
+    await expect(page.getByText("Not started", { exact: true }).first()).toBeVisible();
+
+    await page.getByRole("button", { name: "End exam" }).click();
+    const confirmation = page.getByRole("alertdialog");
+    await expect(confirmation).toContainText("End the exam for everyone in this room?");
+    await confirmation.getByRole("button", { name: "End exam" }).click();
+
+    // One command, one terminal room: the ack is not followed by a failed
+    // refresh, and the room reports the state the server committed.
+    await expect(page.getByText("Room completed.")).toBeVisible();
+    expect(transport.completeCommands).toHaveLength(1);
+    expect(transport.completeCommands[0]?.actorId).toBe("Dana Proctor");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expect(page.getByText("Finished", { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "View responses" })).toBeVisible();
+    // A finished room offers no End exam again.
+    await expect(page.getByRole("button", { name: "End exam" })).toHaveCount(0);
+  });
+
+  test("a refused End Exam keeps the room unstarted and names the reason", async ({ page }) => {
+    const transport = await installRoomTransport(page, {
+      runtimeStatus: "not_started",
+      completeRejection: { status: 409, message: "The room is locked." },
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto("/sat/sessions/sched-ux-1");
+
+    await page.getByRole("button", { name: "End exam" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "End exam" }).click();
+
+    await expect(page.getByRole("alert")).toContainText("The room is locked.");
+    // Nothing was completed, so the room is still endable and still pre-start.
+    await expect(page.getByRole("button", { name: "End exam" })).toBeVisible();
+    await expect(page.getByText("Room completed.")).toHaveCount(0);
+    expect(transport.completeCommands).toHaveLength(1);
   });
 
   test("shows the shared code and correct start instructions, then rotates the code", async ({ page }) => {

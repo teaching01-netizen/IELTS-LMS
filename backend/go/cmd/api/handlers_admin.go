@@ -664,10 +664,13 @@ func schedulesRuntimeHandler(app *App) http.HandlerFunc {
 				return
 			}
 		}
-		if _, err := app.Schedules.GetRuntime(r.Context(), id); err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
+		// No runtime row is not a read error: a room that never started has no
+		// runtime to load, and a room ended before it started has only its
+		// schedule row. loadStudentRuntimeContext publishes the same synthesized
+		// projection the proctor and student reads use (not_started, or the
+		// terminal status the schedule already committed), so callers that
+		// reconcile after a command — the staff End Exam path among them — get a
+		// runtime snapshot instead of a 404 that looks like a failed command.
 		out, err := loadStudentRuntimeContext(r.Context(), app.DB, id)
 		if err != nil {
 			httpx.WriteError(w, r, err)
