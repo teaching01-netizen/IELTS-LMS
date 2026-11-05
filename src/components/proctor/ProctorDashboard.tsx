@@ -24,9 +24,14 @@ import {
 } from './proctorOverviewSessions';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 
-/** Only a running or paused room can be ended; a completed room is already closed. */
+/**
+ * Any room that has not finished can be ended: a room that never started can
+ * still be closed. Completed and cancelled rooms are already terminal.
+ */
 function isRoomEndable(group: ExamGroup): boolean {
-  return group.runtimeStatus === 'live' || group.runtimeStatus === 'paused';
+  return group.runtimeStatus === 'not_started'
+    || group.runtimeStatus === 'live'
+    || group.runtimeStatus === 'paused';
 }
 
 interface ProctorDashboardProps {
@@ -1103,7 +1108,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
         isOpen={roomBulkEndConfirmOpen}
         onClose={() => { if (!roomBulkEndRunning) setRoomBulkEndConfirmOpen(false); }}
         title={`End exam in ${selectedRoomCount} room${selectedRoomCount === 1 ? '' : 's'}?`}
-        description="Students in the selected rooms move to the post-exam phase now. This action cannot be undone."
+        description="Selected rooms stop now and every student in them moves to the post-exam phase. This action cannot be undone."
         confirmLabel={`End ${selectedRoomCount} exam${selectedRoomCount === 1 ? '' : 's'}`}
         tone="danger"
         onConfirm={runRoomBulkEnd}
@@ -1189,7 +1194,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                 >
                   Clear
                 </button>
-                <span className="text-sm text-slate-500">Only running or paused rooms can be ended.</span>
+                <span className="text-sm text-slate-500">Rooms can be ended until they finish.</span>
                 <button
                   type="button"
                   onClick={() => setRoomBulkEndConfirmOpen(true)}

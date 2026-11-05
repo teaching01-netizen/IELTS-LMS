@@ -212,7 +212,7 @@ test.describe("Proctor overview bulk end exam", () => {
     await expect(page.getByRole("group", { name: "Bulk room actions" })).toHaveCount(0);
   });
 
-  test("P4: rooms that are not running cannot be selected for ending", async ({ page }) => {
+  test("P4: rooms that have not started can be selected for ending", async ({ page }) => {
     await installProctorTransport(page, { rooms: [LISTENING, UPCOMING] });
     await page.goto("/proctor");
     await expect(page.getByRole("heading", { name: "Cohorts and students" })).toBeVisible();
@@ -220,7 +220,27 @@ test.describe("Proctor overview bulk end exam", () => {
     await page.getByRole("button", { name: "Select rooms" }).click();
     await expect(page.getByRole("button", { name: "Select Mock Exam for cohort Cohort A" })).toBeEnabled();
     const upcomingCard = page.getByRole("button", { name: "Select Mock Exam for cohort Cohort C" });
-    await expect(upcomingCard).toBeDisabled();
-    await expect(page.getByRole("group", { name: "Bulk room actions" })).toContainText("Only running or paused rooms can be ended.");
+    await expect(upcomingCard).toBeEnabled();
+    await upcomingCard.click();
+    await expect(page.getByRole("group", { name: "Bulk room actions" })).toContainText("1 selected");
+  });
+
+  test("P5: ends a room that has not started from one confirmation", async ({ page }) => {
+    const transport = await installProctorTransport(page, { rooms: [UPCOMING] });
+    await page.goto("/proctor");
+    await expect(page.getByRole("heading", { name: "Cohorts and students" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Select rooms" }).click();
+    await page.getByRole("button", { name: "Select Mock Exam for cohort Cohort C" }).click();
+    await expect(page.getByRole("group", { name: "Bulk room actions" })).toContainText("1 selected");
+
+    await page.getByRole("button", { name: "End exam", exact: true }).click();
+    const confirmation = page.getByRole("dialog");
+    await expect(confirmation).toContainText("End exam in 1 room?");
+    await confirmation.getByRole("button", { name: "End 1 exam" }).click();
+
+    await expect(page.getByText("1 room ended.")).toBeVisible();
+    expect(transport.commands.map((command) => command.scheduleId)).toEqual(["sched-upcoming"]);
+    await expect(page.getByRole("button", { name: "Monitor Mock Exam for cohort Cohort C" })).toHaveCount(0);
   });
 });

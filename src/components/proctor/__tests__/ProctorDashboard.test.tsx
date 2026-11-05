@@ -1263,7 +1263,7 @@ describe('ProctorDashboard runtime controls', () => {
       expect(screen.getByText('1 failed: Cohort B.')).toBeInTheDocument();
     });
 
-    it('offers no room selection on Past and blocks rooms that cannot be ended', () => {
+    it('lets rooms that have not started be selected, never rooms on Past', () => {
       const completedSchedule = {
         ...baseSchedule,
         id: 'sched-completed',
@@ -1279,11 +1279,32 @@ describe('ProctorDashboard runtime controls', () => {
       })} />);
 
       fireEvent.click(screen.getByRole('button', { name: /select rooms/i }));
-      expect(screen.getByRole('button', { name: /select mock exam for cohort upcoming cohort/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /select mock exam for cohort upcoming cohort/i })).toBeEnabled();
 
       fireEvent.click(screen.getByRole('tab', { name: /past sessions/i }));
       expect(screen.queryByRole('button', { name: /select rooms/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('group', { name: /bulk room actions/i })).not.toBeInTheDocument();
+    });
+
+    it('ends a room that has not started from the bulk action', async () => {
+      const onCompleteExam = vi.fn().mockResolvedValue(undefined);
+      render(<DashboardHarness {...overviewProps({
+        schedules: [{ ...baseSchedule, id: 'sched-upcoming', cohortName: 'Upcoming Cohort', status: 'scheduled' as const }],
+        runtimeSnapshots: [],
+        onCompleteExam,
+      })} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /select rooms/i }));
+      fireEvent.click(screen.getByRole('button', { name: /select mock exam for cohort upcoming cohort/i }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /^end exam$/i }));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /end 1 exam/i }));
+      });
+
+      expect(onCompleteExam).toHaveBeenCalledWith('sched-upcoming');
+      expect(screen.getByText('1 room ended.')).toBeInTheDocument();
     });
   });
 });

@@ -5,16 +5,18 @@ was the slowest part of wrapping up a test cycle.
 
 ## Behaviour
 
-**SAT Rooms** (`/sat/sessions`, Live tab) and **IELTS/ACT proctor overview**
-(`/proctor`, Active tab) both offer a `Select rooms` toggle. In selection mode a
+**SAT Rooms** (`/sat/sessions`, Live and Upcoming tabs) and **IELTS/ACT proctor
+overview** (`/proctor`, Active tab) both offer a `Select rooms` toggle. In selection mode a
 room row / cohort card toggles instead of opening, a bulk bar shows
 `N selected` with `Select all`, `Clear`, and a destructive `End exam`, and one
 confirmation dialog (`End exam in N rooms?`) closes every selected room.
 
 Rules shared by both surfaces:
 
-- Only **running or paused** rooms are selectable. Upcoming/completed rooms are
-  disabled (`Can't end`) and ignored by `Select all`.
+- Every room that has **not finished** is selectable: not started, running, or
+  paused. A room that never started can still be ended (the server completes its
+  runtime with no attempts to auto-submit); finished/cancelled rooms are already
+  terminal and are ignored by `Select all`.
 - Selection lives only on the tab where ending is possible. Changing tab, search,
   or opening a room clears it; a stale id can never end a room that left the list.
 - One `POST /v1/proctor/sessions/:scheduleId/control/complete-exam` per room, in
@@ -44,18 +46,23 @@ Scenarios:
 - `e2e/sat-staff-bulk-end-ux.spec.ts`
   - S1 select two live rooms → one confirm → two commands, "2 rooms ended.".
   - S2 one refused room → both commands attempted, notice names the refused room.
-  - S3 no `Select rooms` entry point on Upcoming.
+  - S3 unstarted rooms offer the entry point; finished rooms never do.
   - S4 cancelling the confirmation sends nothing and keeps the selection.
   - S5 changing bucket abandons the selection.
   - S6 selection state has no serious axe violations.
+  - S7 bulk-ends a room that never started from the Upcoming tab.
 - `e2e/proctor-bulk-end-ux.spec.ts`
   - P1 happy path on the proctor overview (toast + list reconciliation).
   - P2 partial failure: other rooms still end, toast names the failed cohort.
   - P3 Past tab exposes no selection controls.
-  - P4 non-running cohorts are disabled during selection.
+  - P4 not-started cohorts are selectable.
+  - P5 bulk-ends a cohort that never started.
 
 ## Risks / limits
 
+- Ending a not-started room uses the same `complete-exam` control as a live one:
+  the runtime completes and any Eva SIM form closes first. There is no separate
+  "cancel room" command.
 - Both rooms' end commands remain per-room HTTP calls; there is no backend batch
   endpoint. Large selections are limited by batching (5 concurrent) rather than a
   server transaction, so a mid-run failure is visible but not atomic.

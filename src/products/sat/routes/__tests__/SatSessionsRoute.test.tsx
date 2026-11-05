@@ -105,6 +105,15 @@ function liveSummary(id: string, cohortName: string, startTime: string, runtimeS
   };
 }
 
+/** A room whose runtime already finished: the only state bulk End exam refuses. */
+function finishedSummary(id: string, cohortName: string, startTime: string) {
+  return {
+    ...summary,
+    schedule: { ...summary.schedule, id, cohortName, status: 'completed', startTime },
+    runtime: { ...summary.runtime, id: 'runtime-' + id, scheduleId: id, cohortName, status: 'completed', actualStartAt: startTime, actualEndAt: startTime },
+  };
+}
+
 function LocationProbe() {
   return <p data-testid="location">{useLocation().pathname}</p>;
 }
@@ -411,9 +420,24 @@ describe('SatSessionsRoute bulk end of exams', () => {
     completeRuntimeMock.mockResolvedValue({ kind: 'confirmed' });
   });
 
-  it('offers selection only on the Live tab, never on Upcoming', () => {
-    useSummariesMock.mockReturnValue({ data: [summary, ...liveRooms], isLoading: false, error: null, refetch: vi.fn() });
+  it('ends rooms that have not started from the Upcoming tab', async () => {
+    useSummariesMock.mockReturnValue({ data: [summary], isLoading: false, error: null, refetch: vi.fn() });
     renderRoute('/sat/sessions?bucket=upcoming');
+    fireEvent.click(screen.getByRole('button', { name: 'Select rooms' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select Morning' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'End exam' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveTextContent('End exam in 1 room?');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'End 1 exam' }));
+
+    await waitFor(() => expect(completeRuntimeMock).toHaveBeenCalledWith('sched-1', 'Proctor'));
+    await waitFor(() => expect(screen.getByText('1 room ended.')).toBeInTheDocument());
+  });
+
+  it('offers no selection on rooms that already finished', () => {
+    useSummariesMock.mockReturnValue({ data: [finishedSummary('sched-done', 'Finished room', '2026-08-30T02:00:00Z')], isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute('/sat/sessions?bucket=finished');
     expect(screen.queryByRole('button', { name: 'Select rooms' })).not.toBeInTheDocument();
   });
 

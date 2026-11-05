@@ -21,9 +21,9 @@ const NOW = "2026-11-04T02:05:00.000Z";
 function satRoom(input: {
   id: string;
   cohortName: string;
-  runtimeStatus: "live" | "paused" | "not_started";
+  runtimeStatus: "live" | "paused" | "not_started" | "completed";
   startTime: string;
-  scheduleStatus: "live" | "scheduled";
+  scheduleStatus: "live" | "scheduled" | "completed";
 }) {
   return {
     schedule: {
@@ -84,6 +84,7 @@ const MORNING = satRoom({ id: "sched-morning", cohortName: "Morning room", runti
 const AFTERNOON = satRoom({ id: "sched-afternoon", cohortName: "Afternoon room", runtimeStatus: "live", startTime: "2026-11-04T03:00:00.000Z", scheduleStatus: "live" });
 const PAUSED = satRoom({ id: "sched-paused", cohortName: "Paused room", runtimeStatus: "paused", startTime: "2026-11-04T04:00:00.000Z", scheduleStatus: "live" });
 const UPCOMING = satRoom({ id: "sched-upcoming", cohortName: "Upcoming room", runtimeStatus: "not_started", startTime: "2026-11-05T02:00:00.000Z", scheduleStatus: "scheduled" });
+const FINISHED = satRoom({ id: "sched-finished", cohortName: "Finished room", runtimeStatus: "completed", startTime: "2026-11-03T02:00:00.000Z", scheduleStatus: "completed" });
 
 interface BulkEndTransport {
   /** Rooms the mocked list currently holds; ended rooms are removed after a confirmed command. */
@@ -210,11 +211,36 @@ test.describe("SAT Rooms bulk end exam", () => {
     await expect(page.locator(".sat-list-row").filter({ hasText: "Paused room" })).toHaveCount(1);
   });
 
-  test("S3: the entry point exists only where ending is possible", async ({ page }) => {
-    await installBulkEndTransport(page, { rooms: [MORNING, UPCOMING] });
+  test("S3: rooms that never started can be ended, rooms that finished cannot", async ({ page }) => {
+    await installBulkEndTransport(page, { rooms: [UPCOMING, FINISHED] });
     await page.goto("/sat/sessions?bucket=upcoming");
     await expect(page.getByText("Upcoming room")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select rooms" })).toBeVisible();
+
+    await page.getByRole("radio", { name: /Finished/ }).click();
+    await expect(page.getByText("Finished room")).toBeVisible();
     await expect(page.getByRole("button", { name: "Select rooms" })).toHaveCount(0);
+  });
+
+  test("S7: ends rooms that have not started from the Upcoming tab", async ({ page }) => {
+    const transport = await installBulkEndTransport(page, { rooms: [UPCOMING] });
+    await page.goto("/sat/sessions?bucket=upcoming");
+    await expect(page.getByText("Upcoming room")).toBeVisible();
+
+    await page.getByRole("button", { name: "Select rooms" }).click();
+    await page.getByRole("button", { name: "Select Upcoming room" }).click();
+    await expect(page.getByRole("group", { name: "Bulk room actions" })).toContainText("1 selected");
+
+    await page.getByRole("button", { name: "End exam", exact: true }).click();
+    const confirmation = page.getByRole("alertdialog");
+    await expect(confirmation).toContainText("End exam in 1 room?");
+    await confirmation.getByRole("button", { name: "End 1 exam" }).click();
+
+    await expect(page.getByText("1 room ended.")).toBeVisible();
+    expect(transport.commands.map((command) => command.scheduleId)).toEqual(["sched-upcoming"]);
+    // The never-started room leaves Upcoming once the server completes it
+    // (scope to the list: the empty-state copy also contains "upcoming room").
+    await expect(page.locator(".sat-list-row").filter({ hasText: "Upcoming room" })).toHaveCount(0);
   });
 
   test("S4: cancelling the confirmation sends no command and keeps the selection", async ({ page }) => {

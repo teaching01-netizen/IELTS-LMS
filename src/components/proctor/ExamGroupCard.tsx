@@ -26,7 +26,7 @@ export const ExamGroupCard = React.memo(function ExamGroupCard({
 }: ExamGroupCardProps) {
   const statusLabel = group.runtimeStatus === 'not_started' && group.isReadyToStart ? 'ready' : group.runtimeStatus;
   const selectable = selectionMode && selectionEnabled;
-  const selectionHint = selectionMode && !selectionEnabled ? 'Only running or paused rooms can be ended.' : undefined;
+  const selectionHint = selectionMode && !selectionEnabled ? 'This room has finished and cannot be ended.' : undefined;
   return (
     <button
       type="button"

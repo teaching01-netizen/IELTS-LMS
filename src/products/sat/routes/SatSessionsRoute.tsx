@@ -130,7 +130,10 @@ export function SatSessionsRoute() {
   const [confirmEndOpen, setConfirmEndOpen] = useState(false);
   const [endPending, setEndPending] = useState(false);
   const [bulkNotice, setBulkNotice] = useState<BulkNotice | null>(null);
-  const bucketIsLive = bucket === 'live';
+  // Ending applies to every room that has not finished: a room that never
+  // started can still be closed (the server completes the runtime with no
+  // attempts to submit). Finished rooms are already terminal.
+  const bucketCanEnd = bucket === 'live' || bucket === 'upcoming';
   const selectedCount = visible.reduce((count, summary) => (selectedIds.has(summary.schedule.id) ? count + 1 : count), 0);
   const allVisibleSelected = visible.length > 0 && selectedCount === visible.length;
 
@@ -244,8 +247,8 @@ export function SatSessionsRoute() {
           ]}
           onChange={(next) => setParams({ sort: next })}
         />
-        {/* Only live rooms can be ended, so the entry point lives on that tab. */}
-        {bucketIsLive && visible.length > 0 ? (
+        {/* Every room that has not finished can be ended, so Upcoming and Live both offer it. */}
+        {bucketCanEnd && visible.length > 0 ? (
           <SatButton
             variant="secondary"
             aria-pressed={selectMode}
@@ -417,7 +420,7 @@ export function SatSessionsRoute() {
       <SatConfirmDialog
         open={confirmEndOpen}
         title={`End exam in ${selectedCount} room${selectedCount === 1 ? '' : 's'}?`}
-        description="Students in the selected rooms move to the post-exam phase now. This cannot be undone."
+        description="Selected rooms stop now and every student in them moves to the post-exam phase. This cannot be undone."
         confirmLabel={`End ${selectedCount} exam${selectedCount === 1 ? '' : 's'}`}
         destructive
         onCancel={() => setConfirmEndOpen(false)}
