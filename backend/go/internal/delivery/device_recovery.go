@@ -822,6 +822,7 @@ func (s *Service) prepareRecoveryControl(ctx context.Context, q tx.Tx, row recov
 	if row.Control != nil {
 		control = *row.Control
 		if !row.Control.Target.Equal(target) {
+			control.RerouteModule2 = false
 			control.FocusDeadlineAt = nil
 			control.FocusStartedAt = nil
 			control.FocusPausedAt = nil

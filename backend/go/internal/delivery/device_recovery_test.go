@@ -587,3 +587,38 @@ func TestRecoveryOptionsPreviewsLiveTargetWithoutGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPrepareRecoveryControlPendingRerouteFollowsTarget(t *testing.T) {
+	for _, sameTarget := range []bool{true, false} {
+		t.Run(map[bool]string{true: "same M1 keeps reroute", false: "different stage drops reroute"}[sameTarget], func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectBegin()
+			txn, err := db.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mock.ExpectQuery("SELECT id FROM attempt_device_recovery_grants").WithArgs("attempt", "attempt").WillReturnRows(sqlmock.NewRows([]string{"id"}))
+			original := examdomainRecoveryTarget("reading-writing", "m1-attempt", "m1")
+			c := examdomain.NewRecoveryControl("control", "browser", original)
+			c.RerouteModule2 = true
+			target := original
+			if !sameTarget {
+				target = examdomainRecoveryTarget("math", "math-attempt", "math-m1")
+			}
+			out, _, err := NewService(db, tx.NewRunner(db)).prepareRecoveryControl(context.Background(), txn, recoveryAttemptRow{ID: "attempt", Control: &c}, target, "new-grant", time.Now().UTC())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.RerouteModule2 != sameTarget {
+				t.Fatalf("reroute=%v, same target=%v", out.RerouteModule2, sameTarget)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

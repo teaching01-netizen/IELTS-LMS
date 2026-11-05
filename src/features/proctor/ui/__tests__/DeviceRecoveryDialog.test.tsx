@@ -127,6 +127,22 @@ describe("DeviceRecoveryDialog authority boundary", () => {
     await waitFor(() => expect(mocks.issue).toHaveBeenCalledOnce());
     expect(mocks.issue.mock.calls[0]?.[2]).not.toHaveProperty("remainingSeconds");
   });
+  it("explains that rewinding SAT Module 1 resets Module 2 progress", async () => {
+    render(<DeviceRecoveryDialog isOpen scheduleId="s" attemptId="a" onClose={() => {}} />);
+    await screen.findByText("Ada");
+    expect(screen.queryByText(/การย้อนกลับไป Module 1/)).toBeNull();
+    fireEvent.click(screen.getByLabelText("ปรับส่วนหรือเวลาเอง"));
+    expect(screen.getByText(/การย้อนกลับไป Module 1/)).toHaveTextContent(
+      "การย้อนกลับไป Module 1 จะล้างคำตอบและเวลาของ Module 2 ในส่วนนี้ และเลือก Module 2 ใหม่ตามกติกาของห้องสอบเมื่อ Module 1 สิ้นสุด"
+    );
+  });
+  it("does not show SAT rewind guidance for IELTS", async () => {
+    mocks.options.mockResolvedValue({ ...options, providerKey: "ielts" });
+    render(<DeviceRecoveryDialog isOpen scheduleId="s" attemptId="a" onClose={() => {}} />);
+    await screen.findByText("Ada");
+    fireEvent.click(screen.getByLabelText("ปรับส่วนหรือเวลาเอง"));
+    expect(screen.queryByText(/การย้อนกลับไป Module 1/)).toBeNull();
+  });
   it("switching back to resume discards a typed award", async () => {
     render(<DeviceRecoveryDialog isOpen scheduleId="s" attemptId="a" onClose={() => {}} />);
     await screen.findByText("Ada");

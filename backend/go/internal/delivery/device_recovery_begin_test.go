@@ -43,6 +43,7 @@ func TestBeginDeviceRecoveryCommitsClockAndCredentialsAtomically(t *testing.T) {
 			mock.ExpectQuery(regexp.QuoteMeta("SELECT UTC_TIMESTAMP(6)")).WillReturnRows(sqlmock.NewRows([]string{"now"}).AddRow(now))
 			mock.ExpectQuery("(?s)FROM assessment_module_attempts ma.*").WithArgs(attempt.id, attempt.version).WillReturnRows(recoverySATTargetRows(now.Add(-time.Minute)))
 			expectNoRecoveryReceipt(mock, attempt.id, 0)
+			mock.ExpectQuery("SELECT d.section_id,p.lower_module_id").WithArgs(attempt.id, "ma-1").WillReturnRows(sqlmock.NewRows([]string{"section_id", "lower_module_id", "higher_module_id", "selected_module_id", "selected_route", "raw_correct"}))
 			mock.ExpectExec("UPDATE assessment_module_attempts SET state = 'active'").WithArgs(now, 480, "ma-1", attempt.id, "mod-1").WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectQuery("SELECT run_generation FROM assessment_module_attempts").WithArgs("ma-1", attempt.id).WillReturnRows(sqlmock.NewRows([]string{"run_generation"}).AddRow(1))
 			mock.ExpectQuery("SELECT CAST\\(s.sat_delivery_policy AS CHAR\\)").WithArgs(attempt.id).WillReturnRows(sqlmock.NewRows([]string{"sat_delivery_policy", "timing_model"}).AddRow(nil, "legacy_section_v1"))

@@ -1195,7 +1195,7 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 	if n != 1 {
 		return nil, apperrors.New(apperrors.CodeAssessmentConflict, "The SAT module was already finalized by another request.")
 	}
-	if followup != nil && followup.recoveryControl != nil && followup.recoveryControl.Phase == examdomain.RecoveryPhaseWorking {
+	if followup != nil && followup.recoveryControl != nil && followup.recoveryControl.Phase == examdomain.RecoveryPhaseWorking && !followup.recoveryControl.RerouteModule2 {
 		if len(followup.recoveryControl.Suspended) > 0 {
 			return s.resumeRecoverySuccessor(ctx, t, attemptID, followup.recoveryControl)
 		}
@@ -1228,6 +1228,11 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 	}
 	if err := s.openFollowUpModuleTx(ctx, t, attemptID, currentSectionID, breakAfterSeconds, next, audit, basis, followup); err != nil {
 		return nil, err
+	}
+	if followup != nil && followup.recoveryControl != nil && followup.recoveryControl.RerouteModule2 {
+		if err := focusReroutedRecoveryModule(ctx, t, attemptID, followup.recoveryControl, next); err != nil {
+			return nil, err
+		}
 	}
 	return next, nil
 }

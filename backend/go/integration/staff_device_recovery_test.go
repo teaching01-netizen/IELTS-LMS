@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"example.com/ielts-proctoring/internal/delivery"
 	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/grading"
+	"example.com/ielts-proctoring/internal/platform/apperrors"
 	platformcrypto "example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
@@ -592,7 +594,7 @@ func TestStaffDeviceRecoveryAudioCheckpointMySQL(t *testing.T) {
 	}
 }
 
-func newStaffRecoveryService(t *testing.T, f *transferFixture) (string, *delivery.Service) {
+func newStaffRecoveryService(t *testing.T, f *transferFixture, failFirstIssuer ...bool) (string, *delivery.Service) {
 	t.Helper()
 	staff := uuid.NewString()
 	mustExec(t, f.db, `INSERT INTO users (id,email,display_name,role,state) VALUES (?,?,'Recovery Proctor','proctor','active')`, staff, staff+"@example.test")
@@ -601,7 +603,13 @@ func newStaffRecoveryService(t *testing.T, f *transferFixture) (string, *deliver
 		_, _ = f.db.Exec(`DELETE FROM attempt_device_recovery_grants WHERE attempt_id = ?`, f.attemptID)
 		_, _ = f.db.Exec(`DELETE FROM users WHERE id = ?`, staff)
 	})
+	failIssuer := len(failFirstIssuer) > 0 && failFirstIssuer[0]
 	svc := delivery.NewService(f.db, tx.NewRunner(f.db)).SetStaffDeviceRecovery(true, []byte(transferSecret)).SetRecoveryContinuation(func(ctx context.Context, q tx.Tx, req delivery.RecoveryCredentialRequest) (delivery.RecoveryCredentialIdentity, error) {
+		if failIssuer {
+			failIssuer = false
+			return delivery.RecoveryCredentialIdentity{}, errors.New("injected credential failure")
+		}
+
 		id, cookie, csrf, err := auth.CreateSessionInTx(ctx, q, f.cfg, req.UserID, auth.RoleStudent, auth.SessionProof{Source: auth.SessionSourceRecovery, RecoveryAttemptID: req.AttemptID}, nil, nil, req.Now)
 		if err != nil {
 			return delivery.RecoveryCredentialIdentity{}, err
@@ -626,96 +634,258 @@ func newStaffRecoveryService(t *testing.T, f *transferFixture) (string, *deliver
 	return staff, svc
 }
 
-func TestStaffDeviceRecoverySATRewindPreservesSuccessorMySQL(t *testing.T) {
-	f := newTransferFixture(t)
-	ctx := context.Background()
-	staff, svc := newStaffRecoveryService(t, f)
-	f.admit(t, "original-browser")
-	mustExec(t, f.db, `UPDATE exam_session_runtimes SET timing_model='sat_personal_v1' WHERE schedule_id=?`, f.scheduleID)
-	mustExec(t, f.db, `UPDATE assessment_module_attempts SET state='active',started_at=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 3610 SECOND),allocated_seconds=3600 WHERE attempt_id=?`, f.attemptID)
-	if _, err := svc.ReconcileAttemptTimeout(ctx, f.scheduleID, f.attemptID, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	var m1, m2, selected string
-	if err := f.db.QueryRow(`SELECT base_module_attempt_id,selected_module_id FROM assessment_route_decisions WHERE attempt_id=? AND section_id=?`, f.attemptID, f.rw.sectionID).Scan(&m1, &selected); err != nil {
-		t.Fatal(err)
-	}
-	if selected != f.rw.lowID {
-		t.Fatalf("initial selected module=%s", selected)
-	}
-	if err := f.db.QueryRow(`SELECT id FROM assessment_module_attempts WHERE attempt_id=? AND module_id=?`, f.attemptID, selected).Scan(&m2); err != nil {
-		t.Fatal(err)
-	}
-	mustExec(t, f.db, `UPDATE assessment_module_attempts SET state='active',started_at=UTC_TIMESTAMP(6),allocated_seconds=840 WHERE id=?`, m2)
-	var question string
-	if err := f.db.QueryRow(`SELECT id FROM assessment_exam_questions WHERE module_id=? ORDER BY display_order LIMIT 1`, selected).Scan(&question); err != nil {
-		t.Fatal(err)
-	}
-	mustExec(t, f.db, `INSERT INTO attempt_responses_v2 (attempt_id,question_id,module_id,response,response_hash,server_revision,client_version,client_write_id,lease_epoch,control_epoch,request_hash) VALUES (?,?,?,'{"answer":"B"}',?,19,7,?,1,1,?)`, f.attemptID, question, selected, strings.Repeat("b", 64), uuid.NewString(), strings.Repeat("b", 64))
-	options, err := svc.RecoveryOptions(ctx, f.scheduleID, f.attemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	award := 360
-	issue, err := svc.IssueDeviceRecovery(ctx, f.scheduleID, f.attemptID, staff, delivery.IssueDeviceRecoveryRequest{OperationID: uuid.NewString(), ExpectedLeaseEpoch: options.LeaseEpoch, ExpectedControlEpoch: options.ControlEpoch, Target: examdomain.RecoveryTarget{SectionKey: "reading-writing", ModuleAttemptID: m1, ModuleID: f.rw.baseID}, RemainingSeconds: &award})
-	if err != nil {
-		t.Fatal(err)
-	}
-	proof := "rewind-proof-" + uuid.NewString()
-	if _, err := svc.ClaimDeviceRecovery(ctx, issue.Grant.GrantID, delivery.ClaimDeviceRecoveryRequest{OperationID: uuid.NewString(), BrowserProof: proof, LinkSecret: issue.LinkSecret, Code: issue.Code}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := svc.BeginDeviceRecovery(ctx, issue.Grant.GrantID, delivery.BeginDeviceRecoveryRequest{OperationID: uuid.NewString(), BrowserProof: proof}, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	var raw string
-	var paused sql.NullTime
-	if err := f.db.QueryRow(`SELECT CAST(recovery_control AS CHAR) FROM student_attempts WHERE id=?`, f.attemptID).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	control, err := examdomain.ParseRecoveryControl([]byte(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(control.Suspended) != 1 || control.Suspended[0].Target.ModuleAttemptID != m2 || control.Suspended[0].RemainingSeconds < 835 || control.Suspended[0].RemainingSeconds > 840 {
-		t.Fatalf("suspended=%+v", control.Suspended)
-	}
-	frozen := control.Suspended[0].RemainingSeconds
-	if err := f.db.QueryRow(`SELECT paused_at FROM assessment_module_attempts WHERE id=?`, m2).Scan(&paused); err != nil || !paused.Valid {
-		t.Fatalf("successor paused=%v err=%v", paused, err)
-	}
-	// The new M1 score crosses the threshold; the administered M2 must remain.
-	mustExec(t, f.db, `UPDATE attempt_responses_v2 SET response='{"answer":"B"}' WHERE attempt_id=? AND module_id=?`, f.attemptID, f.rw.baseID)
-	expired := time.Now().UTC().Add(-10 * time.Second)
-	mustExec(t, f.db, `UPDATE assessment_module_attempts SET started_at=?,allocated_seconds=1 WHERE id=?`, expired.Add(-time.Second), m1)
-	mustExec(t, f.db, `UPDATE student_attempts SET recovery_control=JSON_SET(recovery_control,'$.focusDeadlineAt',?),deadline_at=? WHERE id=?`, expired.Format(time.RFC3339Nano), expired, f.attemptID)
-	if _, err := svc.ReconcileAttemptTimeout(ctx, f.scheduleID, f.attemptID, time.Now().UTC()); err != nil {
-		t.Fatal(err)
-	}
-	var decisions, score, selectionScore int
-	if err := f.db.QueryRow(`SELECT COUNT(*),MAX(selected_module_id),MAX(raw_correct) FROM assessment_route_decisions WHERE attempt_id=? AND section_id=?`, f.attemptID, f.rw.sectionID).Scan(&decisions, &selected, &selectionScore); err != nil {
-		t.Fatal(err)
-	}
-	if decisions != 1 || selected != f.rw.lowID || selectionScore != 0 {
-		t.Fatalf("route changed: count=%d selected=%s raw=%d", decisions, selected, selectionScore)
-	}
-	if err := f.db.QueryRow(`SELECT raw_correct FROM assessment_module_attempts WHERE id=?`, m1).Scan(&score); err != nil || score != 3 {
-		t.Fatalf("recovered score=%d err=%v", score, err)
-	}
-	var remaining int
-	if err := f.db.QueryRow(`SELECT paused_at,TIMESTAMPDIFF(SECOND,UTC_TIMESTAMP(6),TIMESTAMPADD(SECOND,allocated_seconds+extension_seconds+accumulated_paused_seconds,started_at)) FROM assessment_module_attempts WHERE id=?`, m2).Scan(&paused, &remaining); err != nil {
-		t.Fatal(err)
-	}
-	if paused.Valid || remaining < frozen-2 || remaining > frozen {
-		t.Fatalf("resumed paused=%v remaining=%d frozen=%d", paused, remaining, frozen)
-	}
-	var answer string
-	var version, revision int
-	if err := f.db.QueryRow(`SELECT CAST(response AS CHAR),client_version,server_revision FROM attempt_responses_v2 WHERE attempt_id=? AND question_id=?`, f.attemptID, question).Scan(&answer, &version, &revision); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(answer, `"B"`) || version != 7 || revision != 19 {
-		t.Fatalf("successor answer changed: %s v%d r%d", answer, version, revision)
+func TestStaffDeviceRecoverySATRewindReroutesMySQL(t *testing.T) {
+	for _, tc := range []struct {
+		name                            string
+		originalCorrect, newCorrect     int
+		later                           bool
+		handoff                         string
+		policy                          string
+		sameModule, rollback, completed bool
+		confirmed, pinned               bool
+	}{
+		{name: "lower to hard", originalCorrect: 0, newCorrect: 3, handoff: "server_start", policy: "adaptive"},
+		{name: "lower to lower", originalCorrect: 0, newCorrect: 1, handoff: "server_start", policy: "adaptive"},
+		{name: "hard to lower", originalCorrect: 3, newCorrect: 1, handoff: "server_start", policy: "adaptive"},
+		{name: "threshold selects hard", originalCorrect: 0, newCorrect: 2, handoff: "server_start", policy: "adaptive"},
+		{name: "later section waits for fresh branch", originalCorrect: 0, newCorrect: 3, later: true, handoff: "server_start", policy: "adaptive"},
+		{name: "client entry before later section", originalCorrect: 0, newCorrect: 3, later: true, handoff: "client_start", policy: "adaptive"},
+		{name: "forced lower stays lower", originalCorrect: 0, newCorrect: 3, handoff: "server_start", policy: "force_lower"},
+		{name: "forced higher stays higher", originalCorrect: 3, newCorrect: 0, handoff: "server_start", policy: "force_higher"},
+		{name: "teacher selects before later section", originalCorrect: 0, newCorrect: 3, later: true, handoff: "server_start", policy: "staff_selects"},
+		{name: "transfer within M2 preserves progress", originalCorrect: 0, newCorrect: 0, handoff: "server_start", policy: "adaptive", sameModule: true},
+		{name: "credential failure rolls rewind back", originalCorrect: 0, newCorrect: 3, handoff: "server_start", policy: "adaptive", rollback: true},
+		{name: "completed old branch is cleared", originalCorrect: 0, newCorrect: 3, handoff: "server_start", policy: "adaptive", completed: true},
+		{name: "browser confirmed close reroutes", originalCorrect: 0, newCorrect: 3, handoff: "client_start", policy: "adaptive", confirmed: true},
+		{name: "pinned recovery close reroutes", originalCorrect: 0, newCorrect: 3, handoff: "client_start", policy: "adaptive", confirmed: true, pinned: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newTransferFixture(t)
+			ctx := context.Background()
+			staff, svc := newStaffRecoveryService(t, f, tc.rollback)
+			if tc.policy != "adaptive" {
+				mustExec(t, f.db, `UPDATE exam_schedules SET sat_session_mode='classroom',sat_route_policy=? WHERE id=?`, tc.policy, f.scheduleID)
+			}
+			old := f.admit(t, "original-browser")
+			mustExec(t, f.db, `UPDATE exam_session_runtimes SET sat_handoff_mode=? WHERE schedule_id=?`, tc.handoff, f.scheduleID)
+			mustExec(t, f.db, `UPDATE attempt_responses_v2 SET response='{"answer":"B"}' WHERE attempt_id=? AND module_id=? ORDER BY question_id LIMIT ?`, f.attemptID, f.rw.baseID, tc.originalCorrect)
+			mustExec(t, f.db, `UPDATE exam_session_runtimes SET timing_model='sat_personal_v1' WHERE schedule_id=?`, f.scheduleID)
+			mustExec(t, f.db, `UPDATE assessment_module_attempts SET state='active',started_at=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 3700 SECOND),allocated_seconds=3600 WHERE attempt_id=?`, f.attemptID)
+			if _, err := svc.ReconcileAttemptTimeout(ctx, f.scheduleID, f.attemptID, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+			if tc.policy == "staff_selects" {
+				if _, err := svc.AssignStaffRoute(ctx, staff, f.scheduleID, f.attemptID, "reading-writing", "lower"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var m1, m2, selected string
+			if err := f.db.QueryRow(`SELECT base_module_attempt_id,selected_module_id FROM assessment_route_decisions WHERE attempt_id=? AND section_id=?`, f.attemptID, f.rw.sectionID).Scan(&m1, &selected); err != nil {
+				t.Fatal(err)
+			}
+			originalModule := f.rw.lowID
+			if tc.originalCorrect >= 2 || tc.policy == "force_higher" {
+				originalModule = f.rw.highID
+			}
+			if selected != originalModule {
+				t.Fatalf("initial selected module=%s", selected)
+			}
+			if err := f.db.QueryRow(`SELECT id FROM assessment_module_attempts WHERE attempt_id=? AND module_id=?`, f.attemptID, selected).Scan(&m2); err != nil {
+				t.Fatal(err)
+			}
+			mustExec(t, f.db, `UPDATE assessment_module_attempts SET state='active',started_at=UTC_TIMESTAMP(6),allocated_seconds=840 WHERE id=?`, m2)
+			var question string
+			if err := f.db.QueryRow(`SELECT id FROM assessment_exam_questions WHERE module_id=? ORDER BY display_order LIMIT 1`, selected).Scan(&question); err != nil {
+				t.Fatal(err)
+			}
+			mustExec(t, f.db, `INSERT INTO attempt_responses_v2 (attempt_id,question_id,module_id,response,response_hash,server_revision,client_version,client_write_id,lease_epoch,control_epoch,request_hash) VALUES (?,?,?,'{"answer":"B"}',?,19,7,?,1,1,?)`, f.attemptID, question, selected, strings.Repeat("b", 64), uuid.NewString(), strings.Repeat("b", 64))
+			var laterID string
+			if tc.later {
+				laterID = uuid.NewString()
+				mustExec(t, f.db, `INSERT INTO assessment_module_attempts (id,attempt_id,module_id,state,allocated_seconds,started_at,tool_state) VALUES (?,?,?,'active',1800,UTC_TIMESTAMP(6),'{}')`, laterID, f.attemptID, f.math.baseID)
+			}
+			mustExec(t, f.db, `INSERT INTO assessment_question_responses (id,module_attempt_id,exam_question_id,response,eliminated_options,annotations) VALUES (?,?,?,'{"answer":"B"}','[]','[]')`, uuid.NewString(), m2, question)
+			if tc.pinned {
+				mustExec(t, f.db, `UPDATE exam_schedules SET sat_timing_model='sat_personal_v1',sat_delivery_policy='{"version":"sat_recovery_v1","recoverySeconds":120,"entryRecoverySeconds":120,"lateAnswerPolicy":"frozen_arrival_window"}' WHERE id=?`, f.scheduleID)
+				mustExec(t, f.db, `INSERT INTO assessment_module_boundaries (module_attempt_id,attempt_id,phase,policy_version,run_generation) VALUES (?,?,'settled','sat_recovery_v1',0)`, m1, f.attemptID)
+				svc.SetFrozenResponseApplier(func(ctx context.Context, q tx.Tx, claims platformcrypto.AttemptClaims, cmd attempts.SaveResponsesCommand, module string) (attempts.SaveResult, error) {
+					return f.svc.SaveFrozenResponsesInTx(ctx, q, claims, cmd, module, nil)
+				})
+			}
+			if tc.completed {
+				mustExec(t, f.db, `UPDATE assessment_module_attempts SET state='locked',completion_reason='time_expired',locked_at=UTC_TIMESTAMP(6) WHERE id=?`, m2)
+			}
+			options, err := svc.RecoveryOptions(ctx, f.scheduleID, f.attemptID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			award := 360
+			target := examdomain.RecoveryTarget{SectionKey: "reading-writing", ModuleAttemptID: m1, ModuleID: f.rw.baseID}
+			var remaining *int = &award
+			if tc.sameModule {
+				target.ModuleAttemptID = m2
+				target.ModuleID = originalModule
+				remaining = nil
+			}
+			issue, err := svc.IssueDeviceRecovery(ctx, f.scheduleID, f.attemptID, staff, delivery.IssueDeviceRecoveryRequest{OperationID: uuid.NewString(), ExpectedLeaseEpoch: options.LeaseEpoch, ExpectedControlEpoch: options.ControlEpoch, Target: target, RemainingSeconds: remaining})
+			if err != nil {
+				t.Fatal(err)
+			}
+			proof := "rewind-proof-" + uuid.NewString()
+			if _, err := svc.ClaimDeviceRecovery(ctx, issue.Grant.GrantID, delivery.ClaimDeviceRecoveryRequest{OperationID: uuid.NewString(), BrowserProof: proof, LinkSecret: issue.LinkSecret, Code: issue.Code}); err != nil {
+				t.Fatal(err)
+			}
+			beginRequest := delivery.BeginDeviceRecoveryRequest{OperationID: uuid.NewString(), BrowserProof: proof}
+			if tc.rollback {
+				if _, _, err := svc.BeginDeviceRecovery(ctx, issue.Grant.GrantID, beginRequest, nil, nil); err == nil || err.Error() != "injected credential failure" {
+					t.Fatalf("expected injected failure: %v", err)
+				}
+				var count int
+				for _, check := range []struct {
+					query string
+					args  []any
+				}{
+					{`SELECT COUNT(*) FROM assessment_module_attempts WHERE id=? AND paused_at IS NULL`, []any{m2}},
+					{`SELECT COUNT(*) FROM attempt_responses_v2 WHERE attempt_id=? AND module_id=?`, []any{f.attemptID, originalModule}},
+					{`SELECT COUNT(*) FROM assessment_route_decisions WHERE attempt_id=? AND section_id=?`, []any{f.attemptID, f.rw.sectionID}},
+				} {
+					if err := f.db.QueryRow(check.query, check.args...).Scan(&count); err != nil || count != 1 {
+						t.Fatalf("partial rewind committed: count=%d err=%v", count, err)
+					}
+				}
+			}
+			_, credentials, err := svc.BeginDeviceRecovery(ctx, issue.Grant.GrantID, beginRequest, nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.sameModule {
+				var answers, decisions, seconds int
+				if err := f.db.QueryRow(`SELECT COUNT(*) FROM attempt_responses_v2 WHERE attempt_id=? AND question_id=?`, f.attemptID, question).Scan(&answers); err != nil || answers != 1 {
+					t.Fatalf("M2 answer lost: %d %v", answers, err)
+				}
+				if err := f.db.QueryRow(`SELECT COUNT(*) FROM assessment_question_responses WHERE module_attempt_id=?`, m2).Scan(&answers); err != nil || answers != 1 {
+					t.Fatalf("M2 legacy answer lost: %d %v", answers, err)
+				}
+				if err := f.db.QueryRow(`SELECT COUNT(*) FROM assessment_route_decisions WHERE attempt_id=? AND selected_module_id=?`, f.attemptID, originalModule).Scan(&decisions); err != nil || decisions != 1 {
+					t.Fatalf("M2 route lost: %d %v", decisions, err)
+				}
+				if err := f.db.QueryRow(`SELECT allocated_seconds FROM assessment_module_attempts WHERE id=?`, m2).Scan(&seconds); err != nil || seconds < 835 || seconds > 840 {
+					t.Fatalf("M2 timer changed: %d %v", seconds, err)
+				}
+				return
+			}
+			var count int
+			for _, check := range []struct {
+				query string
+				args  []any
+			}{
+				{`SELECT COUNT(*) FROM assessment_module_attempts WHERE id=?`, []any{m2}},
+				{`SELECT COUNT(*) FROM attempt_responses_v2 WHERE attempt_id=? AND module_id=?`, []any{f.attemptID, originalModule}},
+				{`SELECT COUNT(*) FROM assessment_question_responses WHERE module_attempt_id=?`, []any{m2}},
+				{`SELECT COUNT(*) FROM assessment_route_decisions WHERE attempt_id=? AND section_id=?`, []any{f.attemptID, f.rw.sectionID}},
+			} {
+				if err := f.db.QueryRow(check.query, check.args...).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("old Module 2 survived rewind: query=%s count=%d err=%v", check.query, count, err)
+				}
+			}
+			if err := f.db.QueryRow(`SELECT COUNT(*) FROM session_audit_logs WHERE schedule_id=? AND action_type='DEVICE_RECOVERY_BRANCH_INVALIDATED'`, f.scheduleID).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("invalidation audit=%d err=%v", count, err)
+			}
+			// Revise M1, then verify a Continue retry does not reset the new work.
+			mustExec(t, f.db, `UPDATE attempt_responses_v2 SET response='{"answer":"A"}' WHERE attempt_id=? AND module_id=?`, f.attemptID, f.rw.baseID)
+			mustExec(t, f.db, `UPDATE attempt_responses_v2 SET response='{"answer":"B"}' WHERE attempt_id=? AND module_id=? ORDER BY question_id LIMIT ?`, f.attemptID, f.rw.baseID, tc.newCorrect)
+			replay, replayCredentials, err := svc.BeginDeviceRecovery(ctx, issue.Grant.GrantID, beginRequest, nil, nil)
+			if err != nil || !replay.Replayed {
+				t.Fatalf("Continue replay=%+v err=%v", replay, err)
+			}
+			credentials = replayCredentials
+			_, err = f.svc.SaveResponses(ctx, old.Token, attempts.SaveResponsesCommand{AttemptID: f.attemptID, LeaseEpoch: old.LeaseEpoch, ControlEpoch: 1, Commands: []attempts.ResponseCommand{{WriteID: uuid.NewString(), QuestionID: question, ClientVersion: 8, Response: attempts.ResponsePayload{Answer: "B"}}}}, nil, nil)
+			wantCode(t, err, apperrors.CodeLeaseFenced)
+			expired := time.Now().UTC().Add(-time.Minute)
+			mustExec(t, f.db, `UPDATE assessment_module_attempts SET started_at=?,allocated_seconds=1 WHERE id=?`, expired.Add(-time.Second), m1)
+			mustExec(t, f.db, `UPDATE student_attempts SET recovery_control=JSON_SET(recovery_control,'$.focusDeadlineAt',?),deadline_at=? WHERE id=?`, expired.Format(time.RFC3339Nano), expired, f.attemptID)
+			if tc.confirmed {
+				claims, err := platformcrypto.VerifyAttemptToken([]byte(transferSecret), time.Now().UTC(), credentials.AttemptToken)
+				if err != nil {
+					t.Fatal(err)
+				}
+				closeReq := delivery.ModuleCloseRequest{ModuleID: f.rw.baseID, ModuleAttemptID: m1, CloseID: uuid.NewString(), Answers: []delivery.ModuleCloseAnswer{}}
+				if tc.pinned {
+					var phase string
+					if err := f.db.QueryRow(`SELECT b.phase FROM assessment_module_boundaries b JOIN assessment_module_attempts ma ON ma.id=b.module_attempt_id AND ma.run_generation=b.run_generation WHERE ma.id=?`, m1).Scan(&phase); err != nil || phase != "working" {
+						t.Fatalf("new recovery boundary=%s err=%v", phase, err)
+					}
+					if err := tx.NewRunner(f.db).WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
+						return examruntime.RealignSATRecoveryBoundariesInTx(ctx, q, f.scheduleID, f.attemptID)
+					}); err != nil {
+						t.Fatal(err)
+					}
+					closeReq.Protocol = attempts.SATRecoveryPolicyV1
+					if err := f.db.QueryRow(`SELECT lease_epoch,control_epoch FROM student_attempts WHERE id=?`, f.attemptID).Scan(&closeReq.LeaseEpoch, &closeReq.ControlEpoch); err != nil {
+						t.Fatal(err)
+					}
+				}
+				ack, err := svc.CloseModuleRecovery(ctx, f.scheduleID, f.attemptID, f.scheduleID, closeReq, claims, claims.ClientSessionID, claims.TokenID)
+				if err != nil || ack == nil || !ack.Closed {
+					t.Fatalf("confirmed close=%+v err=%v", ack, err)
+				}
+			} else if _, err := svc.ReconcileAttemptTimeout(ctx, f.scheduleID, f.attemptID, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
+
+			if tc.policy == "staff_selects" {
+				if err := f.db.QueryRow(`SELECT COUNT(*) FROM assessment_route_decisions WHERE attempt_id=? AND section_id=?`, f.attemptID, f.rw.sectionID).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("teacher policy auto-routed: %d %v", count, err)
+				}
+				if _, err := svc.AssignStaffRoute(ctx, staff, f.scheduleID, f.attemptID, "reading-writing", "lower"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var decisions, score, selectionScore int
+			if err := f.db.QueryRow(`SELECT COUNT(*),COALESCE(MAX(selected_module_id),''),COALESCE(MAX(raw_correct),-1) FROM assessment_route_decisions WHERE attempt_id=? AND section_id=?`, f.attemptID, f.rw.sectionID).Scan(&decisions, &selected, &selectionScore); err != nil {
+				t.Fatal(err)
+			}
+			expectedModule := f.rw.lowID
+			if (tc.newCorrect >= 2 && tc.policy != "force_lower" && tc.policy != "staff_selects") || tc.policy == "force_higher" {
+				expectedModule = f.rw.highID
+			}
+			if decisions != 1 || selected != expectedModule || selectionScore != tc.newCorrect {
+				t.Fatalf("route changed: count=%d selected=%s raw=%d", decisions, selected, selectionScore)
+			}
+			if err := f.db.QueryRow(`SELECT raw_correct FROM assessment_module_attempts WHERE id=?`, m1).Scan(&score); err != nil || score != tc.newCorrect {
+				t.Fatalf("recovered score=%d err=%v", score, err)
+			}
+			var freshID, state string
+			var allocation int
+			if err := f.db.QueryRow(`SELECT id,state,allocated_seconds FROM assessment_module_attempts WHERE attempt_id=? AND module_id=?`, f.attemptID, expectedModule).Scan(&freshID, &state, &allocation); err != nil {
+				t.Fatal(err)
+			}
+			if freshID == m2 || allocation != 3600 {
+				t.Fatalf("replacement not fresh: id=%s state=%s allocation=%d", freshID, state, allocation)
+			}
+			if tc.later {
+				var paused sql.NullTime
+				if err := f.db.QueryRow(`SELECT paused_at FROM assessment_module_attempts WHERE id=?`, laterID).Scan(&paused); err != nil || !paused.Valid {
+					t.Fatalf("later section resumed before fresh M2: paused=%v err=%v", paused, err)
+				}
+				if state == "not_started" {
+					var tokenID, session string
+					if err := f.db.QueryRow(`SELECT token_id,client_session_id FROM attempt_sessions WHERE attempt_id=? AND revoked_at IS NULL LIMIT 1`, f.attemptID).Scan(&tokenID, &session); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := svc.StartModule(ctx, f.scheduleID, f.attemptID, f.scheduleID, expectedModule, session, tokenID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				mustExec(t, f.db, `UPDATE assessment_module_attempts SET started_at=DATE_SUB(UTC_TIMESTAMP(6),INTERVAL 2 HOUR) WHERE id=?`, freshID)
+				if _, err := svc.ReconcileAttemptTimeout(ctx, f.scheduleID, f.attemptID, time.Now().UTC()); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.db.QueryRow(`SELECT paused_at FROM assessment_module_attempts WHERE id=?`, laterID).Scan(&paused); err != nil || paused.Valid {
+					t.Fatalf("later section did not resume after fresh M2: paused=%v err=%v", paused, err)
+				}
+			}
+		})
 	}
 }
 

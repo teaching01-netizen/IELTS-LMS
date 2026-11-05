@@ -82,7 +82,7 @@ func expectStaffRouteLockRow(mock sqlmock.Sqlmock, policy string, sealed bool) {
 	expectStaffRouteBegin(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts sa JOIN exam_schedules sch ON sch.id = sa.schedule_id WHERE sa.id = ? AND sa.schedule_id = ? FOR UPDATE")).
 		WithArgs("att-1", "sched-1").
-		WillReturnRows(sqlmock.NewRows([]string{"policy", "sealed"}).AddRow(policy, sealed))
+		WillReturnRows(sqlmock.NewRows([]string{"policy", "sealed", "recovery_control"}).AddRow(policy, sealed, ""))
 }
 
 func expectStaffRouteModuleOne(mock sqlmock.Sqlmock, state string) {
@@ -139,7 +139,7 @@ func TestAssignStaffRouteGuards(t *testing.T) {
 		svc, mock := staffRouteSvc(t)
 		expectStaffRouteBegin(mock)
 		mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts sa JOIN exam_schedules sch")).
-			WillReturnRows(sqlmock.NewRows([]string{"policy", "sealed"}).AddRow("force_lower", false))
+			WillReturnRows(sqlmock.NewRows([]string{"policy", "sealed", "recovery_control"}).AddRow("force_lower", false, ""))
 		mock.ExpectRollback()
 		_, err := svc.AssignStaffRoute(ctx, "staff-1", "sched-1", "att-1", "math", "higher")
 		if deliveryCodeOf(err) != apperrors.CodeAssessmentConflict {

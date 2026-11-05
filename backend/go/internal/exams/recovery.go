@@ -140,6 +140,8 @@ type RecoveryControl struct {
 	OriginalSessionID  string         `json:"originalSessionId"`
 	Target             RecoveryTarget `json:"target"`
 	FocusRunGeneration uint64         `json:"focusRunGeneration"`
+	// A base rewind must select a fresh M2 before resuming later sections.
+	RerouteModule2 bool `json:"rerouteModule2,omitempty"`
 	// FocusDeadlineAt is the common writer/read projection of the provider
 	// clock. Provider clock mutations refresh it in the same transaction.
 	// For snapshot sections without a per-attempt timeline it owns the deadline.

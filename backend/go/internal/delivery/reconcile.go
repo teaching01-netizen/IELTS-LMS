@@ -256,9 +256,19 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 			}
 		}
 		for i := 0; i < reconcileCap; i++ {
-			mod, err := lockReconcileRowTx(ctx, t, attemptID)
+			if followup != nil {
+				recoveryControl = followup.recoveryControl
+			}
+			focusID := ""
+			if recoveryControl != nil && recoveryControl.Phase == examdomain.RecoveryPhaseWorking {
+				focusID = recoveryControl.Target.ModuleAttemptID
+			}
+			mod, err := lockReconcileRowTx(ctx, t, attemptID, focusID)
 			if err != nil {
 				return err
+			}
+			if mod == nil && recoveryControl != nil && recoveryControl.RerouteModule2 {
+				break
 			}
 			if mod == nil {
 				if i == 0 {
@@ -860,15 +870,21 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 	return int64(len(candidates)), changed, firstErr
 }
 
-// lockReconcileRowTx locks the oldest open module attempt (Rust ORDER BY
-// created_at, id LIMIT 1 FOR UPDATE); nil means the loop is drained.
-func lockReconcileRowTx(ctx context.Context, t tx.Tx, attemptID string) (*reconcileRow, error) {
+// lockReconcileRowTx locks the recovery focus when supplied; otherwise it
+// locks the oldest open module attempt. Nil means no matching open module.
+func lockReconcileRowTx(ctx context.Context, t tx.Tx, attemptID, focusID string) (*reconcileRow, error) {
 	var m reconcileRow
 	var availableAt, startedAt, pausedAt sql.NullTime
 	var completionReason sql.NullString
-	const q = `SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason, entry_confirmed_at, entry_entered_at FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review') ORDER BY created_at, id LIMIT 1 FOR UPDATE`
+	query := `SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason, entry_confirmed_at, entry_entered_at FROM assessment_module_attempts WHERE attempt_id = ? AND state IN ('not_started', 'active', 'review')`
+	args := []any{attemptID}
+	if focusID != "" {
+		query += " AND id = ?"
+		args = append(args, focusID)
+	}
+	query += " ORDER BY created_at, id LIMIT 1 FOR UPDATE"
 	var entryConfirmedAt, entryEnteredAt sql.NullTime
-	if err := t.QueryRowContext(ctx, q, attemptID).Scan(&m.id, &m.moduleID, &m.state, &m.allocatedSeconds, &availableAt, &startedAt, &pausedAt, &m.accumulatedPausedSeconds, &m.extensionSeconds, &completionReason, &entryConfirmedAt, &entryEnteredAt); err != nil {
+	if err := t.QueryRowContext(ctx, query, args...).Scan(&m.id, &m.moduleID, &m.state, &m.allocatedSeconds, &availableAt, &startedAt, &pausedAt, &m.accumulatedPausedSeconds, &m.extensionSeconds, &completionReason, &entryConfirmedAt, &entryEnteredAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}

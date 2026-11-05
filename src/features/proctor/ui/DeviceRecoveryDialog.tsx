@@ -318,6 +318,11 @@ function DeviceRecoveryPanel({ scheduleId, attemptId }: { scheduleId: string; at
             }))}
             onChange={(event) => editDecision(() => setTargetKey(event.target.value))}
           />
+          {options.providerKey === "sat" && (
+            <p className="text-sm text-gray-600">
+              การย้อนกลับไป Module 1 จะล้างคำตอบและเวลาของ Module 2 ในส่วนนี้ และเลือก Module 2 ใหม่ตามกติกาของห้องสอบเมื่อ Module 1 สิ้นสุด
+            </p>
+          )}
           <p className="text-sm text-gray-600">เวลาเดิมของส่วนนี้: {clock}</p>
           <div className="space-y-1.5">
             <Input

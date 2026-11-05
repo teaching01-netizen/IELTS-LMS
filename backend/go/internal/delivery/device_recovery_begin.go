@@ -2,7 +2,9 @@ package delivery
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
@@ -123,6 +125,11 @@ func (s *Service) BeginDeviceRecovery(ctx context.Context, grantID string, req B
 			control.Suspended, err = s.suspendRecoverySuccessors(ctx, q, row, facts, grant.Target, now)
 			if err != nil {
 				return err
+			}
+			if row.ProviderKey == examdomain.ProviderSAT {
+				if err := invalidateRecoveryBranch(ctx, q, row, grant, &control); err != nil {
+					return err
+				}
 			}
 			if grant.Target.ModuleAttemptID != "" && len(control.Suspended) > 0 {
 				control.SuspendedBreakIDs, err = suspendRecoveryBreaks(ctx, q, row.ID, now)
@@ -407,5 +414,70 @@ b.accumulated_paused_seconds=b.accumulated_paused_seconds+GREATEST(TIMESTAMPDIFF
 b.paused_at=NULL,b.revision=b.revision+1
 WHERE b.attempt_id=? AND b.id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`) AND b.state<>'completed' AND b.paused_at IS NOT NULL
 AND r.status<>'paused' AND COALESCE(a.proctor_status,'active')<>'paused'`, args...)
+	return err
+}
+
+// invalidateRecoveryBranch runs only on the first committed Continue. A base
+// rewind retires its old branch; transferring within M2 has no base decision.
+func invalidateRecoveryBranch(ctx context.Context, q tx.Tx, row recoveryAttemptRow, grant *recoveryGrantRow, control *examdomain.RecoveryControl) error {
+	var sectionID, lowerID, higherID, selectedID, route string
+	var score int
+	err := q.QueryRowContext(ctx, `SELECT d.section_id,p.lower_module_id,p.higher_module_id,d.selected_module_id,d.selected_route,d.raw_correct
+FROM assessment_route_decisions d JOIN assessment_routing_policies p ON p.section_id=d.section_id
+WHERE d.attempt_id=? AND d.base_module_attempt_id=?`, row.ID, grant.Target.ModuleAttemptID).Scan(&sectionID, &lowerID, &higherID, &selectedID, &route, &score)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{"grantId": grant.ID, "target": grant.Target, "sectionId": sectionID, "previousModuleId": selectedID, "previousRoute": route, "previousRawCorrect": score})
+	if err != nil {
+		return err
+	}
+	if _, err := q.ExecContext(ctx, `INSERT INTO session_audit_logs (id,schedule_id,actor,action_type,target_student_id,payload,created_at) VALUES (?,?,?,'DEVICE_RECOVERY_BRANCH_INVALIDATED',?,?,UTC_TIMESTAMP(6))`, uuid.NewString(), row.ScheduleID, grant.IssuedByUserID, row.ID, string(payload)); err != nil {
+		return err
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM attempt_responses_v2 WHERE attempt_id=? AND module_id IN (?,?)`, row.ID, lowerID, higherID); err != nil {
+		return err
+	}
+	if _, err := q.ExecContext(ctx, `DELETE FROM assessment_route_decisions WHERE attempt_id=? AND section_id=?`, row.ID, sectionID); err != nil {
+		return err
+	}
+	// Legacy responses and boundary/frontier rows cascade with their module attempt.
+	if _, err := q.ExecContext(ctx, `DELETE FROM assessment_module_attempts WHERE attempt_id=? AND module_id IN (?,?)`, row.ID, lowerID, higherID); err != nil {
+		return err
+	}
+	stages := control.Suspended[:0]
+	for _, stage := range control.Suspended {
+		if stage.Target.ModuleID != lowerID && stage.Target.ModuleID != higherID {
+			stages = append(stages, stage)
+		}
+	}
+	control.Suspended = stages
+	control.RerouteModule2 = true
+	return nil
+}
+
+// focusReroutedRecoveryModule keeps later sections suspended until the new
+// branch ends. A not-started branch has no work deadline until ordinary entry.
+func focusReroutedRecoveryModule(ctx context.Context, q tx.Tx, attemptID string, c *examdomain.RecoveryControl, next *nextModuleRow) error {
+	var id string
+	var generation uint64
+	var started, deadline sql.NullTime
+	if err := q.QueryRowContext(ctx, `SELECT id,run_generation,started_at,TIMESTAMPADD(SECOND,allocated_seconds+extension_seconds+accumulated_paused_seconds,started_at) FROM assessment_module_attempts WHERE attempt_id=? AND module_id=?`, attemptID, next.id).Scan(&id, &generation, &started, &deadline); err != nil {
+		return err
+	}
+	c.Target = examdomain.RecoveryTarget{SectionKey: next.sectionKey, ModuleID: next.id, ModuleAttemptID: id}
+	c.RerouteModule2 = false
+	c.FocusRunGeneration = generation
+	c.FocusStartedAt = nullTime(started)
+	c.FocusDeadlineAt = nullTime(deadline)
+	c.FocusPausedAt = nil
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, `UPDATE student_attempts SET recovery_control=?,deadline_at=?,closing_grace_until=NULL,control_epoch=control_epoch+1,revision=revision+1 WHERE id=?`, string(raw), c.FocusDeadlineAt, attemptID)
 	return err
 }

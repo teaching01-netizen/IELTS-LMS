@@ -8,9 +8,11 @@ import (
 
 	"github.com/google/uuid"
 
+	examdomain "example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/liveupdates"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	examruntime "example.com/ielts-proctoring/internal/runtime"
 )
 
 // StaffRouteResult is the committed Module 2 assignment for a staff_selects
@@ -41,11 +43,11 @@ func (s *Service) AssignStaffRoute(ctx context.Context, actorID, scheduleID, att
 	var hubEvents []liveupdates.Event
 	err := s.runner.WithTx(ctx, func(ctx context.Context, t tx.Tx) error {
 		out, hubEvents = nil, nil
-		var policy string
+		var policy, rawRecovery string
 		var sealed bool
 		if err := t.QueryRowContext(ctx,
-			"SELECT COALESCE(sch.sat_route_policy, 'adaptive'), (sa.submitted_at IS NOT NULL OR sa.phase = 'post-exam') FROM student_attempts sa JOIN exam_schedules sch ON sch.id = sa.schedule_id WHERE sa.id = ? AND sa.schedule_id = ? FOR UPDATE",
-			attemptID, scheduleID).Scan(&policy, &sealed); err != nil {
+			"SELECT COALESCE(sch.sat_route_policy, 'adaptive'), (sa.submitted_at IS NOT NULL OR sa.phase = 'post-exam'), COALESCE(sa.recovery_control,'') FROM student_attempts sa JOIN exam_schedules sch ON sch.id = sa.schedule_id WHERE sa.id = ? AND sa.schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&policy, &sealed, &rawRecovery); err != nil {
 			if err == sql.ErrNoRows {
 				return apperrors.New(apperrors.CodeNotFound, "Attempt not found.")
 			}
@@ -108,8 +110,31 @@ func (s *Service) AssignStaffRoute(ctx context.Context, actorID, scheduleID, att
 		if err := t.QueryRowContext(ctx, "SELECT break_after_seconds FROM assessment_sections WHERE id = ?", sectionID).Scan(&breakAfterSeconds); err != nil {
 			return err
 		}
-		if err := s.openFollowUpModuleTx(ctx, t, attemptID, sectionID, breakAfterSeconds, next, audit, routeBasisStaffSelected, nil); err != nil {
+		control, err := examdomain.ParseRecoveryControl([]byte(rawRecovery))
+		if err != nil {
 			return err
+		}
+		var followup *moduleFollowupContext
+		if control != nil {
+			if control.Phase != examdomain.RecoveryPhaseWorking || !control.RerouteModule2 || control.Target.ModuleAttemptID != moduleAttemptID {
+				return recoveryConflict("RECOVERY_FOCUS", "Only the focused recovery module can route.", nil)
+			}
+			followup = &moduleFollowupContext{recoveryControl: control, timingModel: examruntime.TimingModelPersonal}
+			if err := t.QueryRowContext(ctx, "SELECT COALESCE(sat_handoff_mode, 'server_start') FROM exam_session_runtimes WHERE schedule_id = ?", scheduleID).Scan(&followup.handoffMode); err != nil {
+				return err
+			}
+			followup.recoveryPolicy, err = satRecoveryPolicyTx(ctx, t, attemptID)
+			if err != nil {
+				return err
+			}
+		}
+		if err := s.openFollowUpModuleTx(ctx, t, attemptID, sectionID, breakAfterSeconds, next, audit, routeBasisStaffSelected, followup); err != nil {
+			return err
+		}
+		if control != nil {
+			if err := focusReroutedRecoveryModule(ctx, t, attemptID, control, next); err != nil {
+				return err
+			}
 		}
 		payload, _ := json.Marshal(map[string]any{"sectionKey": sectionKey, "route": route, "moduleId": next.id})
 		if _, err := t.ExecContext(ctx,
