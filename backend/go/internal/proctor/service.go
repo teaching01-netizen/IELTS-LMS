@@ -1045,10 +1045,34 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 		var runtimeID, status string
 		var revision int64
 		if err := q.QueryRowContext(ctx, selRt, scheduleID).Scan(&runtimeID, &status, &revision); err != nil {
-			if err == sql.ErrNoRows {
-				return &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Runtime not found.", HTTPStatus: 404}
+			if err != sql.ErrNoRows {
+				return err
 			}
-			return err
+			// A room that never started has no runtime row: the proctor list
+			// synthesizes a not-started runtime on read, so End Exam must still
+			// close it. With nothing running there is nothing to submit, so the
+			// terminal write lands on the schedule itself — the same completed
+			// status CompleteInTx would have written — with the same audit and
+			// outbox wakeups. Repeating it on an already-terminal schedule is a
+			// no-op success (idempotent under retry).
+			endedRevision, changed, err := completeScheduleWithoutRuntime(ctx, q, scheduleID)
+			if err != nil {
+				return err
+			}
+			if !changed {
+				return lifecycle.Store(ctx, q, scope, cmd.OperationID, "complete_exam", hash, map[string]any{"ok": true})
+			}
+			if err := insertAuditLog(ctx, q, scheduleID, actor.ID, "SESSION_END", nil, map[string]any{"reason": cmd.Reason, "endedWithoutRuntime": true}); err != nil {
+				return err
+			}
+			if err := s.enqueueAutoSubmitForSchedule(ctx, q, scheduleID, endedRevision, actor.ID, terminalization.ReasonProctorComplete); err != nil {
+				return err
+			}
+			payload, _ := json.Marshal(map[string]any{"scheduleId": scheduleID, "event": "complete_exam"})
+			if err := s.enqueueWakeup(ctx, q, "schedule_runtime", scheduleID, endedRevision, outbox.FamilyRuntimeChanged, payload); err != nil {
+				return err
+			}
+			return lifecycle.Store(ctx, q, scope, cmd.OperationID, "complete_exam", hash, map[string]any{"ok": true})
 		}
 		if status == "completed" || status == "cancelled" {
 			return lifecycle.Store(ctx, q, scope, cmd.OperationID, "complete_exam", hash, map[string]any{"ok": true})
@@ -1083,6 +1107,37 @@ func (s *Service) CompleteExam(ctx context.Context, actor Actor, scheduleID stri
 	// B2: post-commit snapshot invalidation (nil-safe when hook unset).
 	s.invalidated(scheduleID)
 	return nil
+}
+
+// completeScheduleWithoutRuntime ends a schedule that never had a runtime row.
+//
+// The proctor session reads synthesize a not-started runtime for such rooms
+// (see sessions.go), so staff can End Exam on a room the runtime writes never
+// touched. There is no runtime to complete and nothing to submit; the schedule
+// is the terminal entity, so it gets the same 'completed' status CompleteInTx
+// writes and the bumped revision the caller uses for its outbox wakeups.
+//
+// The bool reports whether this call performed the transition. A schedule that
+// is already terminal returns false so the caller can store the lifecycle
+// receipt without duplicating the audit row or re-bumping the revision.
+func completeScheduleWithoutRuntime(ctx context.Context, q tx.Tx, scheduleID string) (int64, bool, error) {
+	const sel = "SELECT status, revision FROM exam_schedules WHERE id = ?"
+	var status string
+	var revision int64
+	if err := q.QueryRowContext(ctx, sel, scheduleID).Scan(&status, &revision); err != nil {
+		if err == sql.ErrNoRows {
+			return 0, false, &apperrors.Error{Code: apperrors.CodeNotFound, Message: "Schedule not found.", HTTPStatus: 404}
+		}
+		return 0, false, err
+	}
+	if status == "completed" || status == "cancelled" {
+		return revision, false, nil
+	}
+	const done = "UPDATE exam_schedules SET status = 'completed', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?"
+	if _, err := q.ExecContext(ctx, done, scheduleID); err != nil {
+		return 0, false, err
+	}
+	return revision + 1, true, nil
 }
 
 // AutoSubmitAfterComplete seals one remaining attempt as auto-submit

@@ -9,6 +9,11 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: ["sat-staff-bulk-end-ux.spec.ts", "proctor-bulk-end-ux.spec.ts"],
   fullyParallel: false,
+  // One worker: both suites share a single Vite dev server, and two cold
+  // workers racing module transforms produced a 30s browser-load timeout on
+  // the first run after a restart. Sequential runs are deterministic and the
+  // whole set still finishes in about 15 seconds.
+  workers: 1,
   retries: 0,
   reporter: "list",
   expect: { timeout: 15_000 },

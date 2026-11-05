@@ -234,3 +234,116 @@ func TestAutoSubmitScheduleAfterEndSectionUsesProctorEndReason(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A room that never started has no runtime row (the proctor list synthesizes a
+// not-started runtime on read). End Exam must still close it: the schedule is
+// the terminal entity in that case, so completing it is a schedule-only write
+// with the same audit and outbox wakeups the runtime path emits.
+func TestCompleteExamEndsScheduleThatNeverStarted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	outbx := &captureOutbox{}
+	svc := NewService(tx.NewRunner(db), db, nil, outbx, nil)
+	actor := Actor{ID: "admin-1", Role: RoleAdmin, CSRFVerified: true}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id = ? FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
+			AddRow("sched-1", "exam-1", "ielts", "", "", "proctor", "ver-1", "scheduled", 4, 180))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	// lockScheduleScope tolerates a missing runtime: this is the never-started room.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_lifecycle_receipts WHERE scope_kind = ? AND scope_id = ? AND operation_id = ?")).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET eva_sim_closed_at")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnError(sql.ErrNoRows)
+	// Schedule-only terminal transition.
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT status, revision FROM exam_schedules WHERE id = ?")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"status", "revision"}).AddRow("scheduled", 4))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET status = 'completed', updated_at = UTC_TIMESTAMP(6), revision = revision + 1 WHERE id = ?")).
+		WithArgs("sched-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO session_audit_logs")).
+		WithArgs(sqlmock.AnyArg(), "sched-1", "admin-1", "SESSION_END", nil, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	// enqueueAutoSubmitForSchedule: no writable attempts in a never-started room.
+	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts")).
+		WithArgs("sched-1").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_lifecycle_receipts")).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := svc.CompleteExam(context.Background(), actor, "sched-1", CompleteExamCommand{OperationID: "op-complete-never-started"}); err != nil {
+		t.Fatalf("CompleteExam must end a never-started room, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(outbx.families) != 1 || outbx.families[0] != "runtime_changed" {
+		t.Fatalf("outbox families = %#v, want one runtime_changed wakeup", outbx.families)
+	}
+	if got, _ := outbx.revisionFor("runtime_changed"); got != 5 {
+		t.Fatalf("wakeup revision = %d, want the bumped schedule revision 5", got)
+	}
+}
+
+// Repeated End Exam on an already-closed runtime-less room stays idempotent:
+// no second revision bump, no duplicate audit row, still a success.
+func TestCompleteExamWithoutRuntimeIsIdempotentOnceTerminal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	outbx := &captureOutbox{}
+	svc := NewService(tx.NewRunner(db), db, nil, outbx, nil)
+	actor := Actor{ID: "admin-1", Role: RoleAdmin, CSRFVerified: true}
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("SET time_zone")).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM exam_schedules WHERE id = ? FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "exam_id", "provider_key", "sat_timing_model", "ielts_timing_model", "sat_start_mode", "published_version_id", "status", "revision", "planned_duration_minutes"}).
+			AddRow("sched-1", "exam-1", "ielts", "", "", "proctor", "ver-1", "completed", 9, 180))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM student_attempts WHERE schedule_id = ? ORDER BY id FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_lifecycle_receipts WHERE scope_kind = ? AND scope_id = ? AND operation_id = ?")).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET eva_sim_closed_at")).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, status, revision FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE")).
+		WithArgs("sched-1").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT status, revision FROM exam_schedules WHERE id = ?")).
+		WithArgs("sched-1").
+		WillReturnRows(sqlmock.NewRows([]string{"status", "revision"}).AddRow("completed", 9))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_lifecycle_receipts")).WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := svc.CompleteExam(context.Background(), actor, "sched-1", CompleteExamCommand{OperationID: "op-complete-repeat"}); err != nil {
+		t.Fatalf("repeated CompleteExam on a terminal room must succeed, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+	if len(outbx.families) != 0 {
+		t.Fatalf("terminal no-op must not emit outbox events, got %#v", outbx.families)
+	}
+}
