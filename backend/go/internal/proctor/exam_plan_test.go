@@ -3,6 +3,7 @@ package proctor
 import (
 	"context"
 	"database/sql/driver"
+	"encoding/json"
 	"regexp"
 	"testing"
 
@@ -29,13 +30,46 @@ func examPlanQuerier(t *testing.T) (sqlmock.Sqlmock, sessionQuerier) {
 }
 
 func planSectionPlanRows(mock sqlmock.Sqlmock, rows ...[]driver.Value) {
-	out := sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds"})
+	out := sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "routing_policy_config"})
 	for _, row := range rows {
+		if len(row) == 6 {
+			row = append(row, nil)
+		}
 		out.AddRow(row...)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id")).
 		WithArgs("pv-1").
 		WillReturnRows(out)
+}
+
+func TestLoadExamPlanCarriesPublishedRoutingThreshold(t *testing.T) {
+	mock, q := examPlanQuerier(t)
+	planSectionPlanRows(mock,
+		[]driver.Value{"sec-rw", "reading-writing", "Reading & Writing", 0, 3840, 600, `{"minimumCorrectForHigher":13}`},
+		[]driver.Value{"sec-math", "math", "Math", 1, 4200, 0},
+	)
+	planModulePlanRows(mock)
+	plan, err := loadExamPlan(context.Background(), q, "pv-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sections []map[string]any
+	if err := json.Unmarshal(encoded, &sections); err != nil {
+		t.Fatal(err)
+	}
+	if sections[0]["minimumCorrectForHigher"] != float64(13) {
+		t.Fatalf("room must report its own published threshold: %s", encoded)
+	}
+	if sections[1]["minimumCorrectForHigher"] != nil {
+		t.Fatalf("missing policy must not invent a threshold: %s", encoded)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func planModulePlanRows(mock sqlmock.Sqlmock, rows ...[]driver.Value) {

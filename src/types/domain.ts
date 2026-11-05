@@ -435,6 +435,8 @@ export interface ExamPlanSection {
   order: number;
   durationMinutes: number;
   gapAfterMinutes: number;
+  /** Routing cutoff from this room's captured published version, never the working draft. */
+  minimumCorrectForHigher?: number | undefined;
   modules: ExamPlanModule[];
 }
 

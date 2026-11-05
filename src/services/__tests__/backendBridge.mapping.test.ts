@@ -23,6 +23,16 @@ import {
 import { ApiError } from '../../shared/api-client/errors';
 
 describe('backendBridge contract mappings', () => {
+  it('preserves the published routing threshold in the room plan', () => {
+    const mapped = mapBackendRuntime({
+      id: 'runtime-1', scheduleId: 'sched-1', examId: 'exam-1', providerKey: 'sat', status: 'live',
+      totalPausedSeconds: 0, createdAt: '2026-01-01T09:00:00Z', updatedAt: '2026-01-01T09:00:00Z', sections: [],
+      examPlan: [{ sectionKey: 'reading-writing', label: 'Reading & Writing', order: 0,
+        durationMinutes: 64, gapAfterMinutes: 10, modules: [], minimumCorrectForHigher: 13 }],
+    }, { providerKey: 'sat', examTitle: 'Exam', cohortName: 'Room', deliveryMode: 'proctor_start' });
+    expect(mapped.examPlan?.[0]).toHaveProperty('minimumCorrectForHigher', 13);
+  });
+
   it('maps backend exam entity field renames and permissions', () => {
     const mapped = mapBackendExamEntity({
       id: 'exam-1',

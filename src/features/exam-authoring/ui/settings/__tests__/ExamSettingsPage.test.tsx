@@ -139,6 +139,12 @@ beforeEach(() => {
 });
 
 describe("ExamSettingsPage", () => {
+  it("explains that saved draft settings do not change existing rooms", () => {
+    renderPage();
+    expect(screen.getByText("Working draft settings")).toBeInTheDocument();
+    expect(screen.getByText(/Existing rooms keep the version and routing threshold captured when they were created/)).toBeInTheDocument();
+  });
+
   it("marks Settings as the current tab inside the shared exam header", () => {
     renderPage();
     const tabs = screen.getByRole("navigation", { name: "Exam sections" });

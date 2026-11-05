@@ -149,12 +149,13 @@ type SessionPlanModule struct {
 // adaptive branch) and its modules. The staff run sheet renders it; the live
 // clocks still come from SessionRuntimeSection, so the two can be compared.
 type SessionPlanSection struct {
-	SectionKey      string              `json:"sectionKey"`
-	Label           string              `json:"label"`
-	Order           int                 `json:"order"`
-	DurationMinutes int                 `json:"durationMinutes"`
-	GapAfterMinutes int                 `json:"gapAfterMinutes"`
-	Modules         []SessionPlanModule `json:"modules"`
+	SectionKey              string              `json:"sectionKey"`
+	Label                   string              `json:"label"`
+	Order                   int                 `json:"order"`
+	DurationMinutes         int                 `json:"durationMinutes"`
+	GapAfterMinutes         int                 `json:"gapAfterMinutes"`
+	Modules                 []SessionPlanModule `json:"modules"`
+	MinimumCorrectForHigher *int                `json:"minimumCorrectForHigher,omitempty"`
 }
 
 // SessionRuntime mirrors Rust ExamSessionRuntime (camelCase): the full
@@ -1018,7 +1019,9 @@ func loadExamPlan(ctx context.Context, q sessionQuerier, versionID string) ([]Se
 		section  SessionPlanSection
 	}
 	rows, err := q.QueryContext(ctx,
-		"SELECT id, section_key, title, display_order, duration_seconds, break_after_seconds FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id",
+		`SELECT id, section_key, title, display_order, duration_seconds, break_after_seconds,
+		(SELECT policy_config FROM assessment_routing_policies WHERE section_id = assessment_sections.id) AS routing_policy_config
+		FROM assessment_sections WHERE exam_version_id = ? ORDER BY display_order, id`,
 		versionID)
 	if err != nil {
 		return nil, err
@@ -1028,13 +1031,20 @@ func loadExamPlan(ctx context.Context, q sessionQuerier, versionID string) ([]Se
 	for rows.Next() {
 		var row sectionRow
 		var breakSeconds int
-		if err := rows.Scan(&row.id, &row.section.SectionKey, &row.section.Label, &row.section.Order, &row.authored, &breakSeconds); err != nil {
+		var policyConfig sql.NullString
+		if err := rows.Scan(&row.id, &row.section.SectionKey, &row.section.Label, &row.section.Order, &row.authored, &breakSeconds, &policyConfig); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		row.section.DurationMinutes = planMinutes(row.authored)
 		row.section.GapAfterMinutes = planMinutes(breakSeconds)
 		row.section.Modules = []SessionPlanModule{}
+		var policy struct {
+			MinimumCorrectForHigher *int `json:"minimumCorrectForHigher"`
+		}
+		if policyConfig.Valid && json.Unmarshal([]byte(policyConfig.String), &policy) == nil && policy.MinimumCorrectForHigher != nil && *policy.MinimumCorrectForHigher > 0 {
+			row.section.MinimumCorrectForHigher = policy.MinimumCorrectForHigher
+		}
 		index[row.id] = len(ordered)
 		ordered = append(ordered, row)
 	}

@@ -57,23 +57,31 @@ export function DeliverySettingsPanel({
   return (
     <div className="space-y-4">
       {state.kind === "ready" ? (
-        state.shell.sections.map((section) => (
-          <SectionDeliveryEditor
-            key={section.id}
-            examId={exam.id}
-            section={section}
-            canEdit={exam.canEdit}
-            onDirtyChange={setSectionDirty}
-          />
-        ))
+        <>
+          <div className="rounded-[var(--sat-staff-radius-card,14px)] border border-border bg-muted/40 p-4 text-[14px] leading-5">
+            <p className="font-semibold">Working draft settings</p>
+            <p className="mt-1 text-muted-foreground">
+              Saved settings apply to new rooms created from this draft. Existing rooms keep the version and routing threshold captured when they were created. Check a room’s routing summary for its actual threshold.
+            </p>
+          </div>
+          {state.shell.sections.map((section) => (
+            <SectionDeliveryEditor
+              key={section.id}
+              examId={exam.id}
+              section={section}
+              canEdit={exam.canEdit}
+              onDirtyChange={setSectionDirty}
+            />
+          ))}
+        </>
       ) : loadError ? (
         <SatInlineError title="Settings could not load" description={loadError} onRetry={() => void lifecycle.refetch()} />
       ) : state.kind === "no-draft" ? (
         <div className="rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline)] bg-white p-5 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
           <p className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">This exam is published.</p>
           <p className="mt-1">
-            Timing and routing belong to the working draft. Editing opens a draft from the published version; students
-            keep the published version until you publish again.
+            Timing and routing belong to the working draft. Editing opens a draft from the published version.
+            Existing rooms keep their captured version, even after you publish again.
           </p>
           {exam.canEdit && onEditExam ? (
             <button type="button" onClick={onEditExam} className="sat-btn sat-btn--primary sat-press mt-4">

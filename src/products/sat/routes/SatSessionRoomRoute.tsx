@@ -724,6 +724,7 @@ export function SatSessionRoomRoute() {
             currentStage={currentStage}
             remainingSeconds={cohortStageRemainingSeconds}
             startMode={startMode}
+            routePolicy={schedule.satRoutePolicy}
             studentEntry={roomMode === 'prestart' ? (
               <SatWaitingRoomPanel
                 versionLabel={accessLink ? `Version ${accessLink.versionNumber}` : null}

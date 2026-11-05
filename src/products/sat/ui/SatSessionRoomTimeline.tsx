@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { ExamSessionRuntime } from '../../../types/domain';
+import type { ExamSchedule, ExamSessionRuntime } from '../../../types/domain';
 import { SatRunSheet } from './SatRunSheet';
 import {
   formatRunSheetClock,
@@ -27,6 +27,7 @@ export function SatSessionRoomTimeline({
   remainingSeconds,
   startMode,
   studentEntry,
+  routePolicy,
   children,
 }: {
   runtime: ExamSessionRuntime;
@@ -40,6 +41,7 @@ export function SatSessionRoomTimeline({
   startMode: 'proctor' | 'access_code';
   /** Pre-start only: what will run and how it starts. */
   studentEntry?: ReactNode;
+  routePolicy?: ExamSchedule['satRoutePolicy'];
   /** Room panels shown between the stage and the run sheet. */
   children?: ReactNode;
 }) {
@@ -50,6 +52,12 @@ export function SatSessionRoomTimeline({
   const [scheduleOpen, setScheduleOpen] = useState(roomMode === 'review');
   const stageRows = satRunSheetCurrentRows(runSheet);
   const sessionFinished = runtime.status === 'completed';
+  const routingSections = routePolicy && routePolicy !== 'adaptive' ? [] : (runtime.examPlan ?? []).filter(
+    (section) => Number.isSafeInteger(section.minimumCorrectForHigher) && (section.minimumCorrectForHigher ?? 0) > 0
+      && section.modules.some((module) => module.adaptiveRole === 'base')
+      && section.modules.some((module) => module.adaptiveRole === 'lower_branch')
+      && section.modules.some((module) => module.adaptiveRole === 'higher_branch'),
+  );
   const stageSectionOrdinal = stageRows.section
     ? runSheet.rows.filter((row) => row.kind === 'section').indexOf(stageRows.section) + 1
     : 0;
@@ -166,6 +174,17 @@ export function SatSessionRoomTimeline({
           </p>
         )}
       </SatRoomSurface>
+      {routingSections.length > 0 ? (
+        <SatRoomSurface aria-label="Room routing" className="p-4 text-[14px] leading-5">
+          <h2 className="font-semibold">Room routing · Published version</h2>
+          {routingSections.map((section) => (
+            <p key={section.sectionKey} className="mt-2 text-[var(--sat-staff-text-secondary,#515154)]">
+              {section.label}: Hard Module 2 at {section.minimumCorrectForHigher} correct in Module 1.
+            </p>
+          ))}
+          <p className="mt-2 text-[var(--sat-staff-text-tertiary,#6e6e73)]">Changes to the exam draft do not change this room.</p>
+        </SatRoomSurface>
+      ) : null}
       {children}
       <SatRunSheet sheet={runSheet} runtime={runtime} scheduledStartAt={scheduledStartAt} open={scheduleOpen} onOpenChange={setScheduleOpen} />
     </section>

@@ -132,6 +132,31 @@ describe('SatSessionRoomRoute', () => {
     });
   });
 
+  it('shows the room published routing threshold instead of the newer draft value', () => {
+    const base = controllerMock();
+    controllerMock.mockReturnValue({
+      ...base,
+      schedules: [{ ...schedule, satRoutePolicy: 'adaptive' }],
+      runtimeSnapshots: [{ ...runtime, examPlan: [{ ...runtime.examPlan[0], minimumCorrectForHigher: 13 }] }],
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.getByText('Room routing · Published version')).toBeInTheDocument();
+    expect(screen.getByText('Reading & Writing: Hard Module 2 at 13 correct in Module 1.')).toBeInTheDocument();
+    expect(screen.getByText(/Changes to the exam draft do not change this room/)).toBeInTheDocument();
+    expect(screen.queryByText(/Hard Module 2 at 18/)).not.toBeInTheDocument();
+  });
+
+  it('does not present an adaptive cutoff as the rule for a forced-route room', () => {
+    const base = controllerMock();
+    controllerMock.mockReturnValue({
+      ...base,
+      schedules: [{ ...schedule, satRoutePolicy: 'force_higher' }],
+      runtimeSnapshots: [{ ...runtime, examPlan: [{ ...runtime.examPlan[0], minimumCorrectForHigher: 13 }] }],
+    });
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.queryByText(/Hard Module 2 at 13/)).not.toBeInTheDocument();
+  });
+
   it('carries confirmed creation into the ready room and focuses its title', async () => {
     const scroll = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
     render(<MemoryRouter initialEntries={[{ pathname: '/sat/sessions/sched-1', state: { satCreatedRoom: 'sched-1' } }]}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);

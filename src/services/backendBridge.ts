@@ -183,6 +183,7 @@ type BackendExamPlanSection = {
   order: number;
   durationMinutes: number;
   gapAfterMinutes: number;
+  minimumCorrectForHigher?: number | undefined;
   modules?: BackendExamPlanModule[] | null | undefined;
 };
 
@@ -721,6 +722,7 @@ function mapBackendExamPlan(
     order: section.order,
     durationMinutes: section.durationMinutes,
     gapAfterMinutes: section.gapAfterMinutes,
+    minimumCorrectForHigher: section.minimumCorrectForHigher,
     modules: (Array.isArray(section.modules) ? section.modules : []).map((module) => ({
       moduleKey: module.moduleKey,
       title: module.title,
