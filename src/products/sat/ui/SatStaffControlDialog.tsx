@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { SatFormDialog } from './ConfirmDialog';
 import { SatButton, SatField } from './SatPage';
+import { useAuthoritativeDeadlineClock, type ServerClockSnapshot } from '../../../shared/hooks/useAuthoritativeDeadlineClock';
 import {
   applySATStaffControl,
   type SATStaffControlRequest,
@@ -16,11 +17,30 @@ export type SatControlTarget = {
   stageKey?: string;
 };
 
+/**
+ * The target's state as the room reports it right now, not the click-time
+ * snapshot the reviewed request is built from. The stage label comes from the
+ * room's latest read; the clock follows the student's own deadline so it counts
+ * down while this dialog is open. Absent inputs mean the dialog renders nothing
+ * live rather than a stale certainty — the click-time fields still carry the
+ * request.
+ */
+export type SatControlLive = {
+  stage: string;
+  deadlineAt?: string | null;
+  running?: boolean;
+  fallbackSeconds: number;
+};
+
 type Props = {
   scheduleId: string;
   targets: SatControlTarget[];
   action: SATStaffControlRequest['action'];
   plan: ExamSessionRuntime['examPlan'];
+  /** Per-target live read; keyed by attempt id. Display only. */
+  live?: Record<string, SatControlLive> | null;
+  /** The room's corrected clock, so this dialog's countdowns cannot disagree with the page's others. */
+  roomClock?: ServerClockSnapshot | null;
   wholeRoom?: boolean;
   blocked?: boolean;
   onClose: () => void;
@@ -71,9 +91,54 @@ function clock(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }
 
+/**
+ * One target's live read: the stage the room last saw them in and the seconds
+ * their own stage clock still holds. Deadline-driven so it progresses between
+ * room reads; a missing deadline holds the last read's seconds without inventing
+ * movement.
+ */
+function SatControlLiveCurrent({ stage, deadlineAt, running = false, fallbackSeconds, roomClock }: SatControlLive & { roomClock?: ServerClockSnapshot | null }) {
+  const remaining = useAuthoritativeDeadlineClock({
+    deadlineAt: deadlineAt ?? null,
+    fallbackSeconds,
+    running: running && deadlineAt != null,
+    roomClock,
+  });
+  return (
+    <p data-sat-staff-control-current className="text-[15px] leading-6 text-[var(--sat-staff-text-secondary,#515154)]">
+      <span className="font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Current:</span> {stage} · <span className="tabular-nums">{clock(remaining)}</span> remaining
+    </p>
+  );
+}
+
+/**
+ * One affected student in the review list. Reads the room's latest projection
+ * when it has one (stage label + deadline-derived seconds) and falls back to the
+ * click-time snapshot when it does not — the review decision follows the room
+ * without rewriting the request behind it.
+ */
+function SatControlTargetRow({ target, liveEntry, roomClock }: { target: SatControlTarget; liveEntry?: SatControlLive | null; roomClock?: ServerClockSnapshot | null }) {
+  const remaining = useAuthoritativeDeadlineClock({
+    deadlineAt: liveEntry?.deadlineAt ?? null,
+    fallbackSeconds: liveEntry ? liveEntry.fallbackSeconds : target.remainingSeconds,
+    running: Boolean(liveEntry?.running && liveEntry?.deadlineAt != null),
+    roomClock,
+  });
+  return (
+    <li className="border-b border-[var(--sat-staff-border-hairline)] py-2">
+      <span className="font-semibold">{target.name}</span>
+      <span className="ml-2 text-sm">{liveEntry ? liveEntry.stage : target.stage} · {clock(remaining)}</span>
+    </li>
+  );
+}
+
 export function SatStaffControlDialog({
-  scheduleId, targets, action, plan, wholeRoom = targets.length > 1, blocked = false, onClose, onApplied,
+  scheduleId, targets, action, plan, live = null, roomClock = null, wholeRoom = targets.length > 1, blocked = false, onClose, onApplied,
 }: Props) {
+  // The single selected student's live read; present only when the room's
+  // projection carries them. Absent keeps the dialog exactly as it was.
+  const singleTarget = targets.length === 1 ? targets[0] : undefined;
+  const singleLive = singleTarget ? live?.[singleTarget.id] : undefined;
   const destinations = destinationOptions(plan);
   const [destinationValue, setDestinationValue] = useState(destinations[0]?.value ?? '');
   const destination = destinations.find(item => item.value === destinationValue);
@@ -154,16 +219,19 @@ export function SatStaffControlDialog({
             <p className="text-sm font-medium">{targets.length} {targets.length === 1 ? 'student' : 'students'} affected</p>
             <ul className="max-h-48 overflow-y-auto" aria-label="Affected students">
               {targets.map(target => (
-                <li key={target.id} className="border-b border-[var(--sat-staff-border-hairline)] py-2">
-                  <span className="font-semibold">{target.name}</span>
-                  <span className="ml-2 text-sm">{target.stage} · {clock(target.remainingSeconds)}</span>
-                </li>
+                <SatControlTargetRow key={target.id} target={target} liveEntry={live?.[target.id] ?? null} roomClock={roomClock} />
               ))}
             </ul>
             {!pending && !requestRef.current ? <SatButton variant="quiet" onClick={() => setReviewing(false)}>Back to editing</SatButton> : null}
           </>
         ) : (
           <>
+            {/* A single selected student gets their own live read: the proctor
+                is choosing where to move them, so the view names where they
+                actually are now, and counts their clock down while it happens. */}
+            {singleTarget && singleLive ? (
+              <SatControlLiveCurrent key={singleTarget.id} {...singleLive} roomClock={roomClock} />
+            ) : null}
             {action === 'move' ? (
               <SatField label="Destination">
                 {control => (

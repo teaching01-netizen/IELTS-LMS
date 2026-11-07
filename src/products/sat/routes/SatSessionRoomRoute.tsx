@@ -28,7 +28,7 @@ import { SatRoomNeedsAttention } from '../ui/SatRoomNeedsAttention';
 import { StudentShareDialog } from '../../../features/exam-authoring/ui/access-links/AccessLinkShareSheet';
 import { describeAccessLinkAudience, formatAccessLinkStatus, roomEntryUrl } from '../../../features/exam-authoring/ui/access-links/accessLinkUi';
 import { buildSatRunSheet, formatRunSheetClockWithSeconds, formatRunSheetRemaining, satRunSheetCurrentRows, satRunSheetTimingPlan } from '../ui/sessionRunSheet';
-import { isSatStageLive } from '../ui/satStage';
+import { isSatStageLive, satStudentLiveStage, type SatStudentLiveStage } from '../ui/satStage';
 import { satPublishScopeCopy } from '../../../features/exam-authoring/ui/release/releaseSelectors';
 import { ACCESS_LINK_SECTION_LABELS, effectiveAccessLinkSections } from '../../../features/exam-authoring/contracts/accessLinks';
 import { sessionPhaseFromRuntime, sessionStatusLine } from '../../../features/exam-authoring/ui/delivery/sessionState';
@@ -518,6 +518,21 @@ export function SatSessionRoomRoute() {
     if (targets.length) setStaffControl({ action, targets, wholeRoom });
   };
 
+  // Display only: while a staff-control review sits open, each target's stage
+  // and clock are re-read from the room's latest projection on every refresh,
+  // so the proctor sees a candidate who moved on mid-review before Apply. The
+  // reviewed request itself keeps the click-time snapshot the dialog was opened
+  // with — the server's stage guard stays meaningful.
+  const staffControlLive = useMemo(() => {
+    if (!staffControl) return null;
+    const live: Record<string, SatStudentLiveStage> = {};
+    for (const target of staffControl.targets) {
+      const projection = satStudentLiveStage(runtime, students.find(student => student.id === target.id));
+      if (projection) live[target.id] = projection;
+    }
+    return live;
+  }, [staffControl, runtime, students]);
+
   const inspectorContent = selectedStudent ? (
         <StudentDetail
           key={selectedStudent.id}
@@ -788,6 +803,8 @@ export function SatSessionRoomRoute() {
           action={staffControl.action}
           wholeRoom={staffControl.wholeRoom}
           blocked={isStale || !sessionLive}
+          live={staffControlLive}
+          roomClock={roomClock}
           plan={runtime.examPlan}
           onClose={() => setStaffControl(null)}
           onApplied={() => {

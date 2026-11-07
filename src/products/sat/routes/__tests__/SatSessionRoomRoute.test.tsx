@@ -36,7 +36,7 @@ vi.mock('../../../../features/proctor/infrastructure/proctorGateway', () => {
     examDeliveryService,
     // Staff route queue reports disabled, so the panel stays hidden and raises no alert.
     // Room commands reach the same delivery mocks through proctorMutations.
-    proctorGateway: { backendGet: (...args: unknown[]) => proctorGetMock(...args), backendPost: async () => undefined, examDeliveryService, examRepository: {} },
+    proctorGateway: { backendGet: (...args: unknown[]) => proctorGetMock(...args), backendPost: vi.fn(async () => undefined), examDeliveryService, examRepository: {} },
   };
 });
 vi.mock('../../../../features/proctor/api/deviceTransfers', () => ({
@@ -1125,6 +1125,68 @@ describe('SatSessionRoomRoute', () => {
       // seconds away from the hero clock the proctor is reading beside it.
       expect(row.querySelector('.sat-room__row-sub')?.textContent).toBe(`Section clock ${hero}`);
     });
+  });
+
+  // While a staff-control dialog sits open the room keeps moving behind it: the
+  // room's latest projection must reach the dialog (current module, the
+  // student's own ticking clock) while the reviewed request keeps the click-time
+  // stakes — a student who advanced mid-review is visible to the proctor, and
+  // the change they decided is never silently rewritten to track them.
+  it('keeps the move dialog live with the room latest read while the reviewed change stays frozen', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-30T02:05:00Z').getTime());
+    const { proctorGateway } = await import('../../../../features/proctor/infrastructure/proctorGateway');
+    const controlRequests: Array<Record<string, unknown>> = [];
+    (proctorGateway.backendPost as ReturnType<typeof vi.fn>).mockImplementation(async (_path: string, body: unknown) => {
+      controlRequests.push(body as Record<string, unknown>);
+      return { outcomes: [{ attemptId: student.id, applied: true }] };
+    });
+
+    const clocked = {
+      ...student,
+      runtimeCurrentSection: 'reading-writing',
+      runtimeSectionStatus: 'live' as const,
+      runtimeModuleRole: 'base' as const,
+      runtimeModuleRemainingSeconds: 780,
+      runtimeModuleDeadlineAt: '2026-08-30T02:18:00Z',
+    };
+    const base = {
+      schedules: [schedule], runtimeSnapshots: [runtime], sessions: [clocked], alerts: [], error: null, isLoading: false,
+      roomClock: resolvedRoomClock,
+      reload: vi.fn().mockResolvedValue(undefined), handleStartScheduledSession: vi.fn(), handlePauseCohort: vi.fn(), handleResumeCohort: vi.fn(),
+      handleExtendCurrentSection: vi.fn(), handleCompleteExam: vi.fn(),
+    };
+    controllerMock.mockReset();
+    controllerMock.mockReturnValue(base);
+    const renderRoom = () => <MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>;
+    try {
+      const { rerender } = render(renderRoom());
+      fireEvent.click(screen.getByRole('option', { name: 'Open Ananda S.' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Move module…' }));
+      const dialog = screen.getByRole('dialog', { name: 'Move module' });
+
+      const current = () => dialog.querySelector('[data-sat-staff-control-current]')?.textContent ?? '';
+      expect(current()).toBe('Current: Reading & Writing · Module 1 · 13:00 remaining');
+      act(() => { vi.advanceTimersByTime(2_000); });
+      expect(current()).toBe('Current: Reading & Writing · Module 1 · 12:58 remaining');
+
+      // The room's next read moves them on while the dialog stays open...
+      controllerMock.mockReturnValue({ ...base, sessions: [{ ...clocked, runtimeModuleRole: 'lower_branch' as const }] });
+      rerender(renderRoom());
+      expect(current()).toBe('Current: Reading & Writing · Module 2 · Lower · 12:58 remaining');
+
+      // ...and the reviewed change they decided is exactly what gets sent.
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Review change' }));
+      expect(within(dialog).getByRole('list', { name: 'Affected students' })).toHaveTextContent('Module 2 · Lower');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Apply change' }));
+      await act(async () => { await Promise.resolve(); });
+      expect(controlRequests).toEqual([expect.objectContaining({
+        attemptIds: [student.id], action: 'move', sectionKey: 'reading-writing', destination: 'module_1', remainingSeconds: 1920,
+      })]);
+    } finally {
+      vi.useRealTimers();
+      vi.setSystemTime(new Date('2026-08-30T02:05:00Z').getTime());
+    }
   });
 
   describe('room ops hierarchy (phase 04)', () => {
