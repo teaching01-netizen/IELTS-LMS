@@ -1399,11 +1399,9 @@ describe("useStudentSessionRouteData backend mode", () => {
   });
 
   /**
-   * Phase 3/4: the student socket is a real transport again — behind one
-   * switch — and it is only ever a WAKE-UP plus snapshot. Revisions stay
-   * monotonic on the client: a frame for a revision already applied cannot
-   * start a second refresh, while a newer transition refreshes immediately
-   * instead of waiting out the 500ms coalescer meant for answer bursts.
+   * SAT uses the student socket by default. Frames are wake-ups plus snapshots,
+   * and revision checks ignore events already applied. New transitions refresh
+   * immediately instead of waiting for the answer-burst coalescer.
    */
   describe("student realtime transport", () => {
     const originalWebSocket = globalThis.WebSocket;
@@ -1447,12 +1445,14 @@ describe("useStudentSessionRouteData backend mode", () => {
       return fetchMock.mock.calls.filter((call) => String(call[0]).includes("/live")).length;
     }
 
-    function stubSessionFetch() {
+    function stubSessionFetch(providerKey: "ielts" | "sat" = "ielts") {
       vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
       vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());
+      const staticContext =
+        providerKey === "sat" ? buildSatStaticSessionContext() : buildStaticSessionContext();
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce(jsonResponse(buildStaticSessionContext()))
+        .mockResolvedValueOnce(jsonResponse(staticContext))
         .mockResolvedValueOnce(jsonResponse(buildLiveSessionContext(null)))
         .mockResolvedValueOnce(jsonResponse(buildBootstrapContext(buildAttempt())))
         .mockResolvedValue(jsonResponse(buildLiveSessionContext(buildAttempt())));
@@ -1464,7 +1464,7 @@ describe("useStudentSessionRouteData backend mode", () => {
       globalThis.WebSocket = originalWebSocket;
     });
 
-    it("keeps the socket closed when the rollout flag is absent", async () => {
+    it("keeps non-SAT student sockets closed when the rollout flag is absent", async () => {
       installSocket();
       stubSessionFetch();
 
@@ -1475,6 +1475,50 @@ describe("useStudentSessionRouteData backend mode", () => {
 
       expect(MockSocket.instances).toHaveLength(0);
       expect(result.current.liveSocketConnected).toBe(false);
+    });
+
+    it("refreshes a SAT sitting from its staff-control socket event without a manual refresh", async () => {
+      installSocket();
+      vi.stubEnv("VITE_STUDENT_REALTIME", "");
+      const fetchMock = stubSessionFetch("sat");
+
+      const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+        wrapper: createWrapper(),
+      });
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      await waitFor(() =>
+        expect(
+          MockSocket.instances.some((candidate) =>
+            new URL(candidate.url).searchParams.has("attemptId")
+          )
+        ).toBe(true)
+      );
+
+      const socket = MockSocket.instances.find((candidate) =>
+        new URL(candidate.url).searchParams.has("attemptId")
+      )!;
+      act(() => socket.open());
+      await waitFor(() => expect(result.current.liveSocketConnected).toBe(true));
+      await waitFor(() => expect(liveFetchCount(fetchMock)).toBeGreaterThan(1));
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 550));
+      });
+
+      const liveFetchesBeforeControl = liveFetchCount(fetchMock);
+      act(() => {
+        socket.emit({
+          kind: "attempt",
+          id: "attempt-1",
+          revision: 2,
+          event: "sat_module_submitted",
+        });
+      });
+
+      await act(async () => {
+        await new Promise((resolve) => window.setTimeout(resolve, 550));
+      });
+      await waitFor(() => expect(result.current.satAttemptUpdateToken).toBeGreaterThan(0));
+      await waitFor(() => expect(liveFetchCount(fetchMock)).toBeGreaterThan(liveFetchesBeforeControl));
     });
 
     it("opens the student socket and applies only newer runtime snapshots", async () => {

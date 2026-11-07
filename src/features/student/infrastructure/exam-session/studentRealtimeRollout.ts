@@ -1,18 +1,15 @@
 /**
  * Student realtime transport rollout (Phase 3).
  *
- * The student channel used to be poll-only: `useLiveUpdates` short-circuited
- * `role: 'student'` to disconnected, hard-coded, with no way to turn it on from
- * the client even when the server admitted student sockets (STUDENT_WS=allow).
- * That left every waiting student blind until their next poll, so a proctor's
- * Start reached them up to a poll window late.
+ * SAT students use the socket by default so staff controls appear without a
+ * manual refresh. Other providers keep polling unless the global switch turns
+ * sockets on for them too.
  *
  * This module owns the one switch that decides the transport. It is a pure
  * function of a raw env value so the decision can be tested without a bundler,
- * and it defaults to `poll` — today's behavior is the rollback position, so a
- * missing, misspelled, or partially deployed flag can never open a socket
- * fleet. Server-side rollback stays `STUDENT_WS=gone`; the two are independent
- * switches for the same seam.
+ * and it supports a provider-specific SAT default. Invalid values fail closed
+ * to polling. Server-side rollback stays `STUDENT_WS=gone`; the two switches
+ * are independent.
  */
 export type StudentRealtimeTransport = 'websocket' | 'poll';
 
@@ -20,11 +17,22 @@ export type StudentRealtimeTransport = 'websocket' | 'poll';
 export const STUDENT_REALTIME_ENV_KEY = 'VITE_STUDENT_REALTIME';
 
 /**
- * `websocket` -> WS primary with poll recovery.
- * anything else (incl. undefined) -> poll only.
+ * `websocket` -> WS primary with poll recovery for every provider.
+ * `poll` -> polling for every provider. When unset, SAT uses WS and other
+ * providers keep polling.
  */
-export function resolveStudentRealtimeTransport(raw: unknown): StudentRealtimeTransport {
-  return typeof raw === 'string' && raw.trim().toLowerCase() === 'websocket'
-    ? 'websocket'
-    : 'poll';
+export function resolveStudentRealtimeTransport(
+  raw: unknown,
+  providerKey?: 'sat' | 'ielts' | 'act' | 'unknown'
+): StudentRealtimeTransport {
+  if (raw == null) {
+    return providerKey === 'sat' ? 'websocket' : 'poll';
+  }
+  if (typeof raw !== 'string') return 'poll';
+
+  const value = raw.trim().toLowerCase();
+  if (value === 'websocket') return 'websocket';
+  if (value === 'poll') return 'poll';
+  if (value === '' && providerKey === 'sat') return 'websocket';
+  return 'poll';
 }

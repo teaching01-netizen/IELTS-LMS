@@ -2,16 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { resolveStudentRealtimeTransport } from '../studentRealtimeRollout';
 
 describe('student realtime rollout', () => {
-  it('defaults to the poll-only posture', () => {
-    // The rollback position must be what a missing/typo'd flag resolves to:
-    // a partially deployed flag can never open a socket fleet.
-    expect(resolveStudentRealtimeTransport(undefined)).toBe('poll');
-    expect(resolveStudentRealtimeTransport(null)).toBe('poll');
-    expect(resolveStudentRealtimeTransport('')).toBe('poll');
-    expect(resolveStudentRealtimeTransport('poll')).toBe('poll');
-    expect(resolveStudentRealtimeTransport('true')).toBe('poll');
-    expect(resolveStudentRealtimeTransport(true)).toBe('poll');
-    expect(resolveStudentRealtimeTransport('websocket')).toBe('websocket');
-    expect(resolveStudentRealtimeTransport(' WebSocket ')).toBe('websocket');
+  it('defaults SAT to the live socket and keeps other providers on polling', () => {
+    expect(resolveStudentRealtimeTransport(undefined, 'sat')).toBe('websocket');
+    expect(resolveStudentRealtimeTransport(null, 'sat')).toBe('websocket');
+    expect(resolveStudentRealtimeTransport('', 'sat')).toBe('websocket');
+    expect(resolveStudentRealtimeTransport(undefined, 'ielts')).toBe('poll');
+    expect(resolveStudentRealtimeTransport(undefined, 'act')).toBe('poll');
+  });
+
+  it('keeps explicit transport settings authoritative and invalid values fail closed', () => {
+    expect(resolveStudentRealtimeTransport('poll', 'sat')).toBe('poll');
+    expect(resolveStudentRealtimeTransport('true', 'sat')).toBe('poll');
+    expect(resolveStudentRealtimeTransport(true, 'sat')).toBe('poll');
+    expect(resolveStudentRealtimeTransport('websocket', 'ielts')).toBe('websocket');
+    expect(resolveStudentRealtimeTransport(' WebSocket ', 'sat')).toBe('websocket');
   });
 });

@@ -901,6 +901,73 @@ func loadSessionRuntimes(ctx context.Context, q sessionQuerier, schedules []Sess
 		}
 		out[id] = hydrateSessionRuntime(row, sectionsByRuntime[row.id], now)
 	}
+	// The committed IELTS timetable is the read authority for shared-schedule
+	// rooms, and the section rows a late reconciler has not materialized yet
+	// are exactly the lag applySharedScheduleView reports. The detail path
+	// already overlays; without the same overlay here the roster and the
+	// room detail answer "which section is this room on?" differently until
+	// the next materialization.
+	sharedIDs := make([]string, 0, len(out))
+	for _, id := range ids {
+		if out[id].TimingModel != examruntime.TimingModelIELTSSharedSchedule {
+			continue
+		}
+		sharedIDs = append(sharedIDs, out[id].ID)
+	}
+	if len(sharedIDs) > 0 {
+		// One batched probe for the whole page: the roster read must stay
+		// bounded as the room list grows.
+		rows, err := q.QueryContext(ctx, "SELECT id, ielts_shared_schedule FROM exam_session_runtimes WHERE id IN ("+placeholders(len(sharedIDs))+")", stringArgs(sharedIDs)...)
+		if err != nil {
+			return nil, err
+		}
+		timetables := map[string]examruntime.IELTSSharedSchedule{}
+		var parseFailure, scanFailure error
+		func() {
+			defer rows.Close()
+			for rows.Next() {
+				var runtimeID string
+				var raw sql.NullString
+				if err := rows.Scan(&runtimeID, &raw); err != nil {
+					scanFailure = err
+					return
+				}
+				if !raw.Valid || strings.TrimSpace(raw.String) == "" {
+					continue
+				}
+				shared, err := examruntime.ParseIELTSSharedSchedule([]byte(raw.String))
+				if err != nil {
+					// Same failure semantics as the detail path: a stored
+					// timetable the resolver cannot read must not pass a
+					// silently stale projection to staff.
+					parseFailure = err
+					return
+				}
+				timetables[runtimeID] = shared
+			}
+		}()
+		if parseFailure != nil {
+			return nil, parseFailure
+		}
+		if scanFailure != nil {
+			return nil, scanFailure
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			rt := out[id]
+			if rt.TimingModel != examruntime.TimingModelIELTSSharedSchedule {
+				continue
+			}
+			shared, ok := timetables[rt.ID]
+			if !ok {
+				continue
+			}
+			applySharedScheduleView(&rt, shared, now)
+			out[id] = rt
+		}
+	}
 	return out, nil
 }
 

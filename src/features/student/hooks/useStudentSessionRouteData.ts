@@ -165,13 +165,13 @@ export function useStudentSessionRouteData(
   const [error, setError] = useState<string | null>(null);
   const [ownershipBlocked, setOwnershipBlocked] = useState(false);
   const loadTransitionRollout = useMemo(buildDefaultAnswerInvariantRollout, []);
-  // Phase 3 rollout: the socket is the primary student channel only when the
-  // deployment says so (VITE_STUDENT_REALTIME=websocket). The default is the
-  // poll-only posture this route shipped with, so the switch is also the
-  // client-side rollback. Server-side rollback stays STUDENT_WS=gone.
+  // SAT staff controls need to reach the open exam without waiting for a
+  // manual refresh. When the global switch is unset, SAT uses the socket and
+  // other providers keep polling. Setting VITE_STUDENT_REALTIME=poll remains
+  // the client-side rollback. Server-side rollback stays STUDENT_WS=gone.
   const studentRealtimeTransport = useMemo(
-    () => resolveStudentRealtimeTransport(import.meta.env["VITE_STUDENT_REALTIME"]),
-    []
+    () => resolveStudentRealtimeTransport(import.meta.env["VITE_STUDENT_REALTIME"], providerKey),
+    [providerKey]
   );
   const candidateId = useMemo(() => normalizeCandidateId(studentId), [studentId]);
   // Server reads re-check the grant; this only decides whether to try.

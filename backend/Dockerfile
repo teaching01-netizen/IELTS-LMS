@@ -15,6 +15,9 @@ FROM node:22-bookworm-slim AS frontend-builder
 
 WORKDIR /app
 
+# Vite embeds this option in the browser bundle during the Docker build.
+ARG VITE_STUDENT_REALTIME
+
 # Bun is the package manager; Node (from the base image) remains the runtime
 # because the toolchain binaries use a `#!/usr/bin/env node` shebang.
 COPY --from=oven/bun:1.3.14-debian /usr/local/bin/bun /usr/local/bin/bun
