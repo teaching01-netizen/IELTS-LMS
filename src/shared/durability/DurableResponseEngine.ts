@@ -168,6 +168,7 @@ type CommandEpoch = {
  * Pre-repair checkpoints lack it; readers fall back to the record leaseEpoch.
  */
 interface BlockedInfoEx {
+  originScope?: string | null;
   reason: string;
   blockedAt: string;
   originLeaseEpoch?: number;
@@ -607,11 +608,11 @@ export class DurableResponseEngine {
   private restoreClosedScopes(): void {
     if (!this.scopeOf) return;
     for (const entry of this.quarantined) {
-      const scope = this.scopeOf(entry.questionId);
+      const scope = entry.scope ?? this.scopeOf(entry.questionId);
       if (scope != null && MODULE_SCOPED_CLOSE_REASONS[entry.reason]) this.closedScopes.set(scope, entry.reason);
     }
     for (const [questionId, state] of this.states) {
-      const scope = this.scopeOf(questionId);
+      const scope = (state.pending?.blocked as BlockedInfoEx | undefined)?.originScope ?? this.scopeOf(questionId);
       const reason = state.pending?.blocked?.reason;
       if (scope != null && reason && MODULE_SCOPED_CLOSE_REASONS[reason]) this.closedScopes.set(scope, reason);
     }
@@ -766,6 +767,7 @@ export class DurableResponseEngine {
     closeId: string,
     manifestHash: string,
     commands: readonly ResponseCommandV2[],
+    moduleAttemptId = scope,
   ): Promise<void> {
     if (!commands.length) return;
     const key = scopeCloseDraftKey(this.attemptId, scope);
@@ -790,7 +792,7 @@ export class DurableResponseEngine {
       leaseEpoch: preparedValue.leaseEpoch,
       controlEpoch: preparedValue.controlEpoch,
       commands: commands.map((command) => ({ ...command, response: clonePayload(command.response) })),
-      moduleClose: { moduleAttemptId: scope, manifestHash },
+      moduleClose: { moduleAttemptId, manifestHash },
     });
     if (this.isDestroyed) return;
     this.attemptRevision = Math.max(this.attemptRevision, result.attemptRevision);
@@ -975,7 +977,7 @@ export class DurableResponseEngine {
   public getBlockedQuestionIds(): string[] {
     const blocked: string[] = [];
     for (const [questionId, state] of this.states) {
-      if (state.pending?.blocked && !this.isClosedScope(questionId)) blocked.push(questionId);
+      if (state.pending?.blocked && !this.isClosedScope(questionId) && !this.closedScopes.has((state.pending.blocked as BlockedInfoEx).originScope ?? "")) blocked.push(questionId);
     }
     return blocked;
   }
@@ -996,7 +998,7 @@ export class DurableResponseEngine {
     if (this.getBlockedCount() > 0) {
       throw new Error("Blocked drafts need attention before submit. Reconcile or discard them first.");
     }
-    if (this.quarantined.some((entry) => !this.isClosedScope(entry.questionId))) {
+    if (this.quarantined.some((entry) => !(entry.scope ? this.closedScopes.has(entry.scope) : this.isClosedScope(entry.questionId)))) {
       throw new Error("Some saved answers were quarantined and need attention before submit.");
     }
     if (this.hasOutstandingWork()) {
@@ -2021,6 +2023,8 @@ export class DurableResponseEngine {
         if (!isResponsePayload(record["payload"])) continue;
         if (this.quarantined.some((entry) => entry.writeId === record["writeId"])) continue;
         this.quarantined.push({
+          scope: typeof record["scope"] === "string" ? record["scope"] as string : null,
+          controlEpoch: typeof record["controlEpoch"] === "number" ? record["controlEpoch"] as number : null,
           writeId: record["writeId"] as string,
           questionId: record["questionId"] as string,
           clientVersion: typeof record["clientVersion"] === "number" ? (record["clientVersion"] as number) : 0,
@@ -3337,6 +3341,8 @@ export class DurableResponseEngine {
     if (this.isSyntheticTombstoneWriteId(command.writeId)) return;
     if (this.quarantined.some((entry) => entry.writeId === command.writeId)) return;
     const entry: QuarantinedWrite = {
+      scope: this.scopeOf?.(command.questionId) ?? null,
+      controlEpoch: this.commandEpochs.get(command.writeId)?.controlEpoch ?? this.states.get(command.questionId)?.pending?.controlEpoch ?? null,
       writeId: command.writeId,
       questionId: command.questionId,
       clientVersion: command.clientVersion,
@@ -3370,6 +3376,7 @@ export class DurableResponseEngine {
         reason,
         blockedAt: new Date().toISOString(),
         originLeaseEpoch: this.commandOriginLease(command),
+        originScope: this.scopeOf?.(command.questionId) ?? null,
       };
       existing.pending.blocked = mark;
       this.checkpointIntentSync(command.questionId, existing.pending);

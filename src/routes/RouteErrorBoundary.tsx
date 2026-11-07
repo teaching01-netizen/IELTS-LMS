@@ -3,6 +3,7 @@ import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router-d
 
 import { ErrorSurface } from '../components/ui/ErrorSurface';
 import { logError } from '../app/error/errorLogger';
+import { recordSatDiagnostic } from '../utils/satDiagnostics';
 
 function getRouteErrorDescription(error: unknown) {
   if (isRouteErrorResponse(error)) {
@@ -43,6 +44,8 @@ export function RouteErrorBoundary() {
     // Route errors have no class boundary above them in this tree, so log
     // them explicitly for observability.
     if (error !== undefined && error !== null) {
+      recordSatDiagnostic('route_error', { reason: isChunkLoadFailure(error) ? 'chunk' : 'route',
+        ...(isRouteErrorResponse(error) ? { statusCode: error.status } : {}) });
       logError(error instanceof Error ? error : new Error(getRouteErrorDescription(error)), {
         scope: 'RouteErrorBoundary',
         status: isRouteErrorResponse(error) ? error.status : undefined,

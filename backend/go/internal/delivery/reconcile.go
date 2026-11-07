@@ -92,9 +92,10 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		autoStartLag = nil
 		recoveryTransitions = nil
 		var attemptRow, providerKey, rawRecovery string
+		var staffControlled bool
 		if err := t.QueryRowContext(ctx,
-			"SELECT id, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), ''), COALESCE(recovery_control,'') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
-			attemptID, scheduleID).Scan(&attemptRow, &providerKey, &rawRecovery); err != nil {
+			"SELECT id, COALESCE((SELECT provider_key FROM exam_entities WHERE id = student_attempts.exam_id), ''), COALESCE(recovery_control,''), sat_staff_control IS NOT NULL FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&attemptRow, &providerKey, &rawRecovery, &staffControlled); err != nil {
 			if err == sql.ErrNoRows {
 				return nil
 			}
@@ -114,6 +115,12 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				return nil
 			}
 			return err
+		}
+		if staffControlled {
+			if runtimeStatus == "paused" {
+				return nil
+			}
+			timingModel = examruntime.TimingModelPersonal
 		}
 		if recoveryControl != nil && recoveryControl.Phase == examdomain.RecoveryPhaseWorking {
 			if runtimeStatus == "completed" {
@@ -211,6 +218,9 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 				attemptID).Scan(&pendingBreak); err != nil {
 				return err
 			}
+			if pendingBreak && staffControlled {
+				return nil
+			}
 			if !pendingBreak && recoveryPolicy == nil {
 				ares, err := t.ExecContext(ctx, `
 					UPDATE assessment_module_attempts
@@ -249,7 +259,7 @@ func (s *Service) ReconcileAttemptTimeout(ctx context.Context, scheduleID, attem
 		}
 		var followup *moduleFollowupContext
 		if !examruntime.IsSatPersonal(timingModel) || recoveryPolicyLoaded || recoveryControl != nil {
-			followup = &moduleFollowupContext{recoveryControl: recoveryControl,
+			followup = &moduleFollowupContext{recoveryControl: recoveryControl, staffControlled: staffControlled,
 				timingModel:    timingModel,
 				handoffMode:    handoffMode,
 				recoveryPolicy: recoveryPolicy,
@@ -666,7 +676,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			WHERE m.state IN ('active', 'review') AND m.paused_at IS NULL
 			  AND m.started_at IS NOT NULL AND m.started_at <= ?
 			  AND DATE_ADD(m.started_at, INTERVAL (m.allocated_seconds + m.extension_seconds + m.accumulated_paused_seconds + IF(r.sat_handoff_mode = 'client_start', ?, 3)) SECOND) <= ?
-			  AND r.timing_model = 'sat_personal_v1'
+			  AND (r.timing_model = 'sat_personal_v1' OR a.sat_staff_control IS NOT NULL)
 			  AND a.submitted_at IS NULL
 			  AND COALESCE(a.proctor_status, 'active') <> 'paused'
 			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
@@ -721,7 +731,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 				WHERE b.phase IN ('preparing', 'working', 'collecting')
 				  AND b.next_action_at IS NOT NULL AND b.next_action_at <= ?
 				  AND m.state IN ('not_started', 'active', 'review')
-				  AND r.timing_model = 'sat_personal_v1'
+				  AND (r.timing_model = 'sat_personal_v1' OR a.sat_staff_control IS NOT NULL)
 				  AND s.sat_delivery_policy IS NOT NULL
 				  AND a.submitted_at IS NULL
 				  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')`
@@ -785,7 +795,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
 			WHERE b.state = 'active' AND b.paused_at IS NULL
 			  AND b.deadline_at IS NOT NULL AND b.deadline_at <= ?
-			  AND r.timing_model = 'sat_personal_v1'
+			  AND (r.timing_model = 'sat_personal_v1' OR a.sat_staff_control IS NOT NULL)
 			  AND a.submitted_at IS NULL
 			  AND COALESCE(a.proctor_status, 'active') <> 'paused'
 			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')
@@ -833,7 +843,7 @@ func (s *Service) reconcileExpiredPersonalModules(ctx context.Context, asOf time
 			JOIN exam_session_runtimes r ON r.schedule_id = a.schedule_id
 			WHERE s.sat_delivery_policy IS NULL
 			  AND m.state = 'not_started' AND m.auto_start_at IS NOT NULL AND m.auto_start_at <= ? AND m.paused_at IS NULL
-			  AND r.timing_model = 'sat_personal_v1' AND r.status = 'live'
+			  AND (r.timing_model = 'sat_personal_v1' OR a.sat_staff_control IS NOT NULL) AND r.status = 'live'
 			  AND a.submitted_at IS NULL
 			  AND COALESCE(a.proctor_status, 'active') <> 'paused'
 			  AND COALESCE(a.delivery_status, 'running') NOT IN ('submitted', 'terminated', 'locked', 'cancelled')

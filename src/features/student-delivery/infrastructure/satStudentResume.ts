@@ -1,3 +1,4 @@
+import { queueSatResumeDiagnostic } from '../../../utils/satDiagnostics';
 import { backendGet, hasBackendStatusCode } from "@services/backendBridge";
 import {
   mapBackendStudentAttempt,
@@ -31,6 +32,7 @@ export type SatResumeResult =
   | { kind: "resumed"; attempt: StudentAttempt; route: string; terminal: boolean }
   | { kind: "no-attempt" }
   | { kind: "unauthenticated" }
+  | { kind: "recovery-required"; reason: "expired" | "revoked" | "ownership" }
   | { kind: "transient-error"; reason: "network" | "server_error" };
 
 function statusCode(error: unknown): number | null {
@@ -68,7 +70,15 @@ export async function resumeSatStudentSession(input: {
   scheduleId: string;
   locator: SatResumeLocatorV1 | null;
 }): Promise<SatResumeResult> {
-  const { scheduleId, locator } = input;
+  const { scheduleId } = input;
+  const locator = matchesSatResumeLocator(input.locator, { scheduleId }) ? input.locator : null;
+  const finish = (result: SatResumeResult): SatResumeResult => {
+    if (locator?.providerKey === 'sat' && locator.scheduleId === scheduleId) {
+      const id = result.kind === 'resumed' ? result.attempt.id : locator.attemptId;
+      if (id) queueSatResumeDiagnostic(scheduleId, id, 'reason' in result ? result.reason : result.kind);
+    }
+    return result;
+  };
   const startedAt = Date.now();
   emitResumeMetric("student_resume_probe_total", scheduleId, "probe");
 
@@ -102,7 +112,7 @@ export async function resumeSatStudentSession(input: {
         undefined,
         Date.now() - startedAt
       );
-      return { kind: "no-attempt" };
+      return finish({ kind: "no-attempt" });
     }
 
     const attempt = mapBackendStudentAttempt(
@@ -149,13 +159,20 @@ export async function resumeSatStudentSession(input: {
       attempt.id,
       Date.now() - startedAt
     );
-    return {
+    return finish({
       kind: "resumed",
       attempt,
       route: `/student/${encodeURIComponent(scheduleId)}/${encodeURIComponent(attempt.candidateId)}`,
       terminal,
-    };
+    });
   } catch (error) {
+    if (error && typeof error === "object" && "code" in error) {
+      if (error.code === "EXAM_ACCESS_EXPIRED") return finish({ kind: "recovery-required", reason: "expired" });
+      if (error.code === "EXAM_ACCESS_REVOKED") return finish({ kind: "recovery-required", reason: "revoked" });
+      if (["SESSION_ALREADY_ACTIVE", "LEASE_FENCED", "ACTIVE_SESSION_SUPERSEDED"].includes(String(error.code))) {
+        return finish({ kind: "recovery-required", reason: "ownership" });
+      }
+    }
     if (hasBackendStatusCode(error, 401) || hasBackendStatusCode(error, 403)) {
       if (matchesSatResumeLocator(locator, { scheduleId })) clearSatResumeLocator();
       emitResumeMetric(
@@ -165,7 +182,7 @@ export async function resumeSatStudentSession(input: {
         undefined,
         Date.now() - startedAt
       );
-      return { kind: "unauthenticated" };
+      return finish({ kind: "unauthenticated" });
     }
     if (hasBackendStatusCode(error, 404)) {
       if (matchesSatResumeLocator(locator, { scheduleId })) clearSatResumeLocator();
@@ -176,7 +193,7 @@ export async function resumeSatStudentSession(input: {
         undefined,
         Date.now() - startedAt
       );
-      return { kind: "no-attempt" };
+      return finish({ kind: "no-attempt" });
     }
     const code = statusCode(error);
     const reason = (code !== null && code >= 500) || code === 429 ? "server_error" : "network";
@@ -187,6 +204,6 @@ export async function resumeSatStudentSession(input: {
       undefined,
       Date.now() - startedAt
     );
-    return { kind: "transient-error", reason };
+    return finish({ kind: "transient-error", reason });
   }
 }

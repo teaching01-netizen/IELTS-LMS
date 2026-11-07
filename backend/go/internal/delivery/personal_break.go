@@ -72,7 +72,7 @@ func (s *Service) StartBreak(ctx context.Context, scheduleID, attemptID, urlSche
 		if err := enforceControlEpochSnapshot(attemptID, &authority, controlEpoch); err != nil {
 			return err
 		}
-		now, err := personalRuntimeNowTx(ctx, t, bound)
+		now, err := personalRuntimeNowTx(ctx, t, bound, authority.staffControlled)
 		if err != nil {
 			return err
 		}
@@ -171,7 +171,7 @@ func (s *Service) EnterBreak(ctx context.Context, scheduleID, attemptID, urlSche
 		if err := enforceControlEpochSnapshot(attemptID, &authority, req.ControlEpoch); err != nil {
 			return err
 		}
-		now, err := personalRuntimeNowTx(ctx, t, bound)
+		now, err := personalRuntimeNowTx(ctx, t, bound, authority.staffControlled)
 		if err != nil {
 			return err
 		}
@@ -250,7 +250,7 @@ func (s *Service) MarkBreakVisible(ctx context.Context, scheduleID, attemptID, u
 		if err := enforceControlEpochSnapshot(attemptID, &authority, req.ControlEpoch); err != nil {
 			return err
 		}
-		now, err := personalRuntimeNowTx(ctx, t, bound)
+		now, err := personalRuntimeNowTx(ctx, t, bound, authority.staffControlled)
 		if err != nil {
 			return err
 		}
@@ -346,7 +346,7 @@ func completeDuePersonalBreaksTx(ctx context.Context, t tx.Tx, attemptID string,
 	return true, nil
 }
 
-func personalRuntimeNowTx(ctx context.Context, t tx.Tx, scheduleID string) (time.Time, error) {
+func personalRuntimeNowTx(ctx context.Context, t tx.Tx, scheduleID string, staffControlled bool) (time.Time, error) {
 	var model, status string
 	if err := t.QueryRowContext(ctx, "SELECT timing_model, status FROM exam_session_runtimes WHERE schedule_id = ? FOR SHARE", scheduleID).Scan(&model, &status); err != nil {
 		if err == sql.ErrNoRows {
@@ -354,7 +354,7 @@ func personalRuntimeNowTx(ctx context.Context, t tx.Tx, scheduleID string) (time
 		}
 		return time.Time{}, err
 	}
-	if model != examruntime.TimingModelPersonal || status != "live" {
+	if (!staffControlled && model != examruntime.TimingModelPersonal) || status != "live" {
 		return time.Time{}, assessmentConflict("RUNTIME_NOT_LIVE", "The SAT runtime is not live.")
 	}
 	return dbTimeTx(ctx, t)

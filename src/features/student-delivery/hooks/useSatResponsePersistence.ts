@@ -185,6 +185,9 @@ export function useSatResponsePersistence({
   const mountedRef = useRef(true);
   const identityGenerationRef = useRef(0);
   const v2EngineRef = useRef<DurableResponseEngine | null>(null);
+  const staffControlledRef = useRef(false);
+  const staffSourceEpochRef = useRef(new Map<string,number>());
+  const scopeByModuleAttemptRef = useRef(new Map<string,string>());
   const credentialAttemptRef = useRef<StudentAttempt | null>(credentialAttempt);
   credentialAttemptRef.current = credentialAttempt;
   const v2ReadyRef = useRef<Promise<void> | null>(null);
@@ -296,6 +299,9 @@ export function useSatResponsePersistence({
     setUnsyncedSince(null);
     questionScopeRef.current.clear();
     moduleIdByAttemptRef.current.clear();
+    scopeByModuleAttemptRef.current.clear();
+    staffSourceEpochRef.current.clear();
+    staffControlledRef.current = false;
     evidenceSentRef.current.clear();
     for (const flight of evidenceUploadsRef.current.values()) if (flight.timer !== null) window.clearTimeout(flight.timer);
     evidenceUploadsRef.current.clear();
@@ -372,7 +378,9 @@ export function useSatResponsePersistence({
         }
         setBlockedDrafts(blockedIds);
         const display = mapEngineStatus(status, blockedIds.length);
-        if (error?.startsWith('MODULE_CLOSED:')) {
+        if (staffControlledRef.current && error?.startsWith('MODULE_CLOSED:')) {
+          setFailure(null); setFailureKind(null);
+        } else if (error?.startsWith('MODULE_CLOSED:')) {
           setFailure('An answer from an ended module remains on this device for proctor review.');
           setFailureKind('module_closed');
         } else if (error?.includes('DEADLINE_EXPIRED') || error?.includes('TIMEOUT_RECOVERY_CLOSED')) {
@@ -474,24 +482,35 @@ export function useSatResponsePersistence({
   // V2 engine state stays authoritative for answers; the payload only teaches
   // the engine which module attempt each question belongs to (write scope).
   const hydrateBootstrap = useCallback((payload: AssessmentDeliveryBootstrap) => {
-    const attemptByModule = new Map(
-      payload.attempt.moduleAttempts.map((moduleAttempt) => [moduleAttempt.moduleId, moduleAttempt.id])
-    );
-    for (const section of payload.sections) {
-      for (const module of section.modules) {
-        const moduleAttemptId = attemptByModule.get(module.id);
-        if (!moduleAttemptId) continue;
-        moduleIdByAttemptRef.current.set(moduleAttemptId, module.id);
-        for (const question of module.questions) {
-          questionScopeRef.current.set(question.examQuestionId, moduleAttemptId);
-        }
-      }
-    }
     const engine = v2EngineRef.current;
-    for (const module of payload.attempt.moduleAttempts) {
-      if (module.state === 'locked' || module.state === 'submitted') engine?.sealScope(module.id);
+    staffControlledRef.current = Boolean(payload.staffControl);
+    const scopeFor = (attempt: AssessmentDeliveryBootstrap['attempt']['moduleAttempts'][number]) =>
+      payload.staffControl && (attempt.runGeneration ?? 0) > 0 ? `${attempt.id}@${attempt.runGeneration}` : attempt.id;
+    const activeScopes = new Map(payload.attempt.moduleAttempts.filter(module => module.state === 'active' || module.state === 'review').map(module => [module.id,scopeFor(module)]));
+    // Seal using the old ownership map before adopting a new run's scopes.
+    for (const [id, scope] of scopeByModuleAttemptRef.current) if (activeScopes.get(id) !== scope) engine?.sealScope(scope);
+    for (const source of payload.staffControl?.sources ?? []) {
+      staffSourceEpochRef.current.set(source.moduleId, source.throughControlEpoch);
+      moduleIdByAttemptRef.current.set(source.moduleAttemptId, source.moduleId);
+      if (activeScopes.has(source.moduleAttemptId)) continue;
+      const scope = scopeByModuleAttemptRef.current.get(source.moduleAttemptId) ?? source.moduleAttemptId;
+      moduleIdByAttemptRef.current.set(scope, source.moduleId);
+      for (const questionId of source.questionIds) questionScopeRef.current.set(questionId, scope);
+      engine?.sealScope(scope);
     }
+    const attemptByModule = new Map(payload.attempt.moduleAttempts.map(module => [module.moduleId, module]));
+    for (const section of payload.sections) for (const module of section.modules) {
+      const attempt = attemptByModule.get(module.id);
+      if (!attempt) continue;
+      const scope = scopeFor(attempt);
+      scopeByModuleAttemptRef.current.set(attempt.id, scope);
+      moduleIdByAttemptRef.current.set(scope, module.id);
+      for (const question of module.questions) questionScopeRef.current.set(question.examQuestionId, scope);
+      if (attempt.state === 'locked' || attempt.state === 'submitted') engine?.sealScope(scope);
+    }
+
     engine?.refreshScopes();
+    if (payload.staffControl) engine?.adoptControlEpochIfIdle(payload.staffControl.revision, 'staff_control');
   }, []);
 
   // Every immutable held write is uploaded, including writes arriving after
@@ -508,7 +527,7 @@ export function useSatResponsePersistence({
     const generation = identityGenerationRef.current;
     for (const moduleAttemptId of closedModuleAttemptIds) {
       if (evidenceUploadsRef.current.has(moduleAttemptId)) continue;
-      const moduleId = moduleIdByAttemptRef.current.get(moduleAttemptId);
+      const moduleId = moduleIdByAttemptRef.current.get(moduleAttemptId) ?? moduleIdByAttemptRef.current.get(moduleAttemptId.split('@')[0] ?? '');
       const reason = engine.getClosedScopes().get(moduleAttemptId);
       if (!moduleId || !reason) continue;
       const flight = { engine, timer: null as number | null, settleObserved: false };
@@ -518,9 +537,9 @@ export function useSatResponsePersistence({
       const upload = async (retry: number, fromSettleDelay = false): Promise<void> => {
         flight.timer = null;
         if (!current()) return;
-        const answers = engine.getQuarantined()
+        const candidates = engine.getQuarantined()
           .filter((entry) => entry.reason === reason &&
-            questionScopeRef.current.get(entry.questionId) === moduleAttemptId &&
+            (entry.scope ?? questionScopeRef.current.get(entry.questionId)) === moduleAttemptId &&
             !evidenceSentRef.current.has(entry.writeId))
           .slice(0, 200)
           .map((entry) => ({
@@ -528,9 +547,13 @@ export function useSatResponsePersistence({
             writeId: entry.writeId,
             response: entry.payload,
             originLeaseEpoch: entry.clientVersion > 0 ? entry.leaseEpoch : null,
+            originControlEpoch: entry.controlEpoch ?? null,
             clientVersion: entry.clientVersion > 0 ? entry.clientVersion : null,
             clientReceivedAt: entry.quarantinedAt,
           }));
+        const sourceEpoch = staffSourceEpochRef.current.get(moduleId);
+        const staffAnswers = candidates.filter(answer => answer.originControlEpoch != null && sourceEpoch != null && answer.originControlEpoch <= sourceEpoch);
+        const answers = staffAnswers.length ? staffAnswers : candidates;
         if (answers.length === 0) {
           // The settle delay exists for this case: a close ack pruned a write
           // the server already holds. Count the avoided duplicate once.
@@ -546,15 +569,19 @@ export function useSatResponsePersistence({
           return;
         }
         try {
-          await gateway.recordLateEvidence!(scheduleId, attemptId, { moduleId, answers });
+          await gateway.recordLateEvidence!(scheduleId, attemptId, { moduleId, answers, ...(staffAnswers.length ? {staffMove:true} : {}) });
           if (!current()) return;
           for (const answer of answers) evidenceSentRef.current.add(answer.writeId);
+          if (staffAnswers.length && answers.some(answer => questionScopeRef.current.get(answer.questionId) !== moduleAttemptId)) {
+            void engine.recover().catch(() => undefined);
+          }
           void upload(0);
         } catch (error) {
           if (!current()) return;
           if (hasBackendStatusCode(error, 400) || hasBackendStatusCode(error, 401) ||
               hasBackendStatusCode(error, 403) || hasBackendStatusCode(error, 404) ||
               hasBackendStatusCode(error, 409) || hasBackendStatusCode(error, 422)) {
+            if (staffControlledRef.current) return;
             setFailure('Late answers remain on this device. The review upload needs your proctor’s attention.');
             setFailureKind('module_closed');
             return;
@@ -571,19 +598,19 @@ export function useSatResponsePersistence({
 
   const closeManifest = useCallback(
     async (moduleAttemptId: string): Promise<ScopeManifestEntry[]> =>
-      v2EngineRef.current?.prepareScopeManifest(moduleAttemptId) ?? [],
+      v2EngineRef.current?.prepareScopeManifest(scopeByModuleAttemptRef.current.get(moduleAttemptId) ?? moduleAttemptId) ?? [],
     []
   );
 
   const freezeScope = useCallback((moduleAttemptId: string) => {
-    v2EngineRef.current?.freezeScope(moduleAttemptId);
+    v2EngineRef.current?.freezeScope(scopeByModuleAttemptRef.current.get(moduleAttemptId) ?? moduleAttemptId);
   }, []);
 
   const prepareScopeClose = useCallback(
     async (moduleAttemptId: string, closeId: string): Promise<PreparedScopeClose> => {
       const engine = v2EngineRef.current;
       if (!engine) throw new Error('V2 response durability engine is not ready.');
-      return engine.prepareScopeClose(moduleAttemptId, closeId);
+      return engine.prepareScopeClose(scopeByModuleAttemptRef.current.get(moduleAttemptId) ?? moduleAttemptId, closeId);
     },
     []
   );
@@ -597,7 +624,7 @@ export function useSatResponsePersistence({
     ): Promise<void> => {
       const engine = v2EngineRef.current;
       if (!engine) throw new Error('V2 response durability engine is not ready.');
-      await engine.uploadScopeCloseChunk(moduleAttemptId, closeId, manifestHash, commands);
+      await engine.uploadScopeCloseChunk(scopeByModuleAttemptRef.current.get(moduleAttemptId) ?? moduleAttemptId, closeId, manifestHash, commands, moduleAttemptId);
     },
     [],
   );
@@ -609,7 +636,7 @@ export function useSatResponsePersistence({
     ) => {
       const engine = v2EngineRef.current;
       if (!engine) throw new Error('V2 response durability engine is not ready.');
-      await engine.settleScopeFromManifest(moduleAttemptId, settled);
+      await engine.settleScopeFromManifest(scopeByModuleAttemptRef.current.get(moduleAttemptId) ?? moduleAttemptId, settled);
       setUnsyncedSince(engine.getUnsyncedSince());
     },
     []
@@ -619,7 +646,7 @@ export function useSatResponsePersistence({
     async (moduleAttemptId: string, closeId: string, acknowledgements: readonly ResponseAcknowledgementV2[]) => {
       const engine = v2EngineRef.current;
       if (!engine) throw new Error('V2 response durability engine is not ready.');
-      await engine.applyScopeCloseAcknowledgement(moduleAttemptId, closeId, acknowledgements);
+      await engine.applyScopeCloseAcknowledgement(scopeByModuleAttemptRef.current.get(moduleAttemptId) ?? moduleAttemptId, closeId, acknowledgements);
     },
     []
   );

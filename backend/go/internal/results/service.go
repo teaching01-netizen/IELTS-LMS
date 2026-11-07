@@ -10,6 +10,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/attempts"
 	"fmt"
 	"io"
 	"sort"
@@ -1259,7 +1260,7 @@ func (s *Service) satModules(ctx context.Context, attemptID string) ([]SATModule
 		FROM assessment_module_attempts ma
 		JOIN assessment_modules m ON m.id = ma.module_id
 		JOIN assessment_sections s ON s.id = m.section_id
-		WHERE ma.attempt_id = ?
+		WHERE ma.attempt_id = ? AND `+attempts.SATSelectedModuleSQL("ma")+`
 		ORDER BY s.display_order, m.display_order`, attemptID)
 	if err != nil {
 		return nil, nil, err
@@ -1417,7 +1418,7 @@ func satQuestionsQ(ctx context.Context, db rowQuerier, attemptID string) ([]SATQ
 			ON v.attempt_id = ma.attempt_id AND v.question_id IN (eq.id, eq.question_id)
 			AND v.module_id = m.id
 			AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ma.attempt_id)
-		WHERE ma.attempt_id = ?
+		WHERE ma.attempt_id = ? AND `+attempts.SATSelectedModuleSQL("ma")+`
 		ORDER BY s.display_order, m.display_order, eq.display_order,
 			CASE WHEN (CAST(v.question_id AS CHAR) COLLATE utf8mb4_unicode_ci) = eq.id THEN 0 ELSE 1 END
 		LIMIT 500`, attemptID)

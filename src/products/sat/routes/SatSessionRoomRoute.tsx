@@ -1,3 +1,4 @@
+import { SatStaffControlDialog, type SatControlTarget } from '../ui/SatStaffControlDialog';
 import { useSatNavigate } from "../ui/useSatNavigate";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, UserRound } from 'lucide-react';
@@ -98,6 +99,7 @@ export function SatSessionRoomRoute() {
   const [message, setMessage] = useState<RoomMessage | null>(null);
   const deferredMessagesRef = useRef(new Map<string, RoomMessage>());
   const [confirm, setConfirm] = useState<SatSessionRoomConfirmation | null>(null);
+  const [staffControl, setStaffControl] = useState<{ action: 'set_time' | 'move'; targets: SatControlTarget[]; wholeRoom: boolean } | null>(null);
   const [attentionFilter, setAttentionFilter] = useState<'all' | 'needs'>(() =>
     roomReturn?.attentionFilter === 'needs' ? 'needs' : 'all',
   );
@@ -127,6 +129,7 @@ export function SatSessionRoomRoute() {
       deferredMessagesRef.current.clear();
       setMessage(null);
       setConfirm(null);
+      setStaffControl(null);
     }
   }, [scheduleId]);
   useEffect(() => {
@@ -495,6 +498,26 @@ export function SatSessionRoomRoute() {
     void runStudentAction('student-terminate', () => proctorMutations.terminateStudent(bound.id, proctorName), `${bound.name}’s attempt ended.`, bound.id);
   };
 
+  const controlStudents = students.filter(student => student.status !== 'terminated' && student.satStartState !== 'never_started' && student.satStartState !== 'waiting_for_code');
+  const selectedCanBeControlled = sessionLive && controlStudents.some(student => student.id === selectedStudent?.id);
+  const openStaffControl = (action: 'set_time' | 'move', wholeRoom: boolean) => {
+    if (isStale || !sessionLive) return;
+    const targets = (wholeRoom ? controlStudents : controlStudents.filter(student => student.id === selectedStudent?.id))
+      .map(student => {
+        const isBreak = student.runtimeStage === 'break';
+        const stageName = isBreak ? 'Break' : student.currentSection;
+        const presence = student.status === 'connecting' ? ' · Disconnected' : student.status === 'paused' ? ' · Paused' : '';
+        const stageKey = isBreak
+          ? student.runtimeBreakId && `break:${student.runtimeBreakId}`
+          : student.runtimeCurrentModuleId && `module:${student.runtimeCurrentModuleId}`;
+        const remainingSeconds = isBreak
+          ? student.runtimeBreakRemainingSeconds ?? student.timeRemaining
+          : student.runtimeModuleRemainingSeconds ?? student.runtimeTimeRemainingSeconds ?? student.timeRemaining;
+        return { id: student.id, name: student.name, stage: `${stageName}${presence}`, remainingSeconds, ...(stageKey ? { stageKey } : {}) };
+      });
+    if (targets.length) setStaffControl({ action, targets, wholeRoom });
+  };
+
   const inspectorContent = selectedStudent ? (
         <StudentDetail
           key={selectedStudent.id}
@@ -516,6 +539,8 @@ export function SatSessionRoomRoute() {
               ? 0
               : document.querySelector('.sat-room__roster [role="listbox"]')?.scrollTop ?? 0,
           }}
+          onEditTime={selectedCanBeControlled ? () => openStaffControl('set_time', false) : undefined}
+          onMoveModule={selectedCanBeControlled && runtime?.examPlan?.length ? () => openStaffControl('move', false) : undefined}
           onAddTime={(minutes) => {
             if (isStale) return;
             setConfirm({
@@ -644,6 +669,10 @@ export function SatSessionRoomRoute() {
               <>
                 {controller.error ? <span role="status" className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[var(--sat-staff-warning-text,#92400e)]"><AlertTriangle size={16} aria-hidden="true" />Reconnecting</span> : null}
                 {isAdmin ? <SatButton variant="quiet" onClick={() => navigate(roomSettingsPath)}>Room settings</SatButton> : null}
+                {sessionLive ? <>
+                  <SatButton disabled={isStale || controlStudents.length === 0} onClick={() => openStaffControl('set_time', true)}>Edit room time…</SatButton>
+                  <SatButton disabled={isStale || controlStudents.length === 0 || !runtime.examPlan?.length} onClick={() => openStaffControl('move', true)}>Move room to module…</SatButton>
+                </> : null}
                 <SatSessionControls runtimeStatus={runtime.status} pendingActions={pendingActions} blocked={isStale} onViewResponses={roomMode === 'review' ? () => navigate(resultsPath) : undefined} onPause={() => void run('pause', () => controller.handlePauseCohort(scheduleId), 'Exam paused.')} onResume={() => void run('resume', () => controller.handleResumeCohort(scheduleId), 'Exam resumed.')} onExtend={(minutes) => {
                   if (isStale) return;
                   const revision = runtime.revision;
@@ -752,6 +781,25 @@ export function SatSessionRoomRoute() {
         )}
       />
 
+      {staffControl ? (
+        <SatStaffControlDialog
+          scheduleId={scheduleId}
+          targets={staffControl.targets}
+          action={staffControl.action}
+          wholeRoom={staffControl.wholeRoom}
+          blocked={isStale || !sessionLive}
+          plan={runtime.examPlan}
+          onClose={() => setStaffControl(null)}
+          onApplied={() => {
+            const generation = roomIdentityRef.current.generation;
+            void controller.reload().catch(() => {
+              if (mountedRef.current && roomIdentityRef.current.generation === generation) {
+                setMessage({ kind: 'error', text: 'The change was recorded, but the room could not refresh. Retry loading the room.' });
+              }
+            });
+          }}
+        />
+      ) : null}
       <SatSessionRoomConfirmDialog
         confirm={confirm}
         onCancel={() => setConfirm(null)}

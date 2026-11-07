@@ -1,3 +1,4 @@
+import { SAT_RESUME_RECOVERY_COPY, type SatResumeResult } from '../../student-delivery/api/satResume';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Clock3, RefreshCw } from "lucide-react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -7,6 +8,7 @@ import {
   isStudentEntryScheduleBlockedError,
 } from "../infrastructure/studentEntryGateway";
 import { commonSchemas } from "@shared/lib/validateApiResponse";
+import { findSittingAttemptCredential, getAttemptCredentialStatus } from "@services/attemptCredentialAdapter";
 import { entryQueueDelayMs, parseEntryQueueError } from "../infrastructure/studentEntryGateway";
 import { SatErrorSurface, SatLoadingSurface } from "../../student-delivery/api/satStateSurfaces";
 import {
@@ -178,6 +180,7 @@ type ScheduleAvailability =
   | { state: "unknown" };
 
 type ResumeState =
+  | Extract<SatResumeResult, { kind: "recovery-required" }>
   | { kind: "idle" | "checking" | "not-resumable" }
   | { kind: "resumable"; route: string }
   | { kind: "offline"; reason: "network" | "server_error" };
@@ -325,13 +328,20 @@ export function StudentEntryRoute() {
       return;
     }
     if (authStatus === "loading") return;
-    if (authStatus === "unavailable") {
+    const hintedAttemptId = resumeLocator?.scheduleId === scheduleId ? resumeLocator.attemptId : undefined;
+    const hasExamGrant = isSat && Boolean(findSittingAttemptCredential(scheduleId, undefined, hintedAttemptId));
+    const storedGrant = hintedAttemptId ? getAttemptCredentialStatus(scheduleId, hintedAttemptId) : null;
+    if (isSat && storedGrant?.credentialPolicy === 'sitting_v1' && storedGrant.expiresAtMs <= Date.now()) {
+      setResumeState({ kind: 'recovery-required', reason: 'expired' });
+      return;
+    }
+    if (authStatus === "unavailable" && !hasExamGrant) {
       // The session check failed transiently: the student may still be
       // resumable. Show the reconnect surface, never "not resumable".
       setResumeState({ kind: "offline", reason: "server_error" });
       return;
     }
-    if (authStatus !== "authenticated" || session?.user.role !== "student") {
+    if (!hasExamGrant && (authStatus !== "authenticated" || session?.user.role !== "student")) {
       setResumeState({ kind: "not-resumable" });
       return;
     }
@@ -364,6 +374,10 @@ export function StudentEntryRoute() {
       }
       if (result.kind === "transient-error") {
         setResumeState({ kind: "offline", reason: result.reason });
+        return;
+      }
+      if (result.kind === "recovery-required") {
+        setResumeState(result);
         return;
       }
       setResumeState({ kind: "not-resumable" });
@@ -820,6 +834,11 @@ export function StudentEntryRoute() {
         label={isSat ? "Reconnecting to your SAT…" : "Reconnecting to your exam…"}
       />
     );
+  }
+
+  if (resumeState.kind === "recovery-required") {
+    return <SatErrorSurface {...SAT_RESUME_RECOVERY_COPY[resumeState.reason]}
+      actionLabel="Retry after recovery" onAction={retryResume} />;
   }
 
   if (resumeState.kind === "offline") {

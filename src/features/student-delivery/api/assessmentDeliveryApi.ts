@@ -19,6 +19,7 @@ import {
   type PreparedAnsweredExamPdf,
 } from "./answeredExamPdf";
 import type { EvaAck, EvaState, SubmitEvaRequest, SectionEntryState, SubmitSectionEntryRequest, SittingSection } from "@/src/features/assessment-forms/api/assessmentForms";
+import { recordSatDiagnostic, type SatDiagnostic } from "../../../utils/satDiagnostics";
 import type {
   AssessmentAnsweredExam,
   AssessmentDeliveryBootstrap,
@@ -173,6 +174,11 @@ async function attemptRequest<T>(
   try {
     return await request(attemptConfig(scheduleId, attemptId));
   } catch (error) {
+    const status = [401, 403].find(value => hasBackendStatusCode(error, value));
+    if (status) {
+      const reason = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'unknown';
+      recordSatDiagnostic('access_rejected', { reason, statusCode: status });
+    }
     if (!hasBackendStatusCode(error, 401)) throw error;
     const refreshed = await refreshConfiguredCredential(scheduleId, attemptId);
     if (!refreshed) throw error;
@@ -322,6 +328,14 @@ export const assessmentDeliveryApi = {
       storeAttemptCredential({ id: attemptId, scheduleId }, response.refreshedAttemptCredential);
       return response;
     });
+  },
+
+  recordDiagnostic(scheduleId: string, attemptId: string, payload: SatDiagnostic): Promise<unknown> {
+    // Diagnostics never renew authorization or compete with answer recovery.
+    return backendPost(`/v1/student/sessions/${encodeURIComponent(scheduleId)}/audit`, {
+      attemptId, clientSessionId: clientSessionId(scheduleId, attemptId),
+      actionType: "STUDENT_DIAGNOSTIC", payload,
+    }, { ...attemptConfig(scheduleId, attemptId), timeout: 3_000 });
   },
 
   recordAudit(

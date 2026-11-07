@@ -125,7 +125,7 @@ func ensureSATModuleTopologyTx(ctx context.Context, q tx.Tx, attemptID string) e
 		LEFT JOIN assessment_sections s ON s.id = m.section_id
 		LEFT JOIN exam_versions v ON v.id = s.exam_version_id
 		LEFT JOIN assessment_route_decisions d ON d.attempt_id = ma.attempt_id AND d.section_id = m.section_id
-		WHERE ma.attempt_id = ?`, attemptID)
+		WHERE ma.attempt_id = ? AND `+SATSelectedModuleSQL("ma"), attemptID)
 	if err != nil {
 		return err
 	}
@@ -296,4 +296,14 @@ func satRequiredSectionsTx(ctx context.Context, q tx.Tx, attemptID string) ([]st
 		return nil, err
 	}
 	return examdomain.SectionScopeKeys(scope), nil
+}
+
+// SATSelectedModuleSQL retains previously administered branch rows for
+// reentry without including them in the current delivery or scoring route.
+// The alias is supplied only by internal SQL builders.
+func SATSelectedModuleSQL(alias string) string {
+	return `NOT EXISTS (SELECT 1 FROM assessment_modules sm
+ JOIN assessment_route_decisions sd ON sd.section_id=sm.section_id AND sd.attempt_id=` + alias + `.attempt_id
+ WHERE sm.id=` + alias + `.module_id AND sm.adaptive_role IN ('lower_branch','higher_branch')
+   AND LEFT(sd.policy_key,14)='staff_control_' AND sd.selected_module_id<>sm.id)`
 }

@@ -132,6 +132,15 @@ describe('SatSessionRoomRoute', () => {
     });
   });
 
+  it('offers individual and whole-room exam controls from the room page', async () => {
+    render(<MemoryRouter initialEntries={['/sat/sessions/sched-1']}><Routes><Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} /></Routes></MemoryRouter>);
+    expect(screen.getByRole('button', { name: 'Edit room time…' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Move room to module…' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit time…' }));
+    expect(screen.getByRole('dialog', { name: 'Edit remaining time' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Remaining time (mm:ss)')).toHaveValue('25:00');
+  });
+
   it('shows the room published routing threshold instead of the newer draft value', () => {
     const base = controllerMock();
     controllerMock.mockReturnValue({

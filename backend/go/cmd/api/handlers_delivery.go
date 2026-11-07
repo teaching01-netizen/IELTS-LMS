@@ -497,8 +497,8 @@ func deliveryRecoveryResolutionHandler(app *App) http.HandlerFunc {
 
 // deliveryLateEvidenceHandler stores answers that reached the server only
 // after their module closed (POST /schedules/{scheduleID}/modules/late-evidence).
-// Evidence never changes a score; it is flagged when it would have changed
-// the adaptive route.
+// Ordinary evidence is review-only. A staff move also permits guarded sync
+// of the interrupted module’s answers without changing its selected route.
 func deliveryLateEvidenceHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims, ok := verifiedDeliveryWriterClaims(app, w, r)

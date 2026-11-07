@@ -9,7 +9,7 @@ export function SatControlBanner({
   testId,
 }: {
   children: ReactNode;
-  tone: "warning" | "error";
+  tone: "info" | "warning" | "error";
   /**
    * When provided, the banner carries a close control. The caller owns the
    * dismissal state so a new message re-opens the strip; the banner itself
@@ -20,11 +20,12 @@ export function SatControlBanner({
   testId?: string | undefined;
 }) {
   const warning = tone === "warning";
+  const alert = tone === "error";
   return (
     <div
-      className={`sat-ui sat-surface-enter mx-auto my-1 flex w-full max-w-[680px] items-center gap-3 border px-4 py-1 text-[14px] font-medium ${warning ? "border-[var(--sat-warning)] bg-[var(--sat-warning-soft)] text-[var(--sat-warning)]" : "border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]"}`}
-      role={warning ? "status" : "alert"}
-      aria-live={warning ? "polite" : undefined}
+      className={`sat-ui sat-surface-enter mx-auto my-1 flex w-full max-w-[680px] items-center gap-3 border px-4 py-1 text-[14px] font-medium ${warning ? "border-[var(--sat-warning)] bg-[var(--sat-warning-soft)] text-[var(--sat-warning)]" : alert ? "border-[var(--sat-danger)] bg-[var(--sat-danger-soft)] text-[var(--sat-danger)]" : "border-slate-300 bg-slate-50 text-slate-800"}`}
+      role={alert ? "alert" : "status"}
+      aria-live={alert ? undefined : "polite"}
       {...(testId ? { "data-testid": testId } : {})}
     >
       <p className="min-w-0 flex-1 text-center">{children}</p>

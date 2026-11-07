@@ -111,6 +111,16 @@ export function decideSatCommitRoute(
       if (preState.phase === "loading") {
         return { type: "bootstrapLoaded", assessmentId: payload.versionId };
       }
+      if (payload.staffControl != null && preState.phase !== 'complete') {
+        const personalBreak = payload.attempt.personalBreaks?.find(item => item.state !== 'completed');
+        if (personalBreak?.deadlineAt) {
+          const current = payload.sections.find(section => section.id === personalBreak.afterSectionId);
+          const next = payload.sections.find(section => section.displayOrder > (current?.displayOrder ?? -1));
+          return { type: 'recover', state: { phase: 'break', scheduleId: identity.scheduleId, candidateId: identity.candidateId, assessmentId: payload.versionId, nextSectionKey: toSatSectionKey(next?.sectionKey ?? 'math'), resumeAt: personalBreak.deadlineAt } };
+        }
+        const active = moduleForAttempt(payload, findActiveAttempt(payload));
+        if (active && (!('moduleId' in preState) || preState.moduleId !== active.id)) return startModuleRouteAction(payload, active);
+      }
       if (
         (preState.phase === "module" || preState.phase === "review") &&
         "moduleId" in preState

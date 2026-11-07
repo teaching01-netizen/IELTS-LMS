@@ -1,3 +1,4 @@
+import { SAT_RESUME_RECOVERY_COPY, type SatResumeResult } from '../../student-delivery/api/satResume';
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { useAuthSession, type StudentQueuedAdmission } from "../../auth/api/authSession";
 import { SatErrorSurface, SatLoadingSurface } from "../../student-delivery/api/satStateSurfaces";
+import { findSittingAttemptCredential, getAttemptCredentialStatus } from "@services/attemptCredentialAdapter";
 import {
   SatEntryButton,
   SatEntryField,
@@ -81,6 +83,7 @@ interface AccessLinkQueuePollFailure {
 }
 
 type ResumeState =
+  | Extract<SatResumeResult, { kind: "recovery-required" }>
   | { kind: "idle" | "checking" | "not-resumable" }
   | { kind: "resumable"; route: string }
   | { kind: "offline"; reason: "network" | "server_error" };
@@ -317,13 +320,19 @@ export function StudentAccessLinkEntryRoute() {
       return;
     }
     if (authStatus === "loading") return;
-    if (authStatus === "unavailable") {
+    const hasExamGrant = Boolean(findSittingAttemptCredential(link.scheduleId, undefined, resumeLocator?.attemptId));
+    const storedGrant = resumeLocator?.attemptId ? getAttemptCredentialStatus(link.scheduleId, resumeLocator.attemptId) : null;
+    if (storedGrant?.credentialPolicy === 'sitting_v1' && storedGrant.expiresAtMs <= Date.now()) {
+      setResumeState({ kind: 'recovery-required', reason: 'expired' });
+      return;
+    }
+    if (authStatus === "unavailable" && !hasExamGrant) {
       // The session check failed transiently: the student may still be
       // resumable. Show the reconnect surface, never "not resumable".
       setResumeState({ kind: "offline", reason: "server_error" });
       return;
     }
-    if (authStatus !== "authenticated" || session?.user.role !== "student") {
+    if (!hasExamGrant && (authStatus !== "authenticated" || session?.user.role !== "student")) {
       setResumeState({ kind: "not-resumable" });
       return;
     }
@@ -360,6 +369,8 @@ export function StudentAccessLinkEntryRoute() {
         navigate(result.route, { replace: true });
       } else if (result.kind === "transient-error") {
         setResumeState({ kind: "offline", reason: result.reason });
+      } else if (result.kind === "recovery-required") {
+        setResumeState(result);
       } else {
         setResumeState({ kind: "not-resumable" });
       }
@@ -645,6 +656,11 @@ export function StudentAccessLinkEntryRoute() {
         resumeState.kind === "idle"))
   )
     return <SatLoadingSurface label="Reconnecting to your SAT…" />;
+  if (resumeState.kind === "recovery-required") {
+    return <SatErrorSurface {...SAT_RESUME_RECOVERY_COPY[resumeState.reason]}
+      actionLabel="Retry after recovery" onAction={retrySatResume} />;
+  }
+
   if (link.providerKey === "sat" && locatorForThisLink && resumeState.kind === "offline") {
     return (
       <SatErrorSurface

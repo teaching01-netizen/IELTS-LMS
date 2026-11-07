@@ -533,7 +533,7 @@ export function useSatExamController({
       hydrateBootstrap(merged);
       const action = decideSatCommitRoute(preState, merged, hint, commitIdentity);
       if (action) dispatch(action);
-      if (hint.kind === "startModule" && action?.type === "routeToModule") {
+      if (action?.type === "routeToModule") {
         const activeModule = moduleForAttempt(merged, findActiveAttempt(merged));
         if (activeModule) hydrateModuleResponsesRef.current?.(merged, activeModule);
       }
@@ -626,7 +626,7 @@ export function useSatExamController({
           // attempt: a routed module new to this browser, or a module retained
           // as a content-withheld stub whose clock has since started (the
           // server's auto-start backstop fired before this browser started it).
-          const needsSections = state.attempt.moduleAttempts.some((item) => {
+          const needsSections = (state.staffControl?.revision ?? 0) > (current.staffControl?.revision ?? 0) || state.attempt.moduleAttempts.some((item) => {
             const module = known.get(item.moduleId);
             return !module || (module.contentWithheld === true && item.state !== "not_started");
           });
@@ -696,11 +696,12 @@ export function useSatExamController({
   const closeTimedOutModule = useCallback(
     async (generation: number, moduleId: string, moduleAttemptId: string): Promise<void> => {
       const boundaryStartedAt = Date.now();
-      const live = () => identityGenerationRef.current === generation;
       const pause = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
       const closeModule = satDeliveryGateway.closeModule;
       const closeId = globalThis.crypto?.randomUUID?.() ?? `close-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const initialSnapshot = dataRef.current;
+      const staffRevision = initialSnapshot?.staffControl?.revision;
+      const live = () => identityGenerationRef.current === generation && dataRef.current?.staffControl?.revision === staffRevision;
       const recoveryPolicy = initialSnapshot?.satDeliveryPolicy?.version === "sat_recovery_v1"
         ? initialSnapshot.satDeliveryPolicy
         : null;

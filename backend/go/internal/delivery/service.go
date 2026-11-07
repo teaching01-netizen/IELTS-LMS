@@ -272,6 +272,7 @@ type DeliverySection struct {
 
 // ModuleAttempt is one attempt-scoped module row with Go-computed timing.
 type ModuleAttempt struct {
+	RunGeneration            uint64     `json:"runGeneration,omitempty"`
 	ID                       string     `json:"id"`
 	ModuleID                 string     `json:"moduleId"`
 	State                    string     `json:"state"`
@@ -397,10 +398,11 @@ type TimingSnapshot struct {
 
 // Bootstrap is the assessment-delivery bootstrap payload.
 type Bootstrap struct {
-	ScheduleID  string `json:"scheduleId"`
-	ExamID      string `json:"examId"`
-	ProviderKey string `json:"providerKey"`
-	VersionID   string `json:"versionId"`
+	StaffControl *SATStaffControl `json:"staffControl,omitempty"`
+	ScheduleID   string           `json:"scheduleId"`
+	ExamID       string           `json:"examId"`
+	ProviderKey  string           `json:"providerKey"`
+	VersionID    string           `json:"versionId"`
 	// VersionRevision is the exam_versions row revision backing Sections
 	// (plan D1: ETag W/"v{versionID}-{revision}" + If-None-Match -> 304).
 	VersionRevision       int64             `json:"versionRevision"`
@@ -565,6 +567,12 @@ func (s *Service) bootstrapSnapshot(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
+	staffControl := control.staffControl
+	if err := s.loadStaffMoveSources(ctx, attemptID, staffControl); err != nil {
+		return nil, err
+	}
+	applySATStaffTiming(staffControl, &timing)
+
 	if c := control.recoveryControl; c != nil {
 		key := c.Target.SectionKey
 		timing.StageKey = &key
@@ -633,6 +641,7 @@ func (s *Service) bootstrapSnapshot(ctx context.Context, scheduleID, examID, pro
 		return nil, err
 	}
 	return &Bootstrap{
+		StaffControl:          staffControl,
 		AwaitingStaffRoute:    awaiting,
 		ScheduleID:            scheduleID,
 		ExamID:                examID,
@@ -1090,7 +1099,7 @@ func (s *Service) ensureBaseModuleAttempt(ctx context.Context, attemptID, versio
 func (s *Service) loadModuleAttempts(ctx context.Context, attemptID string, now time.Time) ([]ModuleAttempt, error) {
 	out := []ModuleAttempt{}
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason, raw_correct, operational_question_count, tool_state, revision FROM assessment_module_attempts WHERE attempt_id = ? ORDER BY created_at, id",
+		"SELECT id, module_id, state, allocated_seconds, available_at, started_at, paused_at, accumulated_paused_seconds, extension_seconds, completion_reason, raw_correct, operational_question_count, tool_state, revision FROM assessment_module_attempts WHERE attempt_id = ? AND "+attempts.SATSelectedModuleSQL("assessment_module_attempts")+" ORDER BY created_at, id",
 		attemptID)
 	if err != nil {
 		return nil, err
@@ -1170,7 +1179,7 @@ func (s *Service) loadSATModuleBoundaries(ctx context.Context, attemptID string,
 // start it under the client_start handoff.
 func (s *Service) loadPersonalEntryOffers(ctx context.Context, attemptID string, attempts []ModuleAttempt) error {
 	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at, auto_start_at FROM assessment_module_attempts WHERE attempt_id = ?",
+		"SELECT id, entry_generation, entry_starts_at, entry_confirmed_at, entry_entered_at, auto_start_at, run_generation FROM assessment_module_attempts WHERE attempt_id = ?",
 		attemptID)
 	if err != nil {
 		return err
@@ -1183,14 +1192,16 @@ func (s *Service) loadPersonalEntryOffers(ctx context.Context, attemptID string,
 	for rows.Next() {
 		var id string
 		var generation int
+		var runGeneration uint64
 		var startsAt, confirmedAt, enteredAt, autoStartAt sql.NullTime
-		if err := rows.Scan(&id, &generation, &startsAt, &confirmedAt, &enteredAt, &autoStartAt); err != nil {
+		if err := rows.Scan(&id, &generation, &startsAt, &confirmedAt, &enteredAt, &autoStartAt, &runGeneration); err != nil {
 			return err
 		}
 		index, ok := byID[id]
 		if !ok {
 			continue
 		}
+		attempts[index].RunGeneration = runGeneration
 		attempts[index].EntryGeneration = &generation
 		attempts[index].EntryStartsAt = nullTime(startsAt)
 		attempts[index].EntryConfirmedAt = nullTime(confirmedAt)
@@ -1388,6 +1399,7 @@ func (s *Service) loadResponsesV2(ctx context.Context, attemptID string) ([]Resp
 
 // attemptControl carries the attempt-level control projection.
 type attemptControl struct {
+	staffControl          *SATStaffControl
 	recoveryControl       *examdomain.RecoveryControl
 	candidateName         string
 	proctorStatus         string
@@ -1411,17 +1423,22 @@ func (s *Service) loadAttemptControl(ctx context.Context, attemptID string, boun
 	if c.candidateName == "" && c.deliveryStatus == "" {
 		var proctorNote sql.NullString
 		var rawRecovery string
+		var rawStaff sql.NullString
 		var submittedAt, codeAcceptedAt sql.NullTime
 		if err := s.db.QueryRowContext(ctx,
-			"SELECT candidate_name, COALESCE(proctor_status, 'active'), proctor_note, COALESCE(delivery_status, 'running'), submitted_at, COALESCE(phase, ''), sat_start_code_required, sat_start_code_accepted_at, COALESCE(recovery_control,'') FROM student_attempts WHERE id = ?",
+			"SELECT candidate_name, COALESCE(proctor_status, 'active'), proctor_note, COALESCE(delivery_status, 'running'), submitted_at, COALESCE(phase, ''), sat_start_code_required, sat_start_code_accepted_at, COALESCE(recovery_control,''), CAST(sat_staff_control AS CHAR) FROM student_attempts WHERE id = ?",
 			attemptID).Scan(&c.candidateName, &c.proctorStatus, &proctorNote,
-			&c.deliveryStatus, &submittedAt, &c.phase, &c.codeRequired, &codeAcceptedAt, &rawRecovery); err != nil {
+			&c.deliveryStatus, &submittedAt, &c.phase, &c.codeRequired, &codeAcceptedAt, &rawRecovery, &rawStaff); err != nil {
 			return c, err
 		}
 		c.proctorNote = nullStringToPtr(proctorNote)
 		c.submittedAt = nullTime(submittedAt)
 		c.codeAcceptedAt = nullTime(codeAcceptedAt)
 		var err error
+		c.staffControl, err = decodeSATStaffControl(rawStaff)
+		if err != nil {
+			return c, err
+		}
 		c.recoveryControl, err = examdomain.ParseRecoveryControl([]byte(rawRecovery))
 		if err != nil {
 			return c, err
@@ -2050,22 +2067,23 @@ func (s *Service) ensureAttemptCanWorkWithRuntimeSnapshotTx(ctx context.Context,
 	var proctorStatus, deliveryStatus string
 	var submittedAt, codeAcceptedAt sql.NullTime
 	var phase sql.NullString
-	var codeRequired bool
+	var codeRequired, staffControlled bool
 	var rawRecovery string
 	var recovery *examdomain.RecoveryControl
 	var err error
 	if authority != nil {
 		*authority = attemptAuthoritySnapshot{}
 		err = t.QueryRowContext(ctx,
-			"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at, active_client_session_id, lease_epoch, control_epoch, COALESCE(recovery_control, '') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
-			attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt, &authority.activeClientSessionID, &authority.leaseEpoch, &authority.controlEpoch, &rawRecovery)
+			"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at, active_client_session_id, lease_epoch, control_epoch, COALESCE(recovery_control, ''), sat_staff_control IS NOT NULL FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt, &authority.activeClientSessionID, &authority.leaseEpoch, &authority.controlEpoch, &rawRecovery, &staffControlled)
 		if err == nil {
 			authority.loaded = true
+			authority.staffControlled = staffControlled
 		}
 	} else {
 		err = t.QueryRowContext(ctx,
-			"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at, COALESCE(recovery_control, '') FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
-			attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt, &rawRecovery)
+			"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at, COALESCE(recovery_control, ''), sat_staff_control IS NOT NULL FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt, &rawRecovery, &staffControlled)
 	}
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -2122,6 +2140,10 @@ func (s *Service) ensureAttemptCanWorkWithRuntimeSnapshotTx(ctx context.Context,
 		if runtimeErr == nil {
 			startRuntime.status = runtimeStatus
 			startRuntime.exists = true
+			startRuntime.staffControlled = staffControlled
+			if staffControlled {
+				startRuntime.timingModel = sql.NullString{String: examruntime.TimingModelPersonal, Valid: true}
+			}
 			startRuntime.recoveryPolicy, runtimeErr = attempts.ParseSATDeliveryPolicy([]byte(recoveryPolicyJSON.String), recoveryTimingModel)
 			if recovery != nil {
 				startRuntime.timingModel = sql.NullString{String: examruntime.TimingModelPersonal, Valid: true}
@@ -2250,6 +2272,7 @@ type moduleTimingGateResult struct {
 }
 
 type moduleTimingRuntimeSnapshot struct {
+	staffControlled bool
 	recoveryControl *examdomain.RecoveryControl
 	exists          bool
 	timingModel     sql.NullString
@@ -2261,6 +2284,7 @@ type moduleTimingRuntimeSnapshot struct {
 }
 
 type attemptAuthoritySnapshot struct {
+	staffControlled       bool
 	recoveryControl       *examdomain.RecoveryControl
 	loaded                bool
 	activeClientSessionID sql.NullString

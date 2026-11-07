@@ -5,6 +5,7 @@
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { logError } from './errorLogger';
+import { recordSatDiagnostic } from '../../utils/satDiagnostics';
 import { getErrorMessage, getErrorCode } from './errorTypes';
 
 type ErrorBoundaryFallback = (props: { error: Error; reset: () => void }) => ReactNode;
@@ -44,6 +45,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   override componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    recordSatDiagnostic('render_error', { reason: 'render' });
     // Log the error
     logError(error, {
       componentStack: errorInfo.componentStack,

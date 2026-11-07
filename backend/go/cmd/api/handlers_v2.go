@@ -45,7 +45,7 @@ var _ attempts.QuestionResolver = v2Resolver{}
 func (v2Resolver) Resolve(ctx context.Context, q tx.Tx, attemptID, questionID string) (attempts.QuestionOwner, error) {
 	const sel = `SELECT m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key,` +
 		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds,` +
-		` COALESCE(r.timing_model, ''), ma.entry_confirmed_at, ma.entry_entered_at,` +
+		` CASE WHEN sa.sat_staff_control IS NOT NULL THEN 'sat_personal_v1' ELSE COALESCE(r.timing_model, '') END, ma.entry_confirmed_at, ma.entry_entered_at,` +
 		` COALESCE(its.state, ''), its.started_at, its.deadline_at, its.paused_at` +
 		` FROM assessment_exam_questions eq` +
 		` JOIN assessment_modules m ON m.id = eq.module_id` +
@@ -392,7 +392,7 @@ func (v2Resolver) CanonicalizeQuestions(ctx context.Context, q tx.Tx, attemptID 
 func normalizedQuestionOwners(ctx context.Context, q tx.Tx, attemptID string, questionIDs []string) (map[string]attempts.QuestionOwner, error) {
 	query := `SELECT eq.id, eq.question_id, m.id, s.section_key, COALESCE(ma.state, ''), e.provider_key,` +
 		` ma.started_at, ma.allocated_seconds, ma.extension_seconds, ma.accumulated_paused_seconds,` +
-		` COALESCE(r.timing_model, ''), ma.entry_confirmed_at, ma.entry_entered_at,` +
+		` CASE WHEN sa.sat_staff_control IS NOT NULL THEN 'sat_personal_v1' ELSE COALESCE(r.timing_model, '') END, ma.entry_confirmed_at, ma.entry_entered_at,` +
 		` COALESCE(its.state, ''), its.started_at, its.deadline_at, its.paused_at` +
 		` FROM assessment_exam_questions eq` +
 		` JOIN assessment_modules m ON m.id = eq.module_id` +

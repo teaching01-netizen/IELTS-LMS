@@ -78,7 +78,7 @@ func expectLegacyLifecycleModules(mock sqlmock.Sqlmock, fixture []lifecycleFixtu
 	for _, m := range fixture {
 		moduleRows.AddRow(m.id, m.moduleID, m.state, m.allocated, m.availableAt, m.startedAt, m.pausedAt, m.accumulated, m.extension, m.completionReason, m.rawCorrect, m.operational, m.tools, m.revision)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? ORDER BY created_at, id")).WithArgs("att-1").WillReturnRows(moduleRows)
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ?")).WithArgs("att-1").WillReturnRows(moduleRows)
 
 	boundaryRows := sqlmock.NewRows([]string{"module_attempt_id", "phase", "policy_version", "work_deadline_at", "entry_deadline_at", "recovery_deadline_at", "next_action_at", "resolution", "resolved_at", "resolution_receipt", "revision"})
 	for _, m := range fixture {
@@ -88,9 +88,9 @@ func expectLegacyLifecycleModules(mock sqlmock.Sqlmock, fixture []lifecycleFixtu
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_boundaries WHERE attempt_id = ?")).WithArgs("att-1").WillReturnRows(boundaryRows)
 
-	entryRows := sqlmock.NewRows([]string{"id", "entry_generation", "entry_starts_at", "entry_confirmed_at", "entry_entered_at", "auto_start_at"})
+	entryRows := sqlmock.NewRows([]string{"id", "entry_generation", "entry_starts_at", "entry_confirmed_at", "entry_entered_at", "auto_start_at", "run_generation"})
 	for _, m := range fixture {
-		entryRows.AddRow(m.id, m.generation, m.entryStartsAt, m.entryConfirmedAt, m.entryEnteredAt, m.autoStartAt)
+		entryRows.AddRow(m.id, m.generation, m.entryStartsAt, m.entryConfirmedAt, m.entryEnteredAt, m.autoStartAt, 0)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, entry_generation")).WithArgs("att-1").WillReturnRows(entryRows)
 }
@@ -101,7 +101,7 @@ func expectCombinedLifecycleModules(mock sqlmock.Sqlmock, fixture []lifecycleFix
 		"accumulated_paused_seconds", "extension_seconds", "completion_reason", "raw_correct", "operational_question_count",
 		"tool_state", "revision", "entry_generation", "entry_starts_at", "entry_confirmed_at", "entry_entered_at", "auto_start_at",
 		"section_key", "module_attempt_id", "phase", "policy_version", "work_deadline_at", "entry_deadline_at", "recovery_deadline_at",
-		"next_action_at", "resolution", "resolved_at", "resolution_receipt", "boundary_revision",
+		"next_action_at", "resolution", "resolved_at", "resolution_receipt", "boundary_revision", "run_generation",
 	})
 	for _, m := range fixture {
 		values := []driver.Value{
@@ -115,7 +115,7 @@ func expectCombinedLifecycleModules(mock sqlmock.Sqlmock, fixture []lifecycleFix
 		} else {
 			values = append(values, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		}
-		rows.AddRow(values...)
+		rows.AddRow(append(values, 0)...)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta("LEFT JOIN assessment_module_boundaries b")).WithArgs("att-1", "ver-1").WillReturnRows(rows)
 }

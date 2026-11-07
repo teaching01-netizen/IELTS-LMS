@@ -27,16 +27,16 @@ func TestRecoveryCloseAckLoadsOnlySelectedModuleMetadata(t *testing.T) {
 		"accumulated_paused_seconds", "extension_seconds", "completion_reason", "raw_correct",
 		"operational_question_count", "tool_state", "revision", "entry_generation", "entry_starts_at",
 		"entry_confirmed_at", "entry_entered_at", "auto_start_at", "control_epoch", "route_basis",
-		"late_answer_count", "selected_route", "server_now",
+		"late_answer_count", "selected_route", "server_now", "run_generation",
 	}
 	mock.ExpectQuery("SELECT ma.id, ma.module_id, ma.state").WithArgs("m1", "attempt-1").WillReturnRows(
 		sqlmock.NewRows(moduleColumns).
 			AddRow("attempt-m1", "m1", "locked", 600, now.Add(-time.Minute), now.Add(-11*time.Minute), nil,
 				0, 0, "time_expired", 25, 27, "{}", 3, 0, nil, nil, nil, nil, 4,
-				"client_confirmed", 0, "higher", now).
+				"client_confirmed", 0, "higher", now, 0).
 			AddRow("attempt-m2", "m2", "not_started", 600, now, nil, nil,
 				0, 0, nil, nil, nil, "{}", 1, 1, nil, nil, nil, nil, 4,
-				"client_confirmed", 0, "higher", now),
+				"client_confirmed", 0, "higher", now, 0),
 	)
 	mock.ExpectQuery("FROM assessment_attempt_breaks").WithArgs("attempt-1").WillReturnRows(
 		sqlmock.NewRows([]string{
@@ -104,11 +104,11 @@ func TestCloseAckBreakProjectionFailureIsNonFatal(t *testing.T) {
 			"accumulated_paused_seconds", "extension_seconds", "completion_reason", "raw_correct",
 			"operational_question_count", "tool_state", "revision", "entry_generation", "entry_starts_at",
 			"entry_confirmed_at", "entry_entered_at", "auto_start_at", "control_epoch", "route_basis",
-			"late_answer_count", "selected_route", "server_now",
+			"late_answer_count", "selected_route", "server_now", "run_generation",
 		}).
 			AddRow("attempt-m1", "m1", "locked", 600, now.Add(-time.Minute), now.Add(-11*time.Minute), nil,
 				0, 0, "time_expired", 25, 27, "{}", 3, 0, nil, nil, nil, nil, 4,
-				"client_confirmed", 0, "higher", now),
+				"client_confirmed", 0, "higher", now, 0),
 	)
 	mock.ExpectQuery("FROM assessment_attempt_breaks").WithArgs("attempt-1").
 		WillReturnError(errors.New("breaks unavailable"))
@@ -154,11 +154,11 @@ func TestCloseAckReturnsEveryBreakRow(t *testing.T) {
 			"accumulated_paused_seconds", "extension_seconds", "completion_reason", "raw_correct",
 			"operational_question_count", "tool_state", "revision", "entry_generation", "entry_starts_at",
 			"entry_confirmed_at", "entry_entered_at", "auto_start_at", "control_epoch", "route_basis",
-			"late_answer_count", "selected_route", "server_now",
+			"late_answer_count", "selected_route", "server_now", "run_generation",
 		}).
 			AddRow("attempt-m2", "m2", "locked", 600, now, nil, nil,
 				0, 0, "time_expired", 20, 27, "{}", 2, 0, nil, nil, nil, nil, 4,
-				"client_confirmed", 0, "higher", now),
+				"client_confirmed", 0, "higher", now, 0),
 	)
 	mock.ExpectQuery("FROM assessment_attempt_breaks").WithArgs("attempt-1").WillReturnRows(
 		sqlmock.NewRows([]string{
@@ -205,11 +205,11 @@ func TestAlreadyClosedAckReusesTheBreakProjection(t *testing.T) {
 			"accumulated_paused_seconds", "extension_seconds", "completion_reason", "raw_correct",
 			"operational_question_count", "tool_state", "revision", "entry_generation", "entry_starts_at",
 			"entry_confirmed_at", "entry_entered_at", "auto_start_at", "control_epoch", "route_basis",
-			"late_answer_count", "selected_route", "server_now",
+			"late_answer_count", "selected_route", "server_now", "run_generation",
 		}).
 			AddRow("attempt-m1", "m1", "locked", 600, now.Add(-time.Minute), now.Add(-11*time.Minute), nil,
 				0, 0, "time_expired", 25, 27, "{}", 3, 0, nil, nil, nil, nil, 4,
-				"client_confirmed", 0, "higher", now),
+				"client_confirmed", 0, "higher", now, 0),
 	)
 	mock.ExpectQuery("FROM assessment_attempt_breaks").WithArgs("attempt-1").WillReturnRows(
 		sqlmock.NewRows([]string{

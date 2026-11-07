@@ -250,6 +250,8 @@ export function StudentDetail({
   roomReturnTo = null,
   roomReturnState = null,
   onAddTime,
+  onEditTime,
+  onMoveModule,
   onWarn,
   onPause,
   onResume,
@@ -269,6 +271,8 @@ export function StudentDetail({
   /** Room UI state stashed in link state so Back restores selection, filters and scroll. */
   roomReturnState?: Record<string, unknown> | null | undefined;
   onAddTime: (minutes: number) => void;
+ onEditTime?: (() => void) | undefined;
+ onMoveModule?: (() => void) | undefined;
   onWarn: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -476,6 +480,8 @@ export function StudentDetail({
             {student.status === 'paused' ? <Play size={16} aria-hidden="true" /> : <Pause size={16} aria-hidden="true" />}
             {student.status === 'paused' ? 'Resume attempt' : 'Pause attempt'}
           </button>
+          {onEditTime ? <button type="button" onClick={onEditTime} disabled={actionDisabled || student.status==='terminated' || student.satStartState==='never_started'} className="sat-btn sat-btn--secondary sat-press">Edit time…</button> : null}
+          {onMoveModule ? <button type="button" onClick={onMoveModule} disabled={actionDisabled || student.status==='terminated' || student.satStartState==='never_started'} className="sat-btn sat-btn--secondary sat-press">Move module…</button> : null}
           <button type="button" onClick={() => onAddTime(5)} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press"><Timer size={16} aria-hidden="true" />Add 5 minutes…</button>
           <button type="button" onClick={onWarn} disabled={actionDisabled} className="sat-btn sat-btn--secondary sat-press"><MessageSquareWarning size={16} aria-hidden="true" />Send warning…</button>
           {/* Recovery works on ended or stalled sittings too, so only a stale room disables it. */}

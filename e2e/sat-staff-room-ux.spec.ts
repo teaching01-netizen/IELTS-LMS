@@ -598,6 +598,28 @@ test.describe("SAT staff live-room UX", () => {
     });
   }
 
+  test("reviews a whole-room move for a disconnected student on a narrow screen", async ({ page }) => {
+    await installRoomTransport(page, { student: { status: "connecting" } });
+    const commands: unknown[] = [];
+    await page.route(`**/v1/proctor/sessions/${SCHEDULE.id}/sat-control`, async route => {
+      commands.push(route.request().postDataJSON());
+      await route.fulfill({ json: { outcomes: [{ attemptId: STUDENT.attemptId, applied: true }] } });
+    });
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.goto(`/sat/sessions/${SCHEDULE.id}`);
+    await page.getByRole("button", { name: "Move room to module…" }).click();
+    const dialog = page.getByRole("dialog", { name: "Move module" });
+    await dialog.getByLabel("Destination").selectOption("reading-writing:break");
+    await expect(dialog.getByLabel("Remaining time (mm:ss)")).toHaveValue("10:00");
+    await dialog.getByRole("button", { name: "Review change" }).click();
+    await expect(dialog.getByRole("list", { name: "Affected students" })).toContainText("Disconnected");
+    expect(commands).toHaveLength(0);
+    await expectNoSeriousAxeViolations(page, "SAT whole-room move confirmation");
+    await dialog.getByRole("button", { name: "Apply change" }).click();
+    await expect(dialog.getByRole("status")).toContainText("Change applied to 1 student.");
+    expect(commands).toEqual([expect.objectContaining({ action: "move", attemptIds: [STUDENT.attemptId], destination: "break", remainingSeconds: 600 })]);
+  });
+
   test("keyboard users can reach room controls, review the consequence, and cancel safely", async ({ page }) => {
     await installRoomTransport(page);
     await page.setViewportSize({ width: 1280, height: 900 });

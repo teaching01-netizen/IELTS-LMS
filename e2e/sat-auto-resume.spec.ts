@@ -6,6 +6,36 @@ import { createRunningSatSession } from "./support/satStudentSession";
 
 test.use({ storageState: ADMIN_STORAGE_STATE_PATH });
 
+test('resumes the same SAT with saved answers and deadline after account cookies are lost', async ({ browser, page }) => {
+  test.setTimeout(300_000);
+  const { studentPage, studentContext, scheduleId, candidateId } = await createRunningSatSession(browser, page, { label: 'grant-only-resume' });
+  try {
+    const answer = studentPage.locator('input[type="radio"]').first();
+    await studentPage.locator('label').filter({ has: answer }).first().click();
+    await waitForSatSaved(studentPage);
+    const original = await readAttemptIdentity(studentPage, scheduleId, candidateId);
+    const remaining = await readSatRemainingSeconds(studentPage);
+    const grant = await studentPage.evaluate((schedule) => {
+      const credentials = JSON.parse(localStorage.getItem('ielts_student_attempt_credentials_v1') ?? '[]');
+      return credentials.find((item: { scheduleId: string }) => item.scheduleId === schedule);
+    }, scheduleId);
+    expect(grant?.credentialPolicy).toBe('sitting_v1');
+    await studentContext.clearCookies();
+    await studentPage.goto(`/student/${scheduleId}`, { waitUntil: 'domcontentloaded' });
+    await expect(studentPage.getByTestId('sat-exam-shell')).toBeVisible({ timeout: 45_000 });
+    await expect(studentPage.locator('input[type="radio"]').first()).toBeChecked();
+    expect(await readSatRemainingSeconds(studentPage)).toBeLessThanOrEqual(remaining);
+    const restored = await studentPage.evaluate(async ({ schedule, proof }) => {
+      const response = await fetch(`/api/v1/student/sessions/${schedule}`, { headers: { Authorization: `Bearer ${proof}` } });
+      if (!response.ok) throw new Error(`Resume lookup failed: ${response.status}`);
+      const wire = await response.json();
+      const attempt = (wire.data ?? wire).attempt;
+      return { id: attempt.id, deadlineAt: attempt.deadlineAt ?? null, answers: attempt.answers ?? {} };
+    }, { schedule: scheduleId, proof: grant.attemptToken });
+    expect(restored).toEqual(original);
+  } finally { await studentContext.close(); await closeDb(); }
+});
+
 async function waitForSatSaved(page: Page) {
   await expect(page.getByTestId("sat-exam-shell")).toHaveAttribute("data-sat-save-state", "idle", {
     timeout: 30_000,

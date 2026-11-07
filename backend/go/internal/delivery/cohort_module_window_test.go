@@ -243,7 +243,7 @@ func TestAssembleBootstrapPublishesTheLateArrivalsEntryWindow(t *testing.T) {
 	// The candidate's own row: seeded, still unstarted, full authored allotment.
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM assessment_module_attempts WHERE attempt_id = ?")).WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("ma-1"))
-	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ? ORDER BY")).WithArgs("att-1").
+	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_module_attempts WHERE attempt_id = ?")).WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "module_id", "state", "allocated_seconds", "available_at", "started_at", "paused_at", "accumulated_paused_seconds", "extension_seconds", "completion_reason", "raw_correct", "operational_question_count", "tool_state", "revision"}).
 			AddRow("ma-1", "mod-1", "not_started", 1920, nil, nil, nil, 0, 0, nil, nil, nil, "{}", 1))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_question_responses ar JOIN")).WithArgs("att-1").
@@ -251,8 +251,8 @@ func TestAssembleBootstrapPublishesTheLateArrivalsEntryWindow(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_responses_v2 v LEFT JOIN")).WithArgs("att-1").
 		WillReturnRows(sqlmock.NewRows([]string{"question_id", "module_id", "response", "server_revision", "module_attempt_id", "exam_question_id"}))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM student_attempts WHERE id = ?")).WithArgs("att-1").
-		WillReturnRows(sqlmock.NewRows([]string{"candidate_name", "proctor_status", "proctor_note", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "recovery_control"}).
-			AddRow("Jane", "active", nil, "running", nil, "exam", false, nil, ""))
+		WillReturnRows(sqlmock.NewRows([]string{"candidate_name", "proctor_status", "proctor_note", "delivery_status", "submitted_at", "phase", "sat_start_code_required", "sat_start_code_accepted_at", "recovery_control", "sat_staff_control"}).
+			AddRow("Jane", "active", nil, "running", nil, "exam", false, nil, "", nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM attempt_sessions WHERE attempt_id")).WithArgs("att-1").
 		WillReturnError(sql.ErrNoRows)
 	// The room: Reading & Writing live on a 64-minute clock since 09:00.

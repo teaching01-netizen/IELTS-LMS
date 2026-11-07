@@ -123,7 +123,7 @@ export interface SatDeliveryGateway {
     attemptId: string,
     request: SATRecoveryResolutionRequest,
   ): Promise<SATRecoveryResolutionReceipt>;
-  /** Uploads answers kept on the device after their module closed (evidence only). */
+  /** Uploads delayed answers for review or guarded staff-move sync. */
   recordLateEvidence?(
     scheduleId: string,
     attemptId: string,

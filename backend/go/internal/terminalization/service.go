@@ -25,6 +25,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/attempts"
 	"fmt"
 	"log"
 	"strings"
@@ -811,7 +812,7 @@ func buildServerSnapshot(ctx context.Context, q tx.Tx, a attemptRow, providerKey
 		"flags":              json.RawMessage(fl),
 	}
 	if providerKey == "sat" {
-		const selMods = "SELECT id, module_id, state, allocated_seconds, started_at, submitted_at, locked_at, completion_reason, revision FROM assessment_module_attempts WHERE attempt_id = ? ORDER BY created_at, id FOR UPDATE"
+		selMods := "SELECT id, module_id, state, allocated_seconds, started_at, submitted_at, locked_at, completion_reason, revision FROM assessment_module_attempts WHERE attempt_id = ? AND " + attempts.SATSelectedModuleSQL("assessment_module_attempts") + " ORDER BY created_at, id FOR UPDATE"
 		mrows, err := q.QueryContext(ctx, selMods, a.ID)
 		if err != nil {
 			return nil, err
@@ -1105,7 +1106,7 @@ func classroomRawScoreTx(ctx context.Context, q tx.Tx, attemptID string) (map[st
 		FROM assessment_module_attempts ma
 		JOIN assessment_modules m ON m.id = ma.module_id
 		JOIN assessment_sections s ON s.id = m.section_id
-		WHERE ma.attempt_id = ?
+		WHERE ma.attempt_id = ? AND `+attempts.SATSelectedModuleSQL("ma")+`
 		ORDER BY s.display_order, m.display_order`, attemptID)
 	if err != nil {
 		return nil, err

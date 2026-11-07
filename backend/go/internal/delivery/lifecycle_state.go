@@ -37,7 +37,7 @@ const lifecycleHeaderQuery = `
 	       a.candidate_name, COALESCE(a.proctor_status, 'active'), a.proctor_note,
 	       COALESCE(a.delivery_status, 'running'), a.submitted_at, COALESCE(a.phase, ''),
 	       a.sat_start_code_required, a.sat_start_code_accepted_at,
-	       UTC_TIMESTAMP(6)
+	       UTC_TIMESTAMP(6), CAST(a.sat_staff_control AS CHAR)
 	FROM exam_schedules s
 	JOIN exam_entities e ON e.id = s.exam_id
 	LEFT JOIN student_attempts a ON a.id = ?
@@ -47,7 +47,7 @@ const lifecycleHeaderQuery = `
 
 func loadLifecycleReadContext(ctx context.Context, q tx.Tx, scheduleID, attemptID string) (lifecycleReadContext, error) {
 	var c lifecycleReadContext
-	var examType, rawPolicy sql.NullString
+	var examType, rawPolicy, rawStaff sql.NullString
 	var foundID, attemptScheduleID, attemptExamID, candidateName, proctorNote sql.NullString
 	var submittedAt, codeAcceptedAt sql.NullTime
 	var codeRequired sql.NullBool
@@ -57,7 +57,7 @@ func loadLifecycleReadContext(ctx context.Context, q tx.Tx, scheduleID, attemptI
 		&rawPolicy, &c.policyTimingModel, &c.sessionMode, &c.versionRevision, &c.publishScope,
 		&candidateName, &c.control.proctorStatus, &proctorNote,
 		&c.control.deliveryStatus, &submittedAt, &c.control.phase,
-		&codeRequired, &codeAcceptedAt, &c.now)
+		&codeRequired, &codeAcceptedAt, &c.now, &rawStaff)
 	if err == sql.ErrNoRows {
 		return c, apperrors.New(apperrors.CodeNotFound, "Schedule not found.")
 	}
@@ -77,7 +77,8 @@ func loadLifecycleReadContext(ctx context.Context, q tx.Tx, scheduleID, attemptI
 	c.control.codeRequired = codeRequired.Bool
 	c.control.codeAcceptedAt = nullTime(codeAcceptedAt)
 	c.rawPolicy = rawPolicy.String
-	return c, nil
+	c.control.staffControl, err = decodeSATStaffControl(rawStaff)
+	return c, err
 }
 
 // errLifecycleFallback ends the read-only snapshot when the attempt is not on
@@ -143,6 +144,8 @@ func (s *Service) LifecycleState(
 		if err != nil {
 			return err
 		}
+		staffControl := control.staffControl
+		applySATStaffTiming(staffControl, &timing)
 		personalBreaks, err := snapshot.loadPersonalBreaks(ctx, bearerAttemptID, now)
 		if err != nil {
 			return err
@@ -156,6 +159,7 @@ func (s *Service) LifecycleState(
 			return err
 		}
 		state = &Bootstrap{
+			StaffControl:          staffControl,
 			ScheduleID:            scheduleID,
 			ExamID:                header.examID,
 			ProviderKey:           providerKey,
@@ -195,7 +199,7 @@ func (s *Service) LifecycleState(
 // published version, with its entry offer and optional boundary. The boundary
 // is keyed by module_attempt_id (its primary key), so the LEFT JOIN cannot
 // multiply rows; one-to-many collections (breaks, responses) stay out of it.
-const satLifecycleModulesQuery = `
+var satLifecycleModulesQuery = `
 	SELECT ma.id, ma.module_id, ma.state, ma.allocated_seconds,
 	       ma.available_at, ma.started_at, ma.paused_at,
 	       ma.accumulated_paused_seconds, ma.extension_seconds,
@@ -207,13 +211,13 @@ const satLifecycleModulesQuery = `
 	       b.module_attempt_id, b.phase, b.policy_version,
 	       b.work_deadline_at, b.entry_deadline_at, b.recovery_deadline_at,
 	       b.next_action_at, b.resolution, b.resolved_at,
-	       CAST(b.resolution_receipt AS CHAR), b.revision
+	       CAST(b.resolution_receipt AS CHAR), b.revision, ma.run_generation
 	FROM assessment_module_attempts ma
 	JOIN assessment_modules m ON m.id = ma.module_id
 	JOIN assessment_sections sec ON sec.id = m.section_id
 	LEFT JOIN assessment_module_boundaries b
 	       ON b.module_attempt_id = ma.id AND b.attempt_id = ma.attempt_id AND b.run_generation = ma.run_generation
-	WHERE ma.attempt_id = ? AND sec.exam_version_id = ?
+	WHERE ma.attempt_id = ? AND sec.exam_version_id = ? AND ` + attempts.SATSelectedModuleSQL("ma") + `
 	ORDER BY ma.created_at, ma.id`
 
 // loadSATLifecycleModules is the one-statement form of loadModuleAttempts +
@@ -249,7 +253,7 @@ func (s *Service) loadSATLifecycleModules(ctx context.Context, attemptID, versio
 			&boundaryID, &phase, &policyVersion,
 			&workDeadline, &entryDeadline, &recoveryDeadline,
 			&nextAction, &resolution, &resolvedAt,
-			&resolutionReceipt, &boundaryRevision); err != nil {
+			&resolutionReceipt, &boundaryRevision, &m.RunGeneration); err != nil {
 			return nil, err
 		}
 		if !examdomain.AllowsSection(scope, sectionKey) {

@@ -18,6 +18,7 @@ export type AssessmentDeliveryModule = DeliveredAssessmentModule;
 export type AssessmentDeliverySection = DeliveredAssessmentSection;
 
 export interface AssessmentModuleAttemptSnapshot {
+  runGeneration?: number;
   id: string;
   moduleId: string;
   state: string;
@@ -127,7 +128,7 @@ export interface AssessmentPersonalBreakSnapshot {
 }
 
 export interface AssessmentTimingSnapshot {
-  authority: "cohort_runtime" | "legacy_attempt";
+  authority: "cohort_runtime" | "legacy_attempt" | "staff_attempt";
   timingModel: TimingModel;
   stageKey: string | null;
   stageStatus: string | null;
@@ -165,6 +166,15 @@ export function isAssessmentDeliveryProviderKey(value: unknown): value is Assess
 }
 
 export interface AssessmentDeliveryBootstrap {
+ staffControl?: {
+    revision: number;
+    action: 'move' | 'set_time';
+    changedAt: string;
+    remainingSeconds?: number;
+    destination?: 'module_1' | 'module_2' | 'break';
+    sectionKey?: string;
+    sources?: Array<{ moduleAttemptId: string; moduleId: string; throughControlEpoch: number; questionIds: string[] }>;
+  } | null;
   scheduleId: string;
   examId: string;
   providerKey: AssessmentDeliveryProviderKey;
@@ -433,14 +443,16 @@ export interface AssessmentModuleCloseAck {
   personalBreaks?: AssessmentPersonalBreakSnapshot[];
 }
 
-/** Answers kept on the device after their module closed (review evidence only). */
+/** Delayed answers: review evidence normally, or guarded sync after a staff move. */
 export interface AssessmentLateEvidenceRequest {
+ staffMove?: boolean;
   moduleId: string;
   answers: Array<{
     questionId: string;
     writeId: string;
     response: unknown;
     originLeaseEpoch: number | null;
+    originControlEpoch?: number | null;
     clientVersion: number | null;
     clientReceivedAt?: string;
   }>;

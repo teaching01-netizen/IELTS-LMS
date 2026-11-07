@@ -1,3 +1,4 @@
+import { recordSatDiagnostic } from '../../../utils/satDiagnostics';
 import React from 'react';
 import { Button } from '@components/ui/Button';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -62,6 +63,7 @@ export function StudentSessionRoute() {
     useStudentSessionRouteData(scheduleId, studentId);
 
   const navigateToStudentCheckIn = () => {
+    if (providerKey === 'sat') recordSatDiagnostic('explicit_exit', { reason: 'explicit' });
     void import('../../student-delivery/api/satResumeLocator')
       .then(({ clearSatResumeLocator }) => clearSatResumeLocator())
       .catch(() => {

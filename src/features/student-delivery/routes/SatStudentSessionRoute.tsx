@@ -71,6 +71,7 @@ import { SatTemporalRuntime } from "../timing/SatTemporalRuntime";
 import { assessmentDeliveryApi, loadAssessmentDeliveryMedia, releaseAssessmentDeliveryMedia } from "../api/assessmentDeliveryApi";
 import { satMediaWarmUp } from "../domain/satMediaWarmUp";
 import { emitStudentObservabilityMetric } from "../../../utils/studentObservability";
+import { recordSatDiagnostic, startSatDiagnostics } from "../../../utils/satDiagnostics";
 
 export interface SatStudentSessionRouteProps {
   scheduleId: string;
@@ -194,6 +195,36 @@ export function SatStudentSessionRoute({
   const [breakVeilOpen, setBreakVeilOpen] = useState(false);
 
   const { state, data, result, error, commands, persistence } = exam;
+  const [staffNotice, setStaffNotice] = useState<string | null>(null);
+  const staffControlRevision = data?.staffControl?.revision;
+  const staffControlAction = data?.staffControl?.action;
+  const staffControlTime = data?.staffControl?.remainingSeconds;
+  const staffControlDestination = data?.staffControl?.destination;
+  const staffControlSection = data?.staffControl?.sectionKey;
+  useEffect(() => {
+    if (staffControlRevision == null || !staffControlAction) { setStaffNotice(null); return; }
+    const section = staffControlSection === 'math' ? 'Math' : 'Reading and Writing';
+    const destination = staffControlDestination === 'break' ? 'Break'
+      : staffControlDestination === 'module_2' ? `${section} Module 2` : `${section} Module 1`;
+    const time = staffControlTime == null ? null : `${Math.floor(staffControlTime / 60)}:${String(staffControlTime % 60).padStart(2, '0')}`;
+    setStaffNotice(staffControlAction === 'move'
+      ? `Your proctor moved you to ${destination}.`
+      : time ? `Your proctor set your timer to ${time}.` : 'Your proctor updated your remaining time.');
+    const timer = window.setTimeout(() => setStaffNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [attemptId, staffControlRevision, staffControlAction, staffControlTime, staffControlDestination, staffControlSection]);
+  const staffControlNotice = staffNotice ? <SatControlBanner tone="info" onDismiss={() => setStaffNotice(null)}>{staffNotice}</SatControlBanner> : null;
+
+  useEffect(() => {
+    try {
+      return startSatDiagnostics({ scheduleId, attemptId, send: assessmentDeliveryApi.recordDiagnostic });
+    } catch { return undefined; }
+  }, [scheduleId, attemptId]);
+  useEffect(() => {
+    if (persistence.failureKind === "superseded") {
+      recordSatDiagnostic('access_rejected', { reason: 'ownership', pendingMutationCount: persistence.pendingCount });
+    }
+  }, [persistence.failureKind, persistence.pendingCount]);
   // A banner the student closed stays closed until its message changes: a new
   // proctor note or a new error opens the strip again. Dismissal lives here,
   // above the phase branches, so it survives module ↔ review transitions.
@@ -658,7 +689,7 @@ export function SatStudentSessionRoute({
   ) : null;
   const withCalculatorHost = (content: ReactNode) => (
     <>
-      {!inModulePhase && !inReviewPhase ? leaseConflictNotice : null}
+      {!inModulePhase && !inReviewPhase ? <>{leaseConflictNotice}{staffControlNotice}</> : null}
       {content}
     </>
   );
@@ -956,6 +987,7 @@ export function SatStudentSessionRoute({
                   {visibleUnsynced === "offline" ? SAT_COPY.notice.unsyncedOffline : SAT_COPY.notice.unsyncedSlow}
                 </SatControlBanner>
               ) : null}
+              {staffControlNotice}
               {visibleWarning ? <SatControlBanner tone="warning" onDismiss={() => setDismissedNotices((current) => ({ ...current, warning: exam.warning }))}>Proctor message: {visibleWarning}</SatControlBanner> : null}
               {visibleError ? <SatControlBanner tone="error" onDismiss={() => setDismissedNotices((current) => ({ ...current, error }))}>{visibleError}</SatControlBanner> : null}
               {leaseConflictNotice}
@@ -1074,7 +1106,8 @@ export function SatStudentSessionRoute({
                 {visibleUnsynced === "offline" ? SAT_COPY.notice.unsyncedOffline : SAT_COPY.notice.unsyncedSlow}
               </SatControlBanner>
             ) : null}
-            {visibleWarning ? <SatControlBanner tone="warning" onDismiss={() => setDismissedNotices((current) => ({ ...current, warning: exam.warning }))}>Proctor message: {visibleWarning}</SatControlBanner> : null}
+            {staffControlNotice}
+              {visibleWarning ? <SatControlBanner tone="warning" onDismiss={() => setDismissedNotices((current) => ({ ...current, warning: exam.warning }))}>Proctor message: {visibleWarning}</SatControlBanner> : null}
             {visibleError ? <SatControlBanner tone="error" onDismiss={() => setDismissedNotices((current) => ({ ...current, error }))}>{visibleError}</SatControlBanner> : null}
           </>
         }

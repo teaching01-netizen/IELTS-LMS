@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/attempts"
 	"strings"
 	"time"
 
@@ -117,7 +118,7 @@ func (s *Service) GetSATAttemptAnswers(ctx context.Context, actor auth.ActorCont
 			ON v.attempt_id = ma.attempt_id AND v.module_id = m.id
 			AND v.question_id IN (eq.id, eq.question_id)
 			AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ma.attempt_id)
-		WHERE ma.attempt_id = ?
+		WHERE ma.attempt_id = ? AND `+attempts.SATSelectedModuleSQL("ma")+`
 		ORDER BY s.display_order, m.display_order, eq.display_order,
 			CASE WHEN (CAST(v.question_id AS CHAR) COLLATE utf8mb4_unicode_ci) = eq.id THEN 0 ELSE 1 END`, attemptID)
 	if err != nil {

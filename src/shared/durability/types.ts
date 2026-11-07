@@ -143,6 +143,8 @@ export interface DraftEvidenceAckV2 {
 }
 
 export interface QuarantinedWrite {
+  scope?: string | null;
+  controlEpoch?: number | null;
   writeId: string;
   questionId: string;
   clientVersion: number;

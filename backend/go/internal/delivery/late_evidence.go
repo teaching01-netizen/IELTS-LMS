@@ -15,20 +15,23 @@ import (
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
-// Evidence never changes canonical responses, scores, or a selected route.
+// Ordinary late evidence never changes canonical responses, scores, or the route.
+// StaffMove requests use the separately fenced original-module sync path.
 // Unknown provenance fields stay null; no writer era or version is invented.
 type LateEvidenceRequest struct {
-	ModuleID string               `json:"moduleId"`
-	Answers  []LateEvidenceAnswer `json:"answers"`
+	StaffMove bool                 `json:"staffMove,omitempty"`
+	ModuleID  string               `json:"moduleId"`
+	Answers   []LateEvidenceAnswer `json:"answers"`
 }
 
 type LateEvidenceAnswer struct {
-	QuestionID       string          `json:"questionId"`
-	WriteID          string          `json:"writeId"`
-	Response         json.RawMessage `json:"response"`
-	OriginLeaseEpoch *int64          `json:"originLeaseEpoch"`
-	ClientVersion    *int64          `json:"clientVersion"`
-	ClientReceivedAt *time.Time      `json:"clientReceivedAt,omitempty"`
+	OriginControlEpoch *uint64         `json:"originControlEpoch,omitempty"`
+	QuestionID         string          `json:"questionId"`
+	WriteID            string          `json:"writeId"`
+	Response           json.RawMessage `json:"response"`
+	OriginLeaseEpoch   *int64          `json:"originLeaseEpoch"`
+	ClientVersion      *int64          `json:"clientVersion"`
+	ClientReceivedAt   *time.Time      `json:"clientReceivedAt,omitempty"`
 }
 
 type LateEvidenceAck struct {
@@ -41,6 +44,9 @@ const lateEvidenceConflictAction = "SAT_LATE_EVIDENCE_PROVENANCE_CONFLICT"
 func (s *Service) RecordLateEvidence(ctx context.Context, bearerScheduleID, bearerAttemptID, urlScheduleID string, req LateEvidenceRequest, writerBinding ...string) (*LateEvidenceAck, error) {
 	if urlScheduleID != bearerScheduleID {
 		return nil, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule.")
+	}
+	if req.StaffMove {
+		return s.syncStaffMovedAnswers(ctx, bearerScheduleID, bearerAttemptID, req, writerBinding...)
 	}
 	prepared, err := prepareLateEvidence(req)
 	if err != nil {

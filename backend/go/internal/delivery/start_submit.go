@@ -1056,6 +1056,7 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 	if err != nil {
 		return nil, err
 	}
+	applySATStaffTiming(control.staffControl, &timing)
 	if examruntime.IsSatPersonal(timing.TimingModel) {
 		if err := s.loadPersonalEntryOffers(ctx, attemptID, moduleAttempts); err != nil {
 			return nil, err
@@ -1082,6 +1083,7 @@ func (s *Service) assembleBootstrap(ctx context.Context, scheduleID, examID, pro
 		return nil, err
 	}
 	return &Bootstrap{
+		StaffControl:          control.staffControl,
 		AwaitingStaffRoute:    awaiting,
 		ScheduleID:            scheduleID,
 		ExamID:                examID,
@@ -1126,6 +1128,7 @@ type nextModuleRow struct {
 // Callers without those authoritative snapshots pass nil and keep the lookup
 // path below.
 type moduleFollowupContext struct {
+	staffControlled bool
 	recoveryControl *examdomain.RecoveryControl
 	timingModel     string
 	handoffMode     string
@@ -1216,6 +1219,12 @@ func (s *Service) finalizeModuleWithBasisTx(ctx context.Context, t tx.Tx, attemp
 	}
 	telemetry.IncCounter(telemetry.MSATModuleRouteBasisTotal, "basis", basis)
 	audit := routeAudit{basis: basis, deadline: moduleDeadline(active.availableAt, active.startedAt, active.allocatedSeconds, active.accumulatedPausedSeconds, active.extensionSeconds)}
+	if followup != nil && followup.staffControlled {
+		err := t.QueryRowContext(ctx, `SELECT selected_route FROM assessment_route_decisions WHERE attempt_id=? AND section_id=? AND base_module_id=?`, attemptID, currentSectionID, active.moduleID).Scan(&audit.staffRoute)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, err
+		}
+	}
 	next, err := s.nextModuleTx(ctx, t, attemptID, active.id, active.moduleID, rawCorrect, operationalCount, audit)
 	if err != nil {
 		return nil, err
@@ -1397,6 +1406,13 @@ func insertActiveModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string,
 		return err
 	}
 	if inserted == 0 {
+		var reopen bool
+		if err := t.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM assessment_module_attempts ma JOIN student_attempts a ON a.id=ma.attempt_id WHERE ma.attempt_id=? AND ma.module_id=? AND ma.state IN ('locked','submitted') AND a.sat_staff_control IS NOT NULL)`, attemptID, module.id).Scan(&reopen); err != nil {
+			return err
+		}
+		if reopen {
+			return activateStaffModuleTx(ctx, t, attemptID, DeliveryModule{ID: module.id, DurationSeconds: module.durationSeconds}, module.durationSeconds, now, false)
+		}
 		// A staff-forced predecessor close may reach a section before its
 		// form was accepted. Seed a waiting module; never start it unseen.
 		// An existing module is retained by the same identity constraint.
@@ -1413,11 +1429,22 @@ func insertActiveModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string,
 // The unique (attempt_id, module_id) constraint keeps it idempotent.
 func insertAwaitingModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string, module *nextModuleRow, now, autoStartAt time.Time) error {
 	moduleAttemptID := uuid.NewString()
-	_, err := t.ExecContext(ctx,
+	insert, err := t.ExecContext(ctx,
 		"INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, available_at, auto_start_at, tool_state) VALUES (?, ?, ?, 'not_started', ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = id",
 		moduleAttemptID, attemptID, module.id, module.durationSeconds, now, autoStartAt, module.toolPolicy.String)
 	if err != nil {
 		return err
+	}
+	if n, err := insert.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		reopen, err := staffFollowupWasClosed(ctx, t, attemptID, module.id)
+		if err != nil {
+			return err
+		}
+		if reopen {
+			return prepareStaffModuleTx(ctx, t, attemptID, DeliveryModule{ID: module.id, DurationSeconds: module.durationSeconds}, &now, &autoStartAt)
+		}
 	}
 	_, err = ensureSatModuleBoundaryTx(ctx, t, attemptID, moduleAttemptID)
 	return err
@@ -1697,12 +1724,21 @@ func (s *Service) nextModuleTx(ctx context.Context, t tx.Tx, attemptID, baseModu
 		if audit.basis != "" {
 			basis = audit.basis
 		}
-		if _, err := t.ExecContext(ctx,
-			"INSERT INTO assessment_route_decisions (id, attempt_id, section_id, base_module_attempt_id, base_module_id, selected_module_id, selected_route, raw_correct, operational_question_count, policy_key, policy_revision, policy_config, route_basis, late_answer_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COUNT(*) FROM attempt_responses_v2 WHERE attempt_id = ? AND module_id = ? AND updated_at > ?))",
+		routeResult, err := t.ExecContext(ctx,
+			"INSERT INTO assessment_route_decisions (id, attempt_id, section_id, base_module_attempt_id, base_module_id, selected_module_id, selected_route, raw_correct, operational_question_count, policy_key, policy_revision, policy_config, route_basis, late_answer_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COUNT(*) FROM attempt_responses_v2 WHERE attempt_id = ? AND module_id = ? AND updated_at > ?)) ON DUPLICATE KEY UPDATE id=assessment_route_decisions.id",
 			uuid.NewString(), attemptID, policySectionID, baseModuleAttemptID, baseModuleID, selectedModuleID, routeName, rawCorrect, operationalCount, policyKey, policyRevision, policyConfig,
-			basis, attemptID, baseModuleID, audit.deadline); err != nil {
+			basis, attemptID, baseModuleID, audit.deadline)
+		if err != nil {
 			return nil, err
 		}
+		if n, err := routeResult.RowsAffected(); err != nil {
+			return nil, err
+		} else if n == 0 {
+			if err := t.QueryRowContext(ctx, "SELECT selected_module_id,selected_route FROM assessment_route_decisions WHERE attempt_id=? AND section_id=?", attemptID, sectionID).Scan(&selectedModuleID, &routeName); err != nil {
+				return nil, err
+			}
+		}
+
 		next, err := scanNextModuleRowTx(ctx, t, selectedModuleID)
 		if err != nil {
 			return nil, err
@@ -1914,11 +1950,22 @@ func nextModuleAvailableAt(now time.Time, currentSectionID, nextSectionID string
 // is the identity fence (ON DUPLICATE KEY UPDATE id = id).
 func insertModuleAttemptTx(ctx context.Context, t tx.Tx, attemptID string, module *nextModuleRow, availableAt *time.Time) error {
 	moduleAttemptID := uuid.NewString()
-	_, err := t.ExecContext(ctx,
+	insert, err := t.ExecContext(ctx,
 		"INSERT INTO assessment_module_attempts (id, attempt_id, module_id, state, allocated_seconds, available_at, started_at, tool_state) VALUES (?, ?, ?, 'not_started', ?, ?, NULL, ?) ON DUPLICATE KEY UPDATE id = id",
 		moduleAttemptID, attemptID, module.id, module.durationSeconds, availableAt, module.toolPolicy.String)
 	if err != nil {
 		return err
+	}
+	if n, err := insert.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		reopen, err := staffFollowupWasClosed(ctx, t, attemptID, module.id)
+		if err != nil {
+			return err
+		}
+		if reopen {
+			return prepareStaffModuleTx(ctx, t, attemptID, DeliveryModule{ID: module.id, DurationSeconds: module.durationSeconds}, availableAt, nil)
+		}
 	}
 	_, err = ensureSatModuleBoundaryTx(ctx, t, attemptID, moduleAttemptID)
 	return err

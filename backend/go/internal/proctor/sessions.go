@@ -50,6 +50,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/attempts"
 	"strings"
 	"time"
 
@@ -1266,6 +1267,7 @@ type studentSessionRow struct {
 	satRecoveryModuleAttemptID, satRecoveryModuleTitle, satRecoveryPhase, satRecoveryKind sql.NullString
 	satRecoveryDeadlineAt                                                                 sql.NullTime
 	satRecoveryBoundaryRevision                                                           sql.NullInt64
+	satStaffSection                                                                       sql.NullString
 }
 
 // studentSessionColumns mirrors Rust load_student_sessions (explicit list).
@@ -1290,7 +1292,8 @@ const studentSessionColumns = "sa.id, sa.candidate_id, sa.candidate_name, sa.can
 	"CASE WHEN sat_module_boundary.module_attempt_id IS NOT NULL THEN 'work' " +
 	"WHEN sat_entry_boundary.module_attempt_id IS NOT NULL THEN 'entry' END, " +
 	"COALESCE(sat_module_boundary.recovery_deadline_at, sat_entry_boundary.entry_deadline_at), " +
-	"COALESCE(sat_module_boundary.revision, sat_entry_boundary.revision)"
+	"COALESCE(sat_module_boundary.revision, sat_entry_boundary.revision), " +
+	"CASE WHEN sa.sat_staff_control IS NOT NULL THEN COALESCE((SELECT section_key FROM assessment_sections WHERE id=sat_module.section_id), '') END"
 
 const studentSessionFrom = "FROM student_attempts sa " + studentSessionJoins
 
@@ -1303,7 +1306,7 @@ const studentSessionJoins = "JOIN exam_entities e ON e.id = sa.exam_id " +
 	"ORDER BY ma2.created_at DESC, ma2.id DESC LIMIT 1" +
 	") " +
 	"LEFT JOIN assessment_modules sat_module ON sat_module.id = sat_attempt.module_id " +
-	"LEFT JOIN assessment_module_boundaries sat_module_boundary ON sat_module_boundary.module_attempt_id = sat_attempt.id " +
+	"LEFT JOIN assessment_module_boundaries sat_module_boundary ON sat_module_boundary.module_attempt_id = sat_attempt.id AND sat_module_boundary.run_generation = sat_attempt.run_generation " +
 	// The attempt-owned SAT break stage, oldest unfinished row only: a break is
 	// created when the section before it finalizes, so an unfinished one is what
 	// the candidate is waiting on right now (and the row the module arm path
@@ -1322,7 +1325,7 @@ const studentSessionJoins = "JOIN exam_entities e ON e.id = sa.exam_id " +
 	"ORDER BY ma3.created_at ASC, ma3.id ASC LIMIT 1" +
 	") " +
 	"LEFT JOIN assessment_modules sat_entry_module ON sat_entry_module.id = sat_entry.module_id " +
-	"LEFT JOIN assessment_module_boundaries sat_entry_boundary ON sat_entry_boundary.module_attempt_id = sat_entry.id"
+	"LEFT JOIN assessment_module_boundaries sat_entry_boundary ON sat_entry_boundary.module_attempt_id = sat_entry.id AND sat_entry_boundary.run_generation = sat_entry.run_generation"
 
 func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSessionRow, error) {
 	var r studentSessionRow
@@ -1343,7 +1346,7 @@ func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSes
 		&r.satEntryStartsAt, &r.satEntryProctorRearmAt, &r.satEntryAutoStartAt,
 		&r.satStartCodeRequired, &r.satStartCodeAcceptedAt,
 		&r.satRecoveryModuleAttemptID, &r.satRecoveryModuleTitle, &r.satRecoveryPhase, &r.satRecoveryKind,
-		&r.satRecoveryDeadlineAt, &r.satRecoveryBoundaryRevision,
+		&r.satRecoveryDeadlineAt, &r.satRecoveryBoundaryRevision, &r.satStaffSection,
 	); err != nil {
 		return studentSessionRow{}, err
 	}
@@ -1427,7 +1430,7 @@ func loadScoreModuleFacts(ctx context.Context, q sessionQuerier, scheduleID stri
 		LEFT JOIN attempt_responses_v2 v_q ON v_q.attempt_id = ma.attempt_id AND v_q.module_id = m.id
 			AND v_q.question_id = eq.question_id
 			AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ma.attempt_id)
-		WHERE sa.schedule_id = ?
+		WHERE sa.schedule_id = ? AND `+attempts.SATSelectedModuleSQL("ma")+`
 		GROUP BY ma.id, ma.attempt_id, m.module_key, s.section_key, ma.state, ma.raw_correct
 		ORDER BY ma.attempt_id, s.display_order, m.display_order, m.id`, scheduleID)
 	if err != nil {
@@ -1872,7 +1875,7 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime, score *s
 		warnings = 1
 	}
 	isSAT := row.providerKey == "sat"
-	cohortTimedSAT := isSAT && examruntime.IsCohortTimed(runtime.TimingModel)
+	cohortTimedSAT := isSAT && !row.satStaffSection.Valid && examruntime.IsCohortTimed(runtime.TimingModel)
 	timeRemaining := runtime.CurrentSectionRemainingSeconds
 	// The candidate's own MODULE clock, for every SAT timing model: the module a
 	// candidate is sitting has its own window, and since the window is the room's
@@ -2026,6 +2029,9 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime, score *s
 	// proctor row cannot show the between-sections window.
 	if isSAT && !cohortTimedSAT {
 		v := currentSection
+		if row.satStaffSection.String != "" {
+			v = row.satStaffSection.String
+		}
 		runtimeCurrentSection = &v
 		runtimeRemaining = timeRemaining
 	}

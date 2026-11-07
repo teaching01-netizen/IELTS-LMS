@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"example.com/ielts-proctoring/internal/attempts"
 	"sort"
 	"strconv"
 	"strings"
@@ -223,7 +224,7 @@ func satRawdataModules(ctx context.Context, tx *sql.Tx, actor auth.ActorContext,
 		JOIN assessment_modules m ON m.id = ma.module_id
 		JOIN assessment_sections s ON s.id = m.section_id
 		WHERE a.exam_id = ? AND a.schedule_id = ?
-		  AND s.exam_version_id = a.published_version_id` + scope + `
+		  AND s.exam_version_id = a.published_version_id AND ` + attempts.SATSelectedModuleSQL("ma") + scope + `
 		ORDER BY ma.attempt_id ASC, s.display_order ASC, m.display_order ASC, ma.id ASC`
 	args := append([]any{examID, scheduleID}, scopeArgs...)
 	rows, err := tx.QueryContext(ctx, query, args...)
@@ -271,7 +272,7 @@ func satRawdataCells(ctx context.Context, tx *sql.Tx, actor auth.ActorContext, e
 			AND v.module_id = m.id
 			AND s.exam_version_id = (SELECT published_version_id FROM student_attempts WHERE id = ma.attempt_id)
 		WHERE a.exam_id = ? AND a.schedule_id = ?
-		  AND s.exam_version_id = a.published_version_id` + scope + `
+		  AND s.exam_version_id = a.published_version_id AND ` + attempts.SATSelectedModuleSQL("ma") + scope + `
 		ORDER BY ma.attempt_id ASC, m.id ASC, eq.display_order ASC,
 			CASE WHEN (CAST(v.question_id AS CHAR) COLLATE utf8mb4_unicode_ci) = eq.id THEN 0 ELSE 1 END`
 	args := append([]any{examID, scheduleID}, scopeArgs...)

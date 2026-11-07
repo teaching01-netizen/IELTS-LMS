@@ -388,7 +388,7 @@ func (s *Service) closeModule(ctx context.Context, bearerScheduleID, bearerAttem
 			recoveryTransitions = append(recoveryTransitions, satBoundaryTransition{from: "collecting", to: "settled"})
 			boundaryPhase = "settled"
 		}
-		followup := &moduleFollowupContext{recoveryControl: runtimeSnapshot.recoveryControl,
+		followup := &moduleFollowupContext{recoveryControl: runtimeSnapshot.recoveryControl, staffControlled: runtimeSnapshot.staffControlled,
 			timingModel:    runtimeSnapshot.timingModel.String,
 			handoffMode:    runtimeSnapshot.handoffMode.String,
 			recoveryPolicy: recoveryPolicy,
@@ -736,12 +736,12 @@ func (s *Service) loadCloseAckProjection(ctx context.Context, attemptID, moduleI
 			ma.entry_generation, ma.entry_starts_at, ma.entry_confirmed_at,
 			ma.entry_entered_at, ma.auto_start_at,
 			COALESCE(sa.control_epoch, 0), rd.route_basis,
-			COALESCE(rd.late_answer_count, 0), rd.selected_route, UTC_TIMESTAMP(6)
+			COALESCE(rd.late_answer_count, 0), rd.selected_route, UTC_TIMESTAMP(6), ma.run_generation
 		FROM assessment_module_attempts ma
 		JOIN student_attempts sa ON sa.id = ma.attempt_id
 		LEFT JOIN assessment_route_decisions rd
 			ON rd.attempt_id = ma.attempt_id AND rd.base_module_id = ?
-		WHERE ma.attempt_id = ?
+		WHERE ma.attempt_id = ? AND `+attempts.SATSelectedModuleSQL("ma")+`
 		ORDER BY ma.created_at, ma.id`, moduleID, attemptID)
 	if err != nil {
 		return closeAckProjection{}, err
@@ -758,7 +758,7 @@ func (s *Service) loadCloseAckProjection(ctx context.Context, attemptID, moduleI
 			&m.ExtensionSeconds, &completionReason, &rawCorrect, &operationalCount,
 			&toolState, &m.Revision, &entryGeneration, &entryStartsAt, &entryConfirmedAt,
 			&entryEnteredAt, &autoStartAt, &projection.controlEpoch, &projection.routeBasis,
-			&projection.lateAnswerCount, &projection.selectedRoute, &projection.serverNow); err != nil {
+			&projection.lateAnswerCount, &projection.selectedRoute, &projection.serverNow, &m.RunGeneration); err != nil {
 			return closeAckProjection{}, err
 		}
 		m.AvailableAt = nullTime(availableAt)

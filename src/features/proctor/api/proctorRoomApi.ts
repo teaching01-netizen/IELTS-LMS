@@ -49,3 +49,20 @@ export function assignModuleRoute(
 }
 
 export { isCommandConfirmed, type CommandOutcome } from '../domain/commandOutcome';
+
+export type SATStaffControlRequest = {
+  operationId: string;
+  attemptIds: string[];
+  action: 'set_time' | 'move';
+  remainingSeconds: number;
+  expectedStages?: Record<string, string>;
+  sectionKey?: string;
+  destination?: 'module_1' | 'module_2' | 'break';
+  route?: 'automatic' | 'lower' | 'higher';
+};
+export type SATStaffControlResult = {
+  outcomes: Array<{ attemptId: string; applied: boolean; error?: string }>;
+};
+export function applySATStaffControl(scheduleId: string, request: SATStaffControlRequest): Promise<SATStaffControlResult> {
+  return proctorGateway.backendPost(`${roomPath(scheduleId)}/sat-control`, request, { retries: 0 });
+}

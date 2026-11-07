@@ -3,6 +3,7 @@ package results
 import (
 	"context"
 	"database/sql"
+	"example.com/ielts-proctoring/internal/attempts"
 	"strings"
 )
 
@@ -32,7 +33,7 @@ func SATDomainAccuracyQ(ctx context.Context, db rowQuerier, attemptID string) ([
 		JOIN assessment_sections s ON s.id = m.section_id
 		JOIN assessment_exam_questions eq ON eq.module_id = m.id
 		JOIN assessment_question_revisions qr ON qr.id = eq.question_revision_id
-		WHERE ma.attempt_id = ?`, attemptID)
+		WHERE ma.attempt_id = ? AND `+attempts.SATSelectedModuleSQL("ma"), attemptID)
 	if err != nil {
 		return nil, err
 	}

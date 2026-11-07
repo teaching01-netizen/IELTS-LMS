@@ -243,6 +243,11 @@ func (s *Service) RecordAudit(ctx context.Context, req AuditRequest) error {
 	if actionType == "" || len(actionType) > 255 {
 		return validationError("actionType is required and must be at most 255 characters.")
 	}
+	if actionType == "STUDENT_DIAGNOSTIC" {
+		if _, err := validateDiagnostic(req.Payload); err != nil {
+			return err
+		}
+	}
 
 	// B1: point-write tx on one attempt row (RC-safe; no snapshot dependency).
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
@@ -262,6 +267,9 @@ func (s *Service) RecordAudit(ctx context.Context, req AuditRequest) error {
 	if err := authorizeTelemetryRecovery(attempt, req.ClientSessionID); err != nil {
 		return err
 	}
+	if actionType == "STUDENT_DIAGNOSTIC" && attempt.ActiveClientSessionID.Valid && attempt.ActiveClientSessionID.String != "" && req.ClientSessionID != attempt.ActiveClientSessionID.String {
+		return apperrors.New(apperrors.CodeActiveSessionSuperseded, "Diagnostic writer has been superseded.")
+	}
 	payload := telemetryObject(string(req.Payload))
 	if req.ClientTimestamp != nil {
 		payload["clientTimestamp"] = req.ClientTimestamp.UTC().Format(time.RFC3339Nano)
@@ -272,9 +280,17 @@ func (s *Service) RecordAudit(ctx context.Context, req AuditRequest) error {
 			return validationError("payload.violationId is required for VIOLATION_DETECTED.")
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `
+	auditID, actor := uuid.NewString(), attempt.CandidateName
+	insert := `
 		INSERT INTO session_audit_logs (id, schedule_id, actor, action_type, target_student_id, payload, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`, uuid.NewString(), req.ScheduleID, attempt.CandidateName, actionType, req.AttemptID, encodeTelemetryObject(payload)); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`
+	if actionType == "STUDENT_DIAGNOSTIC" {
+		eventID, _ := validateDiagnostic(req.Payload)
+		auditID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("student-diagnostic:"+req.AttemptID+":"+eventID)).String()
+		actor = "student"
+		insert += " ON DUPLICATE KEY UPDATE id = id"
+	}
+	if _, err := tx.ExecContext(ctx, insert, auditID, req.ScheduleID, actor, actionType, req.AttemptID, encodeTelemetryObject(payload)); err != nil {
 		return err
 	}
 

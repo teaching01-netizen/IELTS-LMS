@@ -24,6 +24,7 @@ export function isEquivalentBootstrap(
   next: AssessmentDeliveryBootstrap,
 ): boolean {
   if (!prev) return false;
+  if ((prev.staffControl?.revision ?? 0) !== (next.staffControl?.revision ?? 0)) return false;
   if (prev.timing.runtimeRevision !== next.timing.runtimeRevision) return false;
   if (prev.versionId !== next.versionId) return false;
   const prevNow = Date.parse(prev.serverNow);
@@ -90,6 +91,12 @@ export function regressesAttemptState(
 ): boolean {
   // A different attempt is not a regression; the identity guard owns that.
   if (prev.attempt.id !== next.attempt.id) return false;
+  if (prev.result != null && next.result == null) return true;
+  const previousControl = prev.staffControl?.revision ?? 0;
+  const incomingControl = next.staffControl?.revision ?? 0;
+  if (incomingControl < previousControl) return true;
+  // A newer authenticated staff command can reopen a run or replace a branch.
+  if (incomingControl > previousControl) return false;
   const nextModules = new Map(
     next.attempt.moduleAttempts.map((module) => [module.id, module]),
   );
@@ -98,6 +105,8 @@ export function regressesAttemptState(
     // A dropped row is older state (rows are never deleted server-side).
     if (!incoming) return true;
     if (incoming.revision < previous.revision) return true;
+    if ((incoming.runGeneration ?? 0) < (previous.runGeneration ?? 0)) return true;
+    if ((incoming.runGeneration ?? 0) > (previous.runGeneration ?? 0)) continue;
     // SAT boundary transitions have an independent revision and may advance
     // without touching the module-attempt row (for example, entry recovery).
     if (

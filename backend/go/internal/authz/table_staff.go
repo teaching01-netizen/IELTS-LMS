@@ -145,6 +145,7 @@ func init() {
 		// end-section admits builders for the isolated preview schedule
 		// (handler: requirePreviewSectionDeps).
 		"POST /sessions/{scheduleID}/control/end-section-now": {MinRoles: []string{RoleAdmin, RoleBuilder, RoleProctor}},
+		"POST /sessions/{scheduleID}/sat-control":             {MinRoles: proctorRW, Scope: ScopeAssignedSchedule},
 		"POST /sessions/{scheduleID}/control/extend-section":  {MinRoles: proctorRW},
 		"POST /sessions/{scheduleID}/control/complete-exam":   {MinRoles: proctorRW},
 		"GET /sessions/{scheduleID}/forms/state":              {MinRoles: proctorRW},

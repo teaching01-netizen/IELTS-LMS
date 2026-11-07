@@ -808,6 +808,7 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "PATCH", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleSaveHandler(app))
 			authzRoute(r, "DELETE", "/sessions/{scheduleID}/violation-rules/{ruleID}", proctorViolationRuleDeleteHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/presence", withHeartbeatTier(app, proctorPresenceHandler(app)))
+			authzRoute(r, "POST", "/sessions/{scheduleID}/sat-control", proctorSATControlHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/control/end-section-now", proctorEndSectionHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/control/extend-section", proctorExtendSectionHandler(app))
 			authzRoute(r, "POST", "/sessions/{scheduleID}/control/complete-exam", proctorCompleteExamHandler(app))
