@@ -2160,7 +2160,19 @@ describe('student question experience', () => {
     expect(screen.queryByText(/listening audio track/i)).toBeNull();
   });
 
-  it('keeps listening split-screen side by side in tablet mode and shows question instructions', () => {
+  it.each([true, false])('collapses and restores the listening split on touch (tabletMode=%s)', (tabletMode) => {
+    if (!tabletMode) {
+      vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+        matches: query === '(any-pointer: coarse)',
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }));
+    }
     const longInstruction = 'Answer the question using the words you hear. '.repeat(6);
     const state: ExamState = {
       title: 'Listening Test',
@@ -2221,7 +2233,7 @@ describe('student question experience', () => {
         onAnswerChange={() => {}}
         currentQuestionId="q1"
         onNavigate={() => {}}
-        tabletMode
+        tabletMode={tabletMode}
         highlightEnabled
       />,
     );
@@ -2281,7 +2293,7 @@ describe('student question experience', () => {
       '--question-pane-width': 'calc(62%)',
     });
 
-    // P2.4: pointer-capture drag at a 1730px workspace (bounds 32%/68%).
+    // Pointer-capture drag at a 1730px workspace.
     vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
       bottom: 600,
       height: 600,
@@ -2301,13 +2313,28 @@ describe('student question experience', () => {
       '--question-pane-width': 'calc(52%)',
     });
 
-    fireEvent.pointerDown(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 1137 });
-    fireEvent.pointerMove(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 0 });
-    fireEvent.pointerUp(screen.getByTestId('listening-pane-resizer'), { pointerId: 1 });
+    const touch = { pointerId: 2, pointerType: 'touch', clientY: 300 };
+    fireEvent.pointerDown(listeningResizer, { ...touch, clientX: 930 });
+    fireEvent.pointerMove(listeningResizer, { ...touch, clientX: 920 });
+    fireEvent.pointerMove(listeningResizer, { ...touch, clientX: 110 });
+    fireEvent.pointerUp(listeningResizer, touch);
     expect(workspace).toHaveStyle({
-      '--listening-pane-width': '32%',
-      '--question-pane-width': 'calc(68%)',
+      '--listening-pane-width': '0%',
+      '--question-pane-width': 'calc(100%)',
     });
+    expect(listeningResizer).toHaveAttribute('aria-valuenow', '0');
+    expect(listeningResizer).toHaveStyle({ left: '0px' });
+    expect(transcriptReference.closest('[inert]')).toHaveClass('hidden');
+    const questionScroll = screen.getByTestId('listening-question-scroll');
+    expect(questionScroll).toBeVisible();
+
+    fireEvent.pointerDown(listeningResizer, { ...touch, clientX: 124 });
+    fireEvent.pointerMove(listeningResizer, { ...touch, clientX: 134 });
+    fireEvent.pointerMove(listeningResizer, { ...touch, clientX: 826 });
+    fireEvent.pointerUp(listeningResizer, touch);
+    expect(workspace).toHaveStyle({ '--listening-pane-width': '40%' });
+    expect(transcriptReference.closest('[inert]')).toBeNull();
+    expect(screen.getByTestId('listening-question-scroll')).toBe(questionScroll);
 
     fireEvent.pointerDown(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 965 });
     fireEvent.pointerMove(screen.getByTestId('listening-pane-resizer'), { pointerId: 1, clientX: 99999 });

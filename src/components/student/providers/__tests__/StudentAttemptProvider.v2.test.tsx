@@ -177,6 +177,39 @@ describe('StudentAttemptProvider V2 integration', () => {
     );
   });
 
+  it('keeps server-confirmed submission when an older submit request fails', async () => {
+    const response = deferred<void>();
+    mocks.transport.fetchSnapshot.mockResolvedValue([]);
+    mocks.transport.submit.mockImplementationOnce(async () => {
+      await response.promise;
+      throw new Error('Connection lost while submitting');
+    });
+
+    let currentAttempt = attempt('attempt-a');
+    const state = examState();
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <StudentRuntimeProvider state={state} onExit={vi.fn()} attemptSnapshot={currentAttempt}>
+        <StudentAttemptProvider scheduleId="schedule" attemptSnapshot={currentAttempt}>
+          {children}
+        </StudentAttemptProvider>
+      </StudentRuntimeProvider>
+    );
+    const hook = renderHook(() => useStudentAttempt(), { wrapper });
+    const submission = hook.result.current.actions.submitAttemptAfterBarrier();
+    await waitFor(() => expect(mocks.transport.submit).toHaveBeenCalled());
+
+    const submittedAt = '2026-01-01T01:00:00.000Z';
+    currentAttempt = { ...currentAttempt, phase: 'post-exam', submittedAt };
+    hook.rerender();
+    await waitFor(() => expect(hook.result.current.state.attempt?.submittedAt).toBe(submittedAt));
+
+    await act(async () => {
+      response.resolve();
+      await submission;
+    });
+    expect(hook.result.current.state.attempt?.submittedAt).toBe(submittedAt);
+  });
+
   it('keeps preview attempts on local persistence', async () => {
     const currentAttempt = attempt('preview-attempt');
     const state = examState();

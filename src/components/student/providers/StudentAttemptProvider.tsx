@@ -2002,7 +2002,18 @@ export function StudentAttemptProvider({
         }
       }
 
-      const pendingAttempt = mergeAttempt(latestAttempt, {
+      const refreshedAttempt = attemptRef.current;
+      if (!isCurrent() || !refreshedAttempt) return false;
+      if (
+        isVerifiedTerminalStudentState({
+          attempt: refreshedAttempt,
+          runtimeSnapshot: runtimeState.runtimeSnapshot,
+        }) !== "not_terminal"
+      ) {
+        return true;
+      }
+
+      const pendingAttempt = mergeAttempt(refreshedAttempt, {
         recovery: {
           finalSubmissionPending: true,
           syncState: "syncing_reconnect",

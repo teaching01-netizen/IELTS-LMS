@@ -1521,6 +1521,71 @@ describe("useStudentSessionRouteData backend mode", () => {
       await waitFor(() => expect(liveFetchCount(fetchMock)).toBeGreaterThan(liveFetchesBeforeControl));
     });
 
+    it("discovers IELTS auto-submission when the connected socket misses the attempt update", async () => {
+      installSocket();
+      vi.stubEnv("VITE_FEATURE_USE_BACKEND_DELIVERY", "true");
+      vi.stubEnv("VITE_STUDENT_REALTIME", "websocket");
+      vi.spyOn(authService, "getSession").mockResolvedValue(buildAuthSession());
+
+      const attempt = buildAttempt();
+      const endedAt = "2026-01-01T10:00:00.000Z";
+      const submittedAt = "2026-01-01T10:00:04.000Z";
+      const completedRuntime = {
+        revision: 2,
+        status: "completed",
+        actualEndAt: endedAt,
+        updatedAt: endedAt,
+      };
+      let roomCompleted = false;
+      let workerSubmitted = false;
+      const fetchMock = vi.fn((url: string) => {
+        if (url.includes("/static?")) {
+          return Promise.resolve(jsonResponse(buildStaticSessionContext()));
+        }
+        if (url.includes("/runtime?")) {
+          return Promise.resolve(new Response(null, { status: 304 }));
+        }
+        if (url.includes("/live?")) {
+          const currentAttempt = workerSubmitted
+            ? { ...attempt, revision: 2, phase: "post-exam", submittedAt, updatedAt: submittedAt }
+            : attempt;
+          return Promise.resolve(
+            jsonResponse(buildLiveSessionContext(
+              currentAttempt, "ver-1", roomCompleted ? completedRuntime : undefined
+            ))
+          );
+        }
+        return Promise.resolve(jsonResponse(buildBootstrapContext(attempt)));
+      });
+      global.fetch = fetchMock as typeof fetch;
+
+      const { result } = renderHook(() => useStudentSessionRouteData("sched-1", "W250334"), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      const socket = MockSocket.instances.find((instance) => instance.url.includes("attemptId="))!;
+      const initialLiveReads = liveFetchCount(fetchMock);
+      act(() => socket.open());
+      await waitFor(() => expect(liveFetchCount(fetchMock)).toBeGreaterThan(initialLiveReads));
+
+      roomCompleted = true;
+      act(() => socket.emit({
+        kind: "schedule_runtime",
+        id: "sched-1",
+        revision: 2,
+        event: "runtime_changed",
+      }));
+      await waitFor(() => expect(result.current.runtimeSnapshot?.status).toBe("completed"));
+      expect(result.current.attemptSnapshot?.submittedAt).toBeNull();
+
+      workerSubmitted = true;
+      await waitFor(() => expect(result.current.attemptSnapshot?.submittedAt).toBe(submittedAt), {
+        timeout: 4_500,
+      });
+      expect(result.current.liveSocketConnected).toBe(true);
+    }, 7_000);
+
     it("opens the student socket and applies only newer runtime snapshots", async () => {
       installSocket();
       vi.stubEnv("VITE_STUDENT_REALTIME", "websocket");

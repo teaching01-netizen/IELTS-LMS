@@ -93,6 +93,7 @@ export function StudentSplitPaneResizer({
   testId,
 }: StudentSplitPaneResizerProps) {
   const tabletOffset = STUDENT_TABLET_SPLIT_HIT_TARGET_WIDTH_PX / 2;
+  const atLeftEdge = isTabletMode && leftWidth === 0;
   // Invisible overlay widths: the rail keeps its layout width while the
   // grabbable area grows to the pointer/touch target.
   const hitAreaInset = isTabletMode
@@ -332,7 +333,9 @@ export function StudentSplitPaneResizer({
       aria-valuemin={Math.round(minWidth)}
       aria-valuemax={Math.round(maxWidth)}
       aria-valuenow={Math.round(Math.min(maxWidth, Math.max(minWidth, leftWidth)))}
-      aria-valuetext={`Material width, ${Math.round(leftWidth)} percent, adjustable from ${Math.round(minWidth)} to ${Math.round(maxWidth)} percent`}
+      aria-valuetext={atLeftEdge
+        ? 'Material hidden'
+        : `Material width, ${Math.round(leftWidth)} percent, adjustable from ${Math.round(minWidth)} to ${Math.round(maxWidth)} percent`}
       tabIndex={0}
       data-testid={testId}
       data-split-state={interaction}
@@ -354,10 +357,10 @@ export function StudentSplitPaneResizer({
       }}
       className={
         isTabletMode
-          ? 'group absolute inset-y-0 z-20 flex w-8 cursor-col-resize touch-pan-y select-none items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700'
+          ? `group absolute z-20 flex cursor-col-resize touch-pan-y select-none items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${atLeftEdge ? 'top-1/2 size-12 -translate-y-1/2' : 'inset-y-0 w-8'}`
           : 'group relative flex w-2.5 min-w-2.5 flex-shrink-0 cursor-col-resize touch-pan-y select-none items-center justify-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700'
       }
-      style={isTabletMode ? { left: `calc(${leftWidth}% - ${tabletOffset}px)` } : undefined}
+      style={isTabletMode ? { left: atLeftEdge ? 0 : `calc(${leftWidth}% - ${tabletOffset}px)` } : undefined}
     >
       {/* Forgiving grab area: the divider is grabbable anywhere along its
           length and well beyond its hairline width. */}
@@ -365,10 +368,10 @@ export function StudentSplitPaneResizer({
         aria-hidden="true"
         data-testid={`${testId}-hit-area`}
         className="absolute inset-y-0"
-        style={{ insetInline: `-${hitAreaInset}px` }}
+        style={{ insetInline: atLeftEdge ? 0 : `-${hitAreaInset}px` }}
       />
       {/* Quiet hairline: 1px at rest, 2px + accent while pressed/dragging. */}
-      <span aria-hidden="true" data-testid={`${testId}-line`} className={lineClassName} />
+      {atLeftEdge ? null : <span aria-hidden="true" data-testid={`${testId}-line`} className={lineClassName} />}
       {/* Persistent grabber: discoverable, not distracting. */}
       <span aria-hidden="true" data-testid={`${testId}-grabber`} className={grabberClassName}>
         {[0, 1, 2].map((mark) => (

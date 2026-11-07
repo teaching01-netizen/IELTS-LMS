@@ -12,6 +12,7 @@ import {
   STUDENT_SPLIT_KEYBOARD_STEP_PX,
   STUDENT_SPLIT_RESET_DURATION_MS,
   STUDENT_SPLIT_SNAP_THRESHOLD_PERCENT,
+  STUDENT_SPLIT_TOUCH_HIT_TARGET_WIDTH_PX,
   STUDENT_TABLET_SPLIT_DIVIDER_WIDTH_PX,
   STUDENT_TABLET_SPLIT_HIT_TARGET_WIDTH_PX,
 } from './splitPaneDimensions';
@@ -92,6 +93,7 @@ export function computeSplitBounds(
   minMaterialWidth: number,
   minAnswerWidth: number,
   maxMaterialRatio = PREFERRED_TRAVEL_MAX,
+  allowMaterialCollapse = false,
 ): SplitRatioBounds {
   const usableWidth = containerWidth - railWidth;
   if (!Number.isFinite(containerWidth) || usableWidth <= 0) {
@@ -105,7 +107,7 @@ export function computeSplitBounds(
   if (lower > upper) {
     return { lower: null, upper: null, usableWidth };
   }
-  return { lower, upper, usableWidth };
+  return { lower: allowMaterialCollapse ? 0 : lower, upper, usableWidth };
 }
 
 export function renderSplitRatio(preferredRatio: number, bounds: SplitRatioBounds): number | null {
@@ -160,6 +162,8 @@ interface UseSplitPaneResizeOptions {
   dividerMode?: 'overlay' | 'consumes-space';
   /** Optional cap for the material pane, used by ACT Science's reading layout. */
   maxMaterialRatio?: number | undefined;
+  /** Allow the material pane to resize all the way to zero. */
+  allowMaterialCollapse?: boolean;
   /** P2.5: sessionStorage key scoped to attempt/version/module. Omit to disable. */
   persistenceKey?: string | undefined;
   /** Font scale (1 = normal) used to enlarge readable pane minimums. */
@@ -179,6 +183,7 @@ export function useSplitPaneResize({
   crampedDefaultLeftWidth,
   dividerMode = 'consumes-space',
   maxMaterialRatio = PREFERRED_TRAVEL_MAX,
+  allowMaterialCollapse = false,
   persistenceKey,
   fontScale = 1,
 }: UseSplitPaneResizeOptions) {
@@ -267,6 +272,7 @@ export function useSplitPaneResize({
         minMaterialWidth,
         minAnswerWidth,
         maxMaterialRatio,
+        allowMaterialCollapse,
       ),
     // preferredRatio re-runs the read after drags/keyboard moves, and
     // containerResizeTick after rotations/window changes, so ARIA and the
@@ -280,6 +286,7 @@ export function useSplitPaneResize({
       minMaterialWidth,
       minAnswerWidth,
       maxMaterialRatio,
+      allowMaterialCollapse,
       readContainerWidth,
     ],
   );
@@ -468,6 +475,7 @@ export function useSplitPaneResize({
         minMaterialWidth,
         minAnswerWidth,
         maxMaterialRatio,
+        allowMaterialCollapse,
       );
       const rendered = renderSplitRatio(drag.startRatio, boundsNow);
       if (rendered === null) {
@@ -475,14 +483,21 @@ export function useSplitPaneResize({
       }
       const deltaRatio = (event.clientX - drag.startClientX) / drag.usableWidth;
       const nextRatio = Math.min(1, Math.max(0, rendered + deltaRatio));
-      drag.pendingRatio = nextRatio;
+      // A finger can grab off-center, and the browser owns edge gestures.
+      // Let the pane reach zero slightly before the finger reaches the edge.
+      const collapseThreshold = STUDENT_SPLIT_TOUCH_HIT_TARGET_WIDTH_PX / 2;
+      const draggedRatio =
+        allowMaterialCollapse && nextRatio * drag.usableWidth <= collapseThreshold
+          ? 0
+          : nextRatio;
+      drag.pendingRatio = draggedRatio;
       // Live layout update during the drag. Pointermove events already
       // arrive coalesced per frame in browsers, so a direct write is both
       // simpler and safe; the persisted preference is only written at drag
       // completion (endDrag).
-      setPreferredRatio(nextRatio);
+      setPreferredRatio(draggedRatio);
     },
-    [dividerConsumesSpace, dividerWidth, minAnswerWidth, minMaterialWidth],
+    [allowMaterialCollapse, dividerConsumesSpace, dividerWidth, maxMaterialRatio, minAnswerWidth, minMaterialWidth],
   );
 
   const handlePointerEnd = useCallback(

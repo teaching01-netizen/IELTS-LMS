@@ -13,6 +13,7 @@ interface StudentMaterialWithQuestionPaneProps {
   workspaceRef: React.RefObject<HTMLDivElement | null>;
   splitPaneStyle: React.CSSProperties | undefined;
   leftWidth: number;
+  materialCollapsed?: boolean;
   splitMinWidth?: number;
   splitMaxWidth?: number;
   /** P2.4: false when readable pane minimums cannot fit (focus override) — hides the separator. */
@@ -88,6 +89,7 @@ export function StudentMaterialWithQuestionPane({
   workspaceRef,
   splitPaneStyle,
   leftWidth,
+  materialCollapsed = false,
   splitMinWidth,
   splitMaxWidth,
   splitSplittable = true,
@@ -298,7 +300,8 @@ export function StudentMaterialWithQuestionPane({
           data-testid={workspaceTestId}
         >
           <div
-            className="contents"
+            className={materialCollapsed ? "hidden" : "contents"}
+            inert={materialCollapsed || undefined}
             onFocusCapture={() => {
               lastFocusedPaneRef.current = "material";
             }}

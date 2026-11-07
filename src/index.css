@@ -784,6 +784,15 @@
     pointer-events: none;
   }
 
+  /* Extend the focused pane's scroll range without resizing the exam shell. */
+  .student-exam-shell [style*="--student-keyboard-scroll-clearance"]::after {
+    content: '';
+    display: block;
+    flex: none;
+    block-size: var(--student-keyboard-scroll-clearance);
+    pointer-events: none;
+  }
+
   /*
    * Question pane root. Composition is decided by the pane's MEASURED usable
    * width (useStudentQuestionPaneComposition) rather than a CSS container

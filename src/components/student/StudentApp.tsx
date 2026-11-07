@@ -775,21 +775,18 @@ export function StudentApp({
     }
   }, [attemptState.durabilityLeaseConflict]);
 
+  const showFinalSubmitOverlay =
+    runtimeState.runtimeBacked &&
+    runtimeState.runtimeStatus === "completed" &&
+    runtimeCompletionVerified &&
+    verifiedTerminalState === "not_terminal" &&
+    finalSubmitStatus !== "idle";
+
   useEffect(() => {
-    if (
-      runtimeState.runtimeBacked &&
-      submissionRuntimeStatus === "completed" &&
-      runtimeCompletionVerified &&
-      finalSubmitStatus !== "idle"
-    ) {
+    if (showFinalSubmitOverlay) {
       finalSubmitOverlayRef.current?.focus();
     }
-  }, [
-    finalSubmitStatus,
-    runtimeCompletionVerified,
-    runtimeState.runtimeBacked,
-    submissionRuntimeStatus,
-  ]);
+  }, [showFinalSubmitOverlay]);
 
   useEffect(() => {
     if (!latestPendingWarning) {
@@ -1149,11 +1146,7 @@ export function StudentApp({
     ) : null;
 
   const finalSubmitOverlay =
-    runtimeState.runtimeBacked &&
-    runtimeState.runtimeStatus === "completed" &&
-    runtimeCompletionVerified &&
-    verifiedTerminalState === "not_terminal" &&
-    finalSubmitStatus !== "idle" ? (
+    showFinalSubmitOverlay ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/70 backdrop-blur-sm p-4">
         <div
           ref={finalSubmitOverlayRef}
@@ -1161,44 +1154,35 @@ export function StudentApp({
           role="alertdialog"
           aria-modal="true"
           aria-labelledby="final-submit-overlay-title"
+          aria-describedby="final-submit-overlay-status"
           className="max-w-md w-full bg-white rounded-lg border border-gray-200 shadow-xl p-6 md:p-8 text-center"
         >
           <p className="text-[length:var(--student-meta-font-size)] font-semibold uppercase tracking-wide text-gray-500 mb-3">
             Submission
           </p>
           <h2 id="final-submit-overlay-title" className="text-2xl font-black text-gray-900 mb-3">
-            Submitting your exam
+            Confirming your submission
           </h2>
-          <p className="text-sm text-gray-700 leading-6">
-            {finalSubmitStatus === "failed"
-              ? "We could not confirm submission yet. Stay on this page and check your connection."
-              : "Please keep this page open while we finalize your submission."}
+          <p
+            id="final-submit-overlay-status"
+            role="status"
+            className="text-sm text-gray-700 leading-6"
+          >
+            {finalSubmitStatus === "submitting"
+              ? "We’re sending your answers. Please keep this page open."
+              : finalSubmitStatus === "retrying"
+                ? "We’re still checking whether your exam was received. Please keep this page open."
+                : "We haven’t confirmed your submission. Keep this page open, check your connection, and try again. You can also ask your proctor for help."}
           </p>
-          <div className="mt-6 flex items-center justify-center gap-3">
-            <div className="px-3 py-1 rounded-sm bg-gray-50 border border-gray-100 text-xs font-bold uppercase tracking-widest text-gray-700">
-              {finalSubmitStatus === "submitting"
-                ? "Submitting"
-                : finalSubmitStatus === "retrying"
-                  ? "Retrying"
-                  : "Needs attention"}
-            </div>
-            <div className="px-3 py-1 rounded-sm bg-amber-50 border border-amber-700 text-xs font-bold uppercase tracking-widest text-amber-900">
-              Do not close
-            </div>
-          </div>
           {finalSubmitStatus === "failed" ? (
-            <div className="mt-6 flex flex-col items-stretch gap-2">
+            <div className="mt-6 flex flex-col">
               <Button
                 variant="primary"
                 onClick={retryFinalSubmit}
                 className="h-11 text-base font-semibold"
               >
-                Retry Submission
+                Try again
               </Button>
-              <p className="text-xs text-gray-500 leading-5">
-                Your answers are safe on this device. If submission keeps failing, contact your
-                proctor.
-              </p>
             </div>
           ) : null}
         </div>

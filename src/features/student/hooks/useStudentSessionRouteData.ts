@@ -45,6 +45,10 @@ import {
 import { newestIeltsSchedule } from "../application/ieltsOfflineRuntime";
 import { parseIeltsSharedSchedule } from "../domain/exam-session/ieltsSharedSchedule";
 import {
+  getAttemptTerminalState,
+  isRuntimeStructurallyCompleted,
+} from "../domain/exam-session/terminalState";
+import {
   evaluateLiveSnapshotTransition,
   evaluateLoadTransition,
 } from "./studentSessionStateMachine";
@@ -1298,9 +1302,22 @@ export function useStudentSessionRouteData(
     });
   }
 
+  const awaitingIeltsSubmission =
+    providerKey === "ielts" &&
+    attemptSnapshot !== null &&
+    isRuntimeStructurallyCompleted(runtimeSnapshot) &&
+    !isIeltsPersonalTimingModel(runtimeSnapshot?.timingModel) &&
+    getAttemptTerminalState(attemptSnapshot) === "not_terminal";
+
   useAsyncPolling(
     async () => {
       try {
+        if (awaitingIeltsSubmission) {
+          // The worker can submit after the room's last revision. Read the
+          // attempt directly in case its WebSocket notification was missed.
+          await refreshBackendSessionSnapshot();
+          return;
+        }
         const loop = runtimePollLoopRef.current;
         if (loop && !loop.stopped() && runtimePollAvailableRef.current) {
           let view;
@@ -1368,9 +1385,7 @@ export function useStudentSessionRouteData(
           // through the burst coalescer. Refreshing here too would spend a
           // second full live fetch on every single revision bump, which is the
           // poll-budget the fast-lane is trying to protect. 304/same-revision
-          // means steady state: no work at all. The live fetch triggered by
-          // onRevision still carries attempt freshness, so attempt updates are
-          // never gated on the runtime revision.
+          // means steady state: no work at all on this runtime-only path.
           //
           // Adaptive cadence is owned by the loop (pollAfterSecs); the
           // outer useAsyncPolling stays as the scheduling shell.
@@ -1390,11 +1405,9 @@ export function useStudentSessionRouteData(
       // instead of applying a second, independent cadence of its own.
       resolveIntervalMs: () => {
         const loopDelay = runtimePollLoopRef.current?.nextDelayMs() ?? pollingPolicy.intervalMs;
-        // When an older backend lacks the runtime poll endpoint, the live
-        // snapshot refresh becomes the recovery channel. Keep its cadence
-        // inside the current provider policy instead of leaving the loop's
-        // initial 25s delay in place.
-        return runtimePollAvailableRef.current
+        // Live snapshot recovery can start before the first runtime tick.
+        // Keep it inside the provider policy even with the loop's initial delay.
+        return runtimePollAvailableRef.current && !awaitingIeltsSubmission
           ? loopDelay
           : Math.min(loopDelay, pollingPolicy.maxIntervalMs);
       },

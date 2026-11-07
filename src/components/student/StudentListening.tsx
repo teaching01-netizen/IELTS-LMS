@@ -19,6 +19,7 @@ import { hasHtmlMarkup } from "./normalizeReadingPassageText";
 import { StudentMaterialWithQuestionPane } from "./StudentMaterialWithQuestionPane";
 import { StudentModuleEmptyState } from "./StudentModuleEmptyState";
 import type { StudentLayoutMode } from "./layout/studentLayoutMode";
+import { useMediaQuery } from "./useSystemAccessibilityPreferences";
 
 const emptyCaptionTrackUrl = "data:text/vtt;charset=utf-8,WEBVTT%0A%0A";
 
@@ -82,7 +83,8 @@ export function StudentListening({
  checkpointAuthorization,
 }: StudentListeningProps) {
   // The exam shell (StudentApp) is the single owner of the zoom preference.
-  const isTabletMode = Boolean(tabletMode);
+  const hasTouchPointer = useMediaQuery("(any-pointer: coarse)");
+  const isTabletMode = tabletMode || (layoutMode === "wide" && hasTouchPointer);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [volume, setVolume] = useState(70);
@@ -109,6 +111,7 @@ export function StudentListening({
     // less width than the answer surface on a portrait/narrow tablet (38/62).
     crampedDefaultLeftWidth: 38,
     dividerMode: isTabletMode ? "overlay" : "consumes-space",
+    allowMaterialCollapse: isTabletMode,
     persistenceKey: persistenceKeyBase ? `${persistenceKeyBase}:listening:split` : undefined,
   });
   const allQuestions = useMemo(() => getStudentQuestionsForModule(state, "listening"), [state]);
@@ -365,6 +368,7 @@ export function StudentListening({
       workspaceRef={workspaceRef}
       splitPaneStyle={splitPaneStyle}
       leftWidth={leftWidth}
+      materialCollapsed={isTabletMode && leftWidth === 0}
       splitMinWidth={splitBounds.min}
       splitMaxWidth={splitBounds.max}
       splitSplittable={splittable}
@@ -385,7 +389,7 @@ export function StudentListening({
               : "p-4 pr-4 text-sm md:p-6 md:pr-6 md:text-base"
           } ${
             isTabletMode
-              ? "w-[var(--listening-pane-width)] min-w-[48px] border-r border-gray-200"
+              ? "w-[var(--listening-pane-width)] min-w-0 overflow-x-hidden border-r border-gray-200"
               : "lg:w-[var(--listening-pane-width)] lg:min-w-[300px] lg:p-8 lg:pr-12"
           }`}
           data-student-zoom-scroll
