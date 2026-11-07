@@ -358,6 +358,123 @@ describe('ProctorDashboard runtime controls', () => {
     expect(screen.getAllByText(/jane@example.com/i).length).toBeGreaterThan(0);
   });
 
+  it.each(['reading', 'writing'] as const)(
+    'shows shared IELTS %s throughout the roster while the student row is stale',
+    (section) => {
+      render(
+        <DashboardHarness
+          schedules={[{ ...baseSchedule, status: 'live' }]}
+          runtimeSnapshots={[{
+            ...liveRuntime,
+            timingModel: 'ielts_shared_schedule_v1',
+            activeSectionKey: section,
+            currentSectionKey: section,
+          }]}
+          sessions={[{
+            id: 'student-1',
+            studentId: 'STU-001',
+            name: 'Jane Roe',
+            email: 'jane@example.com',
+            scheduleId: 'sched-1',
+            status: 'active',
+            currentSection: 'listening',
+            timeRemaining: 57,
+            runtimeStatus: 'live',
+            runtimeCurrentSection: 'listening',
+            runtimeTimeRemainingSeconds: 57,
+            runtimeWaiting: false,
+            violations: [],
+            warnings: 0,
+            lastActivity: '2026-01-01T00:00:00.000Z',
+            examId: 'exam-1',
+            examName: 'Mock Exam',
+          }]}
+          alerts={[]}
+          onStartScheduledSession={vi.fn()}
+          onPauseCohort={vi.fn()}
+          onResumeCohort={vi.fn()}
+          onEndSectionNow={vi.fn()}
+          onExtendCurrentSection={vi.fn()}
+          onCompleteExam={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
+      const row = screen.getByRole('button', { name: /open jane roe session details/i });
+      expect(row).toHaveTextContent(section);
+      expect(row).toHaveTextContent('20:00');
+
+      fireEvent.click(row);
+      expect(screen.getByRole('button', { name: new RegExp(`jane roe.*stu-001 · ${section}`, 'i') })).toBeInTheDocument();
+      expect(screen.getByText(section)).toBeInTheDocument();
+      expect(screen.getByText('20:00')).toBeInTheDocument();
+    },
+  );
+
+  it('shows the exam has ended after the shared IELTS timetable closes, even if the roster is stale', () => {
+    const props: React.ComponentProps<typeof DashboardHarness> = {
+      schedules: [{ ...baseSchedule, status: 'live' }],
+      runtimeSnapshots: [{
+        ...liveRuntime,
+        timingModel: 'ielts_shared_schedule_v1',
+        serverNow: '2026-01-01T00:40:10.000Z',
+        ieltsSharedSchedule: {
+          schemaVersion: 1,
+          scheduleRevision: 1,
+          status: 'active',
+          windows: [{
+            sectionKey: 'writing',
+            order: 0,
+            startAt: '2026-01-01T00:10:00.000Z',
+            deadlineAt: '2026-01-01T00:40:00.000Z',
+            saveUntil: '2026-01-01T00:40:10.000Z',
+          }],
+        },
+      }],
+      sessions: [{
+        id: 'student-1',
+        studentId: 'STU-001',
+        name: 'Jane Roe',
+        email: 'jane@example.com',
+        scheduleId: 'sched-1',
+        status: 'active',
+        currentSection: 'listening',
+        timeRemaining: 0,
+        runtimeStatus: 'live',
+        ieltsOfflinePreparedSection: 'writing',
+        violations: [],
+        warnings: 0,
+        lastActivity: '2026-01-01T00:39:00.000Z',
+        examId: 'exam-1',
+        examName: 'Mock Exam',
+      }],
+      alerts: [],
+      onStartScheduledSession: vi.fn(),
+      onPauseCohort: vi.fn(),
+      onResumeCohort: vi.fn(),
+      onEndSectionNow: vi.fn(),
+      onExtendCurrentSection: vi.fn(),
+      onCompleteExam: vi.fn(),
+    };
+    const { rerender } = render(<DashboardHarness {...props} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /monitor mock exam for cohort cohort a/i }));
+    const row = screen.getByRole('button', { name: /open jane roe session details/i });
+    expect(row).toHaveTextContent('Exam ended');
+    expect(row).not.toHaveTextContent(/offline ready|00:00|listening/i);
+
+    fireEvent.click(row);
+    expect(screen.getByRole('button', { name: /jane roe.*stu-001 · exam ended/i })).toBeInTheDocument();
+    expect(screen.getByText('Exam ended')).toBeInTheDocument();
+    expect(screen.queryByText(/offline ready/i)).not.toBeInTheDocument();
+
+    rerender(<DashboardHarness {...props} sessions={props.sessions.map((session) => ({
+      ...session,
+      draftEvidencePending: 2,
+    }))} />);
+    expect(screen.getByText('Needs review · 2 retained answers')).toBeInTheDocument();
+  });
+
   it('reacts to rail selection changes by opening the matching student activity tab', () => {
     const baseProps = {
       schedules: [{ ...baseSchedule, status: 'live' as const, startTime: '2026-01-01T00:00:00.000Z' }],

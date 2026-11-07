@@ -15,6 +15,8 @@ import { isCommandConfirmed } from '../../features/proctor/api/proctorRoomApi';
 import { useStudentFilters } from './hooks/useStudentFilters';
 import { logger } from '../../utils/logger';
 import type { ProctorScheduleMetrics, ProctorViewCommands } from '../../features/proctor/contracts';
+import { projectIeltsSharedRuntime } from '../../features/student/application/ieltsOfflineRuntime';
+import { getStudentSectionLabel } from './studentSectionLabel';
 import {
   filterPastSessionGroups,
   getOverviewBucket,
@@ -124,28 +126,54 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
     Array<{ id: string; variant: ToastVariant; title?: string; message: string }>
   >([]);
 
-  const enrichedSessions = useMemo(
-    () =>
-      sessions.map((session) => {
-        const runtime = runtimeSnapshots.find((item) => item.scheduleId === session.scheduleId);
+  const enrichedSessions = useMemo(() => {
+    const runtimes = new Map(runtimeSnapshots.map((runtime) => {
+      const timetable = runtime.ieltsSharedSchedule;
+      const serverNowMs = Date.parse(runtime.serverNow ?? '');
+      // The timetable can finish before the server materializes completion.
+      // Project it for the roster while the room controls use committed status.
+      const rosterRuntime = isIeltsSharedScheduleTimingModel(runtime.timingModel)
+        && timetable && Number.isFinite(serverNowMs)
+        && (runtime.status === 'live' || runtime.status === 'paused')
+        ? projectIeltsSharedRuntime(runtime, timetable, { serverNowMs, confidence: 'verified' })
+        : runtime;
+      return [runtime.scheduleId, rosterRuntime] as const;
+    }));
+    return sessions.map((session) => {
+      const runtime = runtimes.get(session.scheduleId);
+      if (runtime && isIeltsSharedScheduleTimingModel(runtime.timingModel)) {
+        // Shared IELTS uses one timetable. The room can advance before the
+        // next roster read, so use its section and clock together.
         return {
           ...session,
-          runtimeStatus: session.runtimeStatus ?? runtime?.status ?? 'not_started',
-          runtimeCurrentSection: session.runtimeCurrentSection ?? runtime?.currentSectionKey ?? null,
-          runtimeTimeRemainingSeconds:
-            session.runtimeTimeRemainingSeconds ??
-            runtime?.currentSectionRemainingSeconds ??
-            session.timeRemaining,
-          runtimeDeadlineAt: session.runtimeDeadlineAt ?? runtime?.currentSectionDeadlineAt ?? null,
-          runtimeServerNow: session.runtimeServerNow ?? runtime?.serverNow ?? null,
-          runtimeSectionStatus:
-            session.runtimeSectionStatus ??
-            runtime?.sections.find((item) => item.sectionKey === runtime.currentSectionKey)?.status,
-          runtimeWaiting: session.runtimeWaiting ?? runtime?.waitingForNextSection ?? false,
+          runtimeStatus: runtime.status,
+          runtimeCurrentSection: runtime.currentSectionKey,
+          runtimeTimeRemainingSeconds: runtime.currentSectionRemainingSeconds,
+          runtimeDeadlineAt: runtime.currentSectionDeadlineAt ?? null,
+          runtimeServerNow: runtime.serverNow ?? null,
+          runtimeSectionStatus: runtime.currentSectionDeadlineAt
+            ? 'live' as const
+            : undefined,
+          runtimeWaiting: runtime.waitingForNextSection,
         };
-      }),
-    [runtimeSnapshots, sessions],
-  );
+      }
+      return {
+        ...session,
+        runtimeStatus: session.runtimeStatus ?? runtime?.status ?? 'not_started',
+        runtimeCurrentSection: session.runtimeCurrentSection ?? runtime?.currentSectionKey ?? null,
+        runtimeTimeRemainingSeconds:
+          session.runtimeTimeRemainingSeconds ??
+          runtime?.currentSectionRemainingSeconds ??
+          session.timeRemaining,
+        runtimeDeadlineAt: session.runtimeDeadlineAt ?? runtime?.currentSectionDeadlineAt ?? null,
+        runtimeServerNow: session.runtimeServerNow ?? runtime?.serverNow ?? null,
+        runtimeSectionStatus:
+          session.runtimeSectionStatus ??
+          runtime?.sections.find((item) => item.sectionKey === runtime.currentSectionKey)?.status,
+        runtimeWaiting: session.runtimeWaiting ?? runtime?.waitingForNextSection ?? false,
+      };
+    });
+  }, [runtimeSnapshots, sessions]);
 
   const {
     filterCriteria,
@@ -1260,7 +1288,7 @@ export const ProctorDashboard = React.memo(function ProctorDashboard({
                       </span>
                     </div>
                     <div className={`truncate text-xs ${selectedStudentId === session.id ? 'text-slate-300' : 'text-slate-500'}`}>
-                      {session.studentId} · {session.runtimeCurrentSection ?? session.currentSection ?? 'waiting'}
+                      {session.studentId} · {getStudentSectionLabel(session)}
                     </div>
                   </button>
                 ))}

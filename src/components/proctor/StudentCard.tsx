@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Clock, MoreHorizontal, Pause, Play, XCircle } fro
 import { StudentSession } from '../../types';
 import { Badge } from '../ui/Badge';
 import { useAuthoritativeDeadlineClock } from '../../shared/hooks/useAuthoritativeDeadlineClock';
+import { getExamEndLabel, getStudentSectionLabel } from './studentSectionLabel';
 
 interface StudentCardProps {
   session: StudentSession;
@@ -33,7 +34,7 @@ export const StudentCard = React.memo(function StudentCard({
   };
 
   const initials = session.name.split(' ').map((part) => part[0]).join('').toUpperCase();
-  const runtimeSection = session.runtimeCurrentSection ?? session.currentSection;
+  const examEndLabel = getExamEndLabel(session);
   const runtimeTimeRemaining = useAuthoritativeDeadlineClock({
     deadlineAt: session.runtimeDeadlineAt ?? null,
     serverNow: session.runtimeServerNow ?? null,
@@ -52,16 +53,13 @@ export const StudentCard = React.memo(function StudentCard({
       && session.status !== 'terminated',
   });
   const personalSectionActive = Boolean(
-    session.ieltsPersonalStatus && session.ieltsPersonalSectionKey,
+    !examEndLabel && session.ieltsPersonalStatus && session.ieltsPersonalSectionKey,
   );
   // Shared-timetable continuity: distinct from the presence status. Evidence
   // means retained, unscored drafts awaiting staff review; prepared means the
   // device verified its complete offline package for that section.
   const evidencePending = session.draftEvidencePending ?? 0;
   const offlinePreparedSection = session.ieltsOfflinePreparedSection ?? null;
-  const displayedSection = personalSectionActive
-    ? session.ieltsPersonalSectionKey
-    : runtimeSection;
   const displayedTimeRemaining =
     personalSectionActive && session.ieltsPersonalDeadlineAt
       ? personalTimeRemaining
@@ -120,7 +118,7 @@ export const StudentCard = React.memo(function StudentCard({
       </div>
 
       <div className="min-w-0">
-        <p className="truncate text-sm font-medium capitalize text-slate-900">{displayedSection ?? 'Waiting'}</p>
+        <p className="truncate text-sm font-medium capitalize text-slate-900">{getStudentSectionLabel(session)}</p>
         {personalSectionActive ? (
           <p className={`mt-1 truncate text-xs font-medium capitalize ${session.ieltsPersonalStatus === 'unable' ? 'text-rose-700' : session.ieltsPersonalStatus === 'delayed' || session.ieltsPersonalStatus === 'reconnecting' ? 'text-amber-700' : 'text-indigo-700'}`}>
             IELTS · {session.ieltsPersonalStatus === 'unable' ? 'unable to start' : session.ieltsPersonalStatus}
@@ -130,12 +128,12 @@ export const StudentCard = React.memo(function StudentCard({
           <p className="mt-1 truncate text-xs font-medium text-amber-700" title={`${evidencePending} retained answer${evidencePending === 1 ? '' : 's'} awaiting staff review`}>
             Needs review · {evidencePending}
           </p>
-        ) : offlinePreparedSection ? (
+        ) : !examEndLabel && offlinePreparedSection ? (
           <p className="mt-1 truncate text-xs font-medium text-emerald-700" title="This device verified its complete offline package for the section">
             Offline ready · {offlinePreparedSection}
           </p>
         ) : null}
-        <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+        {!examEndLabel ? <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
           <Clock size={12} />
           <span className={displayedTimeRemaining < 600 ? 'font-medium text-red-700' : ''}>{personalSectionActive && !session.ieltsPersonalDeadlineAt ? '—' : formatTime(displayedTimeRemaining)}</span>
           {!personalSectionActive && session.runtimeWaiting ? (
@@ -146,11 +144,11 @@ export const StudentCard = React.memo(function StudentCard({
               on break
             </span>
           ) : null}
-        </div>
+        </div> : null}
       </div>
 
       <div>
-        <Badge variant={badgeVariant}>{session.status}</Badge>
+        {!examEndLabel ? <Badge variant={badgeVariant}>{session.status}</Badge> : null}
       </div>
 
       <div className="flex items-center gap-2 text-sm text-slate-700">

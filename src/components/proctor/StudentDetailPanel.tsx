@@ -7,6 +7,7 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { ConfirmModal } from '../ConfirmModal';
 import { useAuthoritativeDeadlineClock } from '../../shared/hooks/useAuthoritativeDeadlineClock';
+import { getExamEndLabel, getStudentSectionLabel } from './studentSectionLabel';
 
 export type StudentDrawerTab = 'timeline' | 'violations' | 'notes' | 'audit';
 
@@ -144,8 +145,9 @@ export function StudentDetailPanel({
     );
   }
 
-  const runtimeSection = student.ieltsPersonalSectionKey ?? student.runtimeCurrentSection ?? student.currentSection ?? 'waiting';
-  const displayedRemaining = student.ieltsPersonalStatus
+  const examEndLabel = getExamEndLabel(student);
+  const sectionLabel = getStudentSectionLabel(student);
+  const displayedRemaining = examEndLabel ? null : student.ieltsPersonalStatus
     ? student.ieltsPersonalDeadlineAt && (student.ieltsPersonalStatus === 'active' || student.ieltsPersonalStatus === 'delayed')
       ? personalRemaining
       : null
@@ -229,24 +231,24 @@ export function StudentDetailPanel({
                 <h3 className="text-lg font-semibold text-slate-950">{student.name}</h3>
                 <p className="text-sm text-slate-500">{student.studentId} · {student.email}</p>
               </div>
-              <Badge variant={student.status === 'active' ? 'success' : student.status === 'warned' ? 'warning' : student.status === 'paused' ? 'paused' : student.status === 'terminated' ? 'danger' : 'neutral'}>
+              {!examEndLabel ? <Badge variant={student.status === 'active' ? 'success' : student.status === 'warned' ? 'warning' : student.status === 'paused' ? 'paused' : student.status === 'terminated' ? 'danger' : 'neutral'}>
                 {student.status}
-              </Badge>
+              </Badge> : null}
             </div>
             <div className="grid gap-3 text-sm text-slate-600 md:grid-cols-4">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.2em] text-slate-400">Section</p>
-                <p className="mt-1 font-medium capitalize text-slate-900">{runtimeSection}</p>
-                {student.ieltsPersonalStatus ? (
+                <p className="mt-1 font-medium capitalize text-slate-900">{sectionLabel}</p>
+                {!examEndLabel && student.ieltsPersonalStatus ? (
                   <p className={`mt-1 text-xs font-medium capitalize ${student.ieltsPersonalStatus === 'unable' ? 'text-rose-700' : student.ieltsPersonalStatus === 'delayed' || student.ieltsPersonalStatus === 'reconnecting' ? 'text-amber-700' : 'text-indigo-700'}`}>
-                    IELTS {student.ieltsPersonalSectionKey ?? runtimeSection} · {student.ieltsPersonalStatus === 'unable' ? 'unable to start' : student.ieltsPersonalStatus}
+                    IELTS {sectionLabel} · {student.ieltsPersonalStatus === 'unable' ? 'unable to start' : student.ieltsPersonalStatus}
                   </p>
                 ) : null}
                 {(student.draftEvidencePending ?? 0) > 0 ? (
                   <p className="mt-1 text-xs font-medium text-amber-700">
                     Needs review · {student.draftEvidencePending} retained answer{(student.draftEvidencePending ?? 0) === 1 ? '' : 's'}
                   </p>
-                ) : student.ieltsOfflinePreparedSection ? (
+                ) : !examEndLabel && student.ieltsOfflinePreparedSection ? (
                   <p className="mt-1 text-xs font-medium text-emerald-700" title="This device verified its complete offline package for the section">
                     Offline ready · {student.ieltsOfflinePreparedSection}
                   </p>
