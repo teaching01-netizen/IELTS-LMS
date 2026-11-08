@@ -14,10 +14,48 @@ import (
 	"example.com/ielts-proctoring/internal/platform/tx"
 )
 
+type satWorkbookDraft struct {
+	id       string
+	revision int
+	flexible bool
+}
+
+func (s *Service) loadSATWorkbookDraft(ctx context.Context, examID string) (satWorkbookDraft, error) {
+	var draft satWorkbookDraft
+	err := s.db.QueryRowContext(ctx, `SELECT v.id, v.revision, v.sat_flexible_count
+		FROM exam_entities e JOIN exam_versions v ON v.id = e.current_draft_version_id AND v.exam_id = e.id
+		WHERE e.id = ? AND e.provider_key = 'sat' AND v.is_draft = TRUE`, examID).Scan(&draft.id, &draft.revision, &draft.flexible)
+	if err == sql.ErrNoRows {
+		return draft, validationError("The SAT exam does not have an editable draft.")
+	}
+	return draft, err
+}
+
+// PreviewSATWorkbook checks the file against the active draft and registers it if valid.
+func (s *Service) PreviewSATWorkbook(ctx context.Context, examID, actorID string, data []byte) (SatWorkbookPreview, error) {
+	draft, err := s.loadSATWorkbookDraft(ctx, examID)
+	if err != nil {
+		return SatWorkbookPreview{}, err
+	}
+	preview, err := parseSATWorkbook(data, draft.flexible)
+	if err != nil || !preview.Valid {
+		return preview, err
+	}
+	return preview, s.registerSATWorkbookPreview(ctx, examID, actorID, draft, preview)
+}
+
 // RegisterSATWorkbookPreview records only a valid, renderer-checked preview.
 // Replacing a previous preview for the same actor keeps staged media and
 // import recovery bounded to one active workbook session.
 func (s *Service) RegisterSATWorkbookPreview(ctx context.Context, examID, actorID string, preview SatWorkbookPreview) error {
+	draft, err := s.loadSATWorkbookDraft(ctx, examID)
+	if err != nil {
+		return err
+	}
+	return s.registerSATWorkbookPreview(ctx, examID, actorID, draft, preview)
+}
+
+func (s *Service) registerSATWorkbookPreview(ctx context.Context, examID, actorID string, draft satWorkbookDraft, preview SatWorkbookPreview) error {
 	if !preview.Valid {
 		return validationError("Only a valid SAT workbook can be staged for import.")
 	}
@@ -37,13 +75,6 @@ func (s *Service) RegisterSATWorkbookPreview(ctx context.Context, examID, actorI
 	contentDigest, err := workbookContentDigest(targets, modules)
 	if err != nil {
 		return err
-	}
-	shell, err := s.Shell(ctx, examID)
-	if err != nil {
-		return err
-	}
-	if shell.ProviderKey != "sat" {
-		return validationError("Assessment provider is not supported.")
 	}
 	manifest := make([]SatWorkbookAsset, 0, len(preview.Assets))
 	for _, asset := range preview.Assets {
@@ -73,13 +104,13 @@ func (s *Service) RegisterSATWorkbookPreview(ctx context.Context, examID, actorI
 			}
 			return err
 		}
-		if revision != shell.VersionRevision || currentDraft.String != shell.VersionID {
+		if revision != draft.revision || currentDraft.String != draft.id {
 			return conflictError("The SAT draft changed while the workbook was being checked. Run the checks again.")
 		}
 		if _, err := q.ExecContext(ctx, "UPDATE sat_workbook_imports SET state = 'expired', updated_at = CURRENT_TIMESTAMP(6) WHERE exam_id = ? AND created_by = ? AND state = 'previewed'", examID, actorID); err != nil {
 			return err
 		}
-		if _, err := q.ExecContext(ctx, "INSERT INTO sat_workbook_imports (id, exam_id, expected_version_id, expected_version_revision, asset_manifest, state, created_by, expires_at) VALUES (?, ?, ?, ?, ?, 'previewed', ?, DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 DAY))", preview.ImportID, examID, shell.VersionID, shell.VersionRevision, string(manifestJSON), actorID); err != nil {
+		if _, err := q.ExecContext(ctx, "INSERT INTO sat_workbook_imports (id, exam_id, expected_version_id, expected_version_revision, asset_manifest, state, created_by, expires_at) VALUES (?, ?, ?, ?, ?, 'previewed', ?, DATE_ADD(CURRENT_TIMESTAMP(6), INTERVAL 1 DAY))", preview.ImportID, examID, draft.id, draft.revision, string(manifestJSON), actorID); err != nil {
 			return err
 		}
 		_, err := q.ExecContext(ctx, "INSERT INTO sat_workbook_import_scopes (import_id, exam_id, actor_id, target_module_key, content_digest) VALUES (?, ?, ?, ?, ?)", preview.ImportID, examID, actorID, workbookModuleKeysJoined(targets), contentDigest)
@@ -406,7 +437,8 @@ func (s *Service) replaceSATDraftOpKey(ctx context.Context, examID, expectedVers
 			return conflictError("The SAT draft changed before the complete replacement could be applied. Refresh and try again.")
 		}
 		var actualRevision int
-		if err := q.QueryRowContext(ctx, "SELECT revision FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE FOR UPDATE", expectedVersionID, examID).Scan(&actualRevision); err != nil {
+		var flexible bool
+		if err := q.QueryRowContext(ctx, "SELECT revision, sat_flexible_count FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE FOR UPDATE", expectedVersionID, examID).Scan(&actualRevision, &flexible); err != nil {
 			if err == sql.ErrNoRows {
 				return notFoundError("Draft version not found.")
 			}
@@ -512,8 +544,8 @@ func (s *Service) replaceSATDraftOpKey(ctx context.Context, examID, expectedVers
 			if !known || target.TargetCount != spec.questionCount {
 				return validationError("SAT module target count does not match the provider blueprint.")
 			}
-			if len(request.Questions) != target.TargetCount {
-				return validationError(fmt.Sprintf("%s requires exactly %d questions.", target.ModuleKey, target.TargetCount))
+			if problem := satWorkbookCountIssue(target.ModuleKey, len(request.Questions), target.TargetCount, scoped && flexible); problem != "" {
+				return validationError(problem)
 			}
 			for index, question := range request.Questions {
 				issues := validateReplacementQuestion(target.SectionKey, question)
@@ -1004,7 +1036,9 @@ func loadSATQuestionIDs(ctx context.Context, q tx.Tx, versionID string) ([]strin
 // replacement rows written afterward.
 func cloneSATDraftVersionTx(ctx context.Context, q tx.Tx, examID, sourceVersionID, actorID string) (string, error) {
 	var contentSnapshot, configSnapshot string
-	if err := q.QueryRowContext(ctx, "SELECT CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR) FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE FOR UPDATE", sourceVersionID, examID).Scan(&contentSnapshot, &configSnapshot); err != nil {
+	var classroomPlan sql.NullString
+	var flexible bool
+	if err := q.QueryRowContext(ctx, "SELECT CAST(content_snapshot AS CHAR), CAST(config_snapshot AS CHAR), CAST(sat_classroom_plan AS CHAR), sat_flexible_count FROM exam_versions WHERE id = ? AND exam_id = ? AND is_draft = TRUE FOR UPDATE", sourceVersionID, examID).Scan(&contentSnapshot, &configSnapshot, &classroomPlan, &flexible); err != nil {
 		if err == sql.ErrNoRows {
 			return "", notFoundError("Draft version not found.")
 		}
@@ -1016,8 +1050,8 @@ func cloneSATDraftVersionTx(ctx context.Context, q tx.Tx, examID, sourceVersionI
 	}
 	checkpointID := uuid.NewString()
 	if _, err := q.ExecContext(ctx, `INSERT INTO exam_versions
-		(id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision)
-		VALUES (?, ?, ?, ?, ?, ?, NULL, ?, FALSE, FALSE, 0)`, checkpointID, examID, nextVersion, sourceVersionID, contentSnapshot, configSnapshot, actorID); err != nil {
+		(id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision, sat_classroom_plan, sat_flexible_count)
+		VALUES (?, ?, ?, ?, ?, ?, NULL, ?, FALSE, FALSE, 0, ?, ?)`, checkpointID, examID, nextVersion, sourceVersionID, contentSnapshot, configSnapshot, actorID, classroomPlan, flexible); err != nil {
 		return "", err
 	}
 

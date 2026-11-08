@@ -199,6 +199,10 @@ func guardSATWorkbookArchive(data []byte) error {
 // template endpoint. Excel content is converted to the structured-content
 // shape used by the authoring editor and student renderer.
 func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
+	return parseSATWorkbook(data, false)
+}
+
+func parseSATWorkbook(data []byte, flexible bool) (SatWorkbookPreview, error) {
 	if len(data) > MaxSATWorkbookBytes {
 		return SatWorkbookPreview{}, &WorkbookError{TooLarge: true, Message: "SAT workbooks must be 12 MB or smaller."}
 	}
@@ -335,7 +339,7 @@ func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
 			continue
 		}
 		rowModule[excelRow] = spec.key
-		if !touched[spec.key] {
+		if !touched[spec.key] || (flexible && workbookUntouchedScaffold(row, columns, spec)) {
 			rowCount--
 			ignoredScaffoldRows++
 			continue
@@ -423,8 +427,13 @@ func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
 		for _, item := range items {
 			questions = append(questions, SatWorkbookQuestionPreview{QuestionDraft: item.draft})
 		}
-		if len(questions) != spec.count {
-			issue := satWorkbookIssue(0, "Module", fmt.Sprintf("%s requires exactly %d questions; found %d.", spec.label, spec.count, len(questions)))
+		if problem := satWorkbookCountIssue(spec.label, len(questions), spec.count, flexible); problem != "" {
+			issue := satWorkbookIssue(0, "Module", problem)
+			issue.ModuleKey = spec.key
+			issues = append(issues, issue)
+		} else if flexible && items[len(items)-1].order != len(items) {
+			// Row validation already checks that orders are positive and unique.
+			issue := satWorkbookIssue(0, "Order", fmt.Sprintf("%s requires consecutive Order values from 1 through %d.", spec.label, len(items)))
 			issue.ModuleKey = spec.key
 			issues = append(issues, issue)
 		}
@@ -439,7 +448,7 @@ func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
 	detected := make([]SatWorkbookDetectedModule, 0, len(modules))
 	for _, module := range modules {
 		spec := workbookModuleByLabel[module.ModuleKey]
-		ready := len(module.Questions) == spec.count
+		ready := true
 		for _, issue := range issues {
 			if issue.Blocking && issue.ModuleKey == module.ModuleKey {
 				ready = false
@@ -469,6 +478,17 @@ func ParseSATWorkbook(data []byte) (SatWorkbookPreview, error) {
 		Detected:            detected,
 	}
 	return preview, nil
+}
+
+func satWorkbookCountIssue(label string, count, target int, flexible bool) string {
+	if flexible {
+		if count < 1 || count > target {
+			return fmt.Sprintf("%s requires between 1 and %d questions; found %d.", label, target, count)
+		}
+	} else if count != target {
+		return fmt.Sprintf("%s requires exactly %d questions; found %d.", label, target, count)
+	}
+	return ""
 }
 
 // canonicalWorkbookTargets validates a target list against the template and

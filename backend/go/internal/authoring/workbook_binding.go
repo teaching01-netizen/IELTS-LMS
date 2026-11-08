@@ -79,8 +79,13 @@ func prepareWorkbookCommit(request SatWorkbookCommitRequest) (SatWorkbookCommitR
 		if modules[i].ModuleKey != key {
 			return request, "", validationError("An import must contain exactly its detected modules.")
 		}
-		if modules[i].SectionKey != spec.sectionKey || len(modules[i].Questions) != spec.count {
-			return request, "", validationError(fmt.Sprintf("%s must have its complete question count and matching section.", spec.label))
+		if modules[i].SectionKey != spec.sectionKey {
+			return request, "", validationError(fmt.Sprintf("%s must match its SAT section.", spec.label))
+		}
+		// Preflight only checks the supported range. The locked draft decides
+		// whether a shorter module is allowed.
+		if problem := satWorkbookCountIssue(spec.label, len(modules[i].Questions), spec.count, true); problem != "" {
+			return request, "", validationError(problem)
 		}
 	}
 	request.TargetModuleKeys, request.Modules = targets, modules

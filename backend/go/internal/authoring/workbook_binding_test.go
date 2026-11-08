@@ -35,10 +35,10 @@ func TestWorkbookCommitMustMatchDetectedModulesExactly(t *testing.T) {
 	if _, _, err := prepareWorkbookCommit(none); err == nil {
 		t.Fatal("a commit with no target modules was accepted")
 	}
-	short := oneModuleCommitRequest()
-	short.Modules[0].Questions = short.Modules[0].Questions[:26]
-	if _, _, err := prepareWorkbookCommit(short); err == nil {
-		t.Fatal("incomplete module accepted")
+	empty := oneModuleCommitRequest()
+	empty.Modules[0].Questions = nil
+	if _, _, err := prepareWorkbookCommit(empty); err == nil {
+		t.Fatal("empty module accepted")
 	}
 }
 

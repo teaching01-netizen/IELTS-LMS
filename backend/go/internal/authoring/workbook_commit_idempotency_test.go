@@ -53,8 +53,8 @@ func expectReplaceGates(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("SELECT provider_key, current_draft_version_id FROM exam_entities").WithArgs("exam-1").
 		WillReturnRows(sqlmock.NewRows([]string{"provider_key", "current_draft_version_id"}).AddRow("sat", "v-1"))
 	expectReceiptMiss(mock)
-	mock.ExpectQuery("SELECT revision FROM exam_versions").WithArgs("v-1", "exam-1").
-		WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(3))
+	mock.ExpectQuery("SELECT revision, sat_flexible_count FROM exam_versions").WithArgs("v-1", "exam-1").
+		WillReturnRows(sqlmock.NewRows([]string{"revision", "sat_flexible_count"}).AddRow(3, false))
 }
 
 func commitFingerprint(req SatWorkbookCommitRequest) string {
@@ -129,7 +129,7 @@ func expectReplaceBody(mock sqlmock.Sqlmock) {
 	}
 	mock.ExpectQuery("FROM assessment_modules m").WithArgs("v-1").WillReturnRows(targetRows)
 	mock.ExpectQuery("FROM exam_versions WHERE id = ").WithArgs("v-1", "exam-1").
-		WillReturnRows(sqlmock.NewRows([]string{"content_snapshot", "config_snapshot"}).AddRow(`{}`, `{}`))
+		WillReturnRows(sqlmock.NewRows([]string{"content_snapshot", "config_snapshot", "sat_classroom_plan", "sat_flexible_count"}).AddRow(`{}`, `{}`, nil, false))
 	mock.ExpectQuery("MAX.version_number").WithArgs("exam-1").
 		WillReturnRows(sqlmock.NewRows([]string{"next"}).AddRow(7))
 	mock.ExpectExec("INSERT INTO exam_versions").WillReturnResult(sqlmock.NewResult(0, 1))

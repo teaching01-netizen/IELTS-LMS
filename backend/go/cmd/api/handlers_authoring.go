@@ -413,24 +413,20 @@ func authorPreviewImportHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodePayloadTooLarge, "SAT workbooks must be 12 MB or smaller."))
 			return
 		}
-		preview, err := authoring.ParseSATWorkbook(data)
+		preview, err := app.Authoring.PreviewSATWorkbook(r.Context(), chi.URLParam(r, "examID"), sess.UserID, data)
 		if err != nil {
 			var workbookErr *authoring.WorkbookError
-			if errors.As(err, &workbookErr) && workbookErr.TooLarge {
-				httpx.WriteError(w, r, apperrors.New(apperrors.CodePayloadTooLarge, workbookErr.Message))
-			} else {
-				httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, err.Error()))
+			if errors.As(err, &workbookErr) {
+				code := apperrors.CodeValidation
+				if workbookErr.TooLarge {
+					code = apperrors.CodePayloadTooLarge
+				}
+				err = apperrors.New(code, workbookErr.Message)
 			}
+			httpx.WriteError(w, r, err)
 			return
 		}
-		if preview.Valid {
-			if err := app.Authoring.RegisterSATWorkbookPreview(r.Context(), chi.URLParam(r, "examID"), sess.UserID, preview); err != nil {
-				httpx.WriteError(w, r, err)
-				return
-			}
-		}
-		out := preview
-		httpx.WriteJSON(w, http.StatusOK, out)
+		httpx.WriteJSON(w, http.StatusOK, preview)
 	}
 }
 

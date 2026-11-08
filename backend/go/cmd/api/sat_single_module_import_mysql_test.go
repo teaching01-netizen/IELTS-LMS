@@ -27,6 +27,11 @@ import (
 
 func singleModuleWorkbookFixture(t *testing.T, targets ...string) []byte {
 	t.Helper()
+	return limitedModuleWorkbookFixture(t, 27, targets...)
+}
+
+func limitedModuleWorkbookFixture(t *testing.T, questionLimit int, targets ...string) []byte {
+	t.Helper()
 	data, err := buildSATWorkbookTemplate()
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +44,7 @@ func singleModuleWorkbookFixture(t *testing.T, targets ...string) []byte {
 	row := 2
 	for _, spec := range satWorkbookModules {
 		for order := 1; order <= spec.count; order++ {
-			if slices.Contains(targets, spec.key) {
+			if slices.Contains(targets, spec.key) && order <= questionLimit {
 				domain, skill := "Information and Ideas", "Central Ideas and Details"
 				if spec.section == "Math" {
 					domain, skill = "Algebra", "Linear Equations in One Variable"
@@ -124,40 +129,34 @@ func singleModuleRequest(preview authoring.SatWorkbookPreview, shell authoring.S
 }
 
 func TestSATSingleModulePreviewAndCommitHTTPMySQL(t *testing.T) {
-	h := newConcurrencyHarness(t)
-	app := &App{DB: h.db, Exams: h.exams, Authoring: h.authors}
-	workbook := singleModuleWorkbookFixture(t, "rw-m1")
+	t.Run("complete standard module", func(t *testing.T) {
+		testSATSingleModulePreviewAndCommitHTTP(t, newConcurrencyHarness(t), 27, true)
+	})
+	t.Run("partial flexible module", func(t *testing.T) {
+		testSATSingleModulePreviewAndCommitHTTP(t, newConcurrencyHarness(t, satFlexibleM1OnlyConfig()), 20, true)
+	})
+	t.Run("partial standard module", func(t *testing.T) {
+		testSATSingleModulePreviewAndCommitHTTP(t, newConcurrencyHarness(t), 20, false)
+	})
+}
 
-	var upload bytes.Buffer
-	writer := multipart.NewWriter(&upload)
-	file, err := writer.CreateFormFile("file", "single-module.xlsx")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := file.Write(workbook); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	previewRequest := httptest.NewRequest(http.MethodPost, "/exams/"+h.examID+"/sat-workbook-preview", &upload)
-	previewRequest.Header.Set("Content-Type", writer.FormDataContentType())
+func testSATSingleModulePreviewAndCommitHTTP(t *testing.T, h *concurrencyHarness, count int, wantValid bool) {
+	t.Helper()
+	app := &App{DB: h.db, Exams: h.exams, Authoring: h.authors}
+	workbook := limitedModuleWorkbookFixture(t, count, "rw-m1")
+
 	route := chi.NewRouteContext()
 	route.URLParams.Add("examID", h.examID)
 	session := &auth.Session{ID: "test-session", UserID: h.actor, Role: auth.RoleAdmin}
-	previewRequest = previewRequest.WithContext(context.WithValue(previewRequest.Context(), chi.RouteCtxKey, route))
-	previewRequest = previewRequest.WithContext(context.WithValue(previewRequest.Context(), sessionCtxKey, session))
-	previewResponse := httptest.NewRecorder()
-	authorPreviewImportHandler(app).ServeHTTP(previewResponse, previewRequest)
-	if previewResponse.Code != http.StatusOK {
-		t.Fatalf("preview status=%d body=%s", previewResponse.Code, previewResponse.Body.String())
+	requestContext := context.WithValue(context.Background(), chi.RouteCtxKey, route)
+	requestContext = context.WithValue(requestContext, sessionCtxKey, session)
+	preview := uploadSATWorkbookForHTTPTest(t, app, requestContext, workbook)
+
+	if preview.Valid != wantValid || preview.CommitReady != wantValid || !reflect.DeepEqual(preview.TargetModuleKeys, []string{"rw-m1"}) || len(preview.Detected) != 1 || preview.Detected[0].Ready != wantValid || len(preview.Modules) != 1 || preview.QuestionCount != count {
+		t.Fatalf("single-module API preview: valid=%v ready=%v questions=%d targets=%v issues=%+v", preview.Valid, preview.CommitReady, preview.QuestionCount, preview.TargetModuleKeys, preview.Issues)
 	}
-	var preview authoring.SatWorkbookPreview
-	if err := json.Unmarshal(previewResponse.Body.Bytes(), &preview); err != nil {
-		t.Fatal(err)
-	}
-	if !preview.Valid || !preview.CommitReady || !reflect.DeepEqual(preview.TargetModuleKeys, []string{"rw-m1"}) || len(preview.Detected) != 1 || !preview.Detected[0].Ready || len(preview.Modules) != 1 {
-		t.Fatalf("single-module API preview contract mismatch: %+v", preview)
+	if !wantValid {
+		return
 	}
 
 	shell, err := h.authors.Shell(context.Background(), h.examID)
@@ -172,8 +171,7 @@ func TestSATSingleModulePreviewAndCommitHTTPMySQL(t *testing.T) {
 	commitRequest := httptest.NewRequest(http.MethodPost, "/exams/"+h.examID+"/sat-workbook-commit", bytes.NewReader(body))
 	commitRequest.Header.Set("Content-Type", "application/json")
 	commitRequest.Header.Set("Idempotency-Key", commit.OperationKey)
-	commitRequest = commitRequest.WithContext(context.WithValue(commitRequest.Context(), chi.RouteCtxKey, route))
-	commitRequest = commitRequest.WithContext(context.WithValue(commitRequest.Context(), sessionCtxKey, session))
+	commitRequest = commitRequest.WithContext(requestContext)
 	commitResponse := httptest.NewRecorder()
 	authorCommitImportHandler(app).ServeHTTP(commitResponse, commitRequest)
 	if commitResponse.Code != http.StatusOK {
@@ -193,9 +191,68 @@ func TestSATSingleModulePreviewAndCommitHTTPMySQL(t *testing.T) {
 			}
 		}
 	}
-	if targetCount != 27 || result.Shell.VersionRevision != shell.VersionRevision+1 {
+	if targetCount != count || result.Shell.VersionRevision != shell.VersionRevision+1 {
 		t.Fatalf("single-module HTTP commit target count=%d revision=%d", targetCount, result.Shell.VersionRevision)
 	}
+	if count == preview.Detected[0].ExpectedCount {
+		return
+	}
+
+	route.URLParams.Add("importID", result.Undo.ImportID)
+	undoRequest := httptest.NewRequest(http.MethodPost, "/exams/"+h.examID+"/sat-workbook-imports/"+result.Undo.ImportID+"/undo", nil)
+	undoResponse := httptest.NewRecorder()
+	authorUndoImportHandler(app).ServeHTTP(undoResponse, undoRequest.WithContext(requestContext))
+	if undoResponse.Code != http.StatusOK {
+		t.Fatalf("undo status=%d body=%s", undoResponse.Code, undoResponse.Body.String())
+	}
+	previewAfterUndo := uploadSATWorkbookForHTTPTest(t, app, requestContext, workbook)
+	if !previewAfterUndo.Valid {
+		t.Fatal("flexible draft must still accept a partial module after undo")
+	}
+
+	book, err := excelize.OpenReader(bytes.NewReader(workbook))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer book.Close()
+	if err := book.SetCellValue("Questions", "B"+strconv.Itoa(count+1), count+1); err != nil {
+		t.Fatal(err)
+	}
+	withGap, err := book.WriteToBuffer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalid := uploadSATWorkbookForHTTPTest(t, app, requestContext, withGap.Bytes()); invalid.Valid {
+		t.Fatal("flexible workbook with orders 1–19 and 21 must be rejected")
+	}
+}
+
+func uploadSATWorkbookForHTTPTest(t *testing.T, app *App, ctx context.Context, workbook []byte) authoring.SatWorkbookPreview {
+	t.Helper()
+	var upload bytes.Buffer
+	writer := multipart.NewWriter(&upload)
+	file, err := writer.CreateFormFile("file", "single-module.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write(workbook); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/exams/"+chi.RouteContext(ctx).URLParam("examID")+"/sat-workbook-preview", &upload)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	authorPreviewImportHandler(app).ServeHTTP(response, request.WithContext(ctx))
+	if response.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", response.Code, response.Body.String())
+	}
+	var preview authoring.SatWorkbookPreview
+	if err := json.Unmarshal(response.Body.Bytes(), &preview); err != nil {
+		t.Fatal(err)
+	}
+	return preview
 }
 
 func seedNonTargetModules(t *testing.T, h *concurrencyHarness, target string) authoring.Shell {
