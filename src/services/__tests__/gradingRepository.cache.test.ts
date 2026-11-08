@@ -10,6 +10,7 @@ vi.mock('../backendBridge', () => ({
 }));
 
 import { gradingRepository } from '../gradingRepository';
+import { exportBuilderDeps } from '../../components/admin/gradingExportBuilder/exportBuilderDependencies';
 
 function buildBundle(overrides: Record<string, unknown> = {}) {
   return {
@@ -134,7 +135,7 @@ describe('gradingRepository bundle cache', () => {
     expect(backendGet).toHaveBeenCalledTimes(2);
   });
 
-  it('supports a fresh section read for exports after terminal projection', async () => {
+  it('loads fresh sections for the PDF export after terminal projection', async () => {
     const initialSection = {
       id: 'section-3',
       submissionId: 'sub-3',
@@ -152,9 +153,7 @@ describe('gradingRepository bundle cache', () => {
     backendGet.mockResolvedValueOnce([initialSection]).mockResolvedValueOnce([projectedSection]);
 
     const cachedSections = await gradingRepository.getSectionSubmissionsBySubmissionId('sub-3');
-    const freshSections = await gradingRepository.getSectionSubmissionsBySubmissionId('sub-3', {
-      fresh: true,
-    });
+    const freshSections = await exportBuilderDeps.getSectionSubmissionsBySubmissionId('sub-3');
 
     expect(cachedSections[0]?.answers).toEqual(initialSection.answers);
     expect(freshSections[0]?.answers).toEqual(projectedSection.answers);

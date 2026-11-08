@@ -27,7 +27,7 @@ async function resolveExamStateByVersionId(versionId: string): Promise<ExamState
 
 export const exportBuilderDeps: BuildPerStudentZipPdfExportInputDeps = {
   getSectionSubmissionsBySubmissionId: (submissionId) =>
-    gradingRepository.getSectionSubmissionsBySubmissionId(submissionId),
+    gradingRepository.getSectionSubmissionsBySubmissionId(submissionId, { fresh: true }),
   getWritingSubmissionsBySubmissionId: (submissionId) =>
     gradingRepository.getWritingSubmissionsBySubmissionId(submissionId),
   resolveExamState,

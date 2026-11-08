@@ -12,6 +12,7 @@ import {
   buildCsvFilename,
   buildWideObjectiveExport,
   downloadCsvFile,
+  mergeWideObjectiveExports,
   resolveObjectiveGradingVersionId,
   type GradingExportSection,
 } from './gradingReviewUtils';
@@ -371,10 +372,6 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         ? 'manual'
         : 'auto';
 
-      const examState = await resolveExamState(
-        fullSession.scheduleId,
-        fullSession.publishedVersionId,
-      );
       const bundles = await Promise.all(
         fullSubmissions.map(async (submission) => ({
           submission,
@@ -389,17 +386,48 @@ export function GradingSessionDetail({ sessionId, onBack, onStudentSelect }: Gra
         sessionId: fullSession.id,
         examTitle: fullSession.examTitle,
       };
-      const exportPayload = buildWideObjectiveExport({
-        session: sessionContext,
-        submissions: bundles.map(({ submission }) => submission),
-        sectionSubmissions: bundles.map(({ submission, sections }) => ({
-          submissionId: submission.id,
-          sectionSubmission: sections.find((item) => item.section === objectiveSection),
-        })),
-        examState,
-        moduleType: objectiveSection,
-        mode: exportMode,
+      const entries = bundles.map(({ submission, sections }) => {
+        const sectionSubmission = sections.find((item) => item.section === objectiveSection);
+        const savedVersionId = sectionSubmission?.autoGradingResults?.integrity?.gradingSourceVersionId?.trim();
+        return { submission, sectionSubmission, savedVersionId };
       });
+      const entriesByVersion = new Map<string | undefined, typeof entries>();
+      for (const entry of entries) {
+        const versionId = objectiveSection === 'science'
+          ? undefined
+          : entry.savedVersionId || entry.submission.publishedVersionId || fullSession.publishedVersionId || undefined;
+        const versionEntries = entriesByVersion.get(versionId) ?? [];
+        versionEntries.push(entry);
+        entriesByVersion.set(versionId, versionEntries);
+      }
+      if (entriesByVersion.size === 0) entriesByVersion.set(undefined, []);
+
+      const exportsByVersion = await Promise.all(
+        Array.from(entriesByVersion, async ([versionId, versionEntries]) => {
+          let examState: ExamState | null;
+          if (versionId) {
+            const version = await examRepository.getVersionById(versionId);
+            examState = version?.contentSnapshot ?? null;
+            if (!examState && versionEntries.some((entry) => entry.savedVersionId)) {
+              throw new Error(`Could not load exam version ${versionId} used to grade ${objectiveSection}.`);
+            }
+          } else {
+            examState = await resolveExamState(fullSession.scheduleId, fullSession.publishedVersionId);
+          }
+          return buildWideObjectiveExport({
+            session: sessionContext,
+            submissions: versionEntries.map(({ submission }) => submission),
+            sectionSubmissions: versionEntries.map(({ submission, sectionSubmission }) => ({
+              submissionId: submission.id,
+              sectionSubmission,
+            })),
+            examState,
+            moduleType: objectiveSection,
+            mode: exportMode,
+          });
+        }),
+      );
+      const exportPayload = mergeWideObjectiveExports(exportsByVersion, fullSubmissions);
 
       downloadCsvFile(
         buildCsvFilename(

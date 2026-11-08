@@ -892,6 +892,39 @@ export interface WideObjectiveExport {
   rows: Array<Record<string, unknown>>;
 }
 
+export function mergeWideObjectiveExports(
+  exportsByVersion: WideObjectiveExport[],
+  submissions: StudentSubmission[],
+): WideObjectiveExport {
+  if (exportsByVersion.length === 1) return exportsByVersion[0]!;
+
+  const columns = new Map<string, CsvColumn>();
+  const rowsBySubmissionId = new Map<unknown, Record<string, unknown>>();
+  // CSV headers name question positions. A different version can have a
+  // different question ID at the same position, or move an existing ID.
+  const exportsByWidth = [...exportsByVersion].sort((left, right) => right.columns.length - left.columns.length);
+  for (const exportData of exportsByWidth) {
+    const labelCounts = new Map<string, number>();
+    const columnMapping = exportData.columns.map(({ key, label }) => {
+      const occurrence = (labelCounts.get(label) ?? 0) + 1;
+      labelCounts.set(label, occurrence);
+      const mergedKey = JSON.stringify([label, occurrence]);
+      columns.set(mergedKey, { key: mergedKey, label });
+      return { key, mergedKey };
+    });
+    for (const row of exportData.rows) {
+      rowsBySubmissionId.set(row['submissionId'], Object.fromEntries(
+        columnMapping.map(({ key, mergedKey }) => [mergedKey, row[key]]),
+      ));
+    }
+  }
+
+  return {
+    columns: [...columns.values()],
+    rows: submissions.map((submission) => rowsBySubmissionId.get(submission.id)!),
+  };
+}
+
 export type ObjectiveWideExportMode = 'auto' | 'manual';
 
 export interface WideWritingExportInput {
