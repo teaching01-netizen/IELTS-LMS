@@ -645,12 +645,17 @@ func (s *Service) validateSATExam(ctx context.Context, shell Shell, rep Validati
 		return ValidationReport{}, err
 	}
 	for _, issue := range issues {
-		rep.Errors = append(rep.Errors, ValidationIssue{
+		finding := ValidationIssue{
 			Code:     issue.Code,
 			Path:     issue.Path,
 			Message:  issue.Message,
 			Blocking: issue.Blocking,
-		})
+		}
+		if issue.Blocking {
+			rep.Errors = append(rep.Errors, finding)
+		} else {
+			rep.Warnings = append(rep.Warnings, finding)
+		}
 	}
 
 	var endingRevision int

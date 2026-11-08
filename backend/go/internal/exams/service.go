@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -1168,11 +1169,12 @@ func (s *Service) publishDraftTx(ctx context.Context, q tx.Tx, actorID, examID s
 		if err != nil {
 			return Version{}, err
 		}
-		if len(issues) > 0 {
-			first := issues[0]
+		blocking := slices.DeleteFunc(issues, func(issue satpublish.Issue) bool { return !issue.Blocking })
+		if len(blocking) > 0 {
+			first := blocking[0]
 			rejection := validationError("SAT publish requirements are not met: " + first.Message)
-			wire := make([]map[string]any, 0, len(issues))
-			for _, found := range issues {
+			wire := make([]map[string]any, 0, len(blocking))
+			for _, found := range blocking {
 				wire = append(wire, map[string]any{"code": found.Code, "path": found.Path, "message": found.Message})
 			}
 			rejection.Details = map[string]any{"code": first.Code, "path": first.Path, "blockingIssues": wire}
@@ -1513,7 +1515,12 @@ func (s *Service) GetValidationForScope(ctx context.Context, examID string, scop
 			return ValidationReport{}, err
 		}
 		for _, issue := range issues {
-			rep.Errors = append(rep.Errors, ValidationIssue{Field: issue.Path, Message: issue.Message})
+			finding := ValidationIssue{Field: issue.Path, Message: issue.Message}
+			if issue.Blocking {
+				rep.Errors = append(rep.Errors, finding)
+			} else {
+				rep.Warnings = append(rep.Warnings, finding)
+			}
 		}
 		rep.CanPublish = len(rep.Errors) == 0
 		return rep, nil

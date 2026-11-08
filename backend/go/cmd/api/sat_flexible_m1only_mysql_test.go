@@ -33,11 +33,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"example.com/ielts-proctoring/internal/attempts"
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/sat"
 	"example.com/ielts-proctoring/internal/terminalization"
 )
 
@@ -197,7 +197,13 @@ func TestSATFlexibleM1OnlyPublishRoomSitCompleteRawMySQL(t *testing.T) {
 	}
 
 	// Room creation from the flexible release (one-action seal + link).
-	room, err := h.rooms.CreateRoom(ctx, h.actor, h.examID, satRoomRequest(t, h, uuid.NewString(), "Homework room"))
+	wasEnabled := exams.SATClassroomCreationEnabled()
+	exams.SetClassroomCreationEnabled(true)
+	t.Cleanup(func() { exams.SetClassroomCreationEnabled(wasEnabled) })
+	roomRequest := satRoomRequest(t, h, uuid.NewString(), "Homework room")
+	roomRequest.Room.EnabledSections = []string{"reading-writing"}
+	roomRequest.Room.SatSessionMode = "classroom"
+	room, err := h.rooms.CreateRoom(ctx, h.actor, h.examID, roomRequest)
 	if err != nil {
 		t.Fatalf("create room from flexible release: %v", err)
 	}
@@ -207,9 +213,6 @@ func TestSATFlexibleM1OnlyPublishRoomSitCompleteRawMySQL(t *testing.T) {
 	scheduleID := room.Room.ScheduleID
 	if scheduleID == "" {
 		t.Fatal("room has no backing schedule")
-	}
-	if _, err := h.db.ExecContext(ctx, "UPDATE exam_schedules SET sat_session_mode = 'classroom', sat_route_policy = 'staff_selects' WHERE id = ?", scheduleID); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := h.db.ExecContext(ctx, "UPDATE exam_entities e JOIN exam_schedules sch ON sch.exam_id = e.id SET e.sat_score_report_enabled = TRUE WHERE sch.id = ?", scheduleID); err != nil {
 		t.Fatal(err)
@@ -279,9 +282,9 @@ func TestSATFlexibleM1OnlyPublishRoomSitCompleteRawMySQL(t *testing.T) {
 
 	// Completion succeeds with a single terminal base module and no route
 	// decision: AwaitingStaffRoute=false, no "waiting for Module 2".
-	runner := tx.NewRunner(h.db)
-	if err := runner.WithTx(ctx, func(ctx context.Context, q tx.Tx) error {
-		return attempts.EnsureSATModuleTopologyTx(ctx, q, attemptID)
+	completion := sat.NewService(h.db, tx.NewRunner(h.db), nil, nil)
+	if _, err := completion.CompleteAssessment(ctx, sat.CompleteRequest{
+		ScheduleID: scheduleID, AttemptID: attemptID, SubmissionID: uuid.NewString(), ActorKind: "student",
 	}); err != nil {
 		t.Fatalf("complete flexible M1-only attempt: %v", err)
 	}

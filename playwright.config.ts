@@ -111,6 +111,8 @@ const backendRuntimeEnv = {
   WORKER_MAINTENANCE_INTERVAL_SECS: inheritedEnv["WORKER_MAINTENANCE_INTERVAL_SECS"] ?? "1",
   WORKER_FALLBACK_INTERVAL_SECS: inheritedEnv["WORKER_FALLBACK_INTERVAL_SECS"] ?? "1",
   LIVE_UPDATE_POLL_INTERVAL_MS: inheritedEnv["LIVE_UPDATE_POLL_INTERVAL_MS"] ?? "100",
+  // The workbook import suite creates a custom SAT through the real wizard.
+  SAT_CLASSROOM_ENABLED: inheritedEnv["SAT_CLASSROOM_ENABLED"] ?? "true",
   // e2e/persistent-login.spec.ts exercises remembered issuance end to end.
   PERSISTENT_LOGIN_ENABLED: inheritedEnv["PERSISTENT_LOGIN_ENABLED"] ?? "true",
 };

@@ -54,9 +54,6 @@ func newConcurrencyHarness(t *testing.T, configs ...*exams.SATExamConfig) *concu
 	}
 	h := &concurrencyHarness{db: db, authors: authors, exams: examService, actor: actor, examID: exam.ID}
 	t.Cleanup(func() {
-		if _, err := db.Exec("DELETE FROM exam_schedules WHERE exam_id = ?", exam.ID); err != nil {
-			t.Error(err)
-		}
 		if err := examService.Delete(context.Background(), exam.ID); err != nil {
 			t.Error(err)
 		}
