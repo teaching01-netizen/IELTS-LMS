@@ -106,6 +106,10 @@ export interface ExamEntity {
   canPublish: boolean;
   canDelete: boolean;
 
+  // READ ONLY library scope projection (backend-owned): used only to filter
+  // compatible folder targets. Never sent on content saves.
+  organizationId?: string | undefined;
+
   // Denormalized counts for performance (kept in sync via service)
   totalQuestions?: number | undefined;
   totalReadingQuestions?: number | undefined;

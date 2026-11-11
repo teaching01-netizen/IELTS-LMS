@@ -46,6 +46,8 @@ type SatMenuProps = {
   icon?: LucideIcon;
   /** Icon-only 40px trigger with `label` as its accessible name. */
   compact?: boolean;
+  /** Nonmodal action menus can open a modal without overlapping pointer locks. */
+  modal?: boolean;
   align?: 'start' | 'end';
   width?: number;
   /**
@@ -229,9 +231,9 @@ export function SatMenu(props: SatMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   if (!supportsNativeMenu()) return <StaticMenu {...props} />;
-  const { label, items, triggerContent, icon: Icon, compact, align = 'start', width, triggerClassName, portalContainer } = props;
+  const { label, items, triggerContent, icon: Icon, compact, align = 'start', width, triggerClassName, portalContainer, modal = true } = props;
   return (
-    <DropdownMenu.Root>
+    <DropdownMenu.Root modal={modal}>
       <DropdownMenu.Trigger asChild>
         <button ref={triggerRef} type="button" aria-label={label} className={`group ${triggerClassName ?? (compact ? COMPACT_TRIGGER_CLASS : WORKSPACE_TRIGGER_CLASS)}`}>
           {triggerContent ?? (

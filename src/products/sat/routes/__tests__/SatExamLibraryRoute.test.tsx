@@ -13,9 +13,19 @@ const createProviderExamMock = vi.hoisted(() => vi.fn());
 const invalidateExamListMock = vi.hoisted(() => vi.fn());
 const bulkDeleteMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../../features/exam-authoring/api/examQueries', () => ({
+  examKeys: { all: ['exam-authoring'] },
   useExamListQuery: useExamListQueryMock,
   useBulkDeleteExamsMutation: () => ({ mutateAsync: bulkDeleteMock, isPending: false }),
   invalidateExamList: invalidateExamListMock,
+}));
+vi.mock('../../library/queries', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../library/queries')>(),
+  useSatLibraryQuery: () => ({
+    data: { folders: [], entries: [], byExam: {} },
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 vi.mock('../../../../features/exam-authoring/api/examAuthoringFacade', () => ({
   examAuthoringFacade: { lifecycle: { createProviderExam: createProviderExamMock } },
@@ -544,7 +554,7 @@ describe('SatExamLibraryRoute', () => {
         refetch: vi.fn(),
       });
       renderRoute();
-      const nav = screen.getByRole('navigation', { name: 'Library' });
+      const nav = screen.getByRole('radiogroup', { name: 'Exam status' });
       expect(within(nav).getByRole('radio', { name: 'All active 1' })).toHaveAttribute('aria-checked', 'true');
       expect(within(nav).getByRole('radio', { name: 'Not in a room 1' })).toBeInTheDocument();
       expect(within(nav).getByRole('radio', { name: 'Rooms available 0' })).toBeInTheDocument();
@@ -569,7 +579,7 @@ describe('SatExamLibraryRoute', () => {
         refetch: vi.fn(),
       });
       renderRoute();
-      const nav = screen.getByRole('navigation', { name: 'Library' });
+      const nav = screen.getByRole('radiogroup', { name: 'Exam status' });
       const radioAt = (index: number): HTMLElement => {
         const radio = within(nav).getAllByRole('radio')[index];
         if (!radio) throw new Error(`missing library radio at index ${index}`);
@@ -609,7 +619,7 @@ describe('SatExamLibraryRoute', () => {
 
     it('announces the current location in a heading', () => {
       renderRoute();
-      expect(screen.getByRole('heading', { name: /All active/ })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Library' })).toBeInTheDocument();
     });
 
     it('sorts through actionable Name and Updated headers driving the existing sort', () => {

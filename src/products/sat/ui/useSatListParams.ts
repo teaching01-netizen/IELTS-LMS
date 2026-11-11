@@ -8,6 +8,11 @@ import { useSearchParams } from 'react-router-dom';
  * setParams merges a partial patch over the current params; an empty string
  * removes the key. List state lives in the URL so refresh, deep links and the
  * browser Back button all return staff to the same view.
+ *
+ * Library location (`folder`): absent = Library root, `all` = All exams
+ * smart view (searches across folders), otherwise a folder id. Folder
+ * navigation passes `{ replace: false }` so Back walks the folder trail;
+ * searches/filters keep the default `replace: true`.
  */
 export type SatListBucket = 'upcoming' | 'live' | 'finished';
 export type SatScoreFilter = 'all' | 'available' | 'unavailable';
@@ -23,6 +28,11 @@ export type SatListParams = {
   sort?: SatListSort;
   /** Narrows a list to one exam (Rooms opened from an exam's Rooms tab). */
   exam?: string;
+  /**
+   * Library location: absent = Library root, `all` = All exams smart view,
+   * otherwise a folder id.
+   */
+  folder?: string;
 };
 
 type SatListParamsPatch = { [K in keyof SatListParams]?: SatListParams[K] | '' };
@@ -49,14 +59,19 @@ function parseParams(searchParams: URLSearchParams): SatListParams {
   if (sort && has(SORTS, sort)) params.sort = sort as SatListSort;
   const exam = searchParams.get('exam');
   if (exam) params.exam = exam;
+  const folder = searchParams.get('folder');
+  if (folder) params.folder = folder;
   return params;
 }
 
-export function useSatListParams(): { params: SatListParams; setParams: (patch: SatListParamsPatch) => void } {
+export function useSatListParams(): {
+  params: SatListParams;
+  setParams: (patch: SatListParamsPatch, options?: { replace?: boolean }) => void;
+} {
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useMemo(() => parseParams(searchParams), [searchParams]);
   const setParams = useCallback(
-    (patch: SatListParamsPatch) => {
+    (patch: SatListParamsPatch, options?: { replace?: boolean }) => {
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -72,9 +87,10 @@ export function useSatListParams(): { params: SatListParams; setParams: (patch: 
           apply('tab', patch.tab, (v) => has(TABS, v));
           apply('sort', patch.sort, (v) => has(SORTS, v));
           apply('exam', patch.exam, () => true);
+          apply('folder', patch.folder, () => true);
           return next;
         },
-        { replace: true },
+        { replace: options?.replace ?? true },
       );
     },
     [setSearchParams],

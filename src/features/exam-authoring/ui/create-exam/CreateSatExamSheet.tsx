@@ -51,7 +51,7 @@ function looksLikePlanError(message: string): boolean {
   return /classroom plan|SAT section|SAT shape/i.test(message);
 }
 
-export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CreateSatExamSheet({ open, onClose, folderId }: { open: boolean; onClose: () => void; folderId?: string | null }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { session } = useAuthSession();
@@ -141,6 +141,7 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
       providerExamType: "SAT",
       title: nextTitle,
       ...(configuration ? { configuration } : {}),
+      ...(folderId ? { folderId } : {}),
     });
     let operationKey = createOperationRef.current?.operationKey;
     if (createOperationRef.current?.fingerprint !== requestFingerprint || !operationKey) {
@@ -159,6 +160,7 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
           providerExamType: "SAT",
           title: nextTitle,
           ...(configuration ? { configuration } : {}),
+          ...(folderId ? { folderId } : {}),
           operationKey,
         },
         actor,

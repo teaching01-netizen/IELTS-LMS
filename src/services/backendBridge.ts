@@ -41,6 +41,7 @@ type BackendExamEntity = {
   examType: ExamEntity["type"];
   status: ExamEntity["status"];
   visibility: ExamEntity["visibility"];
+  organizationId?: string | null | undefined;
   ownerId: string;
   createdAt: string;
   updatedAt: string;
@@ -424,6 +425,8 @@ export function buildCreateAssessmentExamPayload(input: {
   visibility?: ExamEntity["visibility"];
   /** SAT only: exam-level configuration applied in the creation transaction. */
   configuration?: object | undefined;
+  /** SAT only: library folder to file the exam in atomically (omitted = Library root). */
+  folderId?: string | undefined;
 }) {
   return {
     slug: input.slug,
@@ -433,6 +436,7 @@ export function buildCreateAssessmentExamPayload(input: {
     providerKey: input.providerKey,
     providerExamType: input.providerExamType,
     ...(input.configuration ? { configuration: input.configuration } : {}),
+    ...(input.folderId ? { folderId: input.folderId } : {}),
   };
 }
 
@@ -514,6 +518,7 @@ export function mapBackendExamEntity(payload: BackendExamEntity): ExamEntity {
     type: payload.examType,
     status: payload.status,
     visibility: payload.visibility,
+    organizationId: payload.organizationId ?? undefined,
     owner: payload.ownerId,
     createdAt: payload.createdAt,
     updatedAt: payload.updatedAt,

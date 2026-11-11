@@ -17,6 +17,8 @@ export type CreateExamInput =
       configuration?: SatExamConfig;
       /** Reused for retries of the same create payload; sent as an HTTP header only. */
       operationKey?: string;
+      /** Library folder to file the exam in atomically; omitted = Library root. */
+      folderId?: string;
     }
   | {
       providerKey: 'act';
