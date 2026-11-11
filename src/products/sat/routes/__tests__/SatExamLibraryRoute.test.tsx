@@ -534,4 +534,129 @@ describe('SatExamLibraryRoute', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show Practice exams' }));
     expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
   });
+
+  describe('library browser polish (Finder rail)', () => {
+    it('navigates the real status groups from a Library rail with counts', () => {
+      useExamListQueryMock.mockReturnValue({
+        data: { entities: [satExam, { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      renderRoute();
+      const nav = screen.getByRole('navigation', { name: 'Library' });
+      expect(within(nav).getByRole('radio', { name: 'All active 1' })).toHaveAttribute('aria-checked', 'true');
+      expect(within(nav).getByRole('radio', { name: 'Not in a room 1' })).toBeInTheDocument();
+      expect(within(nav).getByRole('radio', { name: 'Rooms available 0' })).toBeInTheDocument();
+      expect(within(nav).getByRole('radio', { name: 'Archived 1' })).toBeInTheDocument();
+      fireEvent.click(within(nav).getByRole('radio', { name: 'Archived 1' }));
+      expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
+      expect(screen.queryByText('SAT Practice 06')).not.toBeInTheDocument();
+    });
+
+    it('moves the rail by keyboard with roving tabindex and keeps the search', () => {
+      useExamListQueryMock.mockReturnValue({
+        data: {
+          entities: [
+            { ...satExam, id: 'sat-draft', title: 'SAT Draft 01', status: 'draft' },
+            { ...satExam, id: 'sat-pub', title: 'SAT Room 01', status: 'published', currentPublishedVersionId: 'v1' },
+            { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' },
+          ],
+          exams: [],
+        },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      renderRoute();
+      const nav = screen.getByRole('navigation', { name: 'Library' });
+      const radioAt = (index: number): HTMLElement => {
+        const radio = within(nav).getAllByRole('radio')[index];
+        if (!radio) throw new Error(`missing library radio at index ${index}`);
+        return radio;
+      };
+      expect(within(nav).getAllByRole('radio')).toHaveLength(4);
+      // Roving tabindex: only the checked group takes a Tab stop.
+      expect(radioAt(0)).toHaveAttribute('aria-checked', 'true');
+      expect(radioAt(0)).toHaveAttribute('tabindex', '0');
+      expect([radioAt(1), radioAt(2), radioAt(3)].map((radio) => radio.getAttribute('tabindex'))).toEqual(['-1', '-1', '-1']);
+
+      fireEvent.change(screen.getByPlaceholderText('Search exams'), { target: { value: 'SAT' } });
+
+      // ArrowRight moves focus and the checked group together.
+      fireEvent.keyDown(radioAt(0), { key: 'ArrowRight' });
+      expect(radioAt(1)).toHaveAttribute('aria-checked', 'true');
+      expect(radioAt(1)).toHaveAttribute('tabindex', '0');
+      expect(radioAt(0)).toHaveAttribute('tabindex', '-1');
+      expect(document.activeElement).toBe(radioAt(1));
+
+      // End jumps to the last group, Home back to the first.
+      fireEvent.keyDown(radioAt(1), { key: 'End' });
+      expect(radioAt(3)).toHaveAttribute('aria-checked', 'true');
+      expect(document.activeElement).toBe(radioAt(3));
+      fireEvent.keyDown(radioAt(3), { key: 'Home' });
+      expect(radioAt(0)).toHaveAttribute('aria-checked', 'true');
+      expect(document.activeElement).toBe(radioAt(0));
+
+      // ArrowLeft wraps from the first group to the last.
+      fireEvent.keyDown(radioAt(0), { key: 'ArrowLeft' });
+      expect(radioAt(3)).toHaveAttribute('aria-checked', 'true');
+      expect(document.activeElement).toBe(radioAt(3));
+
+      // The search survives every group change (list state shares one param store).
+      expect(screen.getByPlaceholderText('Search exams')).toHaveValue('SAT');
+    });
+
+    it('announces the current location in a heading', () => {
+      renderRoute();
+      expect(screen.getByRole('heading', { name: /All active/ })).toBeInTheDocument();
+    });
+
+    it('sorts through actionable Name and Updated headers driving the existing sort', () => {
+      const older = { ...satExam, id: 'sat-a', title: 'Alpha First', updatedAt: '2026-08-29T00:00:00Z' };
+      const newer = { ...satExam, id: 'sat-b', title: 'Zebra Final', updatedAt: '2026-08-31T00:00:00Z' };
+      useExamListQueryMock.mockReturnValue({ data: { entities: [older, newer], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+      renderRoute();
+      const rowTitles = () => screen.getAllByText(/Alpha First|Zebra Final/).filter((el) => el.tagName !== 'BUTTON');
+      // Default sort is Updated (newest first): Zebra Final (newer) before Alpha First.
+      expect(rowTitles()[0]).toHaveTextContent('Zebra Final');
+      fireEvent.click(screen.getByRole('button', { name: /Sort by name/ }));
+      expect(rowTitles()[0]).toHaveTextContent('Alpha First');
+      fireEvent.click(screen.getByRole('button', { name: /Sort by updated/ }));
+      expect(rowTitles()[0]).toHaveTextContent('Zebra Final');
+    });
+
+    it('marks select-all indeterminate on partial selection and clears it', () => {
+      const second = { ...satExam, id: 'sat-2', slug: 'sat-2', title: 'SAT Practice 07' };
+      useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, second], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+      renderRoute();
+      const selectAll = screen.getByRole('checkbox', { name: /Select all/ }) as HTMLInputElement;
+      expect(selectAll.indeterminate).toBe(false);
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select SAT Practice 06' }));
+      expect(selectAll.indeterminate).toBe(true);
+      expect(screen.getByRole('status')).toHaveTextContent('1 selected');
+      fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
+      expect(screen.getByRole('checkbox', { name: 'Select SAT Practice 06' })).not.toBeChecked();
+      expect((screen.getByRole('checkbox', { name: /Select all/ }) as HTMLInputElement).indeterminate).toBe(false);
+    });
+
+    it('only deletes the visible rows when a filter hides the rest', async () => {
+      const second = { ...satExam, id: 'sat-2', slug: 'sat-2', title: 'SAT Practice 07' };
+      useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, second], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+      bulkDeleteMock.mockResolvedValue({
+        success: true, total: 1, succeeded: 1, failed: 0,
+        results: [{ examId: 'sat-1', examTitle: 'SAT Practice 06', success: true }],
+      });
+      renderRoute();
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all 2 exams' }));
+      fireEvent.change(screen.getByPlaceholderText('Search exams'), { target: { value: 'Practice 06' } });
+      expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
+      expect(screen.queryByText('SAT Practice 07')).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('1 selected');
+      fireEvent.click(screen.getByRole('button', { name: /Delete 1 exam/ }));
+      const alert = await screen.findByRole('alertdialog', { name: 'Delete 1 exam?' });
+      fireEvent.click(within(alert).getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(bulkDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ examIds: ['sat-1'] })));
+    });
+  });
 });
