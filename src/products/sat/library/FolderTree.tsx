@@ -87,23 +87,21 @@ export function FolderTree({
   folders,
   activeId,
   onOpen,
-  onNewFolder,
   expandedIds,
 }: {
   folders: LibraryFolder[];
   /** null = Library root, "all" = All exams smart view, else folder id */
   activeId: string | null | "all";
   onOpen: (id: string | null | "all") => void;
-  onNewFolder: () => void;
   expandedIds?: ReadonlySet<string> | undefined;
 }) {
   const roots = childrenOf(folders, null);
   return (
     <nav
       aria-label="Folders"
-      className="shrink-0 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-1.5 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))] @min-[1080px]/library:sticky @min-[1080px]/library:top-4 @min-[1080px]/library:w-60"
+      className="w-full shrink-0 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-1.5 shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]"
     >
-      <p aria-hidden="true" className="hidden px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--sat-staff-text-tertiary,#6e6e73)] @min-[1080px]/library:block">
+      <p aria-hidden="true" className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--sat-staff-text-tertiary,#6e6e73)]">
         Folders
       </p>
       <ul className="m-0 list-none p-0">
@@ -151,19 +149,12 @@ export function FolderTree({
         </li>
       </ul>
       {roots.length > 0 ? (
-        <ul className="m-0 mt-1 list-none border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] p-0 pt-1">
+        <ul className="m-0 mt-1 max-h-72 list-none overflow-y-auto border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] p-0 pt-1">
           {roots.map((folder) => (
             <FolderNode key={folder.id} folder={folder} folders={folders} activeId={activeId} depth={0} onOpen={onOpen} expandedIds={expandedIds} />
           ))}
         </ul>
       ) : null}
-      <button
-        type="button"
-        onClick={onNewFolder}
-        className="mt-1 flex min-h-11 w-full items-center justify-center rounded-[10px] px-3 text-[14px] font-semibold leading-5 text-[var(--sat-staff-accent,#0071e3)] hover:bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))]"
-      >
-        New folder
-      </button>
     </nav>
   );
 }

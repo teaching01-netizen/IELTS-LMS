@@ -1,8 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SatButton, SatField } from "../ui/SatPage";
 import { SatConfirmDialog, SatFormDialog } from "../ui/ConfirmDialog";
 import type { LibraryFolder } from "./types";
-import { ancestorsOf, childrenOf, descendantIds } from "./types";
+import { FolderDestinationBrowser, isAvailableDestination } from "./FolderDestinationBrowser";
 
 function validateName(name: string): string | null {
   const trimmed = name.trim();
@@ -197,7 +197,6 @@ export function FolderDeleteDialog({
 export function FolderMoveDialog({
   open,
   folders,
-  movingId,
   currentParentId,
   onClose,
   onMove,
@@ -207,7 +206,6 @@ export function FolderMoveDialog({
 }: {
   open: boolean;
   folders: LibraryFolder[];
-  movingId: string;
   currentParentId: string | null;
   onClose: () => void;
   onMove: (parentId: string | null) => void;
@@ -216,61 +214,31 @@ export function FolderMoveDialog({
   title: string;
 }) {
   const [target, setTarget] = useState<string | null>(currentParentId);
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) setTarget(currentParentId);
+    if (open && !wasOpen.current) setTarget(currentParentId);
+    wasOpen.current = open;
   }, [open, currentParentId]);
-  const excluded = useMemo(() => {
-    const desc = descendantIds(folders, movingId);
-    desc.add(movingId);
-    return desc;
-  }, [folders, movingId]);
   if (!open) return null;
-  const roots = childrenOf(folders, null);
-  const renderOptions = (parentId: string | null, depth: number): React.ReactNode[] => {
-    const nodes: React.ReactNode[] = [];
-    for (const folder of childrenOf(folders, parentId)) {
-      if (excluded.has(folder.id)) continue;
-      nodes.push(
-        <option key={folder.id} value={folder.id}>
-          {"\u00A0\u00A0".repeat(depth)}{folder.name}
-        </option>,
-      );
-      nodes.push(...renderOptions(folder.id, depth + 1));
-    }
-    return nodes;
-  };
-  const ancestors = ancestorsOf(folders, movingId).map((f) => f.name).join(" / ");
+  const sameParent = target === currentParentId;
   return (
     <SatFormDialog
       open
       eyebrow="Digital SAT · Library"
       title={title}
-      onClose={onClose}
+      onClose={() => { if (!pending) onClose(); }}
       footer={
         <div className="flex items-center justify-end gap-2 px-5 py-4">
           <SatButton variant="quiet" onClick={onClose} disabled={pending}>Cancel</SatButton>
-          <SatButton variant="primary" onClick={() => onMove(target)} pending={pending}>Move here</SatButton>
+          <SatButton variant="primary" onClick={() => onMove(target)} pending={pending} disabled={sameParent || !isAvailableDestination(folders, target)}>
+            {sameParent ? "Already here" : "Move here"}
+          </SatButton>
         </div>
       }
     >
       <div className="space-y-3 px-5 py-5">
-        {ancestors ? <p className="text-[13px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Now in {ancestors}</p> : null}
-        <label htmlFor="sat-folder-move-target" className="block text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
-          Destination
-        </label>
-        <select
-          id="sat-folder-move-target"
-          value={target ?? ""}
-          disabled={pending}
-          onChange={(event) => setTarget(event.target.value === "" ? null : event.target.value)}
-          className="sat-input min-h-11 w-full"
-        >
-          <option value="">Library (top level)</option>
-          {renderOptions(null, 0)}
-        </select>
-        {roots.length === 0 && target === null ? (
-          <p className="text-[13px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Already at the top level.</p>
-        ) : null}
+        <FolderDestinationBrowser folders={folders} value={target} onChange={setTarget} pending={pending} />
+        {sameParent ? <p className="text-[13px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">This folder is already here. Choose a different destination to move it.</p> : null}
         {serverError ? <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">{serverError}</p> : null}
       </div>
     </SatFormDialog>
@@ -282,6 +250,7 @@ export function ExamMoveDialog({
   folders,
   count,
   compatible,
+  initialDestination = null,
   onClose,
   onMove,
   onNewFolder,
@@ -292,65 +261,93 @@ export function ExamMoveDialog({
   folders: LibraryFolder[];
   count: number;
   compatible: boolean;
+  /** Common current folder of the moved exams, or root when they differ. */
+  initialDestination?: string | null;
   onClose: () => void;
   onMove: (folderId: string | null) => void;
-  onNewFolder: (name: string, parentId: string | null) => Promise<string | null>;
+  onNewFolder: (name: string, parentId: string | null) => Promise<LibraryFolder | null>;
   pending: boolean;
   serverError: string | null;
 }) {
-  const selectId = useId();
-  const [target, setTarget] = useState<string>("");
+  const [target, setTarget] = useState<string | null>(initialDestination ?? null);
   const [newName, setNewName] = useState("");
   const [newError, setNewError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  // Folders created inside this dialog, kept locally so the browser can show
+  // and select them immediately even before the library refetch lands.
+  const [localFolders, setLocalFolders] = useState<LibraryFolder[]>([]);
   const newInputRef = useRef<HTMLInputElement>(null);
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open) {
-      setTarget("");
+    if (open && !wasOpen.current) {
+      setTarget(initialDestination ?? null);
       setNewName("");
       setNewError(null);
       setCreating(false);
+      setCreatingFolder(false);
+      setLocalFolders([]);
     }
-  }, [open ]);
+    wasOpen.current = open;
+  }, [open, initialDestination ]);
+  useEffect(() => {
+    // Keep immediate creation results only until the server includes them.
+    // Later refreshes must be able to report a deleted destination.
+    setLocalFolders((previous) => {
+      const remaining = previous.filter((local) => !folders.some((folder) => folder.id === local.id));
+      return remaining.length === previous.length ? previous : remaining;
+    });
+  }, [folders, localFolders]);
+  const displayFolders = useMemo(() => {
+    if (localFolders.length === 0) return folders;
+    const known = new Set(folders.map((folder) => folder.id));
+    return [...folders, ...localFolders.filter((folder) => !known.has(folder.id))];
+  }, [folders, localFolders]);
   if (!open) return null;
-  const renderOptions = (parentId: string | null, depth: number): React.ReactNode[] => {
-    const nodes: React.ReactNode[] = [];
-    for (const folder of childrenOf(folders, parentId)) {
-      nodes.push(
-        <option key={folder.id} value={folder.id}>
-          {"\u00A0\u00A0".repeat(depth)}{folder.name}
-        </option>,
-      );
-      nodes.push(...renderOptions(folder.id, depth + 1));
-    }
-    return nodes;
-  };
+  const busy = pending || creatingFolder;
+  const available = isAvailableDestination(displayFolders, target);
   const submitNewFolder = async () => {
+    // Create-only: the new folder becomes the displayed destination and the
+    // user presses Move afterwards. Never moves implicitly, so a failed move
+    // cannot strand exams. The in-flight guard plus the parent pending lock
+    // prevent double creation.
+    if (busy || !compatible || !available) return;
     const invalid = validateName(newName);
     if (invalid) {
       setNewError(invalid);
       return;
     }
     setNewError(null);
-    // Create inside the currently selected destination; empty target means Library root.
-    const created = await onNewFolder(newName.trim(), target === "" ? null : target);
-    if (created) {
-      setTarget(created);
-      setCreating(false);
-      setNewName("");
+    setCreatingFolder(true);
+    // Capture the destination now: navigation is locked while creating, and
+    // the value must not drift under the await.
+    const parentNow = target;
+    const trimmed = newName.trim();
+    try {
+      const created = await onNewFolder(trimmed, parentNow);
+      if (created) {
+        setLocalFolders((prev) => (prev.some((folder) => folder.id === created.id) || displayFolders.some((folder) => folder.id === created.id)
+          ? prev
+          : [...prev, created]));
+        setTarget(created.id);
+        setCreating(false);
+        setNewName("");
+      }
+    } finally {
+      setCreatingFolder(false);
     }
   };
-  const destName = target === "" ? "Library" : (folders.find((f) => f.id === target)?.name ?? "Library");
+  const destName = target === null ? "Library" : (displayFolders.find((f) => f.id === target)?.name ?? "Library");
   return (
     <SatFormDialog
       open
       eyebrow="Digital SAT · Library"
       title={`Move ${count === 1 ? "exam" : `${count} exams`} to`}
-      onClose={onClose}
+      onClose={() => { if (!busy) onClose(); }}
       footer={
         <div className="flex items-center justify-end gap-2 px-5 py-4">
-          <SatButton variant="quiet" onClick={onClose} disabled={pending}>Cancel</SatButton>
-          <SatButton variant="primary" onClick={() => onMove(target === "" ? null : target)} pending={pending} disabled={!compatible}>
+          <SatButton variant="quiet" onClick={onClose} disabled={busy}>Cancel</SatButton>
+          <SatButton variant="primary" onClick={() => onMove(target)} pending={busy} disabled={!compatible || !available}>
             Move
           </SatButton>
         </div>
@@ -362,30 +359,18 @@ export function ExamMoveDialog({
             Selected exams belong to different libraries. Move one library at a time.
           </p>
         ) : null}
-        <label htmlFor={selectId} className="block text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
-          Destination
-        </label>
-        <select
-          id={selectId}
-          value={target}
-          disabled={pending || !compatible}
-          onChange={(event) => setTarget(event.target.value)}
-          className="sat-input min-h-11 w-full"
-        >
-          <option value="">Library (top level)</option>
-          {renderOptions(null, 0)}
-        </select>
+        <FolderDestinationBrowser folders={displayFolders} value={target} onChange={setTarget} pending={busy || !compatible} />
         <div className="border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] pt-3">
           {creating ? (
             <div className="space-y-2">
               <p className="text-[13px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-                New folder in {destName} — exams move there immediately.
+                New folder in {destName} — create it, then press Move.
               </p>
               <div className="flex gap-2">
                 <input
                   ref={newInputRef}
                   value={newName}
-                  disabled={pending}
+                  disabled={pending || creatingFolder}
                   onChange={(event) => { setNewName(event.target.value); setNewError(null); }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
@@ -399,16 +384,17 @@ export function ExamMoveDialog({
                 />
                 <SatButton
                   variant="secondary"
-                  disabled={pending || !compatible || !newName.trim()}
+                  disabled={busy || !compatible || !available || !newName.trim()}
+                  pending={creatingFolder}
                   onClick={() => void submitNewFolder()}
                 >
-                  Create and move
+                  Create folder
                 </SatButton>
               </div>
               {newError ? <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">{newError}</p> : null}
             </div>
           ) : (
-            <SatButton variant="quiet" onClick={() => { setCreating(true); requestAnimationFrame(() => newInputRef.current?.focus()); }} disabled={pending || !compatible}>
+            <SatButton variant="quiet" onClick={() => { setCreating(true); requestAnimationFrame(() => newInputRef.current?.focus()); }} disabled={busy || !compatible || !available}>
               New folder here
             </SatButton>
           )}

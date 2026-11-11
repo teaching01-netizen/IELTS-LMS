@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { DragDropProvider, useDraggable, useDroppable, useDragOperation } from "@dnd-kit/react";
-import { GripVertical } from "lucide-react";
+import { Folder, GripVertical } from "lucide-react";
 import clsx from "clsx";
 
 /**
@@ -9,7 +9,7 @@ import clsx from "clsx";
  * collide; the same server mutations back the dialogs, and invalid targets
  * stay disabled in the UI while the server remains the final authority.
  * Drag handles never hijack row links/checkboxes or touch scrolling: only
- * the small grip starts a drag.
+ * the icon button starts a drag.
  */
 
 type DropPolicy = (sourceId: string, targetId: string) => boolean;
@@ -82,7 +82,9 @@ export function FolderDragHandle({ folderId, name }: { folderId: string; name: s
       data-drag-handle={`folder:${folderId}`}
       className="pointer-events-auto relative z-10 flex h-11 w-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-[6px] text-[var(--sat-staff-text-tertiary,#6e6e73)] hover:bg-[var(--sat-staff-fill-chip,rgba(0,0,0,0.06))] active:cursor-grabbing"
     >
-      <GripVertical size={14} aria-hidden="true" />
+      <span className="flex h-8 w-8 items-center justify-center rounded-[10px] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))]">
+        <Folder size={16} aria-hidden="true" />
+      </span>
     </button>
   );
 }

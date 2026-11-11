@@ -157,14 +157,25 @@ async function installStatefulTransport(page: Page, opts: { failLibrary?: boolea
   return { exams, library, moves, folderCreates, folderWrites };
 }
 
+async function showFolderTree(page: Page) {
+  const toggle = page.getByRole('button', { name: 'Browse folders', exact: true });
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('navigation', { name: 'Folders' })).toBeVisible();
+}
+
 async function pointerDrag(page: Page, source: Locator, destination: Locator) {
   await source.scrollIntoViewIfNeeded();
   const from = await source.boundingBox();
-  const to = await destination.boundingBox();
-  if (!from || !to) throw new Error('Drag controls must have visible bounds');
+  if (!from) throw new Error('Drag controls must have visible bounds');
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(from.x + from.width / 2 + 15, from.y + from.height / 2 + 3, { steps: 5 });
+  // Re-resolve the destination after activation: starting a drag can
+  // auto-scroll a scrollable page, so coordinates cached before mouse.down()
+  // go stale. A user tracks the live highlight; the test tracks the live box.
+  const to = await destination.boundingBox();
+  if (!to) throw new Error('Drop target must have visible bounds');
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 30 });
   await page.mouse.up();
 }
@@ -190,6 +201,7 @@ test("SAT library folders: stateful CRUD, pointer physics, fail-closed library, 
   await expect(page.getByRole("menu")).toHaveCount(0);
 
   // Tree button opens the folder; Back returns to the Library root.
+  await showFolderTree(page);
   await page.getByRole("navigation", { name: "Folders" }).getByRole("link", { name: "Physics", exact: true }).click();
   await expect(page.getByText("Filed Exam")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toContainText("Physics");
@@ -206,15 +218,7 @@ test("SAT library folders: stateful CRUD, pointer physics, fail-closed library, 
   // Tree and content targets have distinct IDs; both resolve to the same folder.
   const target = page.getByRole("list", { name: "Subfolders" }).locator('[data-droppable="folder:f-phys"]');
   await expect(target).toBeVisible();
-  const handleBox = await dragHandle.boundingBox();
-  const targetBox = await target.boundingBox();
-  expect(handleBox).not.toBeNull();
-  expect(targetBox).not.toBeNull();
-  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + handleBox!.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(handleBox!.x + handleBox!.width / 2 + 15, handleBox!.y + handleBox!.height / 2 + 3, { steps: 5 });
-  await page.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + targetBox!.height / 2, { steps: 30 });
-  await page.mouse.up();
+  await pointerDrag(page, dragHandle, target);
   await expect.poll(() => moves.length, { timeout: 5000 }).toBeGreaterThan(0);
   const lastMove = moves[moves.length - 1]!.body as { items: Array<{ examId: string }>; folderId: string | null };
   expect(lastMove.items[0]!.examId).toBe("sat-root");
@@ -224,13 +228,16 @@ test("SAT library folders: stateful CRUD, pointer physics, fail-closed library, 
   await page.reload();
   await expect(page.getByRole("heading", { name: "Exams" })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Root Exam")).toHaveCount(0);
+  await showFolderTree(page);
   await page.getByRole("navigation", { name: "Folders" }).getByRole("link", { name: "Physics", exact: true }).click();
   await expect(page.getByText("Root Exam")).toBeVisible({ timeout: 15_000 });
 
   // Folder-to-folder pointer drag: Mechanics -> Library root.
+  await showFolderTree(page);
   await page.getByRole("navigation", { name: "Folders" }).getByRole("link", { name: "Physics", exact: true }).click();
   await expect(page.getByText("Filed Exam")).toBeVisible();
   const folderHandle = page.getByRole('button', { name: 'Drag folder Mechanics', exact: true });
+  await showFolderTree(page);
   await pointerDrag(page, folderHandle, page.locator('[data-droppable="library-root"]'));
   await expect.poll(() => folderWrites.length).toBe(1);
   expect(folderWrites[0]).toMatchObject({ id: 'f-mech', method: 'PATCH', body: { parentId: null } });
@@ -238,10 +245,13 @@ test("SAT library folders: stateful CRUD, pointer physics, fail-closed library, 
   await expect(page.getByRole('heading', { name: 'Physics', exact: true })).toBeVisible();
   await expect(page.getByRole('list', { name: 'Subfolders' })).toHaveCount(0);
   await page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Library', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Library', exact: true })).toBeVisible();
+  await showFolderTree(page);
   await pointerDrag(page, page.getByRole('button', { name: 'Drag folder Mechanics', exact: true }), page.locator('[data-droppable="tree-folder:f-phys"]'));
   await expect.poll(() => folderWrites.length).toBe(2);
   expect(folderWrites[1]).toMatchObject({ id: 'f-mech', body: { parentId: 'f-phys' } });
   await page.reload();
+  await showFolderTree(page);
   await page.getByRole('navigation', { name: 'Folders' }).getByRole('link', { name: 'Physics', exact: true }).click();
   // Return to Library to exercise folder-name validation.
   await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name: "Library" }).click();
@@ -257,16 +267,21 @@ test("SAT library folders: stateful CRUD, pointer physics, fail-closed library, 
 
   // Move-to dialog offers compatible targets and actually moves.
   // Root Exam already moved to Physics; use Physics contents for the dialog move.
+  await showFolderTree(page);
   await page.getByRole("navigation", { name: "Folders" }).getByRole("link", { name: "Physics", exact: true }).click();
   await expect(page.getByText("Filed Exam")).toBeVisible();
   await page.getByRole("checkbox", { name: "Select Filed Exam" }).check();
   await page.getByRole("button", { name: "Move to" }).click();
   const move = page.getByRole("dialog", { name: /Move exam to/ });
   await expect(move).toBeVisible();
-  await expect(move.getByLabel("Destination")).toBeVisible();
-  // Other-org folder must not be offered for org-1 selection (destination compatibility).
-  await expect(move.getByRole("option", { name: "Other Org" })).toHaveCount(0);
-  await move.getByLabel("Destination").selectOption("f-mech");
+  // Drive-style browser: starts in the common current folder (Physics).
+  await expect(move.getByRole("navigation", { name: "Destination path" })).toContainText("Physics");
+  // Drill up: another org's folder is never offered for an org-1 selection.
+  await move.getByRole("button", { name: "Up one level" }).click();
+  await expect(move.getByRole("navigation", { name: "Destination path" })).toContainText("Library");
+  await expect(move.getByRole("button", { name: /Open Other Org/ })).toHaveCount(0);
+  await move.getByRole("button", { name: /Open Physics/ }).click();
+  await move.getByRole("button", { name: /Open Mechanics/ }).click();
   await move.getByRole("button", { name: "Move", exact: true }).click();
   await expect.poll(() => moves.length, { timeout: 5000 }).toBeGreaterThan(1);
 
@@ -323,6 +338,7 @@ test('nested folders can be created, renamed, moved, deleted and reopened after 
   expect(folderCreates).toHaveLength(2);
   expect(folderCreates[0]!.idempotencyKey).toBeTruthy();
   expect(folderCreates[1]!.idempotencyKey).not.toBe(folderCreates[0]!.idempotencyKey);
+  await showFolderTree(page);
   await page.getByRole('navigation', { name: 'Folders' }).getByRole('link', { name: 'Autumn 2026', exact: true }).click();
   await create('Week 1', 'Autumn 2026');
   await page.reload();
@@ -330,7 +346,10 @@ test('nested folders can be created, renamed, moved, deleted and reopened after 
   await page.getByRole('button', { name: 'Actions for Week 1', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Move to', exact: true }).click();
   const move = page.getByRole('dialog', { name: 'Move Week 1 to', exact: true });
-  await move.getByLabel('Destination').selectOption('');
+  // Same-parent confirm stays disabled until the destination actually changes.
+  await expect(move.getByRole('button', { name: 'Already here' })).toBeDisabled();
+  await move.getByRole('button', { name: 'Up one level' }).click();
+  await expect(move.getByRole('navigation', { name: 'Destination path' })).toContainText('Library');
   await move.getByRole('button', { name: 'Move here', exact: true }).click();
   await expect(move).toHaveCount(0);
   await page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Library', exact: true }).click();
@@ -353,24 +372,112 @@ test('dragging a selection moves the entire visible batch to a sidebar folder', 
   await expect(page.getByText('Root Exam', { exact: true })).toBeVisible();
   await page.getByRole('checkbox', { name: 'Select Root Exam', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Select Filed Exam', exact: true }).check();
+  await showFolderTree(page);
   await pointerDrag(page, page.getByRole('button', { name: 'Drag Root Exam', exact: true }), page.locator('[data-droppable="tree-folder:f-mech"]'));
   await expect.poll(() => moves.length).toBe(1);
   const body = moves[0]!.body as { folderId: string; items: Array<{ examId: string }> };
   expect(body.folderId).toBe('f-mech');
   expect(body.items.map(item => item.examId).sort()).toEqual(['sat-filed', 'sat-root']);
   await page.reload();
+  await showFolderTree(page);
   await page.getByRole('navigation', { name: 'Folders' }).getByRole('link', { name: 'Mechanics', exact: true }).click();
   await expect(page.getByText('Root Exam', { exact: true })).toBeVisible();
   await expect(page.getByText('Filed Exam', { exact: true })).toBeVisible();
 });
 
 
+test('library browser: Up, current-folder menu, right-click, create-then-move', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const { moves, folderCreates } = await installStatefulTransport(page);
+  await page.goto('/sat/exams');
+  await expect(page.getByText('Root Exam', { exact: true })).toBeVisible();
+
+  await expect(page.getByRole('button', { name: 'Browse folders' })).toHaveAttribute('aria-expanded', 'false');
+
+  // Folders render as rows in the same grouped surface as the exam rows.
+  const subfolders = page.getByRole('list', { name: 'Subfolders' });
+  await expect(subfolders.getByRole('link', { name: 'Physics' })).toBeVisible();
+
+  // Drill in, then Up one level returns to Library with the search cleared.
+  await page.getByPlaceholder('Search exams').fill('Filed');
+  // A folder search filters the row list, so navigate through the tree.
+  await showFolderTree(page);
+  await page.getByRole('navigation', { name: 'Folders' }).getByRole('link', { name: 'Physics' }).click();
+  await expect(page.getByRole('heading', { name: 'Physics', exact: true })).toBeVisible();
+  await expect(page.getByPlaceholder('Search exams')).toHaveValue('');
+  await page.getByRole('button', { name: 'Up one level' }).click();
+  await expect(page.getByRole('heading', { name: 'Library', exact: true })).toBeVisible();
+
+  // Current-folder menu creates a subfolder without leaving the folder.
+  await subfolders.getByRole('link', { name: 'Physics' }).click();
+  await page.getByRole('button', { name: 'Actions for current folder' }).click();
+  await page.getByRole('menuitem', { name: 'New subfolder' }).click();
+  const create = page.getByRole('dialog', { name: 'New subfolder in Physics' });
+  await create.getByLabel('Folder name').fill('Week 9');
+  await create.getByRole('button', { name: 'Create folder' }).click();
+  await expect(subfolders.getByText('Week 9', { exact: true })).toBeVisible();
+
+  // Right-clicking an exam row offers the same Move action as the row menu.
+  // The stretched row link sits above the title text, so the row link is
+  // what receives the press — exactly as for a staff member's pointer.
+  const filedLink = page.getByRole('link', { name: 'Edit Filed Exam' });
+  const filedActions = page.getByRole('button', { name: 'Actions for Filed Exam', exact: true });
+  await filedLink.click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Move to' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(filedActions).toBeFocused();
+  await filedLink.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to' }).click();
+  await page.getByRole('dialog', { name: /Move exam to/ }).getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('dialog', { name: /Move exam to/ })).toHaveCount(0);
+  await expect(filedActions).toBeFocused();
+  await page.setViewportSize({ width: 390, height: 1000 });
+  const headingLines = await page.getByRole('heading', { name: 'Physics', exact: true }).evaluate((heading) => heading.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(heading).lineHeight));
+  expect(headingLines, 'a short folder name stays readable on a phone').toBeLessThanOrEqual(1.5);
+  await page.screenshot({ path: '/tmp/sat-folders-review/nested-folder-mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await filedLink.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to' }).click();
+  const move = page.getByRole('dialog', { name: /Move exam to/ });
+  await expect(move.getByRole('navigation', { name: 'Destination path' })).toContainText('Physics');
+
+  // New folder here creates and selects without moving; Move confirms after.
+  await move.getByRole('button', { name: 'New folder here' }).click();
+  await move.getByLabel('New folder name').fill('Catch-up');
+  await move.getByRole('button', { name: 'Create folder' }).click();
+  await expect(move.getByRole('navigation', { name: 'Destination path' })).toContainText('Catch-up');
+  expect(moves).toHaveLength(0);
+  await page.screenshot({ path: '/tmp/sat-folders-review/move-picker-desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 1000 });
+  await expect(move.getByRole('button', { name: 'Move', exact: true })).toBeVisible();
+  await expectNoSeriousAxeViolations(page, 'SAT destination picker');
+  await page.screenshot({ path: '/tmp/sat-folders-review/move-picker-mobile.png', fullPage: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await move.getByRole('button', { name: 'Move', exact: true }).click();
+  await expect.poll(() => moves.length).toBe(1);
+  await expect(page.getByRole('heading', { name: 'Physics', exact: true })).toBeFocused();
+  const created = folderCreates[folderCreates.length - 1]!.body as { name: string };
+  expect(created.name).toBe('Catch-up');
+  expect((moves[0]!.body as { folderId: string }).folderId).toBeTruthy();
+
+  // Right-clicking a folder row opens it through the same Open action.
+  await subfolders.getByRole('link', { name: 'Week 9', exact: true }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Open' }).click();
+  await expect(page.getByRole('heading', { name: 'Week 9', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Up one level' }).click();
+  await expect(page.getByRole('heading', { name: 'Physics', exact: true })).toBeVisible();
+});
+
 test('compact rows keep titles and editing accessible without overlapping controls', async ({ page }) => {
   await installStatefulTransport(page);
-  const exams = baseExams().map(exam => exam.id === 'sat-root' ? { ...exam, status: 'published', currentPublishedVersionId: 'sealed-1' } : exam);
+  const longExam = { ...baseExams()[0]!, id: 'sat-long', slug: 'sat-long', title: 'Autumn Full-Length Mock 04 — Reading & Writing and Mathematics with Adaptive Modules and Extended Time', satCustomModules: true };
+  const exams = [...baseExams().map(exam => exam.id === 'sat-root' ? { ...exam, status: 'published', currentPublishedVersionId: 'sealed-1' } : exam), longExam];
   await page.route('**/api/v1/exams*', route => route.fulfill({ status: 200, json: { success: true, data: exams } }));
   await page.goto('/sat/exams');
   await expect(page.getByText('Root Exam', { exact: true })).toBeVisible();
+  // A realistic long title stays readable: it wraps instead of clipping.
+  await expect(page.getByText(longExam.title)).toBeVisible();
   for (const width of [320, 390, 768, 1024, 1280, 1440, 1920]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -393,6 +500,7 @@ test('compact rows keep titles and editing accessible without overlapping contro
   await expect(page.getByRole('navigation', { name: 'Folders' })).toBeHidden();
   await page.getByRole('button', { name: 'Browse folders', exact: true }).click();
   await expect(page.getByRole('navigation', { name: 'Folders' })).toBeVisible();
+  await showFolderTree(page);
   await page.getByRole('navigation', { name: 'Folders' }).getByRole('link', { name: 'Physics', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Physics', exact: true })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Folders' })).toBeHidden();

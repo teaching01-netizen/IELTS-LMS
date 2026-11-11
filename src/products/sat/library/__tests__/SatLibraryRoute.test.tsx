@@ -109,6 +109,7 @@ describe('SAT library folders', () => {
     renderRoute('/');
     expect(screen.getByText('Root Exam')).toBeInTheDocument();
     expect(screen.queryByText('Filed Exam')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Browse folders' }));
     expect(screen.getByRole('navigation', { name: 'Folders' })).toBeInTheDocument();
     expect(within(screen.getByRole('navigation', { name: 'Folders' })).getByRole('link', { name: 'Physics' })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toHaveTextContent('Library');
@@ -117,6 +118,7 @@ describe('SAT library folders', () => {
 
   it('opens a folder from the tree, filters to its exams, and exposes the ancestor breadcrumb', () => {
     renderRoute('/');
+    fireEvent.click(screen.getByRole('button', { name: 'Browse folders' }));
     fireEvent.click(within(screen.getByRole('navigation', { name: 'Folders' })).getByRole('link', { name: 'Physics' }));
     expect(screen.getByText('Filed Exam')).toBeInTheDocument();
     expect(screen.queryByText('Root Exam')).not.toBeInTheDocument();
@@ -163,7 +165,10 @@ describe('SAT library folders', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select Root Exam' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to' }));
     const dialog = screen.getByRole('dialog', { name: /Move exam to/ });
-    fireEvent.change(within(dialog).getByLabelText('Destination'), { target: { value: 'f-mech' } });
+    // Drive-style destination browser: drill from Library into Physics, then
+    // open Mechanics as the destination, then confirm with Move.
+    fireEvent.click(within(dialog).getByRole('button', { name: /Open Physics/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /Open Mechanics/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
     await waitFor(() => expect(libraryState.moveCalls.length).toBe(1));
     expect(libraryState.moveCalls[0]).toMatchObject({ folderId: 'f-mech', items: [{ examId: 'sat-root', revision: 0 }] });

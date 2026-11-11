@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
-import { Archive, ArrowDown, ArrowRight, ArrowUp, BookOpen, ChevronsUpDown, DoorOpen, FileText, Folder, Layers, MoreHorizontal, Pencil, Plus, SearchX, Trash2 } from 'lucide-react';
+import { Archive, ArrowDown, ArrowRight, ArrowUp, BookOpen, ChevronsUpDown, DoorOpen, FileText, Layers, MoreHorizontal, Pencil, Plus, SearchX, Trash2 } from 'lucide-react';
 import { SatButton, SatInlineError, SatBreadcrumbs } from '../ui/SatPage';
 import { useBulkDeleteExamsMutation, useExamListQuery } from '../../../features/exam-authoring/api/examQueries';
 import { useAuthSession } from '../../../features/auth/authSession';
@@ -33,6 +33,8 @@ import { ancestorsOf, childrenOf, descendantIds, folderIdOf } from '../library/t
 import { FolderTree } from '../library/FolderTree';
 import { ExamMoveDialog, FolderCreateDialog, FolderDeleteDialog, FolderMoveDialog, FolderRenameDialog } from '../library/FolderDialogs';
 import { ExamDragHandle, FolderDragHandle, LibraryDragProvider, LibraryDroppable, folderFromDropTarget } from '../library/LibraryDnD';
+import { LibraryContextMenu } from '../library/LibraryContextMenu';
+import type { SatMenuItem } from '../ui/Menu';
 
 type LibrarySort = 'updated' | 'title';
 type ExamType = 'classroom' | 'practice';
@@ -253,16 +255,16 @@ export function SatExamLibraryRoute() {
   const crumbs = useMemo(() => {
     if (effectiveFolderId === 'all') {
       return [
-        { label: 'Library', href: folderHref(null), onSelect: () => setParams({ folder: '' }, { replace: false }) },
+        { label: 'Library', href: folderHref(null), onSelect: () => setParams({ folder: '', q: '' }, { replace: false }) },
         { label: 'All exams' },
       ];
     }
     const chain = effectiveFolder ? ancestorsOf(folders, effectiveFolder.id) : [];
     return [
       ...(chain.length > 0 || effectiveFolder
-        ? [{ label: 'Library', href: folderHref(null), onSelect: () => setParams({ folder: '' }, { replace: false }) }]
+        ? [{ label: 'Library', href: folderHref(null), onSelect: () => setParams({ folder: '', q: '' }, { replace: false }) }]
         : [{ label: 'Library' }]),
-      ...chain.slice(0, -1).map((folder) => ({ label: folder.name, href: folderHref(folder.id), onSelect: () => setParams({ folder: folder.id }, { replace: false }) })),
+      ...chain.slice(0, -1).map((folder) => ({ label: folder.name, href: folderHref(folder.id), onSelect: () => setParams({ folder: folder.id, q: '' }, { replace: false }) })),
       ...(effectiveFolder ? [{ label: effectiveFolder.name }] : []),
     ];
   }, [effectiveFolder, effectiveFolderId, folders, setParams]);
@@ -283,13 +285,23 @@ export function SatExamLibraryRoute() {
   const setSearch = (value: string) => setParams({ q: value });
   // Central navigation callback clears selection consistently, including
   // breadcrumbs and Back. Notices clear so a new location never shows a stale
-  // receipt.
+  // receipt. The search clears too: a stale folder search must never hide the
+  // destination contents. Status/type/sort params are preserved.
   const openFolder = (id: string | null | 'all') => {
     setPicked(new Set());
     setNotice(null);
-    if (id === null) setParams({ folder: '' }, { replace: false });
-    else if (id === 'all') setParams({ folder: 'all' }, { replace: false });
-    else setParams({ folder: id }, { replace: false });
+    if (id === null) setParams({ folder: '', q: '' }, { replace: false });
+    else if (id === 'all') setParams({ folder: 'all', q: '' }, { replace: false });
+    else setParams({ folder: id, q: '' }, { replace: false });
+  };
+  const parentOfCurrent: string | null | 'all' | undefined = activeIsAll
+    ? null
+    : effectiveFolder
+      ? (effectiveFolder.parentId ?? null)
+      : undefined;
+  const goUpOneLevel = () => {
+    if (parentOfCurrent === undefined) return;
+    openFolder(parentOfCurrent);
   };
 
   const bulkDelete = useBulkDeleteExamsMutation();
@@ -357,6 +369,17 @@ export function SatExamLibraryRoute() {
     setCreateOpen(true);
   };
   const createFolderId = effectiveFolderId === 'all' || effectiveFolderId === null ? null : effectiveFolderId;
+  // One main New folder action for the whole browser: it creates inside the
+  // current location (Library root from Library or All exams). Folder rows and
+  // the current-folder menu reuse the same dialog with their own parent.
+  const openNewFolderDialog = () => {
+    if (!locationKnown) {
+      setNotice({ tone: 'error', text: 'The library is still loading. Try again.' });
+      return;
+    }
+    setFolderCreateError(null);
+    setFolderCreateParent(createFolderId);
+  };
 
   // Folder dialogs + mutations.
   const createFolder = useCreateFolderMutation();
@@ -470,12 +493,26 @@ export function SatExamLibraryRoute() {
       setSingleMoveExam(null);
       setExamMoveOpen(false);
       setNotice({ tone: 'ok', text: folderId ? `Moved ${plural(items.length)}.` : `Moved ${plural(items.length)} to the Library.` });
-      headingRef.current?.focus?.();
+      // Release the dialog's focus trap before focusing outside it. The
+      // original row may have disappeared from this folder after the move.
+      requestAnimationFrame(() => headingRef.current?.focus());
     } catch (error) {
       setExamMoveError(error instanceof Error ? error.message : 'The exams could not be moved. Try again.');
     }
   };
+  const examInitialDestination = useMemo(() => {
+    // Start the exam chooser in the exams' common current folder so Move is
+    // one step when everything already sits together; root otherwise.
+    if (!moveTargetExams.length) return null;
+    const first = folderIdOf(entriesByExam, moveTargetExams[0]?.id ?? '');
+    if (first !== null && !folders.some((folder) => folder.id === first)) return null;
+    return moveTargetExams.every((exam) => folderIdOf(entriesByExam, exam.id) === first) ? first : null;
+  }, [moveTargetExams, entriesByExam, folders]);
   const runNewFolderFromMove = async (name: string, parentId: string | null) => {
+    // Create-only: the dialog selects and browses into the new folder and the
+    // user presses Move afterwards. Never moves implicitly, so a failed move
+    // cannot strand exams and a created folder never fires twice.
+    if (createFolder.isPending) return null;
     if (!locationKnown) {
       setExamMoveError('The library is still loading. Try again.');
       return null;
@@ -499,12 +536,96 @@ export function SatExamLibraryRoute() {
         ...(parentId ? { parentId } : { parentId: null }),
         ...(contextExam && !parentId ? { contextExamId: contextExam.id } : {}),
       });
-      await runMoveExams(created.id);
-      return created.id;
+      setNotice({ tone: 'ok', text: parentId ? `Created folder ${created.name}.` : `Created folder ${created.name} in the Library.` });
+      return created;
     } catch (error) {
       setExamMoveError(error instanceof Error ? error.message : 'The folder could not be created.');
       return null;
     }
+  };
+
+  const folderMenuItems = (folder: { id: string; name: string }): SatMenuItem[] => [
+    { id: 'open', label: 'Open', onSelect: () => openFolder(folder.id) },
+    {
+      id: 'subfolder',
+      label: 'New subfolder',
+      onSelect: (trigger) => {
+        returnFocusRef.current = trigger;
+        setFolderCreateError(null);
+        setFolderCreateParent(folder.id);
+      },
+    },
+    {
+      id: 'rename',
+      label: 'Rename',
+      onSelect: (trigger) => {
+        returnFocusRef.current = trigger;
+        setRenameError(null);
+        setRenameTarget(folder.id);
+      },
+    },
+    {
+      id: 'move',
+      label: 'Move to',
+      onSelect: (trigger) => {
+        returnFocusRef.current = trigger;
+        setMoveFolderError(null);
+        setMoveFolderTarget(folder.id);
+      },
+    },
+    {
+      id: 'delete',
+      label: 'Delete',
+      destructive: true,
+      onSelect: (trigger) => {
+        returnFocusRef.current = trigger;
+        setDeleteTarget(folder.id);
+      },
+    },
+  ];
+  const currentFolderMenuItems: SatMenuItem[] = effectiveFolder
+    ? folderMenuItems({ id: effectiveFolder.id, name: effectiveFolder.name }).filter((item) => item.id !== 'open')
+    : [];
+  const examMenuItems = (exam: ExamEntity, hasPublishedVersion: boolean): SatMenuItem[] => {
+    const locationId = folderIdOf(entriesByExam, exam.id);
+    return [
+      ...(activeIsAll
+        ? [{
+            id: 'reveal',
+            label: locationId ? 'Show in folder' : 'Show in Library',
+            onSelect: () => openFolder(locationId),
+          } as SatMenuItem]
+        : []),
+      {
+        id: 'move',
+        label: 'Move to',
+        onSelect: (trigger) => {
+          returnFocusRef.current = trigger;
+          setExamMoveError(null);
+          setSingleMoveExam(exam);
+          setExamMoveOpen(true);
+        },
+      },
+      ...(hasPublishedVersion
+        ? [{
+            id: 'edit',
+            label: 'Edit exam',
+            onSelect: () => {
+              requestAuthoringDraftOnEntry(exam.id);
+              openRecord(exam.id, `/sat/exams/${exam.id}`);
+            },
+          } as SatMenuItem]
+        : []),
+    ];
+  };
+  const folderLocationLabel = (examId: string): string | null => {
+    if (!activeIsAll) return null;
+    const folderId = folderIdOf(entriesByExam, examId);
+    if (folderId === null) return 'Library';
+    const folder = folders.find((item) => item.id === folderId);
+    if (!folder) return 'Library';
+    const chain = ancestorsOf(folders, folder.id);
+    return chain.length > 1 ? chain.map((item) => item.name).join(' / ') : folder.name;
   };
 
   const canDrop = (sourceId: string, targetId: string): boolean => {
@@ -576,66 +697,71 @@ export function SatExamLibraryRoute() {
         <SatBreadcrumbs items={crumbs} />
       </div>
 
-      <div className="mt-6 overflow-x-auto">
-        <SatSegmentedControl<ExamType>
-          label="Exam type"
-          value={examType}
-          options={[
-            { value: 'classroom', label: EXAM_TYPE_LABEL.classroom, count: typeCounts.classroom },
-            { value: 'practice', label: EXAM_TYPE_LABEL.practice, count: typeCounts.practice },
-          ]}
-          onChange={setExamType}
-        />
-      </div>
-
       <LibraryDragProvider onDrop={handleDrop} canDrop={canDrop}>
-        <div className="mt-4 flex flex-col gap-4 @min-[1080px]/library:flex-row @min-[1080px]/library:items-start">
-          <div className="shrink-0 @min-[1080px]/library:w-60">
-            <button
-              type="button"
-              className="flex min-h-11 w-full items-center justify-between rounded-[10px] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3 text-[14px] font-semibold @min-[1080px]/library:hidden"
-              aria-expanded={foldersOpen}
-              aria-controls="sat-folder-tree"
-              onClick={() => setFoldersOpen((v) => !v)}
-            >
-              Browse folders
-              <ChevronsUpDown size={14} aria-hidden="true" />
-            </button>
-            <div id="sat-folder-tree" className={clsx(foldersOpen ? 'mt-2 block' : 'mt-2 hidden', '@min-[1080px]/library:mt-0 @min-[1080px]/library:block')}>
-              <FolderTree
-                folders={locationKnown ? folders : []}
-                activeId={effectiveFolderId}
-                onOpen={openFolder}
-                onNewFolder={() => {
-                  if (!locationKnown) {
-                    setNotice({ tone: 'error', text: 'The library is still loading. Try again.' });
-                    return;
-                  }
-                  setFolderCreateError(null);
-                  setFolderCreateParent(effectiveFolderId === 'all' || effectiveFolderId === null ? null : effectiveFolderId);
-                }}
-                expandedIds={expandedPaths}
-              />
+        <div className="mt-4 flex min-w-0 flex-col gap-3">
+          <div className="shrink-0">
+            <div className="flex min-w-0 flex-wrap items-center gap-2" role="group" aria-label="Library navigation">
+              <button
+                type="button"
+                className="flex min-h-11 items-center gap-2 rounded-[10px] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-3 text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]"
+                aria-expanded={foldersOpen}
+                aria-controls="sat-folder-tree"
+                onClick={() => setFoldersOpen((v) => !v)}
+              >
+                Browse folders
+                <ChevronsUpDown size={14} aria-hidden="true" />
+              </button>
+              <SatButton variant="secondary" onClick={openNewFolderDialog} icon={<Plus size={16} aria-hidden="true" />}>
+                New folder
+              </SatButton>
+              {!activeIsAll ? (
+                <a
+                  href={folderHref('all')}
+                  className="sat-btn sat-btn--quiet"
+                  onClick={(event) => {
+                    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    openFolder('all');
+                  }}
+                >
+                  All exams
+                </a>
+              ) : null}
+            </div>
+            <div id="sat-folder-tree" className={foldersOpen ? 'mt-2 block' : 'mt-2 hidden'}>
+              <div className="max-h-[50vh] min-w-0 overflow-y-auto">
+                <FolderTree
+                  folders={locationKnown ? folders : []}
+                  activeId={effectiveFolderId}
+                  onOpen={openFolder}
+                  expandedIds={expandedPaths}
+                />
+              </div>
             </div>
           </div>
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              {parentOfCurrent !== undefined ? (
+                <SatButton variant="quiet" onClick={goUpOneLevel} icon={<ArrowUp size={16} aria-hidden="true" />}>
+                  <span className="sr-only sm:not-sr-only">Up one level</span>
+                </SatButton>
+              ) : null}
               <h2
                 ref={headingRef}
                 tabIndex={-1}
-                className="text-[length:var(--sat-staff-type-section-size,20px)] font-semibold leading-[var(--sat-staff-type-section-line,28px)] tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)] outline-none"
+                className="min-w-40 flex-1 break-words text-[length:var(--sat-staff-type-section-size,20px)] font-semibold leading-[var(--sat-staff-type-section-line,28px)] tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)] outline-none"
               >
                 {heading}
               </h2>
-              <p className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{EXAM_TYPE_LABEL[examType]} exams</p>
-            </div>
-            <div className="mt-3 overflow-x-auto">
-              <SatSegmentedControl<SatLibraryTab>
-                label="Exam status"
-                value={tab}
-                options={LIBRARY_GROUPS.map((g) => ({ value: g.value, label: g.label, count: counts[g.value] }))}
-                onChange={(next) => setParams({ tab: next === 'active' ? '' : next })}
-              />
+              {currentFolderMenuItems.length > 0 ? (
+                <SatMenu
+                  modal={false}
+                  label="Actions for current folder"
+                  compact
+                  icon={MoreHorizontal}
+                  items={currentFolderMenuItems}
+                />
+              ) : null}
             </div>
             {notice ? (
               <p
@@ -655,79 +781,26 @@ export function SatExamLibraryRoute() {
                 retryLabel="Return to Library"
               />
             ) : null}
-            {childFolders.length > 0 && !activeIsAll && locationKnown ? (
-              <ul aria-label="Subfolders" className="mt-3 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
-                {childFolders.map((folder) => (
-                  <li key={folder.id}>
-                    <LibraryDroppable id={`folder:${folder.id}`} label={`Drop into ${folder.name}`}>
-                      <div className="flex min-h-11 items-center gap-1 rounded-[12px] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] px-2">
-                        <FolderDragHandle folderId={folder.id} name={folder.name} />
-                        <a
-                          href={folderHref(folder.id)}
-                          onClick={(event) => {
-                            if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-                            event.preventDefault();
-                            openFolder(folder.id);
-                          }}
-                          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-[8px] px-1 text-left text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]"
-                        >
-                          <Folder size={16} aria-hidden="true" className="shrink-0 text-[var(--sat-staff-text-tertiary,#6e6e73)]" />
-                          <span className="min-w-0 flex-1 truncate">{folder.name}</span>
-                        </a>
-                        <span className={SAT_ROW_ACTION_CLASS}>
-                          <SatMenu
-                            modal={false}
-                            label={`Actions for ${folder.name}`}
-                            compact
-                            icon={MoreHorizontal}
-                            items={[
-                              { id: 'open', label: 'Open', onSelect: () => openFolder(folder.id) },
-                              {
-                                id: 'subfolder',
-                                label: 'New subfolder',
-                                onSelect: (trigger) => {
-                                  returnFocusRef.current = trigger;
-                                  setFolderCreateError(null);
-                                  setFolderCreateParent(folder.id);
-                                },
-                              },
-                              {
-                                id: 'rename',
-                                label: 'Rename',
-                                onSelect: (trigger) => {
-                                  returnFocusRef.current = trigger;
-                                  setRenameError(null);
-                                  setRenameTarget(folder.id);
-                                },
-                              },
-                              {
-                                id: 'move',
-                                label: 'Move to',
-                                onSelect: (trigger) => {
-                                  returnFocusRef.current = trigger;
-                                  setMoveFolderError(null);
-                                  setMoveFolderTarget(folder.id);
-                                },
-                              },
-                              {
-                                id: 'delete',
-                                label: 'Delete',
-                                destructive: true,
-                                onSelect: (trigger) => {
-                                  returnFocusRef.current = trigger;
-                                  setDeleteTarget(folder.id);
-                                },
-                              },
-                            ]}
-                          />
-                        </span>
-                      </div>
-                    </LibraryDroppable>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
             <div className="mt-3 flex min-w-0 flex-wrap items-center gap-2" role="group" aria-label="Exam list controls">
+              <div className="min-w-0 max-w-full overflow-x-auto">
+                <SatSegmentedControl<ExamType>
+                  label="Exam type"
+                  value={examType}
+                  options={[
+                    { value: 'classroom', label: EXAM_TYPE_LABEL.classroom, count: typeCounts.classroom },
+                    { value: 'practice', label: EXAM_TYPE_LABEL.practice, count: typeCounts.practice },
+                  ]}
+                  onChange={setExamType}
+                />
+              </div>
+              <div className="min-w-0 max-w-full overflow-x-auto">
+                <SatSegmentedControl<SatLibraryTab>
+                  label="Exam status"
+                  value={tab}
+                  options={LIBRARY_GROUPS.map((g) => ({ value: g.value, label: g.label, count: counts[g.value] }))}
+                  onChange={(next) => setParams({ tab: next === 'active' ? '' : next })}
+                />
+              </div>
               <SatSearchField
                 id="sat-exam-search"
                 label="Search exams"
@@ -776,7 +849,14 @@ export function SatExamLibraryRoute() {
                         {selectedIds.length} selected
                       </p>
                     ) : (
-                      <span className="[&>p]:mt-0"><SatResultCount total={counts[tab]} visible={exams.length} itemLabel={exams.length === 1 ? 'exam' : 'exams'} /></span>
+                      <span className="flex min-w-0 flex-wrap items-center gap-x-2 [&>p]:mt-0">
+                        <SatResultCount total={counts[tab]} visible={exams.length} itemLabel={exams.length === 1 ? 'exam' : 'exams'} />
+                        {childFolders.length > 0 && !activeIsAll && locationKnown ? (
+                          <span className="text-[14px] font-medium tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+                            · {childFolders.length} {childFolders.length === 1 ? 'folder' : 'folders'}
+                          </span>
+                        ) : null}
+                      </span>
                     )}
                   </div>
                   {selectedIds.length ? (
@@ -805,6 +885,67 @@ export function SatExamLibraryRoute() {
                     <span className="flex min-h-11 items-center justify-end"><SortHeaderButton label="Updated" active={sort === 'updated'} direction="desc" onSelect={() => setParams({ sort: '' })} /></span>
                     <span />
                   </div>
+                  {childFolders.length > 0 && !activeIsAll && locationKnown ? (
+                    <ul aria-label="Subfolders" className="m-0 list-none divide-y divide-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] p-0">
+                      {childFolders.map((folder, folderIndex) => {
+                        const items = folderMenuItems(folder);
+                        return (
+                          <li key={folder.id}>
+                            <LibraryDroppable id={`folder:${folder.id}`} label={`Drop into ${folder.name}`}>
+                              <LibraryContextMenu label={`Actions for ${folder.name}`} items={items}>
+                                <div className="min-w-0">
+                              <SatListRowShell
+                                rowId={`folder-${folder.id}`}
+                                index={Math.min(folderIndex, 5)}
+                                primary={
+                                  <a
+                                    href={folderHref(folder.id)}
+                                    aria-label={folder.name}
+                                    className={SAT_ROW_PRIMARY_LINK_CLASS}
+                                    onClick={(event) => {
+                                      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                                      event.preventDefault();
+                                      openFolder(folder.id);
+                                    }}
+                                  />
+                                }
+                              >
+                                <span className={'grid w-full items-center py-3 ' + ROW_GRID}>
+                                    <span className={ROW_CELL.select} aria-hidden="true" />
+                                    <span className={ROW_CELL.art}>
+                                      <FolderDragHandle folderId={folder.id} name={folder.name} />
+                                    </span>
+                                    <span className={ROW_CELL.title}>
+                                      <span className="flex min-h-11 min-w-0 items-center gap-2 text-left text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-primary,#1d1d1f)]">
+                                        <span className="min-w-0 flex-1 break-words">{folder.name}</span>
+                                      </span>
+                                    </span>
+                                    <span className={ROW_CELL.status}>
+                                      <span className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">Folder</span>
+                                    </span>
+                                    <span className={clsx('hidden text-right text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] @min-[820px]/list:block', ROW_CELL.updated)}>{formatDate(folder.updatedAt)}</span>
+                                    <span className={'flex items-center justify-end gap-1 ' + ROW_CELL.chevron}>
+                                      <span className={SAT_ROW_ACTION_CLASS}>
+                                        <SatMenu
+                                          modal={false}
+                                          label={`Actions for ${folder.name}`}
+                                          compact
+                                          icon={MoreHorizontal}
+                                          items={items}
+                                        />
+                                      </span>
+                                      <ArrowRight size={16} className="sat-row-chevron hidden shrink-0 text-slate-400 group-hover:text-slate-500 @min-[820px]/list:block" aria-hidden="true" />
+                                    </span>
+                                  </span>
+                              </SatListRowShell>
+                                </div>
+                              </LibraryContextMenu>
+                            </LibraryDroppable>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : null}
                   {exams.map((exam, rowIndex) => {
                     const status = statusLabel(exam);
                     const tone = statusTone(exam);
@@ -816,10 +957,13 @@ export function SatExamLibraryRoute() {
                       if (!hasPublishedVersion) requestAuthoringDraftOnEntry(exam.id);
                       openRecord(exam.id, primaryPath);
                     };
+                    const locationLabel = folderLocationLabel(exam.id);
+                    const menuItems = examMenuItems(exam, hasPublishedVersion);
                     return (
+                      <LibraryContextMenu key={exam.id} label={`Actions for ${exam.title}`} items={menuItems}>
+                        <div className="min-w-0">
                       <SatListRowShell
-                        key={exam.id}
-                        index={Math.min(rowIndex, 5)}
+                        index={Math.min(rowIndex + childFolders.length, 5)}
                         rowId={exam.id}
                         current={exam.id === lastOpenedId}
                         primary={
@@ -866,6 +1010,19 @@ export function SatExamLibraryRoute() {
                           <span className={ROW_CELL.title}>
                             <span className="block break-words text-[14px] font-semibold leading-5 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{exam.title}</span>
                             <span className="block truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">{examMeta(exam)}<span className="@min-[820px]/list:hidden"> · Updated {formatDate(exam.updatedAt)}</span></span>
+                            {locationLabel ? (
+                              <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                <span className="max-w-full truncate text-[13px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">In {locationLabel}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => openFolder(folderIdOf(entriesByExam, exam.id))}
+                                  aria-label={`Show ${exam.title} in folder`}
+                                  className={`min-h-11 rounded-[8px] px-2 text-[13px] font-semibold leading-5 text-[var(--sat-staff-accent,#0071e3)] hover:bg-[var(--sat-staff-accent-tint,rgba(0,113,227,0.08))] ${SAT_ROW_ACTION_CLASS}`}
+                                >
+                                  Show in folder
+                                </button>
+                              </span>
+                            ) : null}
                           </span>
                           <span className={ROW_CELL.status}><SatStatusPill tone={tone}>{status}</SatStatusPill></span>
                           <span className={clsx('hidden text-right text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)] @min-[820px]/list:block', ROW_CELL.updated)}>{formatDate(exam.updatedAt)}</span>
@@ -876,28 +1033,7 @@ export function SatExamLibraryRoute() {
                                 label={`Actions for ${exam.title}`}
                                 compact
                                 icon={MoreHorizontal}
-                                items={[
-                                  {
-                                    id: 'move',
-                                    label: 'Move to',
-                                    onSelect: (trigger) => {
-                                      returnFocusRef.current = trigger;
-                                      setExamMoveError(null);
-                                      setSingleMoveExam(exam);
-                                      setExamMoveOpen(true);
-                                    },
-                                  },
-                                  ...(hasPublishedVersion
-                                    ? [{
-                                        id: 'edit',
-                                        label: 'Edit exam',
-                                        onSelect: () => {
-                                          requestAuthoringDraftOnEntry(exam.id);
-                                          openRecord(exam.id, `/sat/exams/${exam.id}`);
-                                        },
-                                      }]
-                                    : []),
-                                ]}
+                                items={menuItems}
                               />
                             </span>
                             {hasPublishedVersion ? (
@@ -919,6 +1055,8 @@ export function SatExamLibraryRoute() {
                           </span>
                         </span>
                       </SatListRowShell>
+                        </div>
+                      </LibraryContextMenu>
                     );
                   })}
                 </SatList>
@@ -994,7 +1132,6 @@ export function SatExamLibraryRoute() {
         <FolderMoveDialog
           open
           folders={folderMoveDestinations}
-          movingId={moveFolderRow.id}
           currentParentId={moveFolderRow.parentId ?? null}
           onClose={() => setMoveFolderTarget(null)}
           onMove={(parentId) => void runMoveFolder(parentId)}
@@ -1015,6 +1152,7 @@ export function SatExamLibraryRoute() {
         folders={moveDestinations}
         count={moveTargetExams.length}
         compatible={moveCompatible && moveTargetExams.length > 0}
+        initialDestination={examInitialDestination}
         onClose={() => {
           createFolder.reset();
           setExamMoveOpen(false);
