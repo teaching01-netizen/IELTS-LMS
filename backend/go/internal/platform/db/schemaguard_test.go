@@ -37,11 +37,11 @@ func TestVerifyFailsClosedOnMissingTable(t *testing.T) {
 }
 
 func TestSchemaGuardListSizes(t *testing.T) {
-	if len(RequiredTables) != 13 {
-		t.Fatalf("RequiredTables must include the authoring table, 3 existing SAT start-code tables, the 0081 slot table, the 3 0087 score-conversion tables, the 0088 room-operation receipt, the 0092 PDF export table, the 0101 form-response table, and the 0105/0108 recovery tables; got %d", len(RequiredTables))
+	if len(RequiredTables) != 16 {
+		t.Fatalf("RequiredTables must include the authoring table, 3 existing SAT start-code tables, the 0081 slot table, the 3 0087 score-conversion tables, the 0088 room-operation receipt, the 0092 PDF export table, the 0101 form-response table, the 0105/0108 recovery tables, and the 3 0121 library tables; got %d", len(RequiredTables))
 	}
-	if len(RequiredIndexes) != 17 {
-		t.Fatalf("RequiredIndexes must include the 10 existing guards, 3 SAT slot indexes, 2 PDF export indexes, and the recovery grant/submission guards, got %d", len(RequiredIndexes))
+	if len(RequiredIndexes) != 20 {
+		t.Fatalf("RequiredIndexes must include the 10 existing guards, 3 SAT slot indexes, 2 PDF export indexes, the recovery grant/submission guards, and the 3 0121 library guards, got %d", len(RequiredIndexes))
 	}
 	seen := map[string]bool{}
 	for _, c := range RequiredColumns {

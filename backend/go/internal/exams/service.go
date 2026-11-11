@@ -263,6 +263,10 @@ type CreateRequest struct {
 	OwnerID          string
 	// SATConfig overlays the SAT blueprint at creation (nil keeps the defaults).
 	SATConfig *SATExamConfig
+	// FolderID places the new SAT exam inside the library atomically (nil =
+	// unfiled Library root). Omitted preserves legacy behavior; saving or
+	// importing with old clients never clears membership.
+	FolderID *string `json:"FolderID,omitempty"`
 }
 
 // UpdateRequest mirrors UpdateExamRequest with revision fencing.
@@ -524,7 +528,8 @@ func (s *Service) GetForActor(ctx context.Context, actor auth.ActorContext, id s
 
 // CreateForActor derives owner and tenant from the authenticated actor. In
 // particular, a builder cannot create an exam in an organization supplied by
-// the client payload.
+// the client payload. When FolderID is set, the create organization derives
+// from the authorized folder (admin) or must match the builder org.
 func (s *Service) CreateForActor(ctx context.Context, actor auth.ActorContext, req CreateRequest) (Exam, error) {
 	if err := requireWriteActor(actor); err != nil {
 		return Exam{}, err
@@ -538,6 +543,35 @@ func (s *Service) CreateForActor(ctx context.Context, actor auth.ActorContext, r
 		}
 		orgID := strings.TrimSpace(*actor.OrgID)
 		req.OrganizationID = &orgID
+	}
+	if req.FolderID != nil && strings.TrimSpace(*req.FolderID) != "" {
+		fid := strings.TrimSpace(*req.FolderID)
+		req.FolderID = &fid
+		provider := NormalizeProviderKey(firstNonEmpty(req.ProviderKey))
+		if provider != ProviderSAT {
+			return Exam{}, validationError("Exam library folders are available for SAT only.")
+		}
+		var scopeKey, fprovider string
+		var forg sql.NullString
+		if err := s.db.QueryRowContext(ctx, "SELECT id, scope_key, provider_key, organization_id FROM exam_folders WHERE id = ?", fid).Scan(&fid, &scopeKey, &fprovider, &forg); err != nil {
+			if err == sql.ErrNoRows {
+				return Exam{}, notFoundError("Folder not found.")
+			}
+			return Exam{}, err
+		}
+		if NormalizeProviderKey(fprovider) != ProviderSAT || scopeKey != LibraryScopeKey(provider, nullToPtr(forg)) {
+			return Exam{}, notFoundError("Folder not found.")
+		}
+		if !actorCanReadScope(actor, nullToPtr(forg)) {
+			return Exam{}, notFoundError("Folder not found.")
+		}
+		if actor.Role == auth.RoleAdmin {
+			req.OrganizationID = nullToPtr(forg)
+		} else {
+			if !equalOrg(actor.OrgID, nullToPtr(forg)) {
+				return Exam{}, notFoundError("Folder not found.")
+			}
+		}
 	}
 	exam, err := s.Create(ctx, req)
 	if err != nil {
@@ -766,6 +800,50 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Exam, error) {
 				return err
 			}
 		}
+		// Atomic create-in-folder: no create-then-move split. Omitted folder
+		// preserves legacy root behavior (no entry row).
+		if req.FolderID != nil && strings.TrimSpace(*req.FolderID) != "" {
+			if providerKey != ProviderSAT {
+				return validationError("Exam library folders are available for SAT only.")
+			}
+			fid := strings.TrimSpace(*req.FolderID)
+			var fScope, fProvider string
+			var fOrg sql.NullString
+			if err := q.QueryRowContext(ctx, "SELECT id, scope_key, provider_key, organization_id FROM exam_folders WHERE id = ?", fid).Scan(&fid, &fScope, &fProvider, &fOrg); err != nil {
+				if err == sql.ErrNoRows {
+					return notFoundError("Folder not found.")
+				}
+				return err
+			}
+			var wantOrg *string
+			if orgID.Valid {
+				v := orgID.String
+				wantOrg = &v
+			}
+			if NormalizeProviderKey(fProvider) != providerKey || fScope != LibraryScopeKey(providerKey, wantOrg) {
+				return conflictError("Exams and the destination folder belong to different libraries.")
+			}
+			if err := lockLibraryScopeTx(ctx, q, fScope, providerKey, wantOrg); err != nil {
+				return err
+			}
+			// Re-read under the scope mutex so a concurrent folder delete or
+			// scope change cannot slip between resolve and insert.
+			if err := q.QueryRowContext(ctx, "SELECT scope_key FROM exam_folders WHERE id = ? FOR UPDATE", fid).Scan(&fScope); err != nil {
+				if err == sql.ErrNoRows {
+					return notFoundError("Folder not found.")
+				}
+				return err
+			}
+			if fScope != LibraryScopeKey(providerKey, wantOrg) {
+				return conflictError("Exams and the destination folder belong to different libraries.")
+			}
+			if _, err := q.ExecContext(ctx, "INSERT INTO exam_folder_entries (exam_id, folder_id, scope_key, revision) VALUES (?, ?, ?, 1)", id, fid, fScope); err != nil {
+				if isDuplicateKey(err) {
+					return conflictError("Exam placement already exists.")
+				}
+				return err
+			}
+		}
 		if _, err := q.ExecContext(ctx, "INSERT INTO exam_events (id, exam_id, version_id, actor_id, action, from_state, to_state, created_at) VALUES (?, ?, ?, ?, 'created', NULL, 'draft', NOW())", uuid.NewString(), id, versionID, strings.TrimSpace(req.OwnerID)); err != nil {
 			return err
 		}
@@ -838,6 +916,26 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Exa
 		if req.SatScoreReportEnabled != nil && existing.ProviderKey != ProviderSAT {
 			return validationError("The score report setting applies to SAT exams only.")
 		}
+		// Cross-scope guard under the existing Update row lock: a foldered
+		// exam cannot change organization without moving to the Library
+		// first, so legacy org writes never leave cross-scope membership.
+		// Root entries (no row, or folder_id NULL) remain safe.
+		if req.OrganizationID != nil {
+			want := strings.TrimSpace(*req.OrganizationID)
+			var have string
+			if existing.OrganizationID != nil {
+				have = strings.TrimSpace(*existing.OrganizationID)
+			}
+			if want != have {
+				var filed int
+				if err := q.QueryRowContext(ctx, "SELECT COUNT(*) FROM exam_folder_entries WHERE exam_id = ? AND folder_id IS NOT NULL", id).Scan(&filed); err != nil {
+					return err
+				}
+				if filed > 0 {
+					return conflictError("Move this exam to the Library before changing its organization.")
+				}
+			}
+		}
 		var scoreReport any
 		if req.SatScoreReportEnabled != nil {
 			scoreReport = *req.SatScoreReportEnabled
@@ -854,6 +952,12 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Exa
 		e, err := scanExam(row2)
 		if err != nil {
 			return err
+		}
+		if req.OrganizationID != nil && e.ProviderKey == ProviderSAT {
+			// Use the saved organization: blank metadata fields preserve it.
+			if _, err := q.ExecContext(ctx, "UPDATE exam_folder_entries SET scope_key = ? WHERE exam_id = ?", LibraryScopeKey(e.ProviderKey, e.OrganizationID), id); err != nil {
+				return err
+			}
 		}
 		updated = e
 		return nil

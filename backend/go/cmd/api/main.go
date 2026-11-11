@@ -623,6 +623,14 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/{id}/versions", examsVersionsHandler(app))
 			authzRoute(r, "GET", "/{id}/versions/summary", examsVersionSummariesHandler(app))
 		})
+		// SAT exam library folders + membership (migration 0121). SAT-only.
+		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/exam-library", func(r chi.Router) {
+			authzRoute(r, "GET", "/", examLibraryHandler(app))
+			authzRoute(r, "POST", "/folders", examLibraryFoldersHandler(app))
+			authzRoute(r, "PATCH", "/folders/{folderId}", examLibraryFolderHandler(app))
+			authzRoute(r, "DELETE", "/folders/{folderId}", examLibraryFolderHandler(app))
+			authzRoute(r, "POST", "/move-exams", examLibraryMoveHandler(app))
+		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/assessment-access", func(r chi.Router) {
 			authzRoute(r, "GET", "/exams/{examID}/overview", accessLinkOverview(app))
 			authzRoute(r, "GET", "/exams/{examID}/links", examLinksList(app))

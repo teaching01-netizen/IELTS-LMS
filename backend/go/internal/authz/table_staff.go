@@ -31,9 +31,14 @@ func init() {
 		"PATCH /{id}":  {MinRoles: writeStaff},
 		"DELETE /{id}": {MinRoles: writeStaff},
 		// exams draft/publish lifecycle (admin/builder write).
-		"PATCH /{id}/draft":          {MinRoles: writeStaff},
-		"POST /{id}/draft/reopen":    {MinRoles: writeStaff},
-		"POST /{id}/publish":         {MinRoles: writeStaff},
+		"PATCH /{id}/draft":       {MinRoles: writeStaff},
+		"POST /{id}/draft/reopen": {MinRoles: writeStaff},
+		"POST /{id}/publish":      {MinRoles: writeStaff},
+		// SAT exam library folders + membership (0121, SAT-only).
+		"POST /folders":              {MinRoles: writeStaff},
+		"PATCH /folders/{folderId}":  {MinRoles: writeStaff},
+		"DELETE /folders/{folderId}": {MinRoles: writeStaff},
+		"POST /move-exams":           {MinRoles: writeStaff},
 		"GET /{id}/events":           {MinRoles: readStaff},
 		"GET /{id}/validation":       {MinRoles: readStaff},
 		"GET /{id}/versions":         {MinRoles: readStaff},

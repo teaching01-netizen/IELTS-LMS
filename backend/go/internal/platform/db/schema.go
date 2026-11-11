@@ -47,6 +47,12 @@ var RequiredTables = []string{
 	// checkpoint table would silently lose listening continuity.
 	"attempt_device_recovery_grants",
 	"attempt_audio_checkpoints",
+	// SAT exam library folders (0121): folder hierarchy + membership rows.
+	// Missing tables must refuse boot so the library API never serves
+	// without its mutex + membership storage.
+	"exam_library_scopes",
+	"exam_folders",
+	"exam_folder_entries",
 }
 
 // RequiredColumns: 19 durability-critical columns from the Rust
@@ -126,6 +132,16 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "user_sessions", Column: "remembered"},
 	{Table: "user_sessions", Column: "idle_window_seconds"},
 	{Table: "user_sessions", Column: "credential_authenticated_at"},
+	// SAT exam library folders (0121): folder metadata + membership revisions.
+	{Table: "exam_folders", Column: "scope_key"},
+	{Table: "exam_folders", Column: "provider_key"},
+	{Table: "exam_folders", Column: "organization_id"},
+	{Table: "exam_folders", Column: "parent_id"},
+	{Table: "exam_folders", Column: "parent_key"},
+	{Table: "exam_folders", Column: "revision"},
+	{Table: "exam_folder_entries", Column: "folder_id"},
+	{Table: "exam_folder_entries", Column: "scope_key"},
+	{Table: "exam_folder_entries", Column: "revision"},
 }
 
 // RequiredIndex is one (table, index) pair the runtime depends on.
@@ -163,6 +179,10 @@ var RequiredIndexes = []RequiredIndex{
 	// attempt, and exactly one current submission per completion generation.
 	{Table: "attempt_device_recovery_grants", Index: "uq_attempt_device_recovery_grants_active"},
 	{Table: "student_submissions", Index: "uq_student_submissions_attempt_generation"},
+	// SAT exam library folders (0121): sibling uniqueness + membership lookups.
+	{Table: "exam_folders", Index: "uq_exam_folders_sibling"},
+	{Table: "exam_folders", Index: "idx_exam_folders_scope_parent"},
+	{Table: "exam_folder_entries", Index: "idx_exam_folder_entries_scope_folder"},
 }
 
 // SchemaVerifier queries information_schema for the required lists.

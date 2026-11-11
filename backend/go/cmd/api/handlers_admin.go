@@ -59,6 +59,9 @@ func examsCreateHandler(app *App) http.HandlerFunc {
 			ProviderExamType *string `json:"providerExamType"`
 			// Configuration overlays the SAT blueprint (SAT only; nil = defaults).
 			Configuration *exams.SATExamConfig `json:"configuration"`
+			// FolderID places the exam inside the SAT library atomically.
+			// Omitted preserves legacy unfiled behavior.
+			FolderID *string `json:"folderId"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -73,6 +76,7 @@ func examsCreateHandler(app *App) http.HandlerFunc {
 			ProviderKey:      req.ProviderKey,
 			ProviderExamType: req.ProviderExamType,
 			SATConfig:        req.Configuration,
+			FolderID:         req.FolderID,
 			OperationKey:     strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 		})
 		if err != nil {

@@ -64,6 +64,7 @@ var expectedAnnotated = []string{
 	"POST /public/access-links/{linkID}/resolve-entry",
 	"GET /", "POST /", "GET /{id}", "PATCH /{id}", "DELETE /{id}",
 	"PATCH /{id}/draft", "POST /{id}/draft/reopen", "POST /{id}/publish",
+	"POST /folders", "PATCH /folders/{folderId}", "DELETE /folders/{folderId}", "POST /move-exams",
 	"GET /{id}/events", "GET /{id}/validation", "GET /{id}/versions", "GET /{id}/versions/summary",
 	"GET /exams/{examID}/overview", "GET /exams/{examID}/links", "POST /exams/{examID}/links",
 	"POST /exams/{examID}/sat-workbook-preview", "POST /exams/{examID}/sat-workbook-commit",
