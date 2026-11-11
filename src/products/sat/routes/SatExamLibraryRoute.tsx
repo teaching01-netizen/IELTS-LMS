@@ -566,7 +566,7 @@ export function SatExamLibraryRoute() {
     : libraryError;
 
   return (
-    <SatContainer className="@container/library">
+    <SatContainer measure="full" className="@container/library">
       <SatPageHeader
         title="Exams"
         description="Author Digital SAT practice exams and prepare rooms. Changes are saved automatically."
@@ -618,7 +618,7 @@ export function SatExamLibraryRoute() {
               />
             </div>
           </div>
-          <div className="@container/list min-w-0 flex-1">
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
               <h2
                 ref={headingRef}
@@ -747,8 +747,10 @@ export function SatExamLibraryRoute() {
                 onChange={(next) => setParams({ sort: next === 'updated' ? '' : next })}
               />
             </div>
-
-            {loadError ? (
+          </div>
+        </div>
+        <div className="@container/list min-w-0">
+          {loadError ? (
               <SatInlineError title={libraryError ? 'Library could not load' : 'Exams could not load'} description={loadError} onRetry={() => { void query.refetch(); void library.refetch(); }} />
             ) : query.isLoading || libraryLoading ? (
               <SatListSkeleton rows={5} label="Loading exams" />
@@ -862,7 +864,7 @@ export function SatExamLibraryRoute() {
                             </ExamDragHandle>
                           </span>
                           <span className={ROW_CELL.title}>
-                            <span className="block truncate text-[14px] font-semibold leading-5 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{exam.title}</span>
+                            <span className="block break-words text-[14px] font-semibold leading-5 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{exam.title}</span>
                             <span className="block truncate text-[14px] leading-5 tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">{examMeta(exam)}<span className="@min-[820px]/list:hidden"> · Updated {formatDate(exam.updatedAt)}</span></span>
                           </span>
                           <span className={ROW_CELL.status}><SatStatusPill tone={tone}>{status}</SatStatusPill></span>
@@ -968,7 +970,6 @@ export function SatExamLibraryRoute() {
                 action={<SatButton variant="primary" onClick={openCreate} icon={<Plus size={16} aria-hidden="true" />}>Create exam</SatButton>}
               />
             )}
-          </div>
         </div>
       </LibraryDragProvider>
 
