@@ -18,27 +18,29 @@ type SatNavItem = {
   label: string;
   path: string;
   icon: typeof BookOpen;
+  /** Short visible label for the five-column phone bar; full `label` stays the accessible name. */
+  shortLabel?: string;
 };
 
 function navForRole(role: string | undefined): SatNavItem[] {
-  if (role === 'builder') return [{ label: 'Exams', path: '/sat/exams', icon: BookOpen }];
-  if (role === 'grader') return [{ label: 'Responses', path: '/sat/results', icon: BarChart3 }];
+  if (role === 'builder') return [{ label: 'Exams', path: '/sat/exams', icon: BookOpen, shortLabel: 'Exams' }];
+  if (role === 'grader') return [{ label: 'Responses', path: '/sat/results', icon: BarChart3, shortLabel: 'Results' }];
   if (role === 'proctor') {
     return [
-      { label: 'Rooms', path: '/sat/sessions', icon: Radio },
-      { label: 'Responses', path: '/sat/results', icon: BarChart3 },
-      { label: 'Form responses', path: '/sat/forms', icon: ClipboardList },
+      { label: 'Rooms', path: '/sat/sessions', icon: Radio, shortLabel: 'Rooms' },
+      { label: 'Responses', path: '/sat/results', icon: BarChart3, shortLabel: 'Results' },
+      { label: 'Form responses', path: '/sat/forms', icon: ClipboardList, shortLabel: 'Forms' },
     ];
   }
   const items: SatNavItem[] = [
-    { label: 'Exams', path: '/sat/exams', icon: BookOpen },
-    { label: 'Rooms', path: '/sat/sessions', icon: Radio },
-    { label: 'Responses', path: '/sat/results', icon: BarChart3 },
-    { label: 'Form responses', path: '/sat/forms', icon: ClipboardList },
+    { label: 'Exams', path: '/sat/exams', icon: BookOpen, shortLabel: 'Exams' },
+    { label: 'Rooms', path: '/sat/sessions', icon: Radio, shortLabel: 'Rooms' },
+    { label: 'Responses', path: '/sat/results', icon: BarChart3, shortLabel: 'Results' },
+    { label: 'Form responses', path: '/sat/forms', icon: ClipboardList, shortLabel: 'Forms' },
   ];
   // Score conversion is an admin-only policy surface (the route guard allows
   // only `admin`), so no other role is ever offered the link.
-  if (role === 'admin') items.push({ label: 'Score Conversion', path: '/sat/score-conversion', icon: Sigma });
+  if (role === 'admin') items.push({ label: 'Score Conversion', path: '/sat/score-conversion', icon: Sigma, shortLabel: 'Scores' });
   return items;
 }
 
@@ -179,7 +181,7 @@ export function SatRoot() {
         )}
 
         <SatWorkspaceNavContext.Provider value={workspaceItems}>
-        <main id="sat-main" tabIndex={-1} style={{ viewTransitionName: 'sat-workspace', background: 'var(--sat-staff-canvas,var(--sat-canvas))' }} className={`min-h-screen focus:outline-none ${isDetailPage ? '' : 'pb-20 md:pb-0'}`}>
+        <main id="sat-main" tabIndex={-1} style={{ viewTransitionName: 'sat-workspace', background: 'var(--sat-staff-canvas,var(--sat-canvas))' }} className={`min-h-screen focus:outline-none ${isDetailPage ? '' : 'pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-0'}`}>
           {collaborationExamId ? (
             <Suspense
               fallback={
@@ -203,17 +205,22 @@ export function SatRoot() {
         </SatWorkspaceNavContext.Provider>
 
         {isDetailPage ? null : (
-        <nav aria-label="Digital SAT" className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--sat-staff-border-nav,var(--sat-separator))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] px-2 pb-[max(env(safe-area-inset-bottom),8px)] pt-1.5 [backdrop-filter:var(--sat-staff-blur-nav)] [-webkit-backdrop-filter:var(--sat-staff-blur-nav)] [background:var(--sat-staff-glass-bottomnav)] md:hidden">
-          <div className="mx-auto flex max-w-md items-center justify-around">
+        <nav aria-label="Digital SAT" className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--sat-staff-border-nav,var(--sat-separator))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] px-1.5 pb-[max(env(safe-area-inset-bottom),8px)] pt-1.5 [backdrop-filter:var(--sat-staff-blur-nav)] [-webkit-backdrop-filter:var(--sat-staff-blur-nav)] [background:var(--sat-staff-glass-bottomnav)] md:hidden">
+          <div className="mx-auto flex w-full max-w-md items-stretch justify-between gap-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
-                <NavLink key={item.path} to={item.path} className={({ isActive }) => `relative flex min-h-12 min-w-[72px] flex-col items-center justify-center gap-0.5 rounded-xl text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'text-[var(--sat-staff-accent,var(--sat-accent-core))]' : 'text-[var(--sat-staff-text-secondary,#515154)]'}`}>
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  aria-label={item.label}
+                  className={({ isActive }) => `relative flex min-h-12 min-w-0 flex-1 basis-0 flex-col items-center justify-center gap-0.5 rounded-xl px-0.5 text-center text-[11px] font-semibold leading-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))] ${isActive ? 'text-[var(--sat-staff-accent,var(--sat-accent-core))]' : 'text-[var(--sat-staff-text-secondary,#515154)]'}`}
+                >
                   {({ isActive }) => (
                     <>
-                      {isActive ? <span aria-hidden="true" className="sat-route-enter absolute inset-x-6 top-0 h-0.5 rounded-full bg-[var(--sat-staff-accent,var(--sat-accent-core))]" /> : null}
+                      {isActive ? <span aria-hidden="true" className="sat-route-enter absolute inset-x-4 top-0 h-0.5 rounded-full bg-[var(--sat-staff-accent,var(--sat-accent-core))]" /> : null}
                       <Icon size={20} strokeWidth={1.9} aria-hidden="true" />
-                      <span>{item.label}</span>
+                      <span className="w-full break-words">{item.shortLabel ?? item.label}</span>
                     </>
                   )}
                 </NavLink>

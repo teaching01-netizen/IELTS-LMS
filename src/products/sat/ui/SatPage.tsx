@@ -1,4 +1,5 @@
 import { forwardRef, useId, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { cva, type VariantProps } from 'class-variance-authority';
 import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 
 /**
@@ -201,7 +202,21 @@ export function SatSearchField({
   );
 }
 
-export type SatButtonVariant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'danger-secondary';
+const satButtonVariants = cva('sat-btn sat-press', {
+  variants: {
+    variant: {
+      primary: 'sat-btn--primary',
+      secondary: 'sat-btn--secondary',
+      quiet: 'sat-btn--quiet',
+      danger: 'sat-btn--danger',
+      'danger-secondary': 'sat-btn--danger-secondary',
+    },
+    iconOnly: { true: 'sat-btn--icon' },
+    block: { true: 'sat-btn--block' },
+  },
+});
+
+export type SatButtonVariant = NonNullable<VariantProps<typeof satButtonVariants>['variant']>;
 
 export type SatButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & {
   variant?: SatButtonVariant;
@@ -242,12 +257,7 @@ export const SatButton = forwardRef<HTMLButtonElement, SatButtonProps>(function 
         }
         onClick?.(event);
       }}
-      className={
-        'sat-btn sat-press sat-btn--' + variant +
-        (iconOnly ? ' sat-btn--icon' : '') +
-        (block ? ' sat-btn--block' : '') +
-        (className ? ' ' + className : '')
-      }
+      className={satButtonVariants({ variant, iconOnly, block, className })}
     >
       {pending && (icon || iconOnly) ? spinner : icon}
       {iconOnly ? null : (
@@ -463,7 +473,7 @@ export function SatToolbarSelect<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="sat-select relative flex min-h-11 shrink-0 items-center rounded-[var(--sat-staff-radius-control,10px)] border border-[var(--sat-staff-border-control,rgba(0,0,0,0.42))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] pl-3 focus-within:border-[var(--sat-staff-accent,#0071e3)] focus-within:ring-[3px] focus-within:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">
+    <div className="sat-select relative flex min-h-11 shrink-0 items-center rounded-[var(--sat-staff-radius-input,10px)] border border-[var(--sat-staff-border-control,rgba(0,0,0,0.42))] bg-[var(--sat-staff-surface-solid-fallback,#fff)] pl-3 focus-within:border-[var(--sat-staff-accent,#0071e3)] focus-within:ring-[3px] focus-within:ring-[var(--sat-staff-accent-ring,rgba(0,113,227,0.4))]">
       <label htmlFor={id} className="whitespace-nowrap text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{label}</label>
       <select
         id={id}
@@ -593,7 +603,7 @@ export function SatListRowShell({
  */
 export function SatListColumns({ gridClassName, columns }: { gridClassName: string; columns: ReadonlyArray<{ label: string; align?: 'start' | 'end' }> }) {
   return (
-    <div aria-hidden="true" className={'hidden min-h-10 items-center bg-[var(--sat-staff-fill-faint,rgba(0,0,0,0.035))] px-4 text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-secondary,#515154)] md:grid ' + gridClassName}>
+    <div aria-hidden="true" className={'hidden min-h-10 items-center bg-[var(--sat-staff-surface-raised,#f8faff)] px-4 text-[14px] font-semibold leading-5 text-[var(--sat-staff-text-secondary,#515154)] md:grid ' + gridClassName}>
       {columns.map((column, index) => (
         <span key={index} className={column.align === 'end' ? 'text-right' : undefined}>{column.label}</span>
       ))}
@@ -706,7 +716,7 @@ export function SatEmptyState({
 }) {
   return (
     <div className="sat-route-enter flex min-h-[360px] flex-col items-center justify-center px-6 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] text-[var(--sat-staff-text-tertiary,#6e6e73)] shadow-[var(--sat-staff-shadow-card-soft,0_1px_2px_rgba(0,0,0,0.04))]">
+      <div className="flex h-12 w-12 items-center justify-center rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-accent-tint-strong,#dceaff)] bg-[var(--sat-staff-accent-tint,#edf4ff)] text-[var(--sat-staff-accent-text-on-tint,#184591)]">
         {icon}
       </div>
       <h2 className="mt-4 text-balance text-[18px] font-semibold tracking-[-0.02em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
@@ -755,7 +765,7 @@ export function SatInlineError({
   retryLabel?: string;
 }) {
   return (
-    <div role="alert" className="mt-4 flex gap-3 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] bg-[var(--sat-staff-surface,#fff)] p-5">
+    <div role="alert" className="mt-4 flex gap-3 rounded-[var(--sat-staff-radius-card,14px)] border border-[var(--sat-staff-danger-border,rgba(180,35,24,0.2))] bg-[var(--sat-staff-surface,#fff)] p-5">
       <AlertCircle size={20} aria-hidden="true" className="mt-0.5 shrink-0 text-[var(--sat-staff-danger,#b42318)]" />
       <div className="min-w-0">
         <h2 className="text-[16px] font-semibold leading-6 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>

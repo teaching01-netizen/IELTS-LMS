@@ -12,6 +12,13 @@ const useExamListQueryMock = vi.hoisted(() => vi.fn());
 const createProviderExamMock = vi.hoisted(() => vi.fn());
 const invalidateExamListMock = vi.hoisted(() => vi.fn());
 const bulkDeleteMock = vi.hoisted(() => vi.fn());
+const libraryState = vi.hoisted(() => ({
+  folders: [] as Array<{ id: string; name: string; parentId?: string; revision: number; scopeKey: string; providerKey: string; organizationId?: string; createdBy: string; createdAt: string; updatedAt: string }>,
+  entries: [] as Array<{ examId: string; folderId?: string; revision: number }>,
+  createCalls: [] as Array<{ name: string; parentId?: string | null }>,
+  deleteCalls: [] as Array<{ id: string; revision: number }>,
+  deleteError: null as string | null,
+}));
 vi.mock('../../../../features/exam-authoring/api/examQueries', () => ({
   examKeys: { all: ['exam-authoring'] },
   useExamListQuery: useExamListQueryMock,
@@ -21,11 +28,46 @@ vi.mock('../../../../features/exam-authoring/api/examQueries', () => ({
 vi.mock('../../library/queries', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../library/queries')>(),
   useSatLibraryQuery: () => ({
-    data: { folders: [], entries: [], byExam: {} },
+    data: {
+      folders: libraryState.folders,
+      entries: libraryState.entries,
+      byExam: Object.fromEntries(libraryState.entries.map((entry) => [entry.examId, entry])),
+    },
     isLoading: false,
     error: null,
     refetch: vi.fn(),
   }),
+  useCreateFolderMutation: () => ({
+    isPending: false,
+    reset: vi.fn(),
+    mutateAsync: async (input: { name: string; parentId?: string | null }) => {
+      libraryState.createCalls.push(input);
+      const created = {
+        id: `f-${input.name}`,
+        name: input.name,
+        parentId: input.parentId ?? undefined,
+        revision: 0,
+        scopeKey: 'sat|platform:nil',
+        providerKey: 'sat',
+        createdBy: 'Admin',
+        createdAt: '',
+        updatedAt: '',
+      };
+      libraryState.folders.push(created);
+      return created;
+    },
+  }),
+  useRenameFolderMutation: () => ({ isPending: false, mutateAsync: async () => ({}) }),
+  useMoveFolderMutation: () => ({ isPending: false, mutateAsync: async () => ({}) }),
+  useDeleteFolderMutation: () => ({
+    isPending: false,
+    mutateAsync: async (input: { id: string; revision: number }) => {
+      libraryState.deleteCalls.push(input);
+      if (libraryState.deleteError) throw new Error(libraryState.deleteError);
+      libraryState.folders = libraryState.folders.filter((folder) => folder.id !== input.id);
+    },
+  }),
+  useMoveExamsMutation: () => ({ isPending: false, mutateAsync: async () => ({ entries: [] }) }),
 }));
 vi.mock('../../../../features/exam-authoring/api/examAuthoringFacade', () => ({
   examAuthoringFacade: { lifecycle: { createProviderExam: createProviderExamMock } },
@@ -101,10 +143,11 @@ describe('SatExamLibraryRoute', () => {
     expect(screen.queryByText(/Math:/)).not.toBeInTheDocument();
   });
 
-  it('labels the section scope before the first room exists', () => {
+  it('shows the creation taxonomy as metadata instead of a publication scope label', () => {
     useExamListQueryMock.mockReturnValue({ data: { entities: [{ ...satExam, satSectionScope: 'math' }], exams: [] }, isLoading: false, error: null });
     renderRoute();
-    expect(screen.getByText(/Math only/)).toBeInTheDocument();
+    expect(screen.getAllByText('Custom modules').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Math only/)).not.toBeInTheDocument();
   });
 
   it('drops an excluded section plan and resets its hidden invalid timings', async () => {
@@ -133,6 +176,11 @@ describe('SatExamLibraryRoute', () => {
     useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, satExam], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     invalidateExamListMock.mockResolvedValue(undefined);
     defaultsMock.data.classroomCreationEnabled = true;
+    libraryState.folders = [];
+    libraryState.entries = [];
+    libraryState.createCalls = [];
+    libraryState.deleteCalls = [];
+    libraryState.deleteError = null;
   });
 
   afterEach(() => {
@@ -184,7 +232,7 @@ describe('SatExamLibraryRoute', () => {
     expect(peekAuthoringDraftOnEntry('sat-1')).toBe(true);
   });
 
-  it('sends a published exam to its rooms, and only its Edit control arms a draft', () => {
+  it('sends a published exam to its rooms, and only its Edit menu action arms a draft', () => {
     const published = {
       ...satExam,
       status: 'published',
@@ -202,10 +250,9 @@ describe('SatExamLibraryRoute', () => {
     fireEvent.click(row);
     expect(peekAuthoringDraftOnEntry('sat-1')).toBe(false);
 
-    // Edit is a real control beside the row link, not a control inside it.
-    const edit = screen.getByRole('link', { name: 'Edit SAT Practice 06' });
-    expect(row.contains(edit)).toBe(false);
-    fireEvent.click(edit);
+    // Editing stays explicit in the row's action menu.
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for SAT Practice 06' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit exam' }));
     expect(peekAuthoringDraftOnEntry('sat-1')).toBe(true);
   });
 
@@ -216,9 +263,10 @@ describe('SatExamLibraryRoute', () => {
     expect(screen.queryByText('IELTS Academic 01')).not.toBeInTheDocument();
   });
 
-  it('shows rooms-available status and scope, never a publish state, in the library row', () => {
+  it('shows rooms-available status as a truthful pill, never a publish state or scope duplicate', () => {
     const published = {
       ...satExam,
+      satCustomModules: false,
       status: 'published',
       currentDraftVersionId: null,
       currentPublishedVersionId: 'published-v2',
@@ -227,10 +275,10 @@ describe('SatExamLibraryRoute', () => {
     };
     useExamListQueryMock.mockReturnValue({ data: { entities: [published], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
-    // The filter tab and the row's status pill both say it.
-    expect(screen.getAllByText('Rooms available')).toHaveLength(2);
+    expect(screen.getAllByText('Rooms available')).toHaveLength(1);
     expect(screen.queryByText(/Published/)).not.toBeInTheDocument();
-    expect(screen.getByText(/^Math only/)).toBeInTheDocument();
+    expect(screen.queryByText(/Math only/)).not.toBeInTheDocument();
+    expect(screen.getByText('Full SAT')).toBeInTheDocument();
   });
 
   it('creates a SAT directly without exposing a provider selector', async () => {
@@ -376,42 +424,46 @@ describe('SatExamLibraryRoute', () => {
     expect(createProviderExamMock).not.toHaveBeenCalled();
   });
 
-  it('renders header plus skeleton while loading, without blanking the page', () => {
+  it('renders the Exams title plus skeleton while loading, without blanking the page', () => {
     useExamListQueryMock.mockReturnValue({ data: undefined, isLoading: true, error: null, refetch: vi.fn() });
     renderRoute();
-    expect(screen.getByText('Exams')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'Exams' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Loading exams' })).toBeInTheDocument();
     expect(screen.queryByText('SAT Practice 06')).not.toBeInTheDocument();
   });
 
-  it('announces the filter result count once data is present', () => {
+  it('shows a local section count instead of a global filtered total', () => {
     renderRoute();
-    expect(screen.getByRole('status')).toHaveTextContent('1 exam');
+    expect(screen.getByRole('heading', { name: 'Exams not in a folder' })).toBeInTheDocument();
+    expect(screen.getByText('1')).toBeInTheDocument();
   });
 
-  it('offers Clear search from a filtered-zero state', () => {
+  it('offers Clear search from a no-match state and returns to the current location', () => {
     renderRoute();
-    fireEvent.change(screen.getByPlaceholderText('Search exams'), { target: { value: 'zzz-no-match' } });
-    expect(screen.getByText('No matching exams')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Search all exams and folders'), { target: { value: 'zzz-no-match' } });
+    expect(screen.getByText('No matches for “zzz-no-match”')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
     expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
   });
 
-  it('separates active and archived exams into counted status tabs', () => {
+  it('keeps archived exams collapsed with a count until the disclosure is opened', () => {
     useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, satExam, { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
     expect(screen.queryByText('SAT Archived 01')).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'All active 1' })).toHaveAttribute('aria-checked', 'true');
-    fireEvent.click(screen.getByRole('radio', { name: 'Archived 1' }));
+    const archived = screen.getByRole('button', { name: /^Archived/ });
+    expect(archived).toHaveTextContent('1');
+    fireEvent.click(archived);
     expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
-    expect(screen.queryByText('SAT Practice 06')).not.toBeInTheDocument();
+    expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
+    fireEvent.click(archived);
+    expect(screen.queryByText('SAT Archived 01')).not.toBeInTheDocument();
   });
 
-  it('reaches archived exams when every exam in the library is archived', () => {
+  it('keeps archived exams reachable when every exam in the location is archived', () => {
     useExamListQueryMock.mockReturnValue({ data: { entities: [{ ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
-    expect(screen.getByText('No active exams')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Show archived' }));
+    expect(screen.queryByText('SAT Archived 01')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Archived/ }));
     expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
   });
 
@@ -432,15 +484,14 @@ describe('SatExamLibraryRoute', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled();
   });
 
-  it('preserves search text when the status tab changes (04A composition guard)', () => {
+  it('keeps the search query while results come from every folder', () => {
     useExamListQueryMock.mockReturnValue({ data: { entities: [ieltsExam, satExam, { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
-    fireEvent.change(screen.getByPlaceholderText('Search exams'), { target: { value: 'SAT' } });
+    fireEvent.change(screen.getByPlaceholderText('Search all exams and folders'), { target: { value: 'SAT' } });
     expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('radio', { name: 'Archived 1' }));
-    expect(screen.getByPlaceholderText('Search exams')).toHaveValue('SAT');
     expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('1 exam');
+    expect(screen.getByPlaceholderText('Search all exams and folders')).toHaveValue('SAT');
+    expect(screen.getByText('Results from all folders for “SAT”.')).toBeInTheDocument();
   });
 
   it('closes a pristine dialog with no alertdialog', () => {
@@ -511,162 +562,78 @@ describe('SatExamLibraryRoute', () => {
     expect(container.innerHTML).not.toMatch(/bg-gradient|backdrop-blur/);
   });
 
-  it('opens on Classroom, filters by exam type, and remembers the last type per user in this browser', () => {
+  it('shows both exam types and ignores the retired type preference', () => {
     const practice = { ...satExam, id: 'sat-full', slug: 'sat-full', title: 'SAT Full 01', satCustomModules: false };
     useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, practice], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     sessionUser.id = 'user-a';
-    const first = renderRoute();
-    const typeTabs = screen.getByRole('radiogroup', { name: 'Exam type' });
-    expect(within(typeTabs).getByRole('radio', { name: 'Classroom 1' })).toHaveAttribute('aria-checked', 'true');
+    window.localStorage.setItem('sat-exam-library-type:user-a', 'practice');
+    renderRoute();
     expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
-    expect(screen.queryByText('SAT Full 01')).not.toBeInTheDocument();
-
-    fireEvent.click(within(typeTabs).getByRole('radio', { name: 'Practice 1' }));
     expect(screen.getByText('SAT Full 01')).toBeInTheDocument();
-    expect(screen.queryByText('SAT Practice 06')).not.toBeInTheDocument();
-    first.unmount();
-
-    expect(window.localStorage.getItem('sat-exam-library-type:user-a')).toBe('practice');
-    renderRoute();
-    expect(screen.getByRole('radio', { name: 'Practice 1' })).toHaveAttribute('aria-checked', 'true');
-    cleanup();
-
-    sessionUser.id = 'user-b';
-    renderRoute();
-    expect(screen.getByRole('radio', { name: 'Classroom 1' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getAllByText('Custom modules').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Full SAT').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('radiogroup', { name: 'Exam type' })).not.toBeInTheDocument();
   });
 
-  it('points to the other type when the selected type has no exams', () => {
-    const practice = { ...satExam, satCustomModules: false };
-    useExamListQueryMock.mockReturnValue({ data: { entities: [practice], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+  it('finds a filed exam from the root search with its location and Show in folder', () => {
+    libraryState.folders = [{ id: 'f-phys', name: 'Physics', revision: 0, scopeKey: 'sat|platform:nil', providerKey: 'sat', createdBy: 'Admin', createdAt: '', updatedAt: '' }];
+    libraryState.entries = [{ examId: 'sat-filed', folderId: 'f-phys', revision: 0 }];
+    const filed = { ...satExam, id: 'sat-filed', slug: 'sat-filed', title: 'Filed Exam' };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, filed], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
     renderRoute();
-    expect(screen.getByText('No Classroom exams')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Show Practice exams' }));
-    expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
+    expect(screen.queryByText('Filed Exam')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Search all exams and folders'), { target: { value: 'Filed' } });
+    expect(screen.getByText('Filed Exam')).toBeInTheDocument();
+    expect(screen.getByText('In Physics')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show Filed Exam in folder' })).toBeInTheDocument();
   });
 
-  describe('library browser polish (Finder rail)', () => {
-    it('navigates the real status groups from a Library rail with counts', () => {
-      useExamListQueryMock.mockReturnValue({
-        data: { entities: [satExam, { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' }], exams: [] },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-      renderRoute();
-      const nav = screen.getByRole('radiogroup', { name: 'Exam status' });
-      expect(within(nav).getByRole('radio', { name: 'All active 1' })).toHaveAttribute('aria-checked', 'true');
-      expect(within(nav).getByRole('radio', { name: 'Not in a room 1' })).toBeInTheDocument();
-      expect(within(nav).getByRole('radio', { name: 'Rooms available 0' })).toBeInTheDocument();
-      expect(within(nav).getByRole('radio', { name: 'Archived 1' })).toBeInTheDocument();
-      fireEvent.click(within(nav).getByRole('radio', { name: 'Archived 1' }));
-      expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
-      expect(screen.queryByText('SAT Practice 06')).not.toBeInTheDocument();
+  it('sorts through the toolbar select instead of a sortable column header', () => {
+    const older = { ...satExam, id: 'sat-a', title: 'Alpha First', updatedAt: '2026-08-29T00:00:00Z' };
+    const newer = { ...satExam, id: 'sat-b', title: 'Zebra Final', updatedAt: '2026-08-31T00:00:00Z' };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [older, newer], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute();
+    const list = screen.getByRole('list', { name: 'Exams' });
+    const rowTitles = () => within(list).getAllByRole('link').map((link) => link.getAttribute('aria-label'));
+    expect(rowTitles()[0]).toBe('Edit Zebra Final');
+    fireEvent.change(screen.getByLabelText('Sort'), { target: { value: 'title' } });
+    expect(rowTitles()[0]).toBe('Edit Alpha First');
+    expect(screen.queryByRole('button', { name: /Sort by name/ })).not.toBeInTheDocument();
+  });
+
+  it('marks select-all indeterminate on partial selection and clears it', () => {
+    const second = { ...satExam, id: 'sat-2', slug: 'sat-2', title: 'SAT Practice 07' };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, second], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    renderRoute();
+    const selectAll = screen.getByRole('checkbox', { name: /Select all/ }) as HTMLInputElement;
+    expect(selectAll.indeterminate).toBe(false);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select SAT Practice 06' }));
+    expect(selectAll.indeterminate).toBe(true);
+    expect(screen.getByRole('status')).toHaveTextContent('1 selected');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
+    expect(screen.getByRole('checkbox', { name: 'Select SAT Practice 06' })).not.toBeChecked();
+    expect((screen.getByRole('checkbox', { name: /Select all/ }) as HTMLInputElement).indeterminate).toBe(false);
+  });
+
+  it('deletes only the rows visible when the selection was made', async () => {
+    const second = { ...satExam, id: 'sat-2', slug: 'sat-2', title: 'SAT Practice 07' };
+    const archived = { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' };
+    useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, second, archived], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
+    bulkDeleteMock.mockResolvedValue({
+      success: true, total: 2, succeeded: 2, failed: 0,
+      results: [
+        { examId: 'sat-1', examTitle: 'SAT Practice 06', success: true },
+        { examId: 'sat-2', examTitle: 'SAT Practice 07', success: true },
+      ],
     });
-
-    it('moves the rail by keyboard with roving tabindex and keeps the search', () => {
-      useExamListQueryMock.mockReturnValue({
-        data: {
-          entities: [
-            { ...satExam, id: 'sat-draft', title: 'SAT Draft 01', status: 'draft' },
-            { ...satExam, id: 'sat-pub', title: 'SAT Room 01', status: 'published', currentPublishedVersionId: 'v1' },
-            { ...satExam, id: 'sat-arch', title: 'SAT Archived 01', status: 'archived' },
-          ],
-          exams: [],
-        },
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      });
-      renderRoute();
-      const nav = screen.getByRole('radiogroup', { name: 'Exam status' });
-      const radioAt = (index: number): HTMLElement => {
-        const radio = within(nav).getAllByRole('radio')[index];
-        if (!radio) throw new Error(`missing library radio at index ${index}`);
-        return radio;
-      };
-      expect(within(nav).getAllByRole('radio')).toHaveLength(4);
-      // Roving tabindex: only the checked group takes a Tab stop.
-      expect(radioAt(0)).toHaveAttribute('aria-checked', 'true');
-      expect(radioAt(0)).toHaveAttribute('tabindex', '0');
-      expect([radioAt(1), radioAt(2), radioAt(3)].map((radio) => radio.getAttribute('tabindex'))).toEqual(['-1', '-1', '-1']);
-
-      fireEvent.change(screen.getByPlaceholderText('Search exams'), { target: { value: 'SAT' } });
-
-      // ArrowRight moves focus and the checked group together.
-      fireEvent.keyDown(radioAt(0), { key: 'ArrowRight' });
-      expect(radioAt(1)).toHaveAttribute('aria-checked', 'true');
-      expect(radioAt(1)).toHaveAttribute('tabindex', '0');
-      expect(radioAt(0)).toHaveAttribute('tabindex', '-1');
-      expect(document.activeElement).toBe(radioAt(1));
-
-      // End jumps to the last group, Home back to the first.
-      fireEvent.keyDown(radioAt(1), { key: 'End' });
-      expect(radioAt(3)).toHaveAttribute('aria-checked', 'true');
-      expect(document.activeElement).toBe(radioAt(3));
-      fireEvent.keyDown(radioAt(3), { key: 'Home' });
-      expect(radioAt(0)).toHaveAttribute('aria-checked', 'true');
-      expect(document.activeElement).toBe(radioAt(0));
-
-      // ArrowLeft wraps from the first group to the last.
-      fireEvent.keyDown(radioAt(0), { key: 'ArrowLeft' });
-      expect(radioAt(3)).toHaveAttribute('aria-checked', 'true');
-      expect(document.activeElement).toBe(radioAt(3));
-
-      // The search survives every group change (list state shares one param store).
-      expect(screen.getByPlaceholderText('Search exams')).toHaveValue('SAT');
-    });
-
-    it('announces the current location in a heading', () => {
-      renderRoute();
-      expect(screen.getByRole('heading', { name: 'Library' })).toBeInTheDocument();
-    });
-
-    it('sorts through actionable Name and Updated headers driving the existing sort', () => {
-      const older = { ...satExam, id: 'sat-a', title: 'Alpha First', updatedAt: '2026-08-29T00:00:00Z' };
-      const newer = { ...satExam, id: 'sat-b', title: 'Zebra Final', updatedAt: '2026-08-31T00:00:00Z' };
-      useExamListQueryMock.mockReturnValue({ data: { entities: [older, newer], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
-      renderRoute();
-      const rowTitles = () => screen.getAllByText(/Alpha First|Zebra Final/).filter((el) => el.tagName !== 'BUTTON');
-      // Default sort is Updated (newest first): Zebra Final (newer) before Alpha First.
-      expect(rowTitles()[0]).toHaveTextContent('Zebra Final');
-      fireEvent.click(screen.getByRole('button', { name: /Sort by name/ }));
-      expect(rowTitles()[0]).toHaveTextContent('Alpha First');
-      fireEvent.click(screen.getByRole('button', { name: /Sort by updated/ }));
-      expect(rowTitles()[0]).toHaveTextContent('Zebra Final');
-    });
-
-    it('marks select-all indeterminate on partial selection and clears it', () => {
-      const second = { ...satExam, id: 'sat-2', slug: 'sat-2', title: 'SAT Practice 07' };
-      useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, second], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
-      renderRoute();
-      const selectAll = screen.getByRole('checkbox', { name: /Select all/ }) as HTMLInputElement;
-      expect(selectAll.indeterminate).toBe(false);
-      fireEvent.click(screen.getByRole('checkbox', { name: 'Select SAT Practice 06' }));
-      expect(selectAll.indeterminate).toBe(true);
-      expect(screen.getByRole('status')).toHaveTextContent('1 selected');
-      fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
-      expect(screen.getByRole('checkbox', { name: 'Select SAT Practice 06' })).not.toBeChecked();
-      expect((screen.getByRole('checkbox', { name: /Select all/ }) as HTMLInputElement).indeterminate).toBe(false);
-    });
-
-    it('only deletes the visible rows when a filter hides the rest', async () => {
-      const second = { ...satExam, id: 'sat-2', slug: 'sat-2', title: 'SAT Practice 07' };
-      useExamListQueryMock.mockReturnValue({ data: { entities: [satExam, second], exams: [] }, isLoading: false, error: null, refetch: vi.fn() });
-      bulkDeleteMock.mockResolvedValue({
-        success: true, total: 1, succeeded: 1, failed: 0,
-        results: [{ examId: 'sat-1', examTitle: 'SAT Practice 06', success: true }],
-      });
-      renderRoute();
-      fireEvent.click(screen.getByRole('checkbox', { name: 'Select all 2 exams' }));
-      fireEvent.change(screen.getByPlaceholderText('Search exams'), { target: { value: 'Practice 06' } });
-      expect(screen.getByText('SAT Practice 06')).toBeInTheDocument();
-      expect(screen.queryByText('SAT Practice 07')).not.toBeInTheDocument();
-      expect(screen.getByRole('status')).toHaveTextContent('1 selected');
-      fireEvent.click(screen.getByRole('button', { name: /Delete 1 exam/ }));
-      const alert = await screen.findByRole('alertdialog', { name: 'Delete 1 exam?' });
-      fireEvent.click(within(alert).getByRole('button', { name: 'Delete' }));
-      await waitFor(() => expect(bulkDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ examIds: ['sat-1'] })));
-    });
+    renderRoute();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all 2 exams' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Archived/ }));
+    expect(screen.getByText('SAT Archived 01')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('2 selected');
+    fireEvent.click(screen.getByRole('button', { name: /Delete 2 exams/ }));
+    const alert = await screen.findByRole('alertdialog', { name: 'Delete 2 exams?' });
+    fireEvent.click(within(alert).getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(bulkDeleteMock).toHaveBeenCalledWith(expect.objectContaining({ examIds: ['sat-1', 'sat-2'] })));
   });
 });

@@ -18,6 +18,8 @@ type SatConfirmDialogProps = {
   description: string;
   confirmLabel: string;
   destructive?: boolean;
+  /** Blocks the definitive action without dismissing the alert (nonempty folder, in-flight delete). */
+  confirmDisabled?: boolean;
   restoreFocusTarget?: HTMLElement | null | undefined;
   onCancel: () => void;
   onConfirm: () => void;
@@ -44,6 +46,7 @@ function StaticConfirmDialog({
   description,
   confirmLabel,
   destructive,
+  confirmDisabled,
   restoreFocusTarget,
   onCancel,
   onConfirm,
@@ -91,6 +94,7 @@ function StaticConfirmDialog({
           <button
             type="button"
             className={destructive ? DESTRUCTIVE_BUTTON_CLASS : CONFIRM_BUTTON_CLASS}
+            disabled={confirmDisabled}
             onClick={onConfirm}
           >
             {confirmLabel}
@@ -107,6 +111,7 @@ export function SatConfirmDialog({
   description,
   confirmLabel,
   destructive = false,
+  confirmDisabled = false,
   restoreFocusTarget,
   onCancel,
   onConfirm,
@@ -120,6 +125,7 @@ export function SatConfirmDialog({
         description={description}
         confirmLabel={confirmLabel}
         destructive={destructive}
+        confirmDisabled={confirmDisabled}
         restoreFocusTarget={restoreFocusTarget}
         onCancel={onCancel}
         onConfirm={onConfirm}
@@ -154,7 +160,14 @@ export function SatConfirmDialog({
               <button
                 type="button"
                 className={destructive ? DESTRUCTIVE_BUTTON_CLASS : CONFIRM_BUTTON_CLASS}
-                onClick={onConfirm}
+                disabled={confirmDisabled}
+                onClick={(event) => {
+                  // The caller owns dismissal: a failed mutation must keep the
+                  // alert open with its server sentence for retry. Successful
+                  // callers close their own open state.
+                  event.preventDefault();
+                  onConfirm();
+                }}
               >
                 {confirmLabel}
               </button>

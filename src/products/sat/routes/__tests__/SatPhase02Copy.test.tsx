@@ -29,12 +29,24 @@ const invalidateExamListMock = vi.hoisted(() => vi.fn());
 // NOTE: SatSessionsRoute imports useExamListQuery from the same examQueries
 // module, so useExamListQueryMock serves both Library and Sessions routes.
 vi.mock('../../../../features/exam-authoring/api/examQueries', () => ({
+  examKeys: { all: ['exam-authoring'] as const },
   useExamListQuery: useExamListQueryMock,
   useBulkDeleteExamsMutation: () => ({ mutateAsync: vi.fn(), isPending: false }),
   invalidateExamList: invalidateExamListMock,
 }));
 vi.mock('../../../../features/exam-authoring/api/examAuthoringFacade', () => ({
   examAuthoringFacade: { lifecycle: { createProviderExam: createProviderExamMock } },
+}));
+// The Exams browser fails closed until its authoritative library query loads;
+// this copy suite only needs a settled empty library.
+vi.mock('../../library/queries', () => ({
+  libraryKeys: { all: ['exam-authoring', 'library', 'sat'] as const },
+  useSatLibraryQuery: () => ({ data: { folders: [], entries: [], byExam: {} }, isLoading: false, error: null, refetch: vi.fn() }),
+  useCreateFolderMutation: () => ({ isPending: false, reset: vi.fn(), mutateAsync: vi.fn() }),
+  useRenameFolderMutation: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useMoveFolderMutation: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useDeleteFolderMutation: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useMoveExamsMutation: () => ({ isPending: false, mutateAsync: vi.fn() }),
 }));
 
 const useSummariesMock = vi.hoisted(() => vi.fn());
@@ -332,7 +344,7 @@ describe('SAT Phase 02 copy contracts', () => {
     cleanup();
 
     renderLibrary();
-    expect(screen.getByPlaceholderText('Search exams')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search all exams and folders')).toBeInTheDocument();
   });
 
   it('rooms and room placeholders name their filter scope', () => {
@@ -340,11 +352,13 @@ describe('SAT Phase 02 copy contracts', () => {
     expect(screen.getByPlaceholderText('Search rooms or exams')).toBeInTheDocument();
 
     render(
-      <MemoryRouter initialEntries={['/sat/sessions/sched-1']}>
-        <Routes>
-          <Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} />
-        </Routes>
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/sat/sessions/sched-1']}>
+          <Routes>
+            <Route path="/sat/sessions/:scheduleId" element={<SatSessionRoomRoute />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     expect(screen.getByPlaceholderText('Search name, ID, email')).toBeInTheDocument();
     expect(screen.queryByPlaceholderText('Search students')).not.toBeInTheDocument();

@@ -26,7 +26,30 @@ function contrastWithWhite(hex: string): number {
   return 1.05 / (luminance(hex) + 0.05);
 }
 
+function staffColor(token: string): string {
+  const value = CSS.match(new RegExp(`--sat-staff-${token}:\\s*(#[\\da-f]{6});`, 'i'))?.[1];
+  if (!value) throw new Error(`Missing SAT staff color: ${token}`);
+  return value;
+}
+
 describe('SAT contrast tokens (Phase 01)', () => {
+  it('keeps primary actions readable in their rest, hover, and pressed states', () => {
+    for (const token of ['accent', 'accent-hover', 'accent-active']) {
+      expect(contrastWithWhite(staffColor(token)), token).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('keeps selection text and form boundaries visible on the staff surfaces', () => {
+    const selected = luminance(staffColor('accent-tint'));
+    const selectedText = luminance(staffColor('accent-text-on-tint'));
+    const canvas = luminance(staffColor('canvas'));
+    const controlBorder = luminance(staffColor('border-control'));
+
+    expect((selected + 0.05) / (selectedText + 0.05)).toBeGreaterThanOrEqual(4.5);
+    expect((canvas + 0.05) / (controlBorder + 0.05)).toBeGreaterThanOrEqual(3);
+    expect(contrastWithWhite(staffColor('border-control'))).toBeGreaterThanOrEqual(3);
+  });
+
   it('keeps authoring accent and hover button text above 4.5:1 on white', () => {
     const accent = CSS.match(/--color-au-accent:\s*(#[\da-f]{6})/i)?.[1];
     const hover = CSS.match(/--color-au-accent-hover:\s*(#[\da-f]{6})/i)?.[1];

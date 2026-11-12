@@ -50,7 +50,7 @@ export function FolderCreateDialog({
   return (
     <SatFormDialog
       open
-      eyebrow="Digital SAT · Library"
+      eyebrow="Digital SAT · Exams"
       title={parentName ? `New subfolder in ${parentName}` : "New folder"}
       onClose={onClose}
       footer={
@@ -115,7 +115,7 @@ export function FolderRenameDialog({
   return (
     <SatFormDialog
       open
-      eyebrow="Digital SAT · Library"
+      eyebrow="Digital SAT · Exams"
       title={`Rename ${folder.name}`}
       onClose={onClose}
       footer={
@@ -155,15 +155,19 @@ export function FolderRenameDialog({
 export function FolderDeleteDialog({
   folder,
   examCount,
+  childFolderCount = 0,
   onClose,
   onConfirm,
   pending,
+  serverError,
 }: {
   folder: LibraryFolder | null;
   examCount: number;
+  childFolderCount?: number;
   onClose: () => void;
   onConfirm: () => void;
   pending: boolean;
+  serverError: string | null;
 }) {
   if (!folder) return null;
   // Delete-pending guard: prevent repeated submits while the delete is in
@@ -177,17 +181,21 @@ export function FolderDeleteDialog({
     if (pending) return;
     onClose();
   };
+  const contents = [
+    examCount > 0 ? `${examCount} ${examCount === 1 ? "exam" : "exams"}` : "",
+    childFolderCount > 0 ? `${childFolderCount} ${childFolderCount === 1 ? "subfolder" : "subfolders"}` : "",
+  ].filter(Boolean).join(" and ");
+  const description = contents
+    ? `This folder still holds ${contents}. Move its contents out first — deleting a folder never deletes exams.`
+    : "This folder is empty. Exams are never deleted with a folder, and deleting it cannot be undone.";
   return (
     <SatConfirmDialog
       open
       title={`Delete ${folder.name}?`}
-      description={
-        examCount > 0
-          ? `This folder still holds ${examCount} ${examCount === 1 ? "exam" : "exams"}. Move its contents to the Library first — deleting a folder never deletes exams.`
-          : "Empty folders delete immediately. Exams are never deleted with a folder."
-      }
+      description={serverError ? `${description} The folder could not be deleted: ${serverError}` : description}
       confirmLabel={pending ? "Deleting…" : "Delete"}
       destructive
+      confirmDisabled={pending || Boolean(contents)}
       onCancel={guardedClose}
       onConfirm={guardedConfirm}
     />
@@ -224,7 +232,7 @@ export function FolderMoveDialog({
   return (
     <SatFormDialog
       open
-      eyebrow="Digital SAT · Library"
+      eyebrow="Digital SAT · Exams"
       title={title}
       onClose={() => { if (!pending) onClose(); }}
       footer={
@@ -337,11 +345,11 @@ export function ExamMoveDialog({
       setCreatingFolder(false);
     }
   };
-  const destName = target === null ? "Library" : (displayFolders.find((f) => f.id === target)?.name ?? "Library");
+  const destName = target === null ? "Exams" : (displayFolders.find((f) => f.id === target)?.name ?? "Exams");
   return (
     <SatFormDialog
       open
-      eyebrow="Digital SAT · Library"
+      eyebrow="Digital SAT · Exams"
       title={`Move ${count === 1 ? "exam" : `${count} exams`} to`}
       onClose={() => { if (!busy) onClose(); }}
       footer={

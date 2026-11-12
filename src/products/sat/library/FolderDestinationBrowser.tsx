@@ -57,7 +57,7 @@ export function FolderDestinationBrowser({
               )}
             >
               <Library size={14} aria-hidden="true" className="shrink-0" />
-              Library
+              Exams
             </button>
           </li>
           {chain.map((folder) => {
@@ -96,12 +96,12 @@ export function FolderDestinationBrowser({
           Up
         </button>
         <p aria-live="polite" className="min-w-0 flex-1 truncate text-[13px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
-          {value === null ? "Library (top level)" : available ? `Inside ${current?.name}` : "Unavailable folder"}
+          {value === null ? "Exams (top level)" : available ? `Inside ${current?.name}` : "Unavailable folder"}
         </p>
       </div>
       {!available ? (
         <p role="alert" className="mt-2 text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">
-          Destination unavailable. Choose Library or another folder before moving.
+          Destination unavailable. Choose Exams or another folder before moving.
         </p>
       ) : kids.length > 0 ? (
         <ul aria-label="Subfolders of destination" className="m-0 mt-2 max-h-56 list-none overflow-y-auto rounded-[10px] border border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))] p-1">

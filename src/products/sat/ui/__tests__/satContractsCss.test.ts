@@ -38,4 +38,12 @@ describe('SAT system-contracts CSS (sat-* rules only)', () => {
     expect(css).toContain('--sat-staff-accent: Highlight');
     expect(css).toMatch(/\.sat-product\s*\{[\s\S]*?forced-color-adjust:\s*auto/);
   });
+
+  it('uses visible outlines for form focus and segmented selection in forced colors', () => {
+    const forcedColors = css.split('@media (forced-colors: active)').slice(1)
+      .map((block) => block.split('@media')[0]).join('\n');
+    expect(forcedColors).toMatch(/\.sat-input:focus-visible,[^{]+\{\s*outline:\s*2px solid Highlight/);
+    expect(forcedColors).toMatch(/\.sat-select:focus-within\s*\{\s*outline:\s*2px solid Highlight/);
+    expect(forcedColors).toMatch(/\.sat-segmented-thumb\s*\{\s*outline:\s*1px solid Highlight/);
+  });
 });

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { examKeys } from '../../../features/exam-authoring/api/examQueries';
@@ -8,6 +8,17 @@ import { SatRoot } from '../SatRoot';
 
 const authMock = vi.hoisted(() => vi.fn());
 vi.mock('../../../features/auth/authSession', () => ({ useAuthSession: authMock }));
+
+/**
+ * SatRoot lazy-loads the authoring collaboration boundary for exam routes.
+ * These tests assert shell chrome and routing, not collaboration, so render
+ * the boundary slot synchronously: waiting on the real coedit chunk under
+ * parallel test load made the 1s findByText deadline nondeterministic, and
+ * the room also fetched a token this suite never asserts on.
+ */
+vi.mock('../../../features/exam-authoring/realtime/coedit', () => ({
+  SatAuthoringCollaborationBoundary: ({ children }: { children: ReactNode }) => children,
+}));
 
 /**
  * Exam pages mount the exam-level collaboration boundary, whose room waits for
@@ -276,6 +287,22 @@ describe('SatRoot shell polish', () => {
     const bottomNav = container.querySelector('nav.fixed[aria-label="Digital SAT"]');
     expect(bottomNav).not.toBeNull();
     expect(bottomNav!.className).toContain('env(safe-area-inset-bottom)');
+  });
+
+  it('fits five mobile destinations with short visible labels and full accessible names', () => {
+    const { container } = renderAt('/sat/exams');
+    const bottomNav = container.querySelector('nav.fixed[aria-label="Digital SAT"]');
+    expect(bottomNav).not.toBeNull();
+    const links = within(bottomNav as HTMLElement).getAllByRole('link');
+    expect(links).toHaveLength(5);
+    expect(within(bottomNav as HTMLElement).getByRole('link', { name: 'Form responses' })).toHaveTextContent('Forms');
+    expect(within(bottomNav as HTMLElement).getByRole('link', { name: 'Score Conversion' })).toHaveTextContent('Scores');
+    for (const link of links) {
+      expect(link.className).toMatch(/min-h-12/);
+      expect(link.className).toMatch(/text-\[11px\]/);
+      expect(link.className).toMatch(/min-w-0/);
+      expect(link.className).toMatch(/flex-1/);
+    }
   });
 
   it('keeps shell content visible with reduced motion enabled', () => {

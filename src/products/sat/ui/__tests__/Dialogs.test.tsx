@@ -26,6 +26,27 @@ describe('SatConfirmDialog', () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 
+  it('disables only the confirmation action when confirmDisabled is set', () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <SatConfirmDialog
+        open
+        title="Delete this folder?"
+        description="This folder is not empty."
+        confirmLabel="Delete"
+        destructive
+        confirmDisabled
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it('cancels from the Cancel answer', () => {
     const onConfirm = vi.fn();
     const onCancel = vi.fn();
