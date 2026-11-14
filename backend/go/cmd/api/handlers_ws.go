@@ -291,9 +291,12 @@ func liveAllowedScheduleIDs(ctx context.Context, db interface {
 	if sess.Role == auth.RoleAdmin || sess.Role == auth.RoleAdminObserver {
 		return nil, nil
 	}
-	rows, err := db.QueryContext(ctx, "SELECT DISTINCT schedule_id FROM schedule_staff_assignments WHERE revoked_at IS NULL AND role = ? AND (user_id = ? OR (user_id IS NULL AND actor_id = ?))", sess.Role, sess.UserID, sess.UserID)
+	var rows *sql.Rows
+	var err error
 	if sess.Role == auth.RoleStudent {
 		rows, err = db.QueryContext(ctx, "SELECT DISTINCT schedule_id FROM schedule_registrations WHERE access_state <> 'withdrawn' AND (user_id = ? OR actor_id = ?)", sess.UserID, sess.UserID)
+	} else {
+		rows, err = db.QueryContext(ctx, "SELECT DISTINCT schedule_id FROM schedule_staff_assignments WHERE revoked_at IS NULL AND role = ? AND (user_id = ? OR (user_id IS NULL AND actor_id = ?))", sess.Role, sess.UserID, sess.UserID)
 	}
 	if err != nil {
 		return nil, err

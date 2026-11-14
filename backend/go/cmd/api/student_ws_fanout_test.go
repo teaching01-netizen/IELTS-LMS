@@ -23,6 +23,7 @@ package main
 // anything is published (the upgrade completes before the handler subscribes).
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -148,6 +149,30 @@ func registrationRows(scheduleIDs ...string) *sqlmock.Rows {
 		rows.AddRow(id)
 	}
 	return rows
+}
+
+func TestStudentLiveAuthorizationWithSingleDBConnection(t *testing.T) {
+	app, mock := studentLiveApp(t)
+	app.DB.SetMaxOpenConns(1)
+	// Accept either first query so an unnecessary staff lookup would hold the
+	// only connection while the student lookup waits for it.
+	mock.ExpectQuery(`FROM schedule_(staff_assignments|registrations)`).
+		WillReturnRows(registrationRows("sched-1")).RowsWillBeClosed()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	ctx = sessionCtx(ctx, &auth.Session{UserID: "u-1", Role: auth.RoleStudent})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/student/sessions/sched-1/runtime", nil).WithContext(ctx)
+	res := httptest.NewRecorder()
+	if !authorizeRuntimePoll(res, req, app, "sched-1") {
+		t.Fatalf("student authorization failed with one connection: status=%d body=%s", res.Code, res.Body.String())
+	}
+	if stats := app.DB.Stats(); stats.InUse != 0 || stats.WaitCount != 0 {
+		t.Fatalf("student authorization retained or waited for a connection: %+v", stats)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestStudentWSIntegrationFanOutIsScopedToOwnScheduleAndAttempt is the Phase 12
