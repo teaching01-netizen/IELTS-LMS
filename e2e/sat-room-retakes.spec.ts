@@ -267,7 +267,7 @@ test("Classroom room defaults, WCODE retake, pause and keyed PDF", async ({ brow
     const headers = { Origin: root, "x-csrf-token": csrf };
     const settings = await admin.request.get(settingsUrl);
     expect(settings.status(), await settings.text()).toBe(200);
-    const initial = (await settings.json()).data;
+    const initial = await settings.json();
     expect(initial).toMatchObject({ unlimitedRetakes: true, reportVisible: true, includeAnswerKeyInPdf: false });
     const saved = await admin.request.put(settingsUrl, {
       headers,
@@ -314,7 +314,7 @@ test("Classroom room defaults, WCODE retake, pause and keyed PDF", async ({ brow
     const pdf = await readFile(await (await download).path());
     expect(pdf.subarray(0, 4).toString()).toBe("%PDF");
 
-    const latest = (await saved.json()).data;
+    const latest = await saved.json();
     const revoke = await admin.request.put(settingsUrl, {
       headers, data: { ...latest, expectedRevision: latest.revision, includeAnswerKeyInPdf: false },
     });
@@ -326,11 +326,47 @@ test("Classroom room defaults, WCODE retake, pause and keyed PDF", async ({ brow
     await page.getByRole("button", { name: "Start exam again" }).click();
     const replay = await retake;
     expect(replay.status(), await replay.text()).toBe(200);
-    const next = (await replay.json()).data;
+    const next = await replay.json();
     expect(next).toMatchObject({ ordinal: 2, disposition: "started" });
     expect(next.attemptId).not.toBe(attemptId);
     await expect(page.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 60_000 });
   } finally {
     await Promise.all([admin.close(), student.close()]);
+  }
+});
+
+test("teachers can save options at exam creation and edit them later", async ({ browser, baseURL }) => {
+  test.setTimeout(60_000);
+  const admin = await browser.newContext({ storageState: ADMIN_STORAGE_STATE_PATH });
+  try {
+    const page = await admin.newPage();
+    await page.goto(`${baseURL}/sat/exams`);
+    await page.getByRole("button", { name: "Create exam", exact: true }).first().click();
+    const wizard = page.getByRole("dialog", { name: "New exam" });
+    await wizard.getByLabel("Exam name").fill(`Retake settings ${randomUUID().slice(0, 8)}`);
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click();
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(wizard.getByRole("switch", { name: "Allow retakes" })).toBeChecked();
+    await expect(wizard.getByRole("switch", { name: "Show results" })).not.toBeChecked();
+    await wizard.getByRole("switch", { name: "Show results" }).check();
+    await wizard.getByRole("switch", { name: "Include answer key in PDF" }).check();
+    await wizard.getByRole("button", { name: "Continue", exact: true }).click();
+    const create = page.waitForResponse((response) => response.request().method() === "POST"
+      && new URL(response.url()).pathname.endsWith("/v1/exams"));
+    await wizard.getByRole("button", { name: "Create exam", exact: true }).click({ noWaitAfter: true });
+    const created = await create;
+    expect(created.status()).toBe(201);
+    const { id } = await created.json();
+    await page.goto(`${baseURL}/sat/exams/${id}/settings`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("switch", { name: "Include answer key in PDF" })).toBeChecked();
+    await page.getByRole("switch", { name: "Allow retakes" }).uncheck();
+    const save = page.getByRole("button", { name: "Save settings" });
+    await save.click();
+    await expect(page.getByRole("button", { name: /^(Save settings|Saving…)$/ })).toHaveCount(0);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("switch", { name: "Allow retakes" })).not.toBeChecked();
+    await expect(page.getByRole("switch", { name: "Show results" })).toBeChecked();
+  } finally {
+    await admin.close();
   }
 });

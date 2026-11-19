@@ -336,11 +336,11 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
         </SatButton>
       )}
       {step < STEP_NAMES.length - 1 ? (
-        <SatButton type="button" variant="primary" disabled={creating || !title.trim() || (step === 0 && !defaultsQuery.data) || readingConverter} onClick={validateAndAdvance}>
+        <SatButton key="continue" type="button" variant="primary" disabled={creating || !title.trim() || (step === 0 && !defaultsQuery.data) || readingConverter} onClick={validateAndAdvance}>
           Continue
         </SatButton>
       ) : (
-        <SatButton type="submit" form={FORM_ID} variant="primary" disabled={!title.trim()} pending={creating}>
+        <SatButton key="create" type="submit" form={FORM_ID} variant="primary" disabled={!title.trim()} pending={creating}>
           {creating ? "Creating…" : "Create exam"}
         </SatButton>
       )}

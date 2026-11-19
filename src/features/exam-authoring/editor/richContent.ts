@@ -114,7 +114,7 @@ export function hasStructuredContent(content: StructuredContent | null | undefin
       (node) => node.type === "image" || node.type === "table" || richNodeText(node).trim()
     );
   }
-  return content.nodes.length > 0 && plainTextFromContent(content).length > 0;
+  return Array.isArray(content.nodes) && content.nodes.length > 0 && plainTextFromContent(content).length > 0;
 }
 
 

@@ -13,10 +13,8 @@ import (
 const policyColumns = `policy_revision, report_visible, include_answer_key_in_pdf,
 	study_enabled, study_required_completions, study_reveal_answers, study_untimed, unlimited_retakes, pause_on_leave`
 
-// LoadPolicyTx reads the one effective policy for a schedule. An absent row
-// keeps conservative legacy behaviour until backfill: classroom assignments
-// project the existing `score_visible` flag and classroom retake default.
-// Practice keeps its independent defaults.
+// LoadPolicyTx reads the saved room policy or derives the legacy default from
+// the room mode, individual timing, and exam-level results switch.
 // Database failures are errors, never a silent default.
 func LoadPolicyTx(ctx context.Context, q tx.Tx, scheduleID string) (Policy, error) {
 	if scheduleID == "" {
@@ -189,10 +187,7 @@ func SavePolicyTx(ctx context.Context, q tx.Tx, scheduleID string, policy Policy
 		next.Study.Untimed, next.UnlimitedRetakes, next.PauseOnLeave, nullableActor(actorID)); err != nil {
 		return Policy{}, err
 	}
-	if _, err := q.ExecContext(ctx, `UPDATE classroom_exams SET score_visible = ?
-		WHERE schedule_id = ?`, next.ReportVisible, scheduleID); err != nil {
-		return Policy{}, err
-	}
+
 	return next, nil
 }
 

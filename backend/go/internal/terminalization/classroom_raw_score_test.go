@@ -11,6 +11,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/results"
 )
 
 const (
@@ -40,7 +41,7 @@ func materializeClassroom(t *testing.T, mode string, sections *sqlmock.Rows, wan
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_start_code_required = 1")).
 		WillReturnRows(sqlmock.NewRows([]string{"n"}).AddRow(false))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_results WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(e.sat_score_report_enabled, FALSE)")).
+	mock.ExpectQuery(regexp.QuoteMeta(results.SATScoreReportOpenSQL)).
 		WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(mode == "classroom"))
 	if sections != nil {
 		mock.ExpectQuery(regexp.QuoteMeta(rawScoreQuery)).WithArgs("att-1").WillReturnRows(sections)
@@ -97,7 +98,7 @@ func TestClassroomScoreFailureKeepsReceiptAndWithholds(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT sat_start_code_required = 1")).
 		WillReturnRows(sqlmock.NewRows([]string{"n"}).AddRow(false))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_results WHERE attempt_id")).WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(e.sat_score_report_enabled, FALSE)")).
+	mock.ExpectQuery(regexp.QuoteMeta(results.SATScoreReportOpenSQL)).
 		WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(true))
 	mock.ExpectQuery(regexp.QuoteMeta(rawScoreQuery)).WithArgs("att-1").WillReturnError(sql.ErrConnDone)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_results")).
@@ -131,7 +132,7 @@ func TestRepairClassroomResults(t *testing.T) {
 	sealBeginUTC(mock)
 	mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_results ar JOIN student_attempts a")).WithArgs(10).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "attempt_id"}).AddRow("res-1", "att-1").AddRow("res-2", "att-2"))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(e.sat_score_report_enabled, FALSE)")).
+	mock.ExpectQuery(regexp.QuoteMeta(results.SATScoreReportOpenSQL)).
 		WithArgs("att-1").WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(true))
 	mock.ExpectQuery(regexp.QuoteMeta(rawScoreQuery)).WithArgs("att-1").
 		WillReturnRows(scoreRows().AddRow("math", "m1", 15, 22, false))
@@ -139,7 +140,7 @@ func TestRepairClassroomResults(t *testing.T) {
 	expectNoConverter(mock, "att-1")
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE assessment_results SET outcome_status = 'scored', release_status = 'released'")).
 		WithArgs(sqlmock.AnyArg(), "res-1").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(regexp.QuoteMeta("SELECT COALESCE(e.sat_score_report_enabled, FALSE)")).
+	mock.ExpectQuery(regexp.QuoteMeta(results.SATScoreReportOpenSQL)).
 		WithArgs("att-2").WillReturnRows(sqlmock.NewRows([]string{"enabled"}).AddRow(true))
 	mock.ExpectQuery(regexp.QuoteMeta(rawScoreQuery)).WithArgs("att-2").
 		WillReturnRows(scoreRows().AddRow("math", "m1", 0, 0, true))
