@@ -6,8 +6,9 @@ package authz
 // (LookupFullPath) when no template annotation is present.
 func init() {
 	for k, v := range map[string]Policy{
-		"GET /api/v1/sat/practice/schedules/{scheduleID}/learning-state": {Public: true},
-		"POST /api/v1/sat/practice/schedules/{scheduleID}/attempts":      {Public: true},
+		"GET /api/v1/sat/practice/schedules/{scheduleID}/learning-state":     {Public: true},
+		"GET /api/v1/sat/practice/schedules/{scheduleID}/completed-attempts": {Bearer: true, Scope: ScopeAttemptOwner},
+		"POST /api/v1/sat/practice/schedules/{scheduleID}/attempts":          {Public: true},
 		"GET /healthz": {Public: true},
 		"GET /readyz":  {Public: true},
 		// /metrics has its own bearer/token gate inside metricsHandler

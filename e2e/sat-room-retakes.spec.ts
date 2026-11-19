@@ -355,6 +355,62 @@ test("Classroom start code, WCODE retake, pause and keyed PDF", async ({ browser
     await expect(rows).toHaveCount(2);
     await rows.getByRole("button", { name: /^View answers for/ }).click();
     await expect(staff).toHaveURL(new RegExp(`[?&]attempt=${attemptId}(&|$)`));
+
+    const correctChoices = page.locator("label.sat-answer-choice").filter({ hasText: "Choice A" });
+    await correctChoices.first().click();
+    await page.getByRole("button", { name: "Next question", exact: true }).click();
+    await correctChoices.first().click();
+    await expect(page.getByTestId("sat-exam-shell")).toHaveAttribute("data-sat-save-state", "idle");
+    const completedPath = `/api/v1/sat/practice/schedules/${scheduleId}/completed-attempts`;
+    const listRequest = page.waitForRequest((request) => new URL(request.url()).pathname === completedPath);
+    await shortenActiveModule(nextAttemptId);
+    const attemptPicker = page.getByLabel("View results for");
+    await expect(attemptPicker).toHaveValue(nextAttemptId, { timeout: 60_000 });
+    await expect(page.getByRole("region", { name: "Scored practice questions" })).toContainText(/2 of 2\s+correct/);
+
+    const historyHeaders = { Authorization: (await (await listRequest).headerValue("authorization"))! };
+    const unavailable = await student.request.get(`${root}${completedPath}?attemptId=${randomUUID()}`, { headers: historyHeaders });
+    expect(unavailable.status()).toBe(404);
+
+    let releaseOldReport: () => void = () => undefined;
+    const holdOldReport = new Promise<void>((resolve) => { releaseOldReport = resolve; });
+    await page.route((url) => url.pathname === completedPath && url.searchParams.get("attemptId") === attemptId, async (route) => {
+      await holdOldReport;
+      await route.continue();
+    }, { times: 1 });
+    try {
+      await attemptPicker.selectOption(attemptId);
+      await expect(page.getByText("Loading Attempt 1 results…")).toBeVisible();
+      await expect(attemptPicker).toBeEnabled();
+      await expect(page.getByRole("button", { name: "Download exam PDF" })).toHaveCount(0);
+      await expect(page.getByRole("region", { name: "Scored practice questions" })).toHaveCount(0);
+    } finally {
+      releaseOldReport();
+    }
+    await expect(page.getByRole("region", { name: "Scored practice questions" })).toContainText(/0 of 2\s+correct/);
+
+    const updatedPolicy = await revoke.json();
+    const enableKeys = await admin.request.put(settingsUrl, {
+      headers, data: { ...updatedPolicy, expectedRevision: updatedPolicy.revision, includeAnswerKeyInPdf: true },
+    });
+    expect(enableKeys.status(), await enableKeys.text()).toBe(200);
+
+    const oldPdfDownload = page.waitForEvent("download", { timeout: 90_000 });
+    const oldPdfPrepare = page.waitForResponse((response) => new URL(response.url()).searchParams.get("attemptId") === attemptId
+      && new URL(response.url()).pathname.endsWith("/prepare"));
+    await page.getByRole("button", { name: "Download exam PDF" }).click();
+    const oldPdfPrepared = await oldPdfPrepare;
+    expect(oldPdfPrepared.status(), await oldPdfPrepared.text()).toBe(200);
+    expect(oldPdfPrepared.request().postDataJSON()).toMatchObject({
+      includeAnswerKey: true,
+      view: { subjects: [{ rawCorrect: 0, rawTotal: 2 }] },
+    });
+    const oldPdf = await readFile(await (await oldPdfDownload).path());
+    expect(oldPdf.subarray(0, 4).toString()).toBe("%PDF");
+
+    await attemptPicker.selectOption(nextAttemptId);
+    await expect(page.getByRole("region", { name: "Scored practice questions" })).toContainText(/2 of 2\s+correct/);
+    await expect(page.getByRole("link", { name: "Download PDF again" })).toHaveCount(0);
   } finally {
     await Promise.all([admin.close(), student.close()]);
   }

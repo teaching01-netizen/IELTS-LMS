@@ -444,16 +444,38 @@ export const assessmentDeliveryApi = {
     );
   },
 
+  completedSatAttempts(scheduleId: string, attemptId: string, signal: AbortSignal) {
+    return attemptRequest(scheduleId, attemptId, (config) =>
+      backendGet<{ attempts: { attemptId: string; ordinal: number }[] }>(
+        `/v1/sat/practice/schedules/${encodeURIComponent(scheduleId)}/completed-attempts`,
+        { ...config, signal, retries: 0 },
+      ),
+    );
+  },
+
+  completedSatResult(scheduleId: string, attemptId: string, selectedAttemptId: string, signal: AbortSignal) {
+    return attemptRequest(scheduleId, attemptId, (config) =>
+      backendGet<{ result: AssessmentResult | null }>(
+        `/v1/sat/practice/schedules/${encodeURIComponent(scheduleId)}/completed-attempts?attemptId=${encodeURIComponent(selectedAttemptId)}`,
+        { ...config, signal, retries: 0 },
+      ),
+    );
+  },
+
   /** The same paper as a server-rendered PDF (one file on every browser). */
   answeredExamPdf(
     scheduleId: string,
     attemptId: string,
     body: PrepareAnsweredExamPdfRequest,
-    signal: AbortSignal
+    signal: AbortSignal,
+    selectedAttemptId?: string,
   ): Promise<PreparedAnsweredExamPdf> {
+    const selection = selectedAttemptId && selectedAttemptId !== attemptId
+      ? `?attemptId=${encodeURIComponent(selectedAttemptId)}`
+      : "";
     return attemptRequest(scheduleId, attemptId, (config) =>
       prepareAnsweredExamPdf(
-        `/api/v1/sat-answered-pdf/schedules/${encodeURIComponent(scheduleId)}/prepare`,
+        `/api/v1/sat-answered-pdf/schedules/${encodeURIComponent(scheduleId)}/prepare${selection}`,
         body,
         signal,
         config.headers

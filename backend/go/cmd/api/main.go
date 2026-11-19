@@ -687,6 +687,7 @@ func BuildRouter(app *App) http.Handler {
 		// lost response.
 		r.With(limitTier(app, httpx.TierWrites, userKey())).Route("/sat", func(r chi.Router) {
 			r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Get("/practice/schedules/{scheduleID}/learning-state", authorize("GET /api/v1/sat/practice/schedules/{scheduleID}/learning-state", practiceLearningStateHandler(app)))
+			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Get("/practice/schedules/{scheduleID}/completed-attempts", authorize("GET /api/v1/sat/practice/schedules/{scheduleID}/completed-attempts", practiceCompletedAttemptsHandler(app)))
 			r.With(limitTier(app, httpx.TierWrites, userKey())).Post("/practice/schedules/{scheduleID}/attempts", authorize("POST /api/v1/sat/practice/schedules/{scheduleID}/attempts", practiceStartHandler(app)))
 			r.With(adminLimit).Post("/exams/{id}/rooms", authorize("POST /api/v1/sat/exams/{id}/rooms", satRoomCreate(app)))
 			r.With(adminLimit).Get("/exam-config/defaults", authorize("GET /api/v1/sat/exam-config/defaults", satExamConfigDefaults(app)))

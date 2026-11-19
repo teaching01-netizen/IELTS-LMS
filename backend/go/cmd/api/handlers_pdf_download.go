@@ -59,6 +59,13 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 				return
 			}
 			binding = answeredpdf.Binding{Kind: "student", OwnerID: claims.UserID, AttemptID: claims.AttemptID, SessionID: claims.ClientSessionID, Claims: &claims}
+			if selected := strings.TrimSpace(r.URL.Query().Get("attemptId")); selected != "" && selected != claims.AttemptID {
+				if err := app.Delivery.AuthorizeStudentSATCompletedPDF(r.Context(), claims, selected); err != nil {
+					httpx.WriteError(w, r, MapDBError(err))
+					return
+				}
+				binding.AttemptID = selected
+			}
 			expiryLimit = time.Unix(claims.Exp, 0)
 		} else {
 			sess := requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor)
@@ -191,11 +198,17 @@ func downloadAnsweredPDFHandler(app *App) http.HandlerFunc {
 				return
 			}
 			claims, err := auth.VerifyAttemptReadBinding(r.Context(), app.DB, time.Now().UTC(), *binding.Claims)
-			if err != nil || claims.AttemptID != binding.AttemptID || claims.UserID != binding.OwnerID || claims.ClientSessionID != binding.SessionID {
+			if err != nil || claims.UserID != binding.OwnerID || claims.ClientSessionID != binding.SessionID {
 				pdfExportError(w, r, answeredpdf.ErrExportUnavailable)
 				return
 			}
-			visible, err := app.Delivery.ReportVisible(r.Context(), claims.AttemptID)
+			if claims.AttemptID != binding.AttemptID {
+				if err := app.Delivery.AuthorizeStudentSATCompletedPDF(r.Context(), claims, binding.AttemptID); err != nil {
+					pdfExportError(w, r, answeredpdf.ErrExportUnavailable)
+					return
+				}
+			}
+			visible, err := app.Delivery.ReportVisible(r.Context(), binding.AttemptID)
 			if err != nil {
 				pdfExportError(w, r, err)
 				return
@@ -205,7 +218,7 @@ func downloadAnsweredPDFHandler(app *App) http.HandlerFunc {
 				return
 			}
 			if binding.IncludeAnswerKey {
-				allowed, err := app.Delivery.KeyedPDFAllowed(r.Context(), claims.AttemptID)
+				allowed, err := app.Delivery.KeyedPDFAllowed(r.Context(), binding.AttemptID)
 				if err != nil || !allowed {
 					pdfExportError(w, r, answeredpdf.ErrExportUnavailable)
 					return

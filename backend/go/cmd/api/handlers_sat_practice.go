@@ -197,3 +197,44 @@ func practiceStartHandler(app *App) http.HandlerFunc {
 		httpx.WriteJSON(w, http.StatusOK, out)
 	}
 }
+
+// practiceCompletedAttemptsHandler serves the result selector and the selected
+// report through the same completed-attempt ownership boundary as PDF export.
+func practiceCompletedAttemptsHandler(app *App) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "private, no-store")
+		bearer, ok := requireBearer(w, r)
+		if !ok {
+			return
+		}
+		claims, err := verifyAttemptReadBearer(app, r, bearer)
+		if err != nil {
+			writeAttemptVerificationError(w, r, err)
+			return
+		}
+		if claims.ScheduleID != chi.URLParam(r, "scheduleID") {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeForbidden, "Attempt credential does not match the schedule."))
+			return
+		}
+		if app.Delivery == nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "SAT results are unavailable."))
+			return
+		}
+		ctx := r.Context()
+		if attemptID := strings.TrimSpace(r.URL.Query().Get("attemptId")); attemptID != "" {
+			result, err := app.Delivery.StudentSATCompletedResult(ctx, claims, attemptID)
+			if err != nil {
+				httpx.WriteError(w, r, MapDBError(err))
+				return
+			}
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{"result": result})
+			return
+		}
+		attempts, err := app.Delivery.StudentSATCompletedAttempts(ctx, claims)
+		if err != nil {
+			httpx.WriteError(w, r, MapDBError(err))
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"attempts": attempts})
+	}
+}

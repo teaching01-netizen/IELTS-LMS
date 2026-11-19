@@ -1,8 +1,9 @@
 import { SatPauseAndLeaveAction, SatStudentPausedScreen } from "../ui/transitions/SatStudentPause";
 import { useSatStudentPause } from "../hooks/useSatStudentPause";
+import { SatRoomCompletion } from "../ui/transitions/SatRoomCompletion";
 import { SatRoomRetakeActions } from "../ui/transitions/SatRoomRetakeActions";
 import { SatSectionEntryScreen } from "../ui/SatSectionEntryScreen";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
 
 /**
  * Phase 04 transient-skew hold window: while state.phase is module/review
@@ -608,20 +609,29 @@ export function SatStudentSessionRoute({
         scheduleId={scheduleId}
         attemptId={attemptId}
         recoveryException={completionRecoveryExceptions.length > 0}
-        renderComplete={(eva) => (
-          <SatCompleteScreen
-            result={data.result ?? result}
-            onExit={onExit}
-            recoveryExceptions={completionRecoveryExceptions}
-            eva={eva}
-            retakeActions={allowRoomRetakes ? <SatRoomRetakeActions scheduleId={scheduleId} attemptId={attemptId} candidateId={candidateId} /> : null}
-            answered={{
+        renderComplete={(eva) => {
+          const completion: ComponentProps<typeof SatCompleteScreen> = {
+            result: data.result ?? result,
+            onExit,
+            recoveryExceptions: completionRecoveryExceptions,
+            eva,
+            answered: {
               key: `student:${scheduleId}:${attemptId}`,
               sections: data.sections,
-              preparePdf: (request, signal) => assessmentDeliveryApi.answeredExamPdf(scheduleId, attemptId, request, signal),
-            }}
-          />
-        )}
+              preparePdf: (request, signal) =>
+                assessmentDeliveryApi.answeredExamPdf(scheduleId, attemptId, request, signal),
+            },
+          };
+          return allowRoomRetakes ? (
+            <SatRoomCompletion
+              key={attemptId}
+              scheduleId={scheduleId}
+              attemptId={attemptId}
+              {...completion}
+              retakeActions={<SatRoomRetakeActions scheduleId={scheduleId} attemptId={attemptId} candidateId={candidateId} />}
+            />
+          ) : <SatCompleteScreen {...completion} />;
+        }}
       />,
     );
   }

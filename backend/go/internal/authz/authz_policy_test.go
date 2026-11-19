@@ -173,6 +173,7 @@ var expectedAnnotated = []string{
 // expectedFullPaths lists every full-path key (no-WithRoute registrations).
 var expectedFullPaths = []string{
 	"GET /api/v1/sat/practice/schedules/{scheduleID}/learning-state",
+	"GET /api/v1/sat/practice/schedules/{scheduleID}/completed-attempts",
 	"POST /api/v1/sat/practice/schedules/{scheduleID}/attempts",
 	"GET /healthz", "GET /readyz", "GET /metrics",
 	"GET /api/v1/assessment-release/exams/{examID}",
