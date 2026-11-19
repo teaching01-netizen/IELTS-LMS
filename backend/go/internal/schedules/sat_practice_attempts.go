@@ -135,6 +135,22 @@ func practiceAdmissionOpen(sch practiceSchedule, now time.Time) bool {
 	return true
 }
 
+// practiceCodeWindowOpen keeps the code-room admission window in effect even
+// when a returning student has already verified the code for this sitting.
+func practiceCodeWindowOpen(ctx context.Context, q tx.Tx, scheduleID string, now time.Time) (bool, error) {
+	var open bool
+	err := q.QueryRowContext(ctx, `SELECT s.start_time <= ?
+		AND NOT EXISTS (
+			SELECT 1 FROM assessment_access_links l WHERE l.schedule_id = s.id
+			AND (l.lifecycle_state <> 'active' OR l.opens_at > ? OR l.closes_at <= ?)
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM exam_session_runtimes r WHERE r.schedule_id = s.id AND r.status = 'paused'
+		)
+		FROM exam_schedules s WHERE s.id = ?`, now, now, now, scheduleID).Scan(&open)
+	return open, err
+}
+
 type practiceLatest struct {
 	ID          string
 	SubmittedAt *time.Time
@@ -403,6 +419,28 @@ func (s *Service) startPracticeAttemptTx(ctx context.Context, q tx.Tx, scheduleI
 	if latestOrdinal > 0 && !policy.UnlimitedRetakes {
 		return PracticeAttempt{}, practiceConflict(apperrors.Code("RETAKE_NOT_ALLOWED"), "Retakes are disabled for this exam.", nil)
 	}
+	codeRequired := sch.StartMode == satstartcode.ModeAccessCode
+	if codeRequired && latestOrdinal > 0 {
+		open, err := practiceCodeWindowOpen(ctx, q, scheduleID, now)
+		if err != nil {
+			return PracticeAttempt{}, err
+		}
+		if !open {
+			return PracticeAttempt{}, practiceConflict(apperrors.Code("STARTS_CLOSED"), "New starts are unavailable for this exam.", nil)
+		}
+		// Only a prior submitted, code-verified attempt owned by this student
+		// in this room and exam version can carry admission forward.
+		var verified bool
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS (
+			SELECT 1 FROM student_attempts a
+			WHERE a.schedule_id = ? AND a.user_id = ? AND a.published_version_id = ?
+			AND a.sat_start_code_accepted_at IS NOT NULL AND a.submitted_at IS NOT NULL
+			AND a.delivery_status = 'submitted' AND COALESCE(a.proctor_status, 'active') <> 'terminated'
+		)`, scheduleID, input.StudentID, sch.VersionID).Scan(&verified); err != nil {
+			return PracticeAttempt{}, err
+		}
+		codeRequired = !verified
+	}
 	snapshot := satlearning.TestSnapshot(policy.Revision)
 
 	ordinal := latestOrdinal + 1
@@ -439,7 +477,7 @@ func (s *Service) startPracticeAttemptTx(ctx context.Context, q tx.Tx, scheduleI
 		 integrity, recovery, created_at, updated_at, revision, protocol_version, delivery_status, lease_epoch, control_epoch, response_revision, sat_start_code_required)
 		VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'lobby', 'reading', '{}', '{}', '{}', '[]', '{}', ?, NOW(), NOW(), 0, 2, 'running', 1, 1, 0, ?)`,
 		attemptID, scheduleID, input.StudentID, candidateWcode, studentKey, nullableStrPtr(sch.OrganizationID), sch.ExamID, sch.VersionID,
-		sch.Title, candidateID, name, email, string(recovery), sch.StartMode == satstartcode.ModeAccessCode); err != nil {
+		sch.Title, candidateID, name, email, string(recovery), codeRequired); err != nil {
 		return PracticeAttempt{}, err
 	}
 	if err := satlearning.InsertSnapshotTx(ctx, q, satlearning.AttemptLearningRow{
@@ -461,7 +499,7 @@ func (s *Service) startPracticeAttemptTx(ctx context.Context, q tx.Tx, scheduleI
 	// A live room may already have a runtime; project its active section clock
 	// onto this attempt exactly as initial check-in does.
 	var runtimeID, activeSection string
-	if sch.StartMode != satstartcode.ModeAccessCode {
+	if !codeRequired {
 		if err := q.QueryRowContext(ctx, `SELECT id, active_section_key FROM exam_session_runtimes WHERE schedule_id = ? FOR UPDATE`,
 			scheduleID).Scan(&runtimeID, &activeSection); err == nil && strings.TrimSpace(activeSection) != "" {
 			running := "running"
@@ -609,6 +647,12 @@ func (s *Service) PracticeLearningState(ctx context.Context, scheduleID, student
 	out.LastOrdinal = lastOrdinal
 	active := out.ActiveAttempt != nil
 	startsOpen := practiceAdmissionOpen(sch, now)
+	if startsOpen && sch.StartMode == satstartcode.ModeAccessCode {
+		startsOpen, err = practiceCodeWindowOpen(ctx, s.db, scheduleID, now)
+		if err != nil {
+			return PracticeLearningState{}, err
+		}
+	}
 	out.CanRetakeTest = startsOpen && examruntime.IsSatPersonal(sch.TimingModel) && !active &&
 		len(out.Attempts) > 0 && out.Attempts[0].Status == "submitted" && policy.UnlimitedRetakes
 	reason := satlearning.ReasonDisabled

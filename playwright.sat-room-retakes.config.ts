@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import net from "node:net";
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
@@ -99,6 +100,9 @@ const baseServers = Array.isArray(baseConfig.webServer)
 const liveClassroomEnv = {
   SAT_CLASSROOM_ENABLED: "true",
   EXAM_ACCESS_ENABLED: "true",
+  SAT_PERSONAL_TIMING: "on",
+  SAT_ACCESS_CODE_START: "true",
+  SAT_START_CODE_KEYS: `retakes-e2e:${randomBytes(32).toString("base64")}`,
   // The API must serve the built print bundle; backend/.env leaves this empty.
   FRONTEND_DIST_DIR: process.env["FRONTEND_DIST_DIR"] ?? path.resolve("dist"),
   ANSWEREDPDF_DIST: process.env["ANSWEREDPDF_DIST"] ?? path.resolve("dist"),

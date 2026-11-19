@@ -200,37 +200,6 @@ async function seedPublishedSatExam(options: SeedExamOptions): Promise<SeededExa
   return { examId, versionId, questions };
 }
 
-async function insertClassroomRoom(
-  examId: string,
-  versionId: string,
-  adminUserId: string,
-  runId: string
-): Promise<string> {
-  const scheduleId = randomUUID();
-  await executeUpdate(
-    `INSERT INTO exam_schedules
-       (id, exam_id, published_version_id, provider_key, organization_id, exam_title,
-        proctor_display_name, grading_display_name, cohort_name, start_time, end_time,
-        planned_duration_minutes, delivery_mode, status, created_by,
-        sat_timing_model, sat_session_mode, sat_route_policy, sat_start_mode)
-     VALUES (?, ?, ?, 'sat', ?, ?, ?, ?, ?, NOW(),
-        DATE_ADD(NOW(), INTERVAL 2 HOUR), 60, 'proctor_start',
-        'scheduled', ?, 'sat_personal_v1', 'classroom', 'adaptive', 'proctor')`,
-    [
-      scheduleId,
-      examId,
-      versionId,
-      E2E_ORG_ID,
-      `SAT Classroom ${runId}`,
-      `SAT Classroom ${runId}`,
-      `SAT Classroom ${runId}`,
-      `SAT Classroom ${runId}`,
-      adminUserId,
-    ]
-  );
-  return scheduleId;
-}
-
 async function shortenActiveModule(attemptId: string): Promise<void> {
   const rows = await queryDb<{ id: string }>(
     "SELECT id FROM assessment_module_attempts WHERE attempt_id = ? AND state = 'active' ORDER BY started_at DESC LIMIT 1",
@@ -250,7 +219,7 @@ async function shortenActiveModule(attemptId: string): Promise<void> {
 test.skip(process.env["SAT_RETAKE_E2E_DISPOSABLE"] !== "1", "Requires a disposable SAT E2E database.");
 test.afterAll(closeDb);
 
-test("Classroom room defaults, WCODE retake, pause and keyed PDF", async ({ browser, baseURL }) => {
+test("Classroom start code, WCODE retake, pause and keyed PDF", async ({ browser, baseURL }) => {
   test.setTimeout(180_000);
   const admin = await browser.newContext({ storageState: ADMIN_STORAGE_STATE_PATH });
   const student = await browser.newContext();
@@ -260,11 +229,20 @@ test("Classroom room defaults, WCODE retake, pause and keyed PDF", async ({ brow
     const { examId, versionId } = await seedPublishedSatExam({
       runId, adminUserId, questionCount: 2, moduleSeconds: 180,
     });
-    const scheduleId = await insertClassroomRoom(examId, versionId, adminUserId, runId);
     const root = baseURL!;
     const csrf = (await admin.cookies()).find((cookie) => cookie.name === (process.env["CSRF_COOKIE_NAME"] ?? "csrf"))!.value;
-    const settingsUrl = `${root}/api/v1/schedules/${scheduleId}/sat-learning-settings`;
     const headers = { Origin: root, "x-csrf-token": csrf };
+    const linkResponse = await admin.request.post(`${root}/api/v1/assessment-access/exams/${examId}/links`, {
+      headers,
+      data: {
+        publishedVersionId: versionId, name: `SAT Classroom ${runId}`,
+        audienceType: "anyone", accessMode: "student_code", availabilityType: "anytime",
+        satSessionMode: "classroom",
+      },
+    });
+    expect(linkResponse.status(), await linkResponse.text()).toBe(201);
+    const { id: linkId, scheduleId } = await linkResponse.json();
+    const settingsUrl = `${root}/api/v1/schedules/${scheduleId}/sat-learning-settings`;
     const settings = await admin.request.get(settingsUrl);
     expect(settings.status(), await settings.text()).toBe(200);
     const initial = await settings.json();
@@ -276,17 +254,19 @@ test("Classroom room defaults, WCODE retake, pause and keyed PDF", async ({ brow
     expect(saved.status(), await saved.text()).toBe(200);
 
     const page = await student.newPage();
-    await page.goto(`${root}/student/${scheduleId}`);
+    await page.goto(`${root}/join/${linkId}`);
     await page.getByLabel("Student ID/WCODE").fill(`W${Date.now().toString().slice(-8)}`);
     await page.getByLabel("Full name").fill("SAT Retake Student");
     await page.getByLabel("Email").fill(`sat-retake-${runId}@example.test`);
     await page.getByRole("button", { name: /Continue/i }).click();
     await expect(page).toHaveURL(new RegExp(`/student/${scheduleId}/[^/]+$`));
-    const started = await admin.request.post(`${root}/api/v1/schedules/${scheduleId}/runtime/commands`, {
-      headers, data: { action: "start" },
-    });
-    expect(started.status(), await started.text()).toBe(200);
-    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Enter your exam start code" })).toBeVisible();
+    const staff = await admin.newPage();
+    await staff.goto(`${root}/sat/sessions/${scheduleId}`);
+    const code = staff.getByLabel("6-digit exam start code", { exact: true });
+    await expect(code).toHaveText(/^\d{6}$/);
+    await page.getByLabel("6-digit exam start code").fill(await code.innerText());
+    await page.getByRole("button", { name: "Enter code and begin exam" }).click();
     await expect(page.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 60_000 });
 
     const choices = page.locator("label.sat-answer-choice").filter({ hasText: "Choice B" });
@@ -365,6 +345,16 @@ test("Classroom room defaults, WCODE retake, pause and keyed PDF", async ({ brow
       { id: attemptId, submitted: 1 },
       { id: nextAttemptId, submitted: 0 },
     ]));
+
+    await staff.reload({ waitUntil: "domcontentloaded" });
+    const roster = staff.getByRole("option").filter({ hasText: "SAT Retake Student" });
+    await expect(roster).toHaveCount(2);
+    await expect(roster.filter({ hasText: "Finished" })).toHaveCount(1);
+    await staff.goto(`${root}/sat/exams/${examId}/responses?access=${scheduleId}`);
+    const rows = staff.getByRole("row").filter({ hasText: "SAT Retake Student" });
+    await expect(rows).toHaveCount(2);
+    await rows.getByRole("button", { name: /^View answers for/ }).click();
+    await expect(staff).toHaveURL(new RegExp(`[?&]attempt=${attemptId}(&|$)`));
   } finally {
     await Promise.all([admin.close(), student.close()]);
   }
