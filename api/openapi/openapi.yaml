@@ -3176,6 +3176,132 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-pdf-layout:
+    parameters:
+      - name: examId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [authoring]
+      summary: Read the saved layout, targets, and assets for a SAT exam PDF
+      responses:
+        "200":
+          description: Saved or default layout
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatPdfLayoutEditor" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [authoring]
+      summary: Save the exam PDF layout against its expected revision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedRevision, layout]
+              properties:
+                expectedRevision: { type: integer, minimum: 0 }
+                layout: { $ref: "#/components/schemas/SatPdfLayout" }
+      responses:
+        "200":
+          description: Saved layout
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatPdfLayoutEditor" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-pdf-assets:
+    post:
+      tags: [authoring]
+      summary: Upload a private slide or logo image for a SAT exam
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: purpose
+          in: query
+          required: true
+          schema: { type: string, enum: [slide, logo] }
+        - name: filename
+          in: query
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema: { type: string, format: binary }
+          image/jpeg:
+            schema: { type: string, format: binary }
+      responses:
+        "201":
+          description: Ready asset metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatPdfLayoutAsset" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-pdf-assets/{assetId}:
+    get:
+      tags: [authoring]
+      summary: Read private SAT exam PDF artwork
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: assetId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Image bytes
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+            image/jpeg:
+              schema: { type: string, format: binary }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-pdf-layout/preview:
+    post:
+      tags: [authoring]
+      summary: Render a sample SAT exam PDF with synthetic data
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                layout: { $ref: "#/components/schemas/SatPdfLayout" }
+                sampleAnswerKey: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Sample PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /assessment-authoring/exams/{examId}/sat-score-converter:
     get:
       tags: [authoring]
@@ -5696,6 +5822,70 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    SatPdfLayoutTarget:
+      type: object
+      required: [kind]
+      properties:
+        kind: { type: string, enum: [cover, scoreReport, answerSummary, answerKey, examReview, reviewSubject, reviewModule] }
+        sectionKey: { type: string }
+        moduleKey: { type: string }
+    SatPdfLayoutAsset:
+      type: object
+      required: [id, purpose, filename, contentType, bytes, width, height]
+      properties:
+        id: { type: string, format: uuid }
+        purpose: { type: string, enum: [slide, logo] }
+        filename: { type: string }
+        contentType: { type: string, enum: [image/png, image/jpeg] }
+        bytes: { type: integer, minimum: 1 }
+        width: { type: integer, minimum: 1 }
+        height: { type: integer, minimum: 1 }
+    SatPdfLayoutLogo:
+      type: object
+      nullable: true
+      required: [assetId]
+      properties:
+        assetId: { type: string, format: uuid }
+        description: { type: string, maxLength: 240 }
+    SatPdfLayout:
+      type: object
+      required: [slides, logos]
+      properties:
+        slides:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            required: [id, assetId, target, side, description]
+            properties:
+              id: { type: string, format: uuid }
+              assetId: { type: string, format: uuid }
+              target: { $ref: "#/components/schemas/SatPdfLayoutTarget" }
+              side: { type: string, enum: [before, after] }
+              description: { type: string, minLength: 1, maxLength: 240 }
+        logos:
+          type: object
+          properties:
+            cover: { $ref: "#/components/schemas/SatPdfLayoutLogo" }
+            leftWatermark: { $ref: "#/components/schemas/SatPdfLayoutLogo" }
+            rightWatermark: { $ref: "#/components/schemas/SatPdfLayoutLogo" }
+    SatPdfLayoutEditor:
+      type: object
+      required: [revision, layout, targets, assets]
+      properties:
+        revision: { type: integer, minimum: 0 }
+        layout: { $ref: "#/components/schemas/SatPdfLayout" }
+        targets:
+          type: array
+          items:
+            type: object
+            required: [target, label]
+            properties:
+              target: { $ref: "#/components/schemas/SatPdfLayoutTarget" }
+              label: { type: string }
+        assets:
+          type: array
+          items: { $ref: "#/components/schemas/SatPdfLayoutAsset" }
     SatPracticeAttemptSummary:
       type: object
       required: [attemptId, ordinal, mode, status, acceptedAt]

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,7 +22,10 @@ import (
 	"example.com/ielts-proctoring/internal/platform/objectstore"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/results"
+	"example.com/ielts-proctoring/internal/satpdflayout"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/pdfcpu/pdfcpu/pkg/api"
 )
 
 func TestPreparedPDFRoutesMySQL(t *testing.T) {
@@ -130,6 +135,45 @@ func TestPreparedPDFRoutesMySQL(t *testing.T) {
 	request("GET", replacement.DownloadURL, "", replacementCookie, false, 200)
 	exec("UPDATE sat_pdf_exports SET expires_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE attempt_id=?", f.attemptID)
 	request("GET", replacement.DownloadURL, "", replacementCookie, false, 404)
+	if _, err := app.PDFExports.Cleanup(t.Context(), 100); err != nil {
+		t.Fatal(err)
+	}
+	// A layout saved after the attempt completed applies to a new real
+	// student preparation. The original artifact is the page-count control.
+	app.PDFLayouts = satpdflayout.New(f.db, store)
+	var examID string
+	if err := f.db.QueryRow("SELECT exam_id FROM student_attempts WHERE id=?", f.attemptID).Scan(&examID); err != nil {
+		t.Fatal(err)
+	}
+	var artwork bytes.Buffer
+	if err := png.Encode(&artwork, image.NewRGBA(image.Rect(0, 0, 43, 27))); err != nil {
+		t.Fatal(err)
+	}
+	asset, err := app.PDFLayouts.Upload(t.Context(), examID, nil, "slide", "Orientation.png", "image/png", artwork.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Exec("DELETE FROM sat_exam_pdf_assets WHERE exam_id=?", examID) })
+	_, err = app.PDFLayouts.Save(t.Context(), examID, staff.UserID, nil, 0, satpdflayout.Layout{
+		Slides: []satpdflayout.Slide{
+			{ID: uuid.NewString(), AssetID: asset.ID, Target: satpdflayout.Target{Kind: "cover"}, Side: "after", Description: "Orientation slide"},
+			{ID: uuid.NewString(), AssetID: asset.ID, Target: satpdflayout.Target{Kind: "answerKey"}, Side: "after", Description: "Conditional key slide"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom, customCookie := prepare(false)
+	customPDF := request("GET", custom.DownloadURL, "", customCookie, false, 200)
+	basePages, err := api.PageCount(t.Context(), bytes.NewReader(downloaded.Body.Bytes()), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages, err := api.PageCount(t.Context(), bytes.NewReader(customPDF.Body.Bytes()), nil)
+	if err != nil || pages != basePages+1 {
+		t.Fatalf("answer-only PDF with layout has %d pages, want %d: %v", pages, basePages+1, err)
+	}
+	exec("UPDATE sat_pdf_exports SET expires_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE attempt_id=?", f.attemptID)
 	if _, err := app.PDFExports.Cleanup(t.Context(), 100); err != nil {
 		t.Fatal(err)
 	}

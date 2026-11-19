@@ -59,12 +59,17 @@ func init() {
 		"PUT /api/v1/assessment-forms/schedules/{scheduleID}/attempts/{attemptID}/section-entry/{sectionKey}": {Bearer: true, Scope: ScopeAttemptOwner},
 		// Staff form responses: admin, or a proctor for assigned rooms (the
 		// handler applies the assignment predicate before paging).
-		"GET /api/v1/assessment-forms/responses":                                {MinRoles: []string{RoleAdmin, RoleProctor}},
-		"GET /api/v1/assessment-forms/attempts/{attemptID}/responses/{formKey}": {MinRoles: []string{RoleAdmin, RoleProctor}},
-		"GET /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":    {MinRoles: readStaff},
-		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":    {MinRoles: writeStaff},
-		"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":   {MinRoles: readStaff},
-		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":   {MinRoles: writeStaff},
+		"GET /api/v1/assessment-forms/responses":                                   {MinRoles: []string{RoleAdmin, RoleProctor}},
+		"GET /api/v1/assessment-forms/attempts/{attemptID}/responses/{formKey}":    {MinRoles: []string{RoleAdmin, RoleProctor}},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":       {MinRoles: readStaff},
+		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan":       {MinRoles: writeStaff},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":      {MinRoles: readStaff},
+		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter":      {MinRoles: writeStaff},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout":           {MinRoles: readStaff},
+		"PUT /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout":           {MinRoles: writeStaff},
+		"POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets":          {MinRoles: writeStaff},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets/{assetID}": {MinRoles: readStaff},
+		"POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout/preview":  {MinRoles: readStaff},
 		// SAT one-action room creation (internal/satrooms): admin/builder write;
 		// the receipt lookup is the actor's own operation key.
 		"POST /api/v1/sat/exams/{id}/rooms":              {MinRoles: writeStaff},

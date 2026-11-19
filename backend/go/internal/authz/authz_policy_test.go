@@ -210,6 +210,11 @@ var expectedFullPaths = []string{
 	"PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan",
 	"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter",
 	"PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter",
+	"GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout",
+	"PUT /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout",
+	"POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout/preview",
+	"POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets",
+	"GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets/{assetID}",
 	// SAT one-action room creation.
 	"POST /api/v1/sat/exams/{id}/rooms",
 	"GET /api/v1/sat/room-operations/{operationKey}",

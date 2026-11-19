@@ -262,3 +262,40 @@
     background-color: CanvasText;
   }
 }
+
+@media print {
+  .sat-paper-slide {
+    break-before: page;
+    break-after: page;
+    break-inside: avoid;
+  }
+
+  .sat-paper-slide-image {
+    position: relative;
+    z-index: 2;
+    height: 162mm;
+  }
+
+  .sat-paper-slide-image img {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #fff;
+  }
+
+  .sat-paper-title-brand img.sat-paper-custom-cover {
+    height: 25mm;
+    object-fit: contain;
+    object-position: left center;
+  }
+
+  .sat-paper-watermark-brand img.sat-paper-custom-watermark {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}

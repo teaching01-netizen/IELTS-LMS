@@ -37,6 +37,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/proctor"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/satpdflayout"
 	"example.com/ielts-proctoring/internal/student"
 	"example.com/ielts-proctoring/internal/terminalization"
 )
@@ -76,6 +77,7 @@ type Runner struct {
 	cfg        config.Config
 	db         *sql.DB
 	pdfExports *answeredpdf.Exports
+	pdfLayouts *satpdflayout.Service
 	outbox     *outbox.Repository
 	sat        *sat.Service
 	act        *act.Service
@@ -133,6 +135,7 @@ func New(cfg config.Config, pool *sql.DB, deps shared.Deps) *Runner {
 	return &Runner{
 		cfg: cfg, db: pool,
 		pdfExports: svc.PDFExports,
+		pdfLayouts: svc.PDFLayouts,
 		outbox:     outbox.NewRepository(pool).WithClaim(cfg.WorkerClaimPartitions, 0, claimMode),
 		sat:        svc.SAT, act: svc.ACT, delivery: svc.Delivery,
 		proctor: svc.Proctor, student: svc.Student, terminal: svc.Terminal,
@@ -1048,6 +1051,11 @@ func (w *Runner) runMaintenanceCycle(ctx context.Context, at time.Time) {
 			log.Printf("worker: RunSATPDFCleanup failed")
 		} else if n > 0 {
 			log.Printf("worker: RunSATPDFCleanup deleted=%d", n)
+		}
+	}
+	if w.pdfLayouts != nil {
+		if _, err := w.pdfLayouts.Cleanup(ctx); err != nil {
+			log.Print("worker: SAT PDF layout asset cleanup failed")
 		}
 	}
 	if rep, err := maintenance.RunMedia(ctx, w.db); err != nil {

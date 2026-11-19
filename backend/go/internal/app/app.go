@@ -39,6 +39,7 @@ import (
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/satpdflayout"
 	"example.com/ielts-proctoring/internal/satrooms"
 	"example.com/ielts-proctoring/internal/satscoring"
 	"example.com/ielts-proctoring/internal/satstartcode"
@@ -60,6 +61,7 @@ type Services struct {
 	Results       *results.Service
 	Media         *media.Service
 	PDFExports    *answeredpdf.Exports
+	PDFLayouts    *satpdflayout.Service
 	Library       *library.Service
 	AnswerHistory *answerhistory.Service
 	Authoring     *authoring.Service
@@ -132,7 +134,9 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 		objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot),
 		media.NewHTTPRemoteImageFetcher(media.RemoteImageFetcherOptions{}),
 	)
-	s.PDFExports = answeredpdf.NewExports(pool, objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot))
+	store := objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot)
+	s.PDFExports = answeredpdf.NewExports(pool, store)
+	s.PDFLayouts = satpdflayout.New(pool, store)
 	s.Exams.SetMediaVerifier(s.Media)
 	s.Library = library.NewService(pool, s.Tx)
 	s.AnswerHistory = answerhistory.NewService(pool)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"mime"
@@ -121,17 +122,14 @@ func readAnsweredPDFRequest(w http.ResponseWriter, r *http.Request) (answeredPDF
 
 // writeAnsweredPDF renders exam with the posted view and figures. Busy maps
 // to 429 + Retry-After; an incomplete paper to 422 and no file (PDF-10).
-func writeAnsweredPDF(app *App, w http.ResponseWriter, r *http.Request, req answeredPDFRequest, exam *delivery.AnsweredExam) {
-	payload, err := json.Marshal(struct {
-		Exam  *delivery.AnsweredExam `json:"exam"`
-		View  json.RawMessage        `json:"view,omitempty"`
-		Media map[string]string      `json:"media"`
-	}{exam, req.View, req.Media})
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	pdf, err := app.AnsweredPDF.Render(r.Context(), payload)
+func writeAnsweredPDF(app *App, w http.ResponseWriter, r *http.Request, req answeredPDFRequest, exam *delivery.AnsweredExam, student bool) {
+	pdf, err := app.AnsweredPDF.RenderPrepared(r.Context(), func(ctx context.Context) ([]byte, error) {
+		layout, err := resolveAttemptPDFLayout(ctx, app, exam, req.View, student)
+		if err != nil {
+			return nil, err
+		}
+		return answeredpdf.MarshalPayload(exam, req.View, req.Media, layout)
+	})
 	switch {
 	case errors.Is(err, answeredpdf.ErrBusy):
 		httpx.WriteRateLimitExceeded(w, r, "answered-exam-pdf", "node", 5*time.Second)
@@ -188,7 +186,7 @@ func deliveryAnsweredPDFHandler(app *App) http.HandlerFunc {
 			writeAnsweredExam(w, r, nil, err)
 			return
 		}
-		writeAnsweredPDF(app, w, r, req, exam)
+		writeAnsweredPDF(app, w, r, req, exam, true)
 	}
 }
 
@@ -226,6 +224,6 @@ func resultsSATAnsweredPDFHandler(app *App) http.HandlerFunc {
 			writeAnsweredExam(w, r, nil, err)
 			return
 		}
-		writeAnsweredPDF(app, w, r, req, exam)
+		writeAnsweredPDF(app, w, r, req, exam, false)
 	}
 }

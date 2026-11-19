@@ -146,10 +146,15 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 			}
 			scored := len(request.View) > 0 && string(request.View) != "null"
 			filename = answeredpdf.Filename(exam.CandidateName, exam.ExamTitle, scored)
-			if student {
-				return answeredpdf.BuildPayload(ctx, exam, request.View, app.Media.OpenDelivery)
+			layout, err := resolveAttemptPDFLayout(ctx, app, exam, request.View, student)
+			if err != nil {
+				return nil, err
 			}
-			return answeredpdf.BuildPayload(ctx, exam, request.View, app.Media.OpenFinalized)
+			open := app.Media.OpenFinalized
+			if student {
+				open = app.Media.OpenDelivery
+			}
+			return answeredpdf.BuildPayloadWithLayout(ctx, exam, request.View, open, layout)
 		})
 		if err != nil {
 			pdfExportError(w, r, err)

@@ -40,6 +40,8 @@ var RequiredTables = []string{
 	"sat_room_operations",
 	// Native SAT downloads (0092): browser grants and artifact cleanup.
 	"sat_pdf_exports",
+	"sat_exam_pdf_layouts",
+	"sat_exam_pdf_assets",
 	"sat_activity_policies",
 	"sat_attempt_learning",
 	"sat_practice_students",

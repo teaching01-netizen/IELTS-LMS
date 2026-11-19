@@ -13,6 +13,7 @@ import { DeliverySettingsPanel } from "./DeliverySettingsPanel";
 import { ScoreConverterPanel } from "../release/ScoreConverterPanel";
 import { ScoreReportSettingPanel } from "../release/ScoreReportSettingPanel";
 import { useExamQuery } from "../../api/examQueries";
+import { ExamPdfLayoutPanel } from "./pdf-layout/ExamPdfLayoutPanel";
 import { FormsSettingsPanel } from "./FormsSettingsPanel";
 
 const SETTINGS_SCORING_PANEL_ID = "sat-settings-scoring";
@@ -31,10 +32,12 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
   // Counted per owner so a saved delivery panel cannot clear unsaved forms.
   const [deliveryDirty, setDeliveryDirty] = useState(0);
   const [formsDirty, setFormsDirty] = useState(0);
-  const dirtyCount = deliveryDirty + formsDirty;
+  const [pdfDirty, setPdfDirty] = useState(0);
+  const dirtyCount = deliveryDirty + formsDirty + pdfDirty;
   const clearDirty = useCallback(() => {
     setDeliveryDirty(0);
     setFormsDirty(0);
+    setPdfDirty(0);
   }, []);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
 
@@ -126,6 +129,7 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
           </div>
           <ScoreReportSettingPanel exam={exam} onSaved={() => examQuery.refetch()} />
           <ScoreConverterPanel examId={exam.id} canEdit={exam.canEdit} />
+          {exam.providerKey === "sat" ? <ExamPdfLayoutPanel key={exam.id} examId={exam.id} canEdit={exam.canEdit} onDirtyChange={setPdfDirty} /> : null}
         </section>
       </div>
 

@@ -11,12 +11,17 @@ import (
 
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/media"
+	"example.com/ielts-proctoring/internal/satpdflayout"
 	"example.com/ielts-proctoring/internal/satpublish"
 )
 
 // BuildPayload loads only figures in the already-authorized projection. The
 // caller selects OpenDelivery for students and OpenFinalized for staff.
 func BuildPayload(ctx context.Context, exam *delivery.AnsweredExam, view json.RawMessage, load func(context.Context, string) (media.Content, error)) ([]byte, error) {
+	return BuildPayloadWithLayout(ctx, exam, view, load, nil)
+}
+
+func BuildPayloadWithLayout(ctx context.Context, exam *delivery.AnsweredExam, view json.RawMessage, load func(context.Context, string) (media.Content, error), layout *satpdflayout.Resolved) ([]byte, error) {
 	figures := map[string]string{}
 	total := 0
 	for _, section := range exam.Sections {
@@ -53,11 +58,16 @@ func BuildPayload(ctx context.Context, exam *delivery.AnsweredExam, view json.Ra
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	return MarshalPayload(exam, view, figures, layout)
+}
+
+func MarshalPayload(exam *delivery.AnsweredExam, view json.RawMessage, figures map[string]string, layout *satpdflayout.Resolved) ([]byte, error) {
 	return json.Marshal(struct {
-		Exam  *delivery.AnsweredExam `json:"exam"`
-		View  json.RawMessage        `json:"view"`
-		Media map[string]string      `json:"media"`
-	}{exam, view, figures})
+		Exam   *delivery.AnsweredExam `json:"exam"`
+		View   json.RawMessage        `json:"view"`
+		Media  map[string]string      `json:"media"`
+		Layout *satpdflayout.Resolved `json:"layout,omitempty"`
+	}{exam, view, figures, layout})
 }
 
 // Filename preserves the browser's existing sanitization and UTF-16 length bound.

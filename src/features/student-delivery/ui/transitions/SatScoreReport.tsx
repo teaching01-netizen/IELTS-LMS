@@ -1,5 +1,5 @@
 /* eslint-disable jsx-a11y/control-has-associated-label -- Presentational, aria-hidden print tables use rows and cells for native page repetition. */
-import { useEffect, useMemo, type ReactNode, type Ref } from "react";
+import { Fragment, useEffect, useMemo, type ReactNode, type Ref } from "react";
 import "./score-report/sat-answered-paper.css";
 import warwickWatermark from "../../../../assets/warwick-institute-logo.png";
 import { SatPrintedQuestion } from "./score-report/SatPrintedQuestion";
@@ -9,6 +9,7 @@ import type {
   AssessmentResult,
   SATRecoveryResolutionReceipt,
 } from "../../contracts/assessmentDelivery";
+import { pdfTargetKey, type PdfSide, type PdfTarget, type ResolvedPdfLayout } from "@shared/sat/pdfLayout";
 import type { SatAttemptLearning } from "@shared/sat/learningPolicy";
 import { logWarn } from "../../../../shared/observability/errorLogger";
 import { SatKnowledgeSkills } from "./score-report/SatKnowledgeSkills";
@@ -193,10 +194,12 @@ export const PAPER_READY_TIMEOUT_MS = 30_000;
  */
 export function answeredPaperReady(paper: HTMLElement): boolean {
   if (paper.dataset["complete"] !== "true") return false;
-  return [...paper.querySelectorAll("figure")].every((figure) => {
+  const ready = [...paper.querySelectorAll("figure")].every((figure) => {
     const image = figure.querySelector("img");
     return image !== null && image.complete && image.naturalWidth > 0;
   });
+  return ready && [...paper.querySelectorAll<HTMLImageElement>("[data-pdf-design-image]")]
+    .every((image) => image.complete && image.naturalWidth > 0);
 }
 
 /**
@@ -320,7 +323,14 @@ function PaperModuleHeading({
 
 /** Stack the symbol and wordmark from the supplied, bundled colour logo.
  * Clipping reuses the same PNG without CSS filters or extra raster assets. */
-function PaperWatermarkBrand({ large = false }: { large?: boolean }) {
+function PaperWatermarkBrand({ large = false, source }: { large?: boolean; source?: string | undefined }) {
+  if (source) {
+    return (
+      <div className="sat-paper-watermark-brand" data-watermark={large ? "large" : "small"}>
+        <img data-pdf-design-image className="sat-paper-custom-watermark" src={source} alt="" loading="eager" />
+      </div>
+    );
+  }
   return (
     <div className="sat-paper-watermark-brand" data-watermark={large ? "large" : "small"}>
       <span className="sat-paper-watermark-symbol">
@@ -335,19 +345,19 @@ function PaperWatermarkBrand({ large = false }: { large?: boolean }) {
 
 /** Reference layout: staggered small marks on the left, one large mark on
  * the right. Fixed positioning repeats the composition on printed pages. */
-function PaperWatermark() {
+function PaperWatermark({ left, right }: { left?: string | undefined; right?: string | undefined }) {
   const slots = [[1, 1], [3, 1], [2, 2], [1, 3], [3, 3], [2, 4], [1, 5], [3, 5]];
   return (
     <div aria-hidden="true" className="sat-paper-watermark">
       <div className="sat-paper-watermark-pattern">
         {slots.map(([column, row], index) => (
           <div key={index} style={{ gridColumn: column, gridRow: row }}>
-            <PaperWatermarkBrand />
+            <PaperWatermarkBrand source={left} />
           </div>
         ))}
       </div>
       <div className="sat-paper-watermark-feature">
-        <PaperWatermarkBrand large />
+        <PaperWatermarkBrand large source={right} />
       </div>
     </div>
   );
@@ -378,6 +388,7 @@ function PaperTitlePage({
   mode,
   subjects,
   moduleCount,
+  logo,
 }: {
   exam: AnsweredExam;
   hasScoreReport: boolean;
@@ -385,6 +396,7 @@ function PaperTitlePage({
   mode: SatAttemptMode;
   subjects: string[];
   moduleCount: number;
+  logo?: { source: string; description: string } | undefined;
 }) {
   const reportTitle = mode === "study" ? "Study result & exam review" : "Score report & exam review";
   return (
@@ -394,7 +406,9 @@ function PaperTitlePage({
           <td>
             <header className="sat-paper-title-page">
               <div className="sat-paper-title-brand">
-                <img src={warwickWatermark} alt="Warwick Institute" loading="eager" />
+                {logo ? (
+                  <img data-pdf-design-image className="sat-paper-custom-cover" src={logo.source} alt={logo.description} loading="eager" />
+                ) : <img src={warwickWatermark} alt="Warwick Institute" loading="eager" />}
                 <p>Digital SAT<span>Personal study copy</span></p>
               </div>
               <div className="sat-paper-title-main">
@@ -515,6 +529,28 @@ function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
   );
 }
 
+function PaperFrontMatter({ children }: { children: ReactNode }) {
+  return (
+    <table className="sat-paper-table" role="presentation">
+      <tbody><tr><td>{children}</td></tr></tbody>
+      <PaperFooter />
+    </table>
+  );
+}
+
+function PaperSlide({ source, description }: { source: string | undefined; description: string }) {
+  return (
+    <table className="sat-paper-table sat-paper-slide" role="presentation">
+      <tbody><tr><td>
+        <div className="sat-paper-slide-image">
+          <img data-pdf-design-image src={source} alt={description} loading="eager" />
+        </div>
+      </td></tr></tbody>
+      <PaperFooter />
+    </table>
+  );
+}
+
 /**
  * Print-only paper: a branded cover, the score report (when one is given), a compact per-module
  * answer sheet, an authorized answer-key table (only from a server key projection), then — on
@@ -532,6 +568,7 @@ export function AnsweredExamPaper({
   loadMediaUrl,
   onMediaFailure,
   generation,
+  layout,
   paperRef,
 }: {
   exam: AnsweredExam;
@@ -541,6 +578,7 @@ export function AnsweredExamPaper({
   loadMediaUrl?: LoadMediaUrl | undefined;
   onMediaFailure?: (() => void) | undefined;
   generation?: number;
+  layout?: ResolvedPdfLayout | undefined;
   paperRef?: Ref<HTMLDivElement>;
 }) {
   const moduleIdByAttempt = new Map<string, string>();
@@ -583,31 +621,18 @@ export function AnsweredExamPaper({
   }));
   const paperMode: SatAttemptMode = view?.mode === "study" ? "study" : "test";
   const mediaFailure = onMediaFailure ? () => onMediaFailure() : undefined;
-  return (
-    <div
-      ref={paperRef}
-      className="sat-answered-paper hidden bg-white text-left text-black print:block"
-      aria-hidden="true"
-      data-complete={complete}
-      data-generation={generation}
-      data-answer-key-mode={keyed ? "keyed" : "answer-only"}
-    >
-      <PaperWatermark />
-      <PaperTitlePage
-        exam={exam}
-        hasScoreReport={Boolean(view)}
-        hasAnswerKey={keyed}
-        mode={paperMode}
-        subjects={[...new Set(printableModules.map(({ section }) => SAT_SECTION_LABEL[section.sectionKey] ?? section.title))]}
-        moduleCount={printableModules.length}
-      />
-      {/* The repeating tfoot reserves the notice's height on every page. The
-          visible copy is fixed at the bottom, including the final short page. */}
-      <table className="sat-paper-table" role="presentation">
-        <tbody>
-          <tr>
-            <td>
-       <header className="sat-paper-cover">
+  const slides = (target: PdfTarget, side: PdfSide) => {
+    const targetKey = pdfTargetKey(target);
+    return (layout?.layout.slides ?? [])
+      .filter((slide) => slide.side === side && pdfTargetKey(slide.target) === targetKey)
+      .map((slide) => <PaperSlide key={slide.id} source={layout?.images[slide.assetId]} description={slide.description} />);
+  };
+  const logoSource = (assetId: string | undefined) => assetId ? layout?.images[assetId] : undefined;
+  const cover = layout?.layout.logos.cover;
+  const coverSource = logoSource(cover?.assetId);
+  const designReady = Object.values(layout?.layout.logos ?? {}).every((logo) => !logo || Boolean(logoSource(logo.assetId)));
+  const frontHeader = (
+    <header className="sat-paper-cover">
         <div>
           <h1>{exam.examTitle?.trim() || "Digital SAT"}</h1>
           <p>
@@ -623,7 +648,9 @@ export function AnsweredExamPaper({
           <span>Personal study copy</span>
         </div>
       </header>
-      {view ? <PaperScoreSummary view={view} /> : null}
+  );
+  const summary = (
+    <>
       <div className="sat-paper-summary-heading">
         <h2>Answer summary</h2>
         <p>Your saved responses, in exam order</p>
@@ -668,20 +695,67 @@ export function AnsweredExamPaper({
           </section>
         );
       })}
-      {keyed ? (
-        <SatAnswerKeyTable modules={keyModules} answers={answers} entries={keyEntries} />
-      ) : null}
-      {/* Front matter ends here: each review module is its own table so its
-          runhead (exam · section · module) repeats on every page it spans. */}
-            </td>
-          </tr>
-        </tbody>
-        <PaperFooter />
-      </table>
-      {printableModules.map(({ section, sectionNo, module }) => {
+    </>
+  );
+  const frontSections: { kind: "scoreReport" | "answerSummary" | "answerKey"; content: ReactNode }[] = [];
+  if (view) frontSections.push({ kind: "scoreReport", content: <PaperScoreSummary view={view} /> });
+  frontSections.push({ kind: "answerSummary", content: summary });
+  if (keyed) frontSections.push({
+    kind: "answerKey",
+    content: <SatAnswerKeyTable modules={keyModules} answers={answers} entries={keyEntries} />,
+  });
+  const frontMatter: ReactNode[] = [];
+  let group: ReactNode[] = [];
+  const appendSlides = (pages: ReactNode[]) => {
+    if (!pages.length) return;
+    if (group.length) frontMatter.push(<PaperFrontMatter key={frontMatter.length}>{group}</PaperFrontMatter>);
+    frontMatter.push(...pages);
+    group = [];
+  };
+  frontSections.forEach(({ kind, content }, index) => {
+    appendSlides(slides({ kind }, "before"));
+    group.push(<Fragment key={kind}>{index === 0 ? frontHeader : null}{content}</Fragment>);
+    appendSlides(slides({ kind }, "after"));
+  });
+  if (group.length) frontMatter.push(<PaperFrontMatter key={frontMatter.length}>{group}</PaperFrontMatter>);
+
+  return (
+    <div
+      ref={paperRef}
+      className="sat-answered-paper hidden bg-white text-left text-black print:block"
+      aria-hidden={layout ? undefined : true}
+      data-complete={complete && designReady}
+      data-generation={generation}
+      data-answer-key-mode={keyed ? "keyed" : "answer-only"}
+    >
+      <PaperWatermark
+        left={logoSource(layout?.layout.logos.leftWatermark?.assetId)}
+        right={logoSource(layout?.layout.logos.rightWatermark?.assetId)}
+      />
+      {slides({ kind: "cover" }, "before")}
+      <PaperTitlePage
+        exam={exam}
+        hasScoreReport={Boolean(view)}
+        hasAnswerKey={keyed}
+        mode={paperMode}
+        subjects={[...new Set(printableModules.map(({ section }) => SAT_SECTION_LABEL[section.sectionKey] ?? section.title))]}
+        moduleCount={printableModules.length}
+        logo={cover && coverSource ? { source: coverSource, description: cover.description ?? "" } : undefined}
+      />
+      {slides({ kind: "cover" }, "after")}
+      {frontMatter}
+      {printableModules.length ? slides({ kind: "examReview" }, "before") : null}
+      {printableModules.map(({ section, sectionNo, module }, index) => {
+        const subject: PdfTarget = { kind: "reviewSubject", sectionKey: section.sectionKey };
+        const moduleTarget: PdfTarget = { kind: "reviewModule", sectionKey: section.sectionKey, moduleKey: module.moduleKey };
+        const firstInSubject = printableModules[index - 1]?.section.id !== section.id;
+        const lastInSubject = printableModules[index + 1]?.section.id !== section.id;
         const sectionLabel = SAT_SECTION_LABEL[section.sectionKey] ?? section.title;
         return (
-          <table key={`review-${module.id}`} className="sat-paper-table sat-paper-review" role="presentation" data-review-module={module.id}>
+          <Fragment key={module.id}>
+          {firstInSubject ? slides(subject, "before") : null}
+          {slides(moduleTarget, "before")}
+          <table className="sat-paper-table sat-paper-review" role="presentation" data-review-module={module.id}>
             <thead>
               <tr>
                 <td>
@@ -733,8 +807,12 @@ export function AnsweredExamPaper({
             </tbody>
             <PaperFooter />
           </table>
+          {slides(moduleTarget, "after")}
+          {lastInSubject ? slides(subject, "after") : null}
+          </Fragment>
         );
       })}
+      {printableModules.length ? slides({ kind: "examReview" }, "after") : null}
     </div>
   );
 }

@@ -73,6 +73,20 @@ func StudentSATResult(ctx context.Context, db tx.Tx, in *sat.AssessmentResult) (
 	return satReleasedProjection(in), nil
 }
 
+// StudentSATPDFScoreAvailable authorizes content attached to the score section
+// using the same release projection as bootstrap, independent of client view data.
+func StudentSATPDFScoreAvailable(ctx context.Context, db tx.Tx, attemptID string) (bool, error) {
+	result, err := sat.LoadResultForAttempt(ctx, db, attemptID)
+	if err != nil {
+		return false, err
+	}
+	visible, err := StudentSATResult(ctx, db, result)
+	if err != nil || visible == nil {
+		return false, err
+	}
+	return visible.ScorePayload["classroomRaw"] != nil, nil
+}
+
 // studentSafeBootstrapResult applies the release policy to a terminal attempt's
 // result. A released result is returned unchanged; anything else becomes the
 // receipt projection.

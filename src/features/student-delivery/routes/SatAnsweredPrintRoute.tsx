@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { ResolvedPdfLayout } from "@shared/sat/pdfLayout";
 import { useSearchParams } from "react-router-dom";
 import {
   AnsweredExamPaper,
@@ -14,6 +15,7 @@ interface PrintPayload {
   exam: AnsweredExam;
   view: StudentScoreReportView | null;
   media: Record<string, string>;
+  layout?: ResolvedPdfLayout;
   /** Optional top-level copy for older renderers; the exam field wins. */
   answerKey?: AnsweredExam["answerKey"];
 }
@@ -100,6 +102,7 @@ export function SatAnsweredPrintRoute() {
         onMediaFailure={() => {
           mediaFailed.current = true;
         }}
+        layout={payload.layout}
         paperRef={paperRef}
       />
     </>,

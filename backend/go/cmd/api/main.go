@@ -50,6 +50,7 @@ import (
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/runtime"
 	"example.com/ielts-proctoring/internal/sat"
+	"example.com/ielts-proctoring/internal/satpdflayout"
 	"example.com/ielts-proctoring/internal/satrooms"
 	"example.com/ielts-proctoring/internal/satscoring"
 	"example.com/ielts-proctoring/internal/schedules"
@@ -101,6 +102,7 @@ type App struct {
 	Delivery      *delivery.Service
 	AnsweredPDF   *answeredpdf.Renderer
 	PDFExports    *answeredpdf.Exports
+	PDFLayouts    *satpdflayout.Service
 	Release       *release.Service
 	Runtime       *runtime.Service
 	Terminal      *terminalization.Service
@@ -288,6 +290,7 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.Results = svc.Results
 		app.Media = svc.Media
 		app.PDFExports = svc.PDFExports
+		app.PDFLayouts = svc.PDFLayouts
 		app.Library = svc.Library
 		app.AnswerHistory = svc.AnswerHistory
 		app.Authoring = svc.Authoring
@@ -669,6 +672,11 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Put("/exams/{examID}/sat-classroom-plan", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/sat-classroom-plan", authorClassroomPlanHandler(app)))
 			r.With(adminLimit).Get("/exams/{examID}/sat-score-converter", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-score-converter", authorScoreConverterHandler(app)))
 			r.With(adminLimit).Put("/exams/{examID}/sat-score-converter", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/sat-score-converter", authorScoreConverterHandler(app)))
+			r.With(adminLimit).Get("/exams/{examID}/sat-pdf-layout", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout", satPDFLayoutHandler(app)))
+			r.With(adminLimit).Put("/exams/{examID}/sat-pdf-layout", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout", satPDFLayoutHandler(app)))
+			r.With(adminLimit).Post("/exams/{examID}/sat-pdf-assets", authorize("POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets", satPDFAssetUploadHandler(app)))
+			r.With(adminLimit).Get("/exams/{examID}/sat-pdf-assets/{assetID}", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets/{assetID}", satPDFAssetReadHandler(app)))
+			r.With(adminLimit).Post("/exams/{examID}/sat-pdf-layout/preview", authorize("POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout/preview", satPDFLayoutPreviewHandler(app)))
 			r.With(adminLimit).Get("/exams/{examID}/forms", authorize("GET /api/v1/assessment-authoring/exams/{examID}/forms", authorFormsHandler(app)))
 			r.With(adminLimit).Put("/exams/{examID}/forms", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/forms", authorFormsHandler(app)))
 		})

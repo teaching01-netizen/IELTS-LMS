@@ -21,6 +21,7 @@ import (
 // only by the separately authorized keyed-PDF path; the ordinary projection
 // leaves it nil.
 type AnsweredExam struct {
+	ExamID        string            `json:"-"`
 	AttemptID     string            `json:"attemptId"`
 	ExamTitle     string            `json:"examTitle"`
 	CandidateName string            `json:"candidateName"`
@@ -296,7 +297,7 @@ func (s *Service) answeredExamSnapshot(ctx context.Context, attemptID string) (*
 	out := &AnsweredExam{AttemptID: attemptID}
 	// The attempt's own published version: the version it was delivered,
 	// whatever the exam or schedule points at now (PDF-07).
-	err := s.db.QueryRowContext(ctx, "SELECT sa.published_version_id, COALESCE(sch.exam_title, '') FROM student_attempts sa JOIN exam_schedules sch ON sch.id = sa.schedule_id JOIN exam_entities e ON e.id = sa.exam_id AND e.provider_key = 'sat' WHERE sa.id = ?", attemptID).Scan(&out.VersionID, &out.ExamTitle)
+	err := s.db.QueryRowContext(ctx, "SELECT sa.exam_id, sa.published_version_id, COALESCE(sch.exam_title, '') FROM student_attempts sa JOIN exam_schedules sch ON sch.id = sa.schedule_id JOIN exam_entities e ON e.id = sa.exam_id AND e.provider_key = 'sat' WHERE sa.id = ?", attemptID).Scan(&out.ExamID, &out.VersionID, &out.ExamTitle)
 	if err == sql.ErrNoRows {
 		return nil, apperrors.New(apperrors.CodeNotFound, "SAT attempt not found.")
 	}
