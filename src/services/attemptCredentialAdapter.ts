@@ -213,7 +213,8 @@ export function clearAttemptCredential(attempt: AttemptCredentialRef): void {
 
 export function storeAttemptCredential(
   attempt: AttemptCredentialRef,
-  credential: BackendAttemptCredential | null | undefined
+  credential: BackendAttemptCredential | null | undefined,
+  replacesAttemptId?: string,
 ): void {
   if (!credential) {
     return;
@@ -221,7 +222,8 @@ export function storeAttemptCredential(
 
   const credentials = getAttemptCredentialStorage().filter(
     (candidate) =>
-      !(candidate.attemptId === attempt.id && candidate.scheduleId === attempt.scheduleId)
+      candidate.scheduleId !== attempt.scheduleId ||
+      (candidate.attemptId !== attempt.id && candidate.attemptId !== replacesAttemptId)
   );
   credentials.push({
     attemptId: attempt.id,

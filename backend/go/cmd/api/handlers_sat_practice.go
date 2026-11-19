@@ -169,14 +169,12 @@ func practiceStartHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
-		clientSessionID := attempt.ClientSessionID
-		if clientSessionID == "" {
-			clientSessionID = body.ClientSessionID
+		clientSessionID := strings.TrimSpace(body.ClientSessionID)
+		if clientSessionID == "" && attempt.Disposition == "started" {
+			clientSessionID = attempt.ClientSessionID
 		}
 		if clientSessionID == "" {
-			// A replay may predate recovery evidence; an admission still needs a
-			// session identity, and it is issued server-side, never trusted from
-			// the display form.
+			// An existing attempt's writer identity belongs to that browser.
 			clientSessionID = uuid.NewString()
 		}
 		admission, err := admitStudentSession(r.Context(), app, identity.UserID, scheduleID, attempt.AttemptID,

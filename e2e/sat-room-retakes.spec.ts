@@ -322,14 +322,49 @@ test("Classroom room defaults, WCODE retake, pause and keyed PDF", async ({ brow
     const href = await page.getByRole("link", { name: "Download PDF again" }).getAttribute("href");
     expect((await student.request.head(new URL(href!, root).href)).status()).toBe(404);
 
+    const credentialKey = "ielts_student_attempt_credentials_v1";
+    const previousGrants = await page.evaluate((key) => ({
+      local: localStorage.getItem(key),
+      session: sessionStorage.getItem(key),
+    }), credentialKey);
+    expect(JSON.parse(previousGrants.local ?? "[]")).toContainEqual(expect.objectContaining({
+      attemptId, credentialPolicy: "sitting_v1",
+    }));
+
     const retake = page.waitForResponse((res) => res.url().endsWith(`/sat/practice/schedules/${scheduleId}/attempts`) && res.request().method() === "POST");
     await page.getByRole("button", { name: "Start exam again" }).click();
-    const replay = await retake;
-    expect(replay.status(), await replay.text()).toBe(200);
-    const next = await replay.json();
-    expect(next).toMatchObject({ ordinal: 2, disposition: "started" });
-    expect(next.attemptId).not.toBe(attemptId);
-    await expect(page.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 60_000 });
+    expect((await retake).status()).toBe(200);
+    const [{ id: nextAttemptId }] = await queryDb<{ id: string }>(
+      "SELECT sa.id FROM student_attempts sa JOIN sat_attempt_learning l ON l.attempt_id = sa.id WHERE sa.schedule_id = ? AND l.ordinal = 2",
+      [scheduleId],
+    );
+    expect(nextAttemptId).not.toBe(attemptId);
+    await expect(page.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 20_000 });
+    await expect(choices.first()).toBeVisible();
+    await expect(choices.first().locator("input")).not.toBeChecked();
+
+    // Re-create the state of a browser whose earlier retake was admitted but
+    // whose reload was still bound to the submitted attempt's grant.
+    await page.evaluate(({ key, local, session }) => {
+      if (local) localStorage.setItem(key, local);
+      if (session) sessionStorage.setItem(key, session);
+      else sessionStorage.removeItem(key);
+    }, { key: credentialKey, ...previousGrants });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("region", { name: "Score report" })).toBeVisible();
+    await page.getByRole("button", { name: "Open new attempt" }).click();
+    await expect(page.getByTestId("sat-exam-shell")).toBeVisible({ timeout: 20_000 });
+    await expect(choices.first().locator("input")).not.toBeChecked();
+
+    const attempts = await queryDb<{ id: string; submitted: number }>(
+      "SELECT id, submitted_at IS NOT NULL AS submitted FROM student_attempts WHERE schedule_id = ?",
+      [scheduleId],
+    );
+    expect(attempts).toHaveLength(2);
+    expect(attempts).toEqual(expect.arrayContaining([
+      { id: attemptId, submitted: 1 },
+      { id: nextAttemptId, submitted: 0 },
+    ]));
   } finally {
     await Promise.all([admin.close(), student.close()]);
   }
