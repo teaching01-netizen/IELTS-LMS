@@ -23,6 +23,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"example.com/ielts-proctoring/internal/satlearning"
+
 	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/authoringrealtime"
@@ -193,8 +195,9 @@ type Exam struct {
 	CanDelete                     bool             `json:"canDelete"`
 	// SatScoreReportEnabled releases the SAT score report and answered-exam
 	// download on completion; off, the student only sees "SAT complete".
-	SatScoreReportEnabled bool            `json:"satScoreReportEnabled"`
-	SatSectionScope       SATPublishScope `json:"satSectionScope"`
+	SatLearningDefaults   *satlearning.Policy `json:"satLearningDefaults,omitempty"`
+	SatScoreReportEnabled bool                `json:"satScoreReportEnabled"`
+	SatSectionScope       SATPublishScope     `json:"satSectionScope"`
 	// SatCustomModules: the exam has a classroom plan, so it runs in Classroom
 	// rooms only; otherwise it is the full adaptive (Practice-capable) test.
 	SatCustomModules bool `json:"satCustomModules"`
@@ -272,6 +275,7 @@ type UpdateRequest struct {
 	Visibility     *string
 	OrganizationID *string
 	// SatScoreReportEnabled toggles the SAT completion score report (SAT only).
+	SatLearningDefaults   *satlearning.Policy
 	SatScoreReportEnabled *bool
 	Revision              int
 }
@@ -336,7 +340,7 @@ func claimExamOperationKey(ctx context.Context, q tx.Tx, actor, scope, key, fing
 
 const examColumns = "id, slug, title, provider_key, provider_exam_type, exam_type, status, visibility, organization_id, owner_id, current_draft_version_id, current_published_version_id, schema_version, revision, created_at, updated_at, (SELECT COALESCE(v.sat_publish_scope, 'full') FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), (SELECT v.version_number FROM exam_versions v WHERE v.id = exam_entities.current_published_version_id), sat_score_report_enabled, sat_section_scope, " +
 	// Same version GetClassroomPlan reads: the draft, else the published release.
-	"COALESCE((SELECT JSON_TYPE(v.sat_classroom_plan) = 'OBJECT' AND JSON_LENGTH(v.sat_classroom_plan) > 0 FROM exam_versions v WHERE v.id = COALESCE(NULLIF(exam_entities.current_draft_version_id, ''), exam_entities.current_published_version_id)), FALSE)"
+	"COALESCE((SELECT JSON_TYPE(v.sat_classroom_plan) = 'OBJECT' AND JSON_LENGTH(v.sat_classroom_plan) > 0 FROM exam_versions v WHERE v.id = COALESCE(NULLIF(exam_entities.current_draft_version_id, ''), exam_entities.current_published_version_id)), FALSE), sat_learning_defaults"
 
 // versionColumns is the full exam_versions projection, snapshot payloads
 // included: only ever selected by id or for a single ordered row.
@@ -353,8 +357,16 @@ func scanExam(row interface {
 	var e Exam
 	var providerExamType, orgID, draftID, pubID, publishedScope sql.NullString
 	var publishedVersionNumber sql.NullInt64
-	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope, &publishedVersionNumber, &e.SatScoreReportEnabled, &e.SatSectionScope, &e.SatCustomModules); err != nil {
+	var rawLearning []byte
+	if err := row.Scan(&e.ID, &e.Slug, &e.Title, &e.ProviderKey, &providerExamType, &e.ExamType, &e.Status, &e.Visibility, &orgID, &e.OwnerID, &draftID, &pubID, &e.SchemaVersion, &e.Revision, &e.CreatedAt, &e.UpdatedAt, &publishedScope, &publishedVersionNumber, &e.SatScoreReportEnabled, &e.SatSectionScope, &e.SatCustomModules, &rawLearning); err != nil {
 		return Exam{}, err
+	}
+	if len(rawLearning) > 0 {
+		policy, err := satlearning.UnmarshalPolicy(rawLearning)
+		if err != nil {
+			return Exam{}, err
+		}
+		e.SatLearningDefaults = &policy
 	}
 	if providerExamType.Valid {
 		v := providerExamType.String
@@ -749,7 +761,11 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Exam, error) {
 					return err
 				}
 			}
-			if req.SATConfig != nil && req.SATConfig.ShowClassroomScoreReport != nil {
+			if req.SATConfig != nil && req.SATConfig.LearningDefaults != nil {
+				if err := saveSATLearningDefaults(ctx, q, id, *req.SATConfig.LearningDefaults); err != nil {
+					return err
+				}
+			} else if req.SATConfig != nil && req.SATConfig.ShowClassroomScoreReport != nil {
 				if _, err := q.ExecContext(ctx, "UPDATE exam_entities SET sat_score_report_enabled = ? WHERE id = ?", *req.SATConfig.ShowClassroomScoreReport, id); err != nil {
 					return err
 				}
@@ -835,7 +851,7 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Exa
 		if existing.Revision != req.Revision {
 			return conflictError("Exam changed while you were editing; refresh before retrying.")
 		}
-		if req.SatScoreReportEnabled != nil && existing.ProviderKey != ProviderSAT {
+		if (req.SatScoreReportEnabled != nil || req.SatLearningDefaults != nil) && existing.ProviderKey != ProviderSAT {
 			return validationError("The score report setting applies to SAT exams only.")
 		}
 		var scoreReport any
@@ -849,6 +865,11 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Exa
 		n, _ := res.RowsAffected()
 		if n != 1 {
 			return conflictError("Exam changed while you were editing; refresh before retrying.")
+		}
+		if req.SatLearningDefaults != nil {
+			if err := saveSATLearningDefaults(ctx, q, id, *req.SatLearningDefaults); err != nil {
+				return err
+			}
 		}
 		row2 := q.QueryRowContext(ctx, "SELECT "+examColumns+" FROM exam_entities WHERE id = ?", id)
 		e, err := scanExam(row2)

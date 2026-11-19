@@ -1,3 +1,4 @@
+import { SatRoomLearningSettingsDialog } from "../classrooms/SatRoomLearningSettingsDialog";
 import { SatStaffControlDialog, type SatControlTarget } from '../ui/SatStaffControlDialog';
 import { useSatNavigate } from "../ui/useSatNavigate";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -52,6 +53,7 @@ function escapeRoomRowId(id: string): string {
   return typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(id) : id;
 }
 export function SatSessionRoomRoute() {
+  const [learningSettingsOpen, setLearningSettingsOpen] = useState(false);
   const { scheduleId } = useParams<{ scheduleId: string }>();
   const navigate = useSatNavigate();
   // Arriving from a test's Sessions tab keeps Back pointed at that test and session.
@@ -667,6 +669,7 @@ export function SatSessionRoomRoute() {
     : [startCodePanel, attentionPanel, entryPanel];
   return (
     <>
+      {learningSettingsOpen && <SatRoomLearningSettingsDialog scheduleId={scheduleId} onClose={() => setLearningSettingsOpen(false)} />}
       <SatRoomWorkspace
         layoutRef={roomLayoutRef}
         layout={roomLayout}
@@ -684,6 +687,7 @@ export function SatSessionRoomRoute() {
               <>
                 {controller.error ? <span role="status" className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[var(--sat-staff-warning-text,#92400e)]"><AlertTriangle size={16} aria-hidden="true" />Reconnecting</span> : null}
                 {isAdmin ? <SatButton variant="quiet" onClick={() => navigate(roomSettingsPath)}>Room settings</SatButton> : null}
+                {isAdmin ? <SatButton variant="quiet" onClick={() => setLearningSettingsOpen(true)}>Results and retakes</SatButton> : null}
                 {sessionLive ? <>
                   <SatButton disabled={isStale || controlStudents.length === 0} onClick={() => openStaffControl('set_time', true)}>Edit room time…</SatButton>
                   <SatButton disabled={isStale || controlStudents.length === 0 || !runtime.examPlan?.length} onClick={() => openStaffControl('move', true)}>Move room to module…</SatButton>

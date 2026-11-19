@@ -12,6 +12,12 @@ import (
 type Code string
 
 const (
+	CodeStudyLocked            Code = "STUDY_LOCKED"
+	CodeAnswerKeyUnavailable   Code = "ANSWER_KEY_UNAVAILABLE"
+	CodePolicyRevisionConflict Code = "POLICY_REVISION_CONFLICT"
+)
+
+const (
 	CodeBadRequest                 Code = "BAD_REQUEST"
 	CodeValidation                 Code = "VALIDATION_ERROR"
 	CodeUnauthorized               Code = "UNAUTHORIZED"

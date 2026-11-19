@@ -14,6 +14,8 @@ interface PrintPayload {
   exam: AnsweredExam;
   view: StudentScoreReportView | null;
   media: Record<string, string>;
+  /** Optional top-level copy for older renderers; the exam field wins. */
+  answerKey?: AnsweredExam["answerKey"];
 }
 
 const TOKEN = /^[0-9a-f]{32}$/;
@@ -93,6 +95,7 @@ export function SatAnsweredPrintRoute() {
       <AnsweredExamPaper
         exam={payload.exam}
         view={payload.view}
+        answerKey={payload.exam.answerKey ?? payload.answerKey ?? null}
         loadMediaUrl={async (assetId) => media[assetId] ?? null}
         onMediaFailure={() => {
           mediaFailed.current = true;

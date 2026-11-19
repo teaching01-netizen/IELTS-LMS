@@ -91,14 +91,25 @@ func migDir(t *testing.T) string {
 // bumped 104->109. Claim operation identity (0110) bumps 109->110. Any other
 // count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 119
-	pinnedMigrationMax   = 119
+	pinnedMigrationFiles = 121
+	pinnedMigrationMax   = 131
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but
 // not yet present in the tree. Gaps are tolerated ONLY at these numbers.
 // Empty: no lane currently holds a reservation.
-var reservedSequences = map[int]string{}
+var reservedSequences = map[int]string{
+	121: "local SAT Classroom migrations",
+	122: "local SAT Classroom migrations",
+	123: "local SAT Classroom migrations",
+	124: "local SAT Classroom migrations",
+	125: "local SAT Classroom migrations",
+	126: "local SAT Classroom migrations",
+	127: "local SAT Classroom migrations",
+	128: "local SAT Classroom migrations",
+	129: "local SAT Classroom migrations",
+	130: "local SAT Classroom migrations",
+}
 
 func TestMigrationSequenceContinuous(t *testing.T) {
 	dir := migDir(t)

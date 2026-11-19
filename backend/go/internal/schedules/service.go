@@ -25,6 +25,8 @@ import (
 	"github.com/google/uuid"
 
 	examdomain "example.com/ielts-proctoring/internal/exams"
+	"example.com/ielts-proctoring/internal/satlearning"
+
 	"example.com/ielts-proctoring/internal/outbox"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
@@ -505,6 +507,11 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (Schedule, erro
 				return err
 			}
 			if err := examdomain.PersistSATSession(ctx, q, id, providerKey, req.PublishedVersionID, satSession, examdomain.ParseSATPublishScope(rawScope.String)); err != nil {
+				return err
+			}
+		}
+		if providerKey == "sat" {
+			if err := satlearning.CopyExamDefaultsTx(ctx, q, req.ExamID, id, req.CreatedBy); err != nil {
 				return err
 			}
 		}

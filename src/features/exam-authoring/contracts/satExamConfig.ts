@@ -27,6 +27,7 @@ export interface SatExamConfig {
   sectionScope?: SatPublishScope;
   sections: Record<SatConfigSectionKey, SatSectionConfig>;
   showClassroomScoreReport: boolean;
+  learningDefaults?: import("../../../shared/sat/learningPolicy").SatActivityPolicy;
   classroomPlan?: SatClassroomPlan;
   /**
    * Flexible question count (Classroom-only, raw scores only). When true the
@@ -151,6 +152,7 @@ export function satExamConfigDiffers(config: SatExamConfig, defaults: SatExamCon
   return (
     (config.sectionScope ?? "full") !== (defaults.sectionScope ?? "full") ||
     config.showClassroomScoreReport !== defaults.showClassroomScoreReport ||
+    config.learningDefaults !== defaults.learningDefaults ||
     (config.flexibleQuestionCount ?? false) !== (defaults.flexibleQuestionCount ?? false) ||
     Object.keys(config.classroomPlan ?? {}).length > 0 ||
     (config.scoreConverter !== undefined && config.scoreConverter !== null) ||

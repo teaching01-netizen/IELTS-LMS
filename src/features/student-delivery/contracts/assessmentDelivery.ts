@@ -100,7 +100,27 @@ export interface AssessmentAttemptSnapshot {
  * version narrowed to the modules it started, keyless, with the responses the
  * server accepted.
  */
+export interface AssessmentAnsweredExamAnswerKey {
+  available: boolean;
+  policyRevision: number;
+  versionId: string;
+  entries: AssessmentAnsweredExamKeyEntry[];
+}
+
+export interface AssessmentAnsweredExamKeyEntry {
+  moduleId: string;
+  examQuestionId: string;
+  correctAnswers: AssessmentAnsweredExamKeyAnswer[];
+  result: "correct" | "incorrect" | "unanswered";
+}
+
+export interface AssessmentAnsweredExamKeyAnswer {
+  label: string;
+  text: string;
+}
+
 export interface AssessmentAnsweredExam {
+  answerKey?: AssessmentAnsweredExamAnswerKey | null;
   attemptId: string;
   examTitle: string;
   candidateName: string;

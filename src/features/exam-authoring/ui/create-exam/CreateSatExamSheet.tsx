@@ -19,6 +19,7 @@ import { SatButton, SatField } from "../../../../products/sat/ui/SatPage";
 import { SatConfirmDialog, SatFormDialog } from "../../../../products/sat/ui/ConfirmDialog";
 import { accessLinkSectionRequest, availableAccessLinkSections, type AccessLinkSectionKey } from "../../contracts/accessLinks";
 import { SectionToggle, sectionsSummary } from "../access-links/AccessLinkEditorSheet";
+import { SatLearningSettings, defaultSatClassroomLearningPolicy, satLearningSettingsError } from "../../../../products/sat/classrooms/SatLearningSettings";
 import { SatExamConfigFields } from "./SatExamConfigFields";
 
 const FORM_ID = "sat-create-exam-form";
@@ -129,6 +130,12 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
       }
       const errors = validateSatExamConfig(config, defaultsQuery.data.limits);
       setConfigErrors(errors);
+      const learningError = config.learningDefaults && satLearningSettingsError(config.learningDefaults);
+      if (learningError) {
+        setCreateError(learningError);
+        setStep(2);
+        return;
+      }
       if (Object.keys(errors).length > 0 || converterError) {
         setStep(converterError ? 2 : 1);
         return;
@@ -476,22 +483,12 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
               {step === 2 ? (
                 config ? (
                   <div className="space-y-6">
-                    <label htmlFor="sat-score-report" className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-[var(--sat-staff-border-hairline)] p-4 text-[14px] leading-5">
-                      <input
-                        id="sat-score-report"
-                        type="checkbox"
-                        role="switch"
-                        aria-label="Show score report when a Classroom sitting ends"
-                        checked={config.showClassroomScoreReport}
-                        disabled={creating}
-                        onChange={(event) => setConfig({ ...config, showClassroomScoreReport: event.target.checked })}
-                        className="mt-0.5 h-4 w-4 accent-[var(--sat-staff-accent,#0071e3)]"
-                      />
-                      <span>
-                        <span className="block font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Show score report when a Classroom sitting ends</span>
-                        <span className="mt-1 block text-[var(--sat-staff-text-secondary,#515154)]">Students see their scores and can download their answers. Practice rooms never show a report. You can change this anytime.</span>
-                      </span>
-                    </label>
+                    <SatLearningSettings
+                      examDefaults
+                      value={config.learningDefaults ?? defaultSatClassroomLearningPolicy(config.showClassroomScoreReport)}
+                      onChange={(learningDefaults) => setConfig({ ...config, learningDefaults, showClassroomScoreReport: learningDefaults.reportVisible })}
+                      disabled={creating}
+                    />
                     <fieldset className="space-y-3">
                       <legend className="text-[15px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">Estimated scores</legend>
                       {isRawOnly ? (
@@ -546,7 +543,7 @@ export function CreateSatExamSheet({ open, onClose }: { open: boolean; onClose: 
                     <div className="flex items-start justify-between gap-3 border-b border-[var(--sat-staff-border-hairline)] pb-4">
                       <div>
                         <h4 className="text-[14px] font-semibold">Results</h4>
-                        <p className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">Score report: {config.showClassroomScoreReport ? "Shown after Classroom sittings" : "Hidden"} · {config.scoreConverter == null ? "Raw scores only" : `Estimated scores${converterFileName ? ` · ${converterFileName}` : ""}`}</p>
+                        <p className="mt-1 text-[14px] text-[var(--sat-staff-text-secondary,#515154)]">Score report: {config.showClassroomScoreReport ? "Shown after completion" : "Hidden"} · {config.scoreConverter == null ? "Raw scores only" : `Estimated scores${converterFileName ? ` · ${converterFileName}` : ""}`}</p>
                       </div>
                       <button type="button" disabled={creating} onClick={() => setStep(2)} className="min-h-11 shrink-0 px-2 text-[14px] font-semibold text-[var(--sat-staff-accent,#0071e3)] underline disabled:opacity-50">Edit</button>
                     </div>

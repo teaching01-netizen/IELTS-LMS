@@ -15,7 +15,13 @@ export interface AnsweredExamDownloadSource {
 
 export function useAnsweredExamDownload(
   source: AnsweredExamDownloadSource | null,
-  view?: StudentScoreReportView | null
+  view?: StudentScoreReportView | null,
+  /**
+   * Ask for the separately authorized key table by default. The server decides
+   * from the live policy and falls back to the answer-only paper when keys are
+   * not permitted, so an unprivileged caller never learns more by asking.
+   */
+  includeAnswerKey = true
 ) {
   const [download, setDownload] = useState<"idle" | "preparing" | "ready" | "failed">("idle");
   const [ready, setReady] = useState<PreparedAnsweredExamPdf | null>(null);
@@ -39,7 +45,7 @@ export function useAnsweredExamDownload(
     setReady(null);
     setDownload("preparing");
     try {
-      const result = await source.preparePdf({ view: view ?? null }, controller.signal);
+      const result = await source.preparePdf({ view: view ?? null, includeAnswerKey }, controller.signal);
       if (active.current !== controller || controller.signal.aborted) return;
       // Download the server attachment directly; PDF bytes never enter JS.
       // Keep the anchor connected for browsers that ignore detached clicks.
@@ -64,7 +70,7 @@ export function useAnsweredExamDownload(
         if (controller.signal.aborted) setDownload("failed");
       }
     }
-  }, [source, view]);
+  }, [source, view, includeAnswerKey]);
   useEffect(() => {
     if (!ready) return;
     const expire = () => {

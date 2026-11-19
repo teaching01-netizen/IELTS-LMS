@@ -301,7 +301,26 @@ function evaSimPath(scheduleId: string, attemptId: string): string {
   return `/v1/assessment-forms/schedules/${encodeURIComponent(scheduleId)}/attempts/${encodeURIComponent(attemptId)}/eva-sim`;
 }
 
+export interface SatStudentPauseState {
+  allowed: boolean;
+  paused: boolean;
+  controlEpoch: number;
+}
+
 export const assessmentDeliveryApi = {
+  studentPause(scheduleId: string, attemptId: string): Promise<SatStudentPauseState> {
+    return attemptRequest(scheduleId, attemptId, (config) =>
+      backendGet(`/v1/assessment-delivery/schedules/${encodeURIComponent(scheduleId)}/student-pause`, config)
+    );
+  },
+
+  setStudentPause(scheduleId: string, attemptId: string, paused: boolean, controlEpoch: number): Promise<SatStudentPauseState> {
+    return attemptRequest(scheduleId, attemptId, (config) =>
+      backendPut(`/v1/assessment-delivery/schedules/${encodeURIComponent(scheduleId)}/student-pause`,
+        { paused, controlEpoch }, config)
+    );
+  },
+
   heartbeat(
     scheduleId: string,
     attemptId: string,

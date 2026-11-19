@@ -2,7 +2,15 @@ import { SatModuleBreakdown } from "./SatModuleBreakdown";
 import { formatRange } from "./SatScoreOverview";
 import type { StudentScoreReportView, SubjectReportView } from "./scoreReportViewModel";
 
-function SubjectCard({ subject, repeatScore }: { subject: SubjectReportView; repeatScore: boolean }) {
+function SubjectCard({
+  subject,
+  repeatScore,
+  study,
+}: {
+  subject: SubjectReportView;
+  repeatScore: boolean;
+  study: boolean;
+}) {
   const headingId = `sat-subject-${subject.key}`;
   const { score } = subject;
   return (
@@ -13,7 +21,14 @@ function SubjectCard({ subject, repeatScore }: { subject: SubjectReportView; rep
       <h3 id={headingId} className="text-[18px] font-semibold">
         {subject.label}
       </h3>
-      {repeatScore ? (
+      {repeatScore && study && score.kind === "raw" ? (
+        <>
+          <p className="mt-2 text-[28px] font-semibold tabular-nums sm:text-[36px]">
+            {score.correct} of {score.total}
+          </p>
+          <p className="text-[13px] text-[var(--sat-text-secondary)]">Raw score</p>
+        </>
+      ) : repeatScore ? (
         score.kind === "estimated" ? (
           <>
             <p className="mt-2 text-[28px] font-semibold tabular-nums sm:text-[36px]">
@@ -35,7 +50,7 @@ function SubjectCard({ subject, repeatScore }: { subject: SubjectReportView; rep
           </p>
         )
       ) : null}
-      {repeatScore ? (
+      {repeatScore && (!study || score.kind !== "raw") ? (
         <p className="mt-2 text-[14px] tabular-nums">
           {subject.rawCorrect} of {subject.rawTotal} scored questions correct
         </p>
@@ -53,7 +68,12 @@ export function SatSubjectPerformance({ view }: { view: StudentScoreReportView }
     <div className={`mt-8 grid gap-4 ${view.subjects.length > 1 ? "md:grid-cols-2" : ""}`}>
       {view.subjects.map((subject) =>
         single && subject.modules.length === 0 ? null : (
-          <SubjectCard key={subject.key} subject={subject} repeatScore={!single} />
+          <SubjectCard
+            key={subject.key}
+            subject={subject}
+            repeatScore={!single}
+            study={view.mode === "study"}
+          />
         )
       )}
     </div>

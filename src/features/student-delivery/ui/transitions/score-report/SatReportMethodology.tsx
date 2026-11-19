@@ -1,9 +1,11 @@
-import type { StudentScoreReportView } from "./scoreReportViewModel";
+import type { SatAttemptMode, StudentScoreReportView } from "./scoreReportViewModel";
 
 export function SatReportMethodology({
   methodology,
+  mode = "test",
 }: {
   methodology: StudentScoreReportView["methodology"];
+  mode?: SatAttemptMode;
 }) {
   return (
     <details className="group mt-8 border-t border-[var(--sat-divider)]">
@@ -17,10 +19,20 @@ export function SatReportMethodology({
         </span>
       </summary>
       <ul className="list-disc space-y-2 pb-2 pl-5 text-[13px] leading-5 text-[var(--sat-text-secondary)]">
-        <li>SAT-style estimates come from the classroom conversion table assigned to this exam.</li>
-        <li>Correct answers count scored operational questions only; pretest questions are excluded.</li>
-        <li>Estimates are not official College Board scores.</li>
-        <li>Some partial or one-module sittings cannot be converted, so only correct answers are shown.</li>
+        {mode === "study" ? (
+          <>
+            <li>This was a Study attempt, so it is excluded from Test averages and best-score summaries.</li>
+            <li>Study attempts report raw correct answers only; no estimated SAT score is produced.</li>
+            <li>Correct answers count scored operational questions only; pretest questions are excluded.</li>
+          </>
+        ) : (
+          <>
+            <li>SAT-style estimates come from the classroom conversion table assigned to this exam.</li>
+            <li>Correct answers count scored operational questions only; pretest questions are excluded.</li>
+            <li>Estimates are not official College Board scores.</li>
+            <li>Some partial or one-module sittings cannot be converted, so only correct answers are shown.</li>
+          </>
+        )}
         {methodology.converterVersion ? (
           <li>Conversion table version: {methodology.converterVersion}.</li>
         ) : null}

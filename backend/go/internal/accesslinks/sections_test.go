@@ -267,6 +267,8 @@ func TestCreatePersistsEnabledSections(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?")).
 		WithArgs("sat_personal_v1", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("sat_classroom_plan").WithArgs("ver-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
+	mock.ExpectQuery("sat_flexible_count").WithArgs("ver-1").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(0))
+	mock.ExpectQuery("SELECT sat_learning_defaults").WithArgs("exam-1").WillReturnRows(sqlmock.NewRows([]string{"sat_learning_defaults"}).AddRow(nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_access_links")).
 		WithArgs(sqlmock.AnyArg(), "exam-1", "ver-1", sqlmock.AnyArg(), "Verbal only", `["reading-writing"]`, "anyone", nil, "student_code", "anytime", nil, nil, "actor-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -380,6 +382,8 @@ func TestDuplicateCopiesEnabledSections(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta("UPDATE exam_schedules SET sat_timing_model = ? WHERE id = ?")).
 		WithArgs("sat_personal_v1", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("sat_classroom_plan").WithArgs("ver-1").WillReturnRows(sqlmock.NewRows([]string{"plan"}).AddRow(nil))
+	mock.ExpectQuery("sat_flexible_count").WithArgs("ver-1").WillReturnRows(sqlmock.NewRows([]string{"sat_flexible_count"}).AddRow(0))
+	mock.ExpectQuery("SELECT sat_learning_defaults").WithArgs("exam-1").WillReturnRows(sqlmock.NewRows([]string{"sat_learning_defaults"}).AddRow(nil))
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO assessment_access_links")).
 		WithArgs(sqlmock.AnyArg(), "exam-1", "ver-1", sqlmock.AnyArg(), "Verbal only Copy", `["reading-writing"]`, "anyone", nil, "student_code", "anytime", nil, nil, "actor-1").
 		WillReturnResult(sqlmock.NewResult(0, 1))

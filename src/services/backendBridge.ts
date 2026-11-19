@@ -52,6 +52,7 @@ type BackendExamEntity = {
   currentPublishedVersionNumber?: number | null | undefined;
   satSectionScope?: SatPublishScope | undefined;
   satScoreReportEnabled?: boolean | undefined;
+  satLearningDefaults?: import("../shared/sat/learningPolicy").SatActivityPolicy | undefined;
   satCustomModules?: boolean | undefined;
   totalQuestions?: number | null | undefined;
   totalReadingQuestions?: number | null | undefined;
@@ -437,7 +438,7 @@ export function buildCreateAssessmentExamPayload(input: {
 }
 
 export function buildUpdateExamPayload(
-  exam: Pick<ExamEntity, "title" | "status" | "visibility" | "providerKey" | "satScoreReportEnabled">,
+  exam: Pick<ExamEntity, "title" | "status" | "visibility" | "providerKey" | "satScoreReportEnabled" | "satLearningDefaults">,
   revision: number
 ) {
   return compactObject({
@@ -446,6 +447,7 @@ export function buildUpdateExamPayload(
     visibility: exam.visibility,
     // The server rejects this field on non-SAT exams.
     satScoreReportEnabled: exam.providerKey === "sat" ? exam.satScoreReportEnabled : undefined,
+    satLearningDefaults: exam.providerKey === "sat" ? exam.satLearningDefaults : undefined,
     revision,
   });
 }
@@ -525,6 +527,7 @@ export function mapBackendExamEntity(payload: BackendExamEntity): ExamEntity {
     currentPublishedVersionNumber: payload.currentPublishedVersionNumber ?? null,
     satSectionScope: payload.satSectionScope ?? "full",
     satScoreReportEnabled: payload.satScoreReportEnabled === true,
+    satLearningDefaults: payload.satLearningDefaults,
     satCustomModules: payload.satCustomModules === true,
     canEdit: payload.canEdit === true,
     canPublish: payload.canPublish === true,

@@ -28,6 +28,10 @@ type Binding struct {
 	AttemptID string                `json:"attemptId"`
 	SessionID string                `json:"sessionId,omitempty"`
 	Claims    *crypto.AttemptClaims `json:"claims,omitempty"`
+	// IncludeAnswerKey identifies the artifact variant. A score-only artifact
+	// must never satisfy a keyed request or the reverse; this bit is part of
+	// the export scope and binding identity.
+	IncludeAnswerKey bool `json:"includeAnswerKey,omitempty"`
 }
 
 type Export struct {
@@ -65,7 +69,11 @@ func (s *Exports) Reserve(ctx context.Context, binding Binding, browserHash stri
 		return nil, err
 	}
 	row := &Export{ID: id, Binding: binding, ObjectKey: "answered-pdf/" + id + ".pdf"}
-	scope := BrowserHash(binding.Kind + "\x00" + binding.OwnerID + "\x00" + binding.AttemptID + "\x00" + binding.SessionID)
+	scopeKey := binding.Kind + "\x00" + binding.OwnerID + "\x00" + binding.AttemptID + "\x00" + binding.SessionID
+	if binding.IncludeAnswerKey {
+		scopeKey += "\x00keyed"
+	}
+	scope := BrowserHash(scopeKey)
 	raw, err := json.Marshal(binding)
 	if err != nil {
 		return nil, err

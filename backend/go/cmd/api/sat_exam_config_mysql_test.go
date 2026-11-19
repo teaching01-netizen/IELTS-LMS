@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
 	"example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
+	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satlearning"
+	"example.com/ielts-proctoring/internal/schedules"
 )
 
 // Configuration given at creation is persisted in the same transaction as the
@@ -74,4 +78,100 @@ func TestSatConfigDefaultsMatchBlueprint(t *testing.T) {
 			t.Fatalf("classroomCreationEnabled=%v, want %v", d.ClassroomCreationEnabled, classroomEnabled)
 		}
 	}
+}
+
+func TestSatExamLearningDefaultsPinNewRoomsMySQL(t *testing.T) {
+	h := newConcurrencyHarness(t)
+	ctx := context.Background()
+	provider := "sat"
+	policy := satlearning.DefaultPolicy()
+	policy.UnlimitedRetakes = true
+	policy.PauseOnLeave = true
+	policy.ReportVisible = true
+	policy.IncludeAnswerKeyInPdf = true
+	cfg := exams.DefaultSATExamConfig()
+	cfg.LearningDefaults = &policy
+	exam, err := h.exams.Create(ctx, exams.CreateRequest{
+		Slug: "learning-" + uuid.NewString(), Title: "Learning defaults", ExamType: "Academic",
+		Visibility: "private", ProviderKey: &provider, OwnerID: h.actor, SATConfig: &cfg,
+	})
+	if err != nil || exam.SatLearningDefaults == nil || *exam.SatLearningDefaults != policy {
+		t.Fatalf("create defaults = %+v err=%v", exam.SatLearningDefaults, err)
+	}
+	t.Cleanup(func() { _ = h.exams.Delete(ctx, exam.ID) })
+	svc := schedules.NewService(h.db, tx.NewRunner(h.db))
+	roomCreator := uuid.NewString()
+	createRoom := func() string {
+		t.Helper()
+		now := time.Now().UTC()
+		room, err := svc.Create(ctx, schedules.CreateRequest{
+			ExamID: exam.ID, PublishedVersionID: *exam.CurrentDraftVersionID, CohortName: "Learning defaults",
+			StartTime: now, EndTime: now.Add(time.Hour), CreatedBy: roomCreator,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = h.db.Exec("DELETE FROM exam_schedules WHERE id = ?", room.ID) })
+		return room.ID
+	}
+	firstRoom := createRoom()
+	changed := policy
+	changed.UnlimitedRetakes = false
+	updated, err := h.exams.Update(ctx, exam.ID, exams.UpdateRequest{Revision: exam.Revision, SatLearningDefaults: &changed})
+	if err != nil || updated.SatLearningDefaults == nil || *updated.SatLearningDefaults != changed {
+		t.Fatalf("update defaults = %+v err=%v", updated.SatLearningDefaults, err)
+	}
+	secondRoom := createRoom()
+	for _, entry := range []struct {
+		room string
+		want satlearning.Policy
+	}{{firstRoom, policy}, {secondRoom, changed}} {
+		entry.want.Revision = 1
+		got, err := satlearning.LoadPolicyTx(ctx, h.db, entry.room)
+		if err != nil || got != entry.want {
+			t.Fatalf("room %s policy = %+v err=%v, want %+v", entry.room, got, err, entry.want)
+		}
+	}
+}
+
+func TestSatClassroomRetakesDefaultAndSavedOptOutMySQL(t *testing.T) {
+	h := newConcurrencyHarness(t)
+	ctx := context.Background()
+	previous := exams.SATClassroomCreationEnabled()
+	exams.SetClassroomCreationEnabled(true)
+	t.Cleanup(func() { exams.SetClassroomCreationEnabled(previous) })
+	provider := "sat"
+	exam, err := h.exams.Create(ctx, exams.CreateRequest{
+		Slug: "classroom-retakes-" + uuid.NewString(), Title: "Classroom retakes", ExamType: "Academic",
+		Visibility: "private", ProviderKey: &provider, OwnerID: h.actor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = h.exams.Delete(ctx, exam.ID) })
+	svc := schedules.NewService(h.db, tx.NewRunner(h.db))
+	roomCreator := uuid.NewString()
+	checkRoom := func(mode string, wantRetakes bool) {
+		t.Helper()
+		now := time.Now().UTC()
+		room, err := svc.Create(ctx, schedules.CreateRequest{
+			ExamID: exam.ID, PublishedVersionID: *exam.CurrentDraftVersionID, CohortName: "Classroom defaults",
+			StartTime: now, EndTime: now.Add(time.Hour), CreatedBy: roomCreator, SatSessionMode: mode,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = h.db.Exec("DELETE FROM exam_schedules WHERE id = ?", room.ID) })
+		policy, err := satlearning.LoadPolicyTx(ctx, h.db, room.ID)
+		if err != nil || policy.UnlimitedRetakes != wantRetakes || policy.ReportVisible || policy.IncludeAnswerKeyInPdf {
+			t.Fatalf("%s room policy = %+v, err=%v, want retakes=%t and hidden results", mode, policy, err, wantRetakes)
+		}
+	}
+	checkRoom("classroom", true)
+	checkRoom("practice", false)
+	optOut := satlearning.DefaultPolicy()
+	if _, err := h.exams.Update(ctx, exam.ID, exams.UpdateRequest{Revision: exam.Revision, SatLearningDefaults: &optOut}); err != nil {
+		t.Fatal(err)
+	}
+	checkRoom("classroom", false)
 }

@@ -38,16 +38,20 @@ describe("ScoreReportSettingPanel", () => {
     mocks.isPending = false;
   });
 
-  it("saves the changed setting before refreshing the exam", async () => {
+  it("defaults a previously created exam to retakes and saves an explicit opt-out", async () => {
     mocks.mutateAsync.mockResolvedValue(undefined);
     const onSaved = vi.fn().mockResolvedValue(undefined);
     render(<ScoreReportSettingPanel exam={exam} onSaved={onSaved} />);
 
-    fireEvent.click(screen.getByRole("switch"));
+    const retakes = screen.getByRole("switch", { name: "Allow retakes" });
+    expect(retakes).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Show results" })).not.toBeChecked();
+    fireEvent.click(retakes);
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledWith({
       ...exam,
-      satScoreReportEnabled: true,
+      satLearningDefaults: expect.objectContaining({ unlimitedRetakes: false, reportVisible: false }),
     }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
   });
@@ -57,7 +61,8 @@ describe("ScoreReportSettingPanel", () => {
     const onSaved = vi.fn().mockResolvedValue(undefined);
     render(<ScoreReportSettingPanel exam={exam} onSaved={onSaved} />);
 
-    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(screen.getByRole("switch", { name: "Allow retakes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Save failed");
     expect(onSaved).not.toHaveBeenCalled();
@@ -66,10 +71,10 @@ describe("ScoreReportSettingPanel", () => {
   it("disables edits while the save is pending or the staff member cannot edit", () => {
     mocks.isPending = true;
     const { rerender } = render(<ScoreReportSettingPanel exam={exam} onSaved={vi.fn()} />);
-    expect(screen.getByRole("switch")).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Allow retakes" })).toBeDisabled();
 
     mocks.isPending = false;
     rerender(<ScoreReportSettingPanel exam={{ ...exam, canEdit: false }} onSaved={vi.fn()} />);
-    expect(screen.getByRole("switch")).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "Allow retakes" })).toBeDisabled();
   });
 });

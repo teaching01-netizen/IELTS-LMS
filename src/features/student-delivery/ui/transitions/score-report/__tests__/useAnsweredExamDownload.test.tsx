@@ -19,6 +19,32 @@ const grant = () => ({
 });
 
 describe("answered exam download lifecycle", () => {
+  it("requests the keyed artifact variant by default and permits an explicit answer-only request", async () => {
+    const preparePdf = vi.fn().mockImplementation(async () => grant());
+    const { result } = renderHook(() =>
+      useAnsweredExamDownload({ key: "attempt", preparePdf }, null)
+    );
+    await act(async () => {
+      await result.current.prepare();
+    });
+    expect(preparePdf).toHaveBeenLastCalledWith(
+      { view: null, includeAnswerKey: true },
+      expect.any(AbortSignal)
+    );
+
+    const answerOnly = vi.fn().mockImplementation(async () => grant());
+    const answerOnlyHook = renderHook(() =>
+      useAnsweredExamDownload({ key: "attempt-2", preparePdf: answerOnly }, null, false)
+    );
+    await act(async () => {
+      await answerOnlyHook.result.current.prepare();
+    });
+    expect(answerOnly).toHaveBeenLastCalledWith(
+      { view: null, includeAnswerKey: false },
+      expect.any(AbortSignal)
+    );
+  });
+
   it("starts a native download automatically after one preparation action", async () => {
     const pdf = grant();
     const clicked: HTMLAnchorElement[] = [];

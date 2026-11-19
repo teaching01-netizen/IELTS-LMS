@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"example.com/ielts-proctoring/internal/satlearning"
+
 	"example.com/ielts-proctoring/internal/auth"
 	"example.com/ielts-proctoring/internal/exams"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -111,8 +113,9 @@ func examsUpdateHandler(app *App) http.HandlerFunc {
 			Visibility     *string `json:"visibility"`
 			OrganizationID *string `json:"organizationId"`
 			// SatScoreReportEnabled toggles the SAT completion score report.
-			SatScoreReportEnabled *bool `json:"satScoreReportEnabled"`
-			Revision              int   `json:"revision"`
+			SatLearningDefaults   *satlearning.Policy `json:"satLearningDefaults"`
+			SatScoreReportEnabled *bool               `json:"satScoreReportEnabled"`
+			Revision              int                 `json:"revision"`
 		}
 		if err := httpx.DecodeLimited(r, httpx.MaxAdminBodyBytes, &req); err != nil {
 			httpx.WriteError(w, r, err)
@@ -125,6 +128,7 @@ func examsUpdateHandler(app *App) http.HandlerFunc {
 			Visibility:            req.Visibility,
 			OrganizationID:        req.OrganizationID,
 			SatScoreReportEnabled: req.SatScoreReportEnabled,
+			SatLearningDefaults:   req.SatLearningDefaults,
 			Revision:              req.Revision,
 		})
 		if err != nil {

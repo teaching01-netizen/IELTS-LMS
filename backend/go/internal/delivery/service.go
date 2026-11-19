@@ -2074,7 +2074,7 @@ func (s *Service) ensureAttemptCanWorkWithRuntimeSnapshotTx(ctx context.Context,
 	if authority != nil {
 		*authority = attemptAuthoritySnapshot{}
 		err = t.QueryRowContext(ctx,
-			"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at, active_client_session_id, lease_epoch, control_epoch, COALESCE(recovery_control, ''), sat_staff_control IS NOT NULL FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			"SELECT CASE WHEN sat_student_paused_at IS NOT NULL AND COALESCE(proctor_status, 'active') NOT IN ('paused', 'terminated') THEN 'student_paused' ELSE COALESCE(proctor_status, 'active') END, COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at, active_client_session_id, lease_epoch, control_epoch, COALESCE(recovery_control, ''), sat_staff_control IS NOT NULL FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
 			attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt, &authority.activeClientSessionID, &authority.leaseEpoch, &authority.controlEpoch, &rawRecovery, &staffControlled)
 		if err == nil {
 			authority.loaded = true
@@ -2082,7 +2082,7 @@ func (s *Service) ensureAttemptCanWorkWithRuntimeSnapshotTx(ctx context.Context,
 		}
 	} else {
 		err = t.QueryRowContext(ctx,
-			"SELECT COALESCE(proctor_status, 'active'), COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at, COALESCE(recovery_control, ''), sat_staff_control IS NOT NULL FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
+			"SELECT CASE WHEN sat_student_paused_at IS NOT NULL AND COALESCE(proctor_status, 'active') NOT IN ('paused', 'terminated') THEN 'student_paused' ELSE COALESCE(proctor_status, 'active') END, COALESCE(delivery_status, 'running'), submitted_at, phase, sat_start_code_required, sat_start_code_accepted_at, COALESCE(recovery_control, ''), sat_staff_control IS NOT NULL FROM student_attempts WHERE id = ? AND schedule_id = ? FOR UPDATE",
 			attemptID, scheduleID).Scan(&proctorStatus, &deliveryStatus, &submittedAt, &phase, &codeRequired, &codeAcceptedAt, &rawRecovery, &staffControlled)
 	}
 	if err != nil {
@@ -2105,6 +2105,8 @@ func (s *Service) ensureAttemptCanWorkWithRuntimeSnapshotTx(ctx context.Context,
 	// inside the same mutation tx (SELECT ... FOR UPDATE + equality), so a
 	// takeover racing the pre-tx EnsureActiveWriter gate cannot slip through.
 	switch proctorStatus {
+	case "student_paused":
+		return assessmentConflict("STUDENT_PAUSED", "Resume your SAT exam before continuing.")
 	case "paused":
 		return assessmentConflict("ATTEMPT_PROCTOR_BLOCKED", "Your SAT attempt is paused by the proctor.")
 	case "terminated":

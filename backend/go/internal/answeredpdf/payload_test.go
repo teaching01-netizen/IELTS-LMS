@@ -10,6 +10,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/media"
+	"example.com/ielts-proctoring/internal/satlearning"
 )
 
 type imageBody struct{ *bytes.Reader }
@@ -60,5 +61,51 @@ func TestDownloadFilenameMatchesExistingNames(t *testing.T) {
 		if got := Filename(tc.name, tc.title, true); got != tc.want {
 			t.Fatalf("got %q want %q", got, tc.want)
 		}
+	}
+}
+
+func TestServerPayloadKeepsOnlyTheAuthorizedKeyVariant(t *testing.T) {
+	exam := delivery.AnsweredExam{AttemptID: "a", VersionID: "v"}
+	answerOnly, err := BuildPayload(t.Context(), &exam, nil, func(context.Context, string) (media.Content, error) {
+		return media.Content{}, errors.New("unexpected figure")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exam.AnswerKey = &delivery.AnsweredExamAnswerKey{
+		Available: true, PolicyRevision: 3, VersionID: "v",
+		Entries: []delivery.AnsweredExamKeyEntry{{
+			ModuleID: "m", ExamQuestionID: "q",
+			CorrectAnswers: []satlearning.AnswerKeyAnswer{{Label: "B", Text: "Beta"}},
+			Result:         "correct",
+		}},
+	}
+	keyed, err := BuildPayload(t.Context(), &exam, nil, func(context.Context, string) (media.Content, error) {
+		return media.Content{}, errors.New("unexpected figure")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(answerOnly) == string(keyed) {
+		t.Fatal("keyed and answer-only payloads must have different identity")
+	}
+	var decoded struct {
+		Exam delivery.AnsweredExam `json:"exam"`
+	}
+	if err := json.Unmarshal(keyed, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Exam.AnswerKey == nil || !decoded.Exam.AnswerKey.Available ||
+		len(decoded.Exam.AnswerKey.Entries) != 1 || decoded.Exam.AnswerKey.Entries[0].CorrectAnswers[0].Label != "B" {
+		t.Fatalf("keyed payload lost authorization data: %+v", decoded.Exam.AnswerKey)
+	}
+	var plain struct {
+		Exam delivery.AnsweredExam `json:"exam"`
+	}
+	if err := json.Unmarshal(answerOnly, &plain); err != nil {
+		t.Fatal(err)
+	}
+	if plain.Exam.AnswerKey != nil {
+		t.Fatalf("answer-only payload carried keys: %+v", plain.Exam.AnswerKey)
 	}
 }

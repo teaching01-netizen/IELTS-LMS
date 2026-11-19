@@ -948,7 +948,7 @@ func insertControlEvent(ctx context.Context, q tx.Tx, runtimeID, scheduleID, act
 // transitions change clocks; overlapping and repeated controls cannot double
 // credit time. Callers hold the affected attempt(s) and runtime locks first.
 func SyncSATPauseInTx(ctx context.Context, q tx.Tx, scheduleID, attemptID string) error {
-	const ordinaryPause = "(r.status = 'paused' OR COALESCE(sa.proctor_status, 'active') = 'paused')"
+	const ordinaryPause = "(r.status = 'paused' OR COALESCE(sa.proctor_status, 'active') = 'paused' OR sa.sat_student_paused_at IS NOT NULL)"
 	const effective = "(" + ordinaryPause + " OR JSON_SEARCH(sa.recovery_control, 'one', ma.id, NULL, '$.suspended[*].target.moduleAttemptId') IS NOT NULL)"
 	scope := "sa.schedule_id = ?"
 	args := []any{scheduleID}

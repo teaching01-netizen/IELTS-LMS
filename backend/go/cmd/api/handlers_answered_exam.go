@@ -85,9 +85,10 @@ func resultsSATAnsweredExamHandler(app *App) http.HandlerFunc {
 // offcut: view is the caller's own score report, trusted like the old
 // browser print was; the PDF is a convenience copy, not a signed record
 type answeredPDFRequest struct {
-	Title string            `json:"title"`
-	View  json.RawMessage   `json:"view"`
-	Media map[string]string `json:"media"`
+	Title            string            `json:"title"`
+	View             json.RawMessage   `json:"view"`
+	Media            map[string]string `json:"media"`
+	IncludeAnswerKey bool              `json:"includeAnswerKey"`
 }
 
 // answeredPDFMaxBodyBytes bounds the posted figures.
@@ -173,7 +174,16 @@ func deliveryAnsweredPDFHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		exam, err := app.Delivery.AnsweredExamForStudent(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"))
+		includeKey := false
+		if req.IncludeAnswerKey {
+			allowed, keyErr := app.Delivery.KeyedPDFAllowed(r.Context(), claims.AttemptID)
+			if keyErr != nil {
+				writeAnsweredExam(w, r, nil, keyErr)
+				return
+			}
+			includeKey = allowed
+		}
+		exam, err := app.Delivery.AnsweredExamForStudentWithKey(r.Context(), claims.ScheduleID, claims.AttemptID, chi.URLParam(r, "scheduleID"), includeKey)
 		if err != nil {
 			writeAnsweredExam(w, r, nil, err)
 			return
@@ -202,7 +212,16 @@ func resultsSATAnsweredPDFHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		exam, err := app.Delivery.AnsweredExam(r.Context(), attemptID)
+		includeKey := false
+		if req.IncludeAnswerKey {
+			allowed, keyErr := app.Delivery.KeyedPDFAllowed(r.Context(), attemptID)
+			if keyErr != nil {
+				writeAnsweredExam(w, r, nil, keyErr)
+				return
+			}
+			includeKey = allowed
+		}
+		exam, err := app.Delivery.AnsweredExamWithKey(r.Context(), attemptID, includeKey)
 		if err != nil {
 			writeAnsweredExam(w, r, nil, err)
 			return

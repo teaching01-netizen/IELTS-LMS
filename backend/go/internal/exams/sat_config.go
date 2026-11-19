@@ -1,11 +1,15 @@
 package exams
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
+	"example.com/ielts-proctoring/internal/satlearning"
+
+	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/satconvert"
 	"example.com/ielts-proctoring/internal/satpublish"
 )
@@ -31,7 +35,8 @@ type SATExamConfig struct {
 	Sections     map[string]SATSectionConfig `json:"sections"`
 	SectionScope SATPublishScope             `json:"sectionScope,omitempty"`
 	// ShowClassroomScoreReport releases the score report on Classroom completion.
-	ShowClassroomScoreReport *bool `json:"showClassroomScoreReport,omitempty"`
+	LearningDefaults         *satlearning.Policy `json:"learningDefaults,omitempty"`
+	ShowClassroomScoreReport *bool               `json:"showClassroomScoreReport,omitempty"`
 	// ClassroomPlan fixes the modules students receive in selected sections.
 	ClassroomPlan map[string]string `json:"classroomPlan,omitempty"`
 	// FlexibleQuestionCount allows 1..max questions per included module instead
@@ -230,4 +235,18 @@ func (c *SATExamConfig) apply(base []satInitialSection) ([]satInitialSection, ma
 		out[i] = copySection
 	}
 	return out, thresholds
+}
+
+func saveSATLearningDefaults(ctx context.Context, q tx.Tx, id string, policy satlearning.Policy) error {
+	policy.Revision = 0
+	policy = satlearning.NormalizePolicy(policy)
+	if err := satlearning.ValidatePolicy(policy); err != nil {
+		return validationError(err.Error())
+	}
+	raw, err := satlearning.MarshalPolicy(policy)
+	if err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx, "UPDATE exam_entities SET sat_learning_defaults = ?, sat_score_report_enabled = ? WHERE id = ?", raw, policy.ReportVisible, id)
+	return err
 }

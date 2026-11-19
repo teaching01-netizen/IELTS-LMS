@@ -1,4 +1,5 @@
 import type { AssessmentDeliverySection } from "../../../contracts/assessmentDelivery";
+import type { SatAttemptLearning, SatStudyCapabilities } from "@shared/sat/learningPolicy";
 import type { ClassroomReport } from "../SatScoreReport";
 
 /**
@@ -8,6 +9,22 @@ import type { ClassroomReport } from "../SatScoreReport";
  */
 
 export type SatSubject = "reading-writing" | "math";
+
+/** The admitted delivery mode. An absent server mode is a legacy Test attempt. */
+export type SatAttemptMode = "test" | "study";
+
+export const STUDY_RAW_RESULTS_NOTICE =
+  "Study attempt: results are reported as raw scores only. No estimated SAT score is produced.";
+
+/** Only the assistance the server admitted; nothing is inferred from the mode. */
+export function studyAssistanceLabels(
+  assistance: SatStudyCapabilities | null | undefined
+): string[] {
+  const labels: string[] = [];
+  if (assistance?.revealAnswers === true) labels.push("Answers available");
+  if (assistance?.untimed === true) labels.push("Untimed");
+  return labels;
+}
 
 export interface ScoreScale {
   min: number;
@@ -59,6 +76,10 @@ export interface StudentScoreReportView {
     isEstimated: boolean;
     converterVersion: string | null;
   };
+  /** The admitted delivery mode; absent server metadata reads as Test. */
+  mode: SatAttemptMode;
+  /** The Study capabilities the server admitted; both false for Test. */
+  assistance: SatStudyCapabilities;
   /** Data problems found while building the view; codes only, no student data. */
   issues: string[];
 }
@@ -190,10 +211,15 @@ function buildDomains(
   return domains;
 }
 
-function unavailableView(issues: string[], converterVersion: string | null): StudentScoreReportView {
+function unavailableView(
+  issues: string[],
+  converterVersion: string | null,
+  mode: SatAttemptMode,
+  assistance: SatStudyCapabilities
+): StudentScoreReportView {
   return {
     layout: "unavailable",
-    title: "Your SAT practice results",
+    title: mode === "study" ? "Study result" : "Your SAT practice results",
     primaryLabel: null,
     primaryScore: {
       kind: "unavailable",
@@ -202,8 +228,20 @@ function unavailableView(issues: string[], converterVersion: string | null): Stu
     subjects: [],
     showCombinedScore: false,
     notice: null,
-    methodology: { isEstimated: false, converterVersion },
+    methodology: { isEstimated: false, converterVersion: mode === "study" ? null : converterVersion },
+    mode,
+    assistance,
     issues,
+  };
+}
+
+/** Only capabilities the server sent; an absent or malformed snapshot grants none. */
+function admittedCapabilities(learning: SatAttemptLearning | undefined): SatStudyCapabilities {
+  const capabilities = (learning as { capabilities?: Partial<SatStudyCapabilities> } | undefined)
+    ?.capabilities;
+  return {
+    revealAnswers: capabilities?.revealAnswers === true,
+    untimed: capabilities?.untimed === true,
   };
 }
 
@@ -212,11 +250,19 @@ export function buildStudentScoreReportView(
   delivered?: AssessmentDeliverySection[]
 ): StudentScoreReportView {
   const issues: string[] = [];
+  const mode: SatAttemptMode =
+    report.mode === "study" || report.learning?.mode === "study" ? "study" : "test";
+  const isStudy = mode === "study";
+  const assistance: SatStudyCapabilities = isStudy
+    ? admittedCapabilities(report.learning)
+    : { revealAnswers: false, untimed: false };
   const converterVersion =
     typeof report.conversion?.converterVersion === "string"
       ? report.conversion.converterVersion.trim() || null
       : null;
-  const hasConverter = converterVersion !== null;
+  // A Study attempt reports raw results only: the admitted assistance would
+  // invalidate an estimate, so no conversion table is consulted or claimed.
+  const hasConverter = converterVersion !== null && !isStudy;
   const meta = moduleMeta(delivered);
 
   const bySubject = new Map<SatSubject, ReportSection>();
@@ -229,19 +275,22 @@ export function buildStudentScoreReportView(
     if (bySubject.has(key) || !validRaw(section.rawCorrect, section.total)) {
       // Showing one of two conflicting or broken sections would misstate which subjects were sat.
       issues.push(bySubject.has(key) ? "section-duplicate" : "section-invalid");
-      return unavailableView(issues, converterVersion);
+      return unavailableView(issues, converterVersion, mode, assistance);
     }
     bySubject.set(key, section);
   }
-  if (bySubject.size === 0) return unavailableView(issues, converterVersion);
+  if (bySubject.size === 0) return unavailableView(issues, converterVersion, mode, assistance);
 
   const subjects: SubjectReportView[] = [];
   for (const key of ["reading-writing", "math"] as const) {
     const section = bySubject.get(key);
     if (!section) continue;
     const converted =
-      section.conversionStatus === "converted" ? estimate(section.scaled, SECTION_SCALE) : null;
-    if (section.conversionStatus === "converted" && !converted) issues.push("scaled-invalid");
+      !isStudy && section.conversionStatus === "converted"
+        ? estimate(section.scaled, SECTION_SCALE)
+        : null;
+    if (!isStudy && section.conversionStatus === "converted" && !converted)
+      issues.push("scaled-invalid");
     const score = converted ?? (hasConverter
       ? unavailableEstimate(`Estimated ${SUBJECT_LABEL[key]} score is unavailable.`)
       : { kind: "raw" as const, correct: section.rawCorrect, total: section.total });
@@ -257,7 +306,7 @@ export function buildStudentScoreReportView(
   }
 
   const convertedCount = subjects.filter((subject) => subject.score.kind === "estimated").length;
-  const methodology = { isEstimated: convertedCount > 0, converterVersion };
+  const methodology = { isEstimated: convertedCount > 0, converterVersion: isStudy ? null : converterVersion };
   const rawSum = subjects.reduce(
     (sum, subject) => ({
       correct: sum.correct + subject.rawCorrect,
@@ -265,6 +314,38 @@ export function buildStudentScoreReportView(
     }),
     { correct: 0, total: 0 }
   );
+
+  if (isStudy) {
+    const [only] = subjects;
+    if (subjects.length === 1 && only) {
+      return {
+        layout: "single-subject",
+        title: "Study result",
+        primaryLabel: "Correct answers",
+        primaryScore: only.score,
+        subjects,
+        showCombinedScore: false,
+        notice: STUDY_RAW_RESULTS_NOTICE,
+        methodology,
+        mode,
+        assistance,
+        issues,
+      };
+    }
+    return {
+      layout: "partial-results",
+      title: "Study result",
+      primaryLabel: "Total correct answers",
+      primaryScore: { kind: "raw", ...rawSum },
+      subjects,
+      showCombinedScore: false,
+      notice: STUDY_RAW_RESULTS_NOTICE,
+      methodology,
+      mode,
+      assistance,
+      issues,
+    };
+  }
 
   const [only] = subjects;
   if (subjects.length === 1 && only) {
@@ -280,6 +361,8 @@ export function buildStudentScoreReportView(
       showCombinedScore: false,
       notice: estimated ? null : "An estimated SAT score is not available for this sitting.",
       methodology,
+      mode,
+      assistance,
       issues,
     };
   }
@@ -298,6 +381,8 @@ export function buildStudentScoreReportView(
       showCombinedScore: true,
       notice: null,
       methodology,
+      mode,
+      assistance,
       issues,
     };
   }
@@ -312,6 +397,8 @@ export function buildStudentScoreReportView(
       showCombinedScore: false,
       notice: "An estimated combined score is unavailable.",
       methodology,
+      mode,
+      assistance,
       issues,
     };
   }
@@ -328,6 +415,8 @@ export function buildStudentScoreReportView(
       ? "Estimated SAT scores are not available for this sitting."
       : "An estimated combined score is unavailable.",
     methodology,
+    mode,
+    assistance,
     issues,
   };
 }

@@ -51,6 +51,10 @@ func serve(t *testing.T, table map[string]Policy, template, method, path, role s
 
 // expectedAnnotated lists every route() annotation key (main.go 360-600).
 var expectedAnnotated = []string{
+	"GET /{id}/sat-learning-settings",
+	"PUT /{id}/sat-learning-settings",
+	"GET /schedules/{scheduleID}/student-pause",
+	"PUT /schedules/{scheduleID}/student-pause",
 	"GET /session", "POST /logout", "POST /logout-all",
 	"POST /student/device-recovery/{grantID}/claim",
 	"POST /student/device-recovery/{grantID}/ready",
@@ -168,6 +172,8 @@ var expectedAnnotated = []string{
 
 // expectedFullPaths lists every full-path key (no-WithRoute registrations).
 var expectedFullPaths = []string{
+	"GET /api/v1/sat/practice/schedules/{scheduleID}/learning-state",
+	"POST /api/v1/sat/practice/schedules/{scheduleID}/attempts",
 	"GET /healthz", "GET /readyz", "GET /metrics",
 	"GET /api/v1/assessment-release/exams/{examID}",
 	"GET /api/v1/assessment-authoring/exams/{examID}/shell",

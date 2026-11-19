@@ -168,7 +168,7 @@ describe("SatCompleteScreen", () => {
     expect(report).toHaveTextContent("Module 1");
     expect(report).toHaveTextContent("Estimated SAT scores are not available for this sitting.");
     expect(screen.getByRole("meter", { name: "Algebra accuracy" })).toHaveAttribute("aria-valuenow", "75");
-    expect(screen.queryByRole("button", { name: /answered exam/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Download exam PDF/ })).not.toBeInTheDocument();
   });
 
   it("shows estimated scores from the pinned converter, a range as low–high and a total only when present", () => {
@@ -367,7 +367,7 @@ describe("SatCompleteScreen", () => {
     expect(report.querySelector("details summary")?.textContent ?? "").not.toMatch(/Module/);
     expect(report).toHaveTextContent("8 of 11 correct");
     // The PDF download comes before the score.
-    const download = screen.getByRole("button", { name: /answered exam/ });
+    const download = screen.getByRole("button", { name: /Download exam PDF/ });
     const score = report.querySelector("#sat-report-primary")!;
     expect(download.compareDocumentPosition(score) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const { container } = render(
@@ -405,9 +405,9 @@ describe("SatCompleteScreen", () => {
     expect(paper).toHaveTextContent("Algebra3 of 4 · 75%");
   });
 
-  it("says the PDF carries the score report, the answers and the exam review", () => {
+  it("keeps the PDF download visible on a released report", () => {
     render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam())} />);
-    expect(screen.getByRole("status")).toHaveTextContent("It includes your score report, answer summary, and the exam questions");
+    expect(screen.getByRole("button", { name: "Download exam PDF" })).toBeVisible();
   });
 
   // PDF-06, Model: verification/lean/sat-result (Paper.answer_unique).
@@ -442,11 +442,11 @@ describe("SatCompleteScreen", () => {
   it("prepares on the server without mounting another exam or downloading a Blob", async () => {
     const preparePdf = vi.fn(async () => prepared());
     render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
-    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Download exam PDF/ }));
     const link = await screen.findByRole("link", { name: "Download PDF again" });
     expect(link).toHaveAttribute('href', prepared().downloadUrl);
     expect(link).toHaveAttribute('download', prepared().filename);
-    expect(preparePdf).toHaveBeenCalledWith({ view: expect.any(Object) }, expect.any(AbortSignal));
+    expect(preparePdf).toHaveBeenCalledWith({ view: expect.any(Object), includeAnswerKey: true }, expect.any(AbortSignal));
     expect(document.querySelector('.sat-answered-paper')).toBeNull();
     expect(downloadBlob).not.toHaveBeenCalled();
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
@@ -455,9 +455,9 @@ describe("SatCompleteScreen", () => {
   it("keeps preparation failures and retry on the report", async () => {
     const preparePdf = vi.fn().mockRejectedValueOnce(new Error('429')).mockResolvedValueOnce(prepared());
     render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
-    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('no PDF was made');
-    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Download exam PDF/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t prepare your PDF');
+    fireEvent.click(screen.getByRole("button", { name: /Download exam PDF/ }));
     expect(await screen.findByRole('link', { name: 'Download PDF again' })).toBeInTheDocument();
     expect(downloadBlob).not.toHaveBeenCalled();
   });
@@ -465,7 +465,7 @@ describe("SatCompleteScreen", () => {
   it("runs one preparation at a time", async () => {
     const preparePdf = vi.fn(async () => prepared());
     render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
-    const button = screen.getByRole("button", { name: /answered exam/ });
+    const button = screen.getByRole("button", { name: /Download exam PDF/ });
     act(() => { button.click(); button.click(); });
     await screen.findByRole('link', { name: 'Download PDF again' });
     expect(preparePdf).toHaveBeenCalledTimes(1);
@@ -477,7 +477,7 @@ describe("SatCompleteScreen", () => {
     let signal: AbortSignal | undefined;
     const preparePdf: AnsweredExamSource['preparePdf'] = (_body, inputSignal) => { signal = inputSignal; return new Promise(r => { resolve = r; }); };
     const { unmount } = render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
-    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Download exam PDF/ }));
     unmount();
     expect(signal?.aborted).toBe(true);
     await act(async () => { resolve(prepared()); });
@@ -490,13 +490,13 @@ describe("SatCompleteScreen", () => {
     let signal: AbortSignal | undefined;
     const preparePdf: AnsweredExamSource['preparePdf'] = (_body, inputSignal) => { signal = inputSignal; return new Promise(r => { resolve = r; }); };
     const { rerender } = render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
-    fireEvent.click(screen.getByRole("button", { name: /answered exam/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Download exam PDF/ }));
     rerender(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { key: 'student:another-attempt' })} />);
     expect(signal?.aborted).toBe(true);
     await act(async () => { resolve(prepared()); });
     expect(screen.queryByRole('link', { name: 'Download PDF again' })).not.toBeInTheDocument();
     expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /answered exam/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Download exam PDF/ })).toBeEnabled();
   });
 
   it("titles each module within its own section", () => {

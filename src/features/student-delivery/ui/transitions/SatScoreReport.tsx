@@ -9,6 +9,7 @@ import type {
   AssessmentResult,
   SATRecoveryResolutionReceipt,
 } from "../../contracts/assessmentDelivery";
+import type { SatAttemptLearning } from "@shared/sat/learningPolicy";
 import { logWarn } from "../../../../shared/observability/errorLogger";
 import { SatKnowledgeSkills } from "./score-report/SatKnowledgeSkills";
 import { useAnsweredExamDownload, type AnsweredExamDownloadSource } from "./score-report/useAnsweredExamDownload";
@@ -18,8 +19,14 @@ import { SatReportMethodology } from "./score-report/SatReportMethodology";
 import { formatRange, SatScoreOverview } from "./score-report/SatScoreOverview";
 import { SatSubjectPerformance } from "./score-report/SatSubjectPerformance";
 import {
+  answerKeyIndex,
+  SatAnswerKeyTable,
+} from "./score-report/SatAnswerKeyTable";
+import {
   buildStudentScoreReportView,
+  studyAssistanceLabels,
   type ScoreDisplay,
+  type SatAttemptMode,
   type StudentScoreReportView,
 } from "./score-report/scoreReportViewModel";
 
@@ -46,6 +53,13 @@ export interface ClassroomReport {
   conversion?: { converterVersion: string };
   /** Only when both sections converted from full two-module routes. */
   totalScaled?: ScaledScore;
+  /**
+   * The admitted delivery mode from the server's attempt learning snapshot.
+   * Absent metadata is a legacy Test attempt; the client never chooses a mode.
+   */
+  mode?: SatAttemptMode;
+  /** The admitted Study capabilities exactly as the server sent them. */
+  learning?: SatAttemptLearning;
 }
 
 export const SAT_SECTION_LABEL: Record<string, string> = {
@@ -65,11 +79,54 @@ export const ANSWERED_EXAM_LEGAL_FOOTER =
 /** The server only releases this key when the exam's score report is on; anything else is not rendered. */
 export function classroomReport(result: AssessmentResult | null): ClassroomReport | null {
   const raw = result?.releaseStatus === "released" ? result.scorePayload?.["classroomRaw"] : null;
-  if (!raw || typeof raw !== "object") return null;
+  return classroomReportFromRaw(raw);
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Validate and normalize a server `classroomRaw` payload. The admitted mode is
+ * read only when the server sent one; every other shape stays a legacy Test.
+ * Capabilities are never inferred: they are true only when the server sent the
+ * literal `true`, and a Test attempt always binds none.
+ */
+export function readSatAttemptLearning(value: unknown): SatAttemptLearning | null {
+  if (!isRecordValue(value)) return null;
+  const mode = value["mode"];
+  if (mode !== "test" && mode !== "study") return null;
+  const revision = value["policyRevision"];
+  const policyRevision =
+    typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 0 ? revision : 0;
+  const capabilities = isRecordValue(value["capabilities"]) ? value["capabilities"] : {};
+  return {
+    mode,
+    policyRevision,
+    capabilities: {
+      revealAnswers: mode === "study" && capabilities["revealAnswers"] === true,
+      untimed: mode === "study" && capabilities["untimed"] === true,
+    },
+  };
+}
+
+/** A flattened `{ mode, capabilities }` payload next to the raw score fields. */
+function flattenedLearning(raw: Record<string, unknown>): SatAttemptLearning | null {
+  if (raw["mode"] !== "test" && raw["mode"] !== "study") return null;
+  return readSatAttemptLearning({
+    mode: raw["mode"],
+    policyRevision: raw["policyRevision"],
+    capabilities: raw["capabilities"],
+  });
+}
+
+export function classroomReportFromRaw(raw: unknown): ClassroomReport | null {
+  if (!isRecordValue(raw)) return null;
   const { rawCorrect, total, sections, domains, conversion, totalScaled } =
     raw as Partial<ClassroomReport>;
   if (typeof rawCorrect !== "number" || typeof total !== "number" || !Array.isArray(sections))
     return null;
+  const learning = readSatAttemptLearning(raw["learning"]) ?? flattenedLearning(raw);
   return {
     rawCorrect,
     total,
@@ -77,6 +134,7 @@ export function classroomReport(result: AssessmentResult | null): ClassroomRepor
     ...(Array.isArray(domains) ? { domains } : {}),
     ...(typeof conversion?.converterVersion === "string" ? { conversion } : {}),
     ...(isScaled(totalScaled) ? { totalScaled } : {}),
+    ...(learning ? { mode: learning.mode, learning } : {}),
   };
 }
 
@@ -86,7 +144,7 @@ function isScaled(value: unknown): value is ScaledScore {
 }
 
 /** What the paper prints from the server's answered-exam projection. */
-export type AnsweredExam = Pick<AssessmentAnsweredExam, "sections" | "attempt"> &
+export type AnsweredExam = Pick<AssessmentAnsweredExam, "sections" | "attempt" | "answerKey"> &
   Partial<Pick<AssessmentAnsweredExam, "examTitle" | "candidateName">>;
 
 export type LoadMediaUrl = (
@@ -97,6 +155,32 @@ export type LoadMediaUrl = (
 export interface AnsweredExamSource extends AnsweredExamDownloadSource {
   /** The delivered sections, used only to title the report's modules. */
   sections: AssessmentDeliverySection[];
+}
+
+/** One server-admitted correct answer, with its delivered choice letter when it has one. */
+export interface AnsweredExamKeyAnswer {
+  label: string;
+  text: string;
+}
+
+/**
+ * One row of the separately authorized answer-key projection. `result` is the
+ * server's verdict against the accepted response; the client never grades.
+ */
+export interface AnsweredExamKeyEntry {
+  moduleId: string;
+  examQuestionId: string;
+  correctAnswers: readonly AnsweredExamKeyAnswer[];
+  result: "correct" | "incorrect" | "unanswered";
+}
+
+/**
+ * A server-supplied keyed export. `available` false keeps the existing
+ * answer-only report; the client cannot authorize a keyed export itself.
+ */
+export interface AnsweredExamAnswerKey {
+  available: boolean;
+  entries: readonly AnsweredExamKeyEntry[];
 }
 
 // offcut: readiness is polled; an exam whose figures need over 30 s fails closed with a retry
@@ -124,12 +208,14 @@ export function SatScoreReport({
   answered,
   onExit,
   recoveryExceptions = [],
+  retakeActions,
   eva = null,
 }: {
   report: ClassroomReport;
   answered: AnsweredExamSource | null;
   onExit: () => void | Promise<void>;
   recoveryExceptions?: readonly { moduleTitle: string; receipt: SATRecoveryResolutionReceipt }[];
+  retakeActions?: ReactNode;
   /** The shared Eva SIM status group (see SatCompleteScreen). */
   eva?: ReactNode;
 }) {
@@ -148,7 +234,7 @@ export function SatScoreReport({
       <div className="sat-ui min-h-[100dvh] bg-[var(--sat-background)] pl-[calc(1rem+var(--student-safe-left))] pr-[calc(1rem+var(--student-safe-right))] pt-[calc(2rem+var(--student-safe-top))] pb-[calc(3rem+var(--student-safe-bottom))] text-[var(--sat-text)] sm:pl-[calc(1.5rem+var(--student-safe-left))] sm:pr-[calc(1.5rem+var(--student-safe-right))] print:hidden">
         <main className="mx-auto w-full max-w-[920px]">
           <section aria-label="Score report">
-            <SatReportHeader title={view.title} />
+            <SatReportHeader title={view.title} mode={view.mode} />
             {recoveryExceptions.length ? (
               <aside role="status" className="mt-5 rounded-xl border border-[var(--sat-divider)] bg-[var(--sat-surface)] p-4 print:hidden">
                 <h2 className="text-[16px] font-semibold">Submission confirmed with a recovery exception</h2>
@@ -165,18 +251,31 @@ export function SatScoreReport({
                 </ul>
               </aside>
             ) : null}
-            <SatReportDownload
+            <div className="mt-4 flex flex-wrap items-start gap-4">
+              {retakeActions}
+              <SatReportDownload
               canPrint={answered !== null}
               download={download}
               ready={ready}
-              onPrint={() => void prepare()}
-            />
+                onPrint={() => void prepare()}
+              />
+            </div>
             <div className="mt-6">
               <SatScoreOverview view={view} />
             </div>
+            {view.mode === "study" ? (
+              <p
+                data-sat-assistance="true"
+                className="mt-3 text-[14px] leading-5 text-[var(--sat-text-secondary)]"
+              >
+                {studyAssistanceLabels(view.assistance).length
+                  ? `Study assistance: ${studyAssistanceLabels(view.assistance).join(" · ")}`
+                  : "No Study assistance was recorded for this attempt."}
+              </p>
+            ) : null}
             <SatSubjectPerformance view={view} />
             <SatKnowledgeSkills subjects={view.subjects} />
-            <SatReportMethodology methodology={view.methodology} />
+            <SatReportMethodology methodology={view.methodology} mode={view.mode} />
             {eva ? <div className="print:hidden">{eva}</div> : null}
             <SatReportActions onExit={() => void onExit()} />
           </section>
@@ -275,14 +374,19 @@ function PaperFooter() {
 function PaperTitlePage({
   exam,
   hasScoreReport,
+  hasAnswerKey,
+  mode,
   subjects,
   moduleCount,
 }: {
   exam: AnsweredExam;
   hasScoreReport: boolean;
+  hasAnswerKey: boolean;
+  mode: SatAttemptMode;
   subjects: string[];
   moduleCount: number;
 }) {
+  const reportTitle = mode === "study" ? "Study result & exam review" : "Score report & exam review";
   return (
     <table className="sat-paper-table sat-paper-title-sheet" role="presentation" data-cover-page="true">
       <tbody>
@@ -296,7 +400,7 @@ function PaperTitlePage({
               <div className="sat-paper-title-main">
                 <div className="sat-paper-title-exam">
                   <h1>{exam.examTitle?.trim() || "Digital SAT"}</h1>
-                  <p>{hasScoreReport ? "Score report & exam review" : "Answer summary & exam review"}</p>
+                  <p>{hasScoreReport ? reportTitle : "Answer summary & exam review"}</p>
                 </div>
                 <div className="sat-paper-title-student">
                   {exam.candidateName?.trim() ? (
@@ -313,9 +417,15 @@ function PaperTitlePage({
               </div>
               <div className="sat-paper-title-contents">
                 {hasScoreReport ? (
-                  <div><h2>Score report</h2><p>Your results and subject breakdowns</p></div>
+                  <div>
+                    <h2>{mode === "study" ? "Study result" : "Score report"}</h2>
+                    <p>{mode === "study" ? "Your raw results, with Study assistance noted" : "Your results and subject breakdowns"}</p>
+                  </div>
                 ) : null}
                 <div><h2>Answer summary</h2><p>Your saved responses at a glance</p></div>
+                {hasAnswerKey ? (
+                  <div><h2>Answer key</h2><p>Correct answers released by your teacher</p></div>
+                ) : null}
                 <div><h2>Exam review</h2><p>Every question, with your answers marked</p></div>
               </div>
             </header>
@@ -331,9 +441,13 @@ function PaperTitlePage({
 function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
   const correct = view.subjects.reduce((sum, subject) => sum + subject.rawCorrect, 0);
   const total = view.subjects.reduce((sum, subject) => sum + subject.rawTotal, 0);
+  const assistance = studyAssistanceLabels(view.assistance);
   return (
     <section className="sat-paper-score-summary">
       <div className="sat-paper-score-lead">
+      {view.mode === "study" ? (
+        <p className="sat-paper-score-label">Study result</p>
+      ) : null}
       {view.primaryScore ? (
         <div>
           {view.primaryLabel ? <p className="sat-paper-score-label">{view.primaryLabel}</p> : null}
@@ -347,6 +461,13 @@ function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
         </div>
       ) : null}
       {view.notice ? <p className="sat-paper-score-note">{view.notice}</p> : null}
+      {view.mode === "study" ? (
+        <p className="sat-paper-score-note" data-paper-assistance="true">
+          {assistance.length
+            ? `Study assistance: ${assistance.join(" · ")}`
+            : "No Study assistance was recorded for this attempt."}
+        </p>
+      ) : null}
       <p className="sat-paper-total">
         Total correct: {correct} of {total} · {percent(correct, total)}%
       </p>
@@ -396,17 +517,18 @@ function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
 
 /**
  * Print-only paper: a branded cover, the score report (when one is given), a compact per-module
- * answer sheet, then — on following pages — the full exam review, so the
- * student can study from their own sitting later. In the review every choice
- * is shown with the student's selected one circled (matched by option id), a
- * student-produced response is boxed as typed, a recorded choice that matches
- * no listed option is printed as such, and unanswered questions say so.
- * Correct answers are never shown. `data-complete` is false when an
- * administered module is missing or withheld, so the paper never prints without it.
+ * answer sheet, an authorized answer-key table (only from a server key projection), then — on
+ * following pages — the full exam review, so the student can study from their own sitting later.
+ * In the review every choice is shown with the student's selected one circled (matched by option
+ * id), a student-produced response is boxed as typed, a recorded choice that matches no listed
+ * option is printed as such, and unanswered questions say so. Correct answers appear only from
+ * `answerKey`; without it the original answer-only report and copy are unchanged. `data-complete`
+ * is false when an administered module is missing or withheld, so the paper never prints without it.
  */
 export function AnsweredExamPaper({
   exam,
   view,
+  answerKey = null,
   loadMediaUrl,
   onMediaFailure,
   generation,
@@ -414,6 +536,8 @@ export function AnsweredExamPaper({
 }: {
   exam: AnsweredExam;
   view?: StudentScoreReportView | null | undefined;
+  /** The separately authorized server key projection; never derived from client grading. */
+  answerKey?: AnsweredExamAnswerKey | null | undefined;
   loadMediaUrl?: LoadMediaUrl | undefined;
   onMediaFailure?: (() => void) | undefined;
   generation?: number;
@@ -449,6 +573,15 @@ export function AnsweredExamPaper({
         printableModules.push({ section, sectionNo: sectionIndex + 1, module });
     }
   });
+  const keyEntries = answerKeyIndex(answerKey);
+  // A keyed export needs at least one usable row for a module this paper prints.
+  const keyed = [...keyEntries.values()].some((entry) => printable.has(entry.moduleId));
+  const keyModules = printableModules.map(({ section, sectionNo, module }) => ({
+    sectionNo,
+    sectionLabel: SAT_SECTION_LABEL[section.sectionKey] ?? section.title,
+    module,
+  }));
+  const paperMode: SatAttemptMode = view?.mode === "study" ? "study" : "test";
   const mediaFailure = onMediaFailure ? () => onMediaFailure() : undefined;
   return (
     <div
@@ -457,11 +590,14 @@ export function AnsweredExamPaper({
       aria-hidden="true"
       data-complete={complete}
       data-generation={generation}
+      data-answer-key-mode={keyed ? "keyed" : "answer-only"}
     >
       <PaperWatermark />
       <PaperTitlePage
         exam={exam}
         hasScoreReport={Boolean(view)}
+        hasAnswerKey={keyed}
+        mode={paperMode}
         subjects={[...new Set(printableModules.map(({ section }) => SAT_SECTION_LABEL[section.sectionKey] ?? section.title))]}
         moduleCount={printableModules.length}
       />
@@ -474,7 +610,13 @@ export function AnsweredExamPaper({
        <header className="sat-paper-cover">
         <div>
           <h1>{exam.examTitle?.trim() || "Digital SAT"}</h1>
-          <p>{view ? "Score report & exam review" : "Answer summary & exam review"}</p>
+          <p>
+            {view
+              ? paperMode === "study"
+                ? "Study result & exam review"
+                : "Score report & exam review"
+              : "Answer summary & exam review"}
+          </p>
         </div>
         <div className="sat-paper-candidate">
           {exam.candidateName ? <p>{exam.candidateName}</p> : null}
@@ -526,6 +668,9 @@ export function AnsweredExamPaper({
           </section>
         );
       })}
+      {keyed ? (
+        <SatAnswerKeyTable modules={keyModules} answers={answers} entries={keyEntries} />
+      ) : null}
       {/* Front matter ends here: each review module is its own table so its
           runhead (exam · section · module) repeats on every page it spans. */}
             </td>
@@ -550,7 +695,11 @@ export function AnsweredExamPaper({
                       <p>{module.title}</p>
                     </div>
                   </div>
-                  <p className="sat-paper-review-note">Your selected choice is circled; written answers appear in the answer box. Correct answers are not shown.</p>
+                  <p className="sat-paper-review-note">
+                    {keyed
+                      ? "Your selected choice is circled; written answers appear in the answer box. The correct answer for each question is shown."
+                      : "Your selected choice is circled; written answers appear in the answer box. Correct answers are not shown."}
+                  </p>
                 </td>
               </tr>
             </thead>
@@ -560,6 +709,7 @@ export function AnsweredExamPaper({
               .map((question, index) => {
                 const answer = answers.get(`${module.id}:${question.examQuestionId}`) ?? null;
                 const marked = markedForReview.has(`${module.id}:${question.examQuestionId}`);
+                const keyEntry = keyEntries.get(`${module.id}:${question.examQuestionId}`);
                 return (
                   <tr key={question.examQuestionId} className="sat-paper-question-row">
                     <td>
@@ -570,6 +720,8 @@ export function AnsweredExamPaper({
                         sectionKey={section.sectionKey}
                         answer={answer}
                         markedForReview={marked}
+                        correctAnswers={keyEntry?.correctAnswers}
+                        result={keyEntry?.result}
                         loadMediaUrl={loadMediaUrl}
                         onMediaFailure={mediaFailure}
                       />
@@ -577,6 +729,7 @@ export function AnsweredExamPaper({
                   </tr>
                 );
               })}
+
             </tbody>
             <PaperFooter />
           </table>

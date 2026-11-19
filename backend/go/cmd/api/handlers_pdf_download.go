@@ -78,7 +78,8 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 			expiryLimit = sess.ExpiresAt
 		}
 		var request struct {
-			View json.RawMessage `json:"view"`
+			View             json.RawMessage `json:"view"`
+			IncludeAnswerKey bool            `json:"includeAnswerKey"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10))
 		decoder.DisallowUnknownFields()
@@ -94,6 +95,19 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(answeredpdf.RenderTimeout + 30*time.Second))
 		ctx, cancel := context.WithTimeout(r.Context(), answeredpdf.RenderTimeout)
 		defer cancel()
+		// The artifact variant follows the live release policy, not the caller's
+		// request alone: a keyed request with keys disabled prepares the honest
+		// answer-only paper, while the binding records which variant really exists.
+		includeKey := false
+		if request.IncludeAnswerKey {
+			allowed, keyErr := app.Delivery.KeyedPDFAllowed(ctx, binding.AttemptID)
+			if keyErr != nil {
+				pdfExportError(w, r, keyErr)
+				return
+			}
+			includeKey = allowed
+		}
+		binding.IncludeAnswerKey = includeKey
 		var nonce [32]byte
 		if _, err := rand.Read(nonce[:]); err != nil {
 			pdfExportError(w, r, err)
@@ -116,9 +130,9 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 			var exam *delivery.AnsweredExam
 			var err error
 			if student {
-				exam, err = app.Delivery.AnsweredExamForStudent(ctx, binding.Claims.ScheduleID, binding.AttemptID, binding.Claims.ScheduleID)
+				exam, err = app.Delivery.AnsweredExamForStudentWithKey(ctx, binding.Claims.ScheduleID, binding.AttemptID, binding.Claims.ScheduleID, includeKey)
 			} else {
-				exam, err = app.Delivery.AnsweredExam(ctx, binding.AttemptID)
+				exam, err = app.Delivery.AnsweredExamWithKey(ctx, binding.AttemptID, includeKey)
 			}
 			if err != nil {
 				return nil, err
@@ -181,9 +195,21 @@ func downloadAnsweredPDFHandler(app *App) http.HandlerFunc {
 				pdfExportError(w, r, answeredpdf.ErrExportUnavailable)
 				return
 			}
-			if _, err := app.Delivery.AnsweredExamForStudent(r.Context(), claims.ScheduleID, claims.AttemptID, claims.ScheduleID); err != nil {
+			visible, err := app.Delivery.ReportVisible(r.Context(), claims.AttemptID)
+			if err != nil {
 				pdfExportError(w, r, err)
 				return
+			}
+			if !visible {
+				httpx.WriteError(w, r, apperrors.New(apperrors.CodeForbidden, "The answered exam is not available for this session."))
+				return
+			}
+			if binding.IncludeAnswerKey {
+				allowed, err := app.Delivery.KeyedPDFAllowed(r.Context(), claims.AttemptID)
+				if err != nil || !allowed {
+					pdfExportError(w, r, answeredpdf.ErrExportUnavailable)
+					return
+				}
 			}
 		} else if binding.Kind == "staff" {
 			sess := requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleGrader, auth.RoleProctor)
@@ -197,6 +223,17 @@ func downloadAnsweredPDFHandler(app *App) http.HandlerFunc {
 			if err := app.Results.AuthorizeSATAttempt(r.Context(), actorOf(r.Context()), binding.AttemptID); err != nil {
 				httpx.WriteError(w, r, err)
 				return
+			}
+			if binding.IncludeAnswerKey {
+				if app.Delivery == nil {
+					pdfExportError(w, r, answeredpdf.ErrExportUnavailable)
+					return
+				}
+				allowed, err := app.Delivery.KeyedPDFAllowed(r.Context(), binding.AttemptID)
+				if err != nil || !allowed {
+					pdfExportError(w, r, answeredpdf.ErrExportUnavailable)
+					return
+				}
 			}
 		} else {
 			pdfExportError(w, r, answeredpdf.ErrExportUnavailable)

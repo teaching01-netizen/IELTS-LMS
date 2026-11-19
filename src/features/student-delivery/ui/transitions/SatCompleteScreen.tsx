@@ -15,23 +15,26 @@ export function SatCompleteScreen({
   onExit,
   answered = null,
   recoveryExceptions = [],
+  retakeActions,
   eva = null,
 }: {
   result: AssessmentResult | null;
   onExit: () => void | Promise<void>;
   answered?: AnsweredExamSource | null;
   recoveryExceptions?: readonly SATCompletionRecoveryException[];
+  retakeActions?: ReactNode;
   /** The shared Eva SIM status group, identical in both branches. */
   eva?: ReactNode;
 }) {
   const report = classroomReport(result);
-  if (!report) return <SatCompletionOnly onExit={onExit} recoveryExceptions={recoveryExceptions} eva={eva} />;
-  return <SatScoreReport report={report} answered={answered} onExit={onExit} recoveryExceptions={recoveryExceptions} eva={eva} />;
+  if (!report) return <SatCompletionOnly onExit={onExit} recoveryExceptions={recoveryExceptions} retakeActions={retakeActions} eva={eva} />;
+  return <SatScoreReport report={report} answered={answered} onExit={onExit} recoveryExceptions={recoveryExceptions} retakeActions={retakeActions} eva={eva} />;
 }
 
-function SatCompletionOnly({ onExit, recoveryExceptions, eva }: {
+function SatCompletionOnly({ onExit, recoveryExceptions, retakeActions, eva }: {
   onExit: () => void | Promise<void>;
   recoveryExceptions: readonly SATCompletionRecoveryException[];
+  retakeActions: ReactNode;
   eva: ReactNode;
 }) {
   const hasRecoveryException = recoveryExceptions.length > 0;
@@ -68,6 +71,7 @@ function SatCompletionOnly({ onExit, recoveryExceptions, eva }: {
           </ul>
         ) : null}
         {eva}
+        {retakeActions ? <div className="mt-5">{retakeActions}</div> : null}
         <div className="mt-8 border-t border-[var(--sat-divider)] pt-6">
           <button
             type="button"

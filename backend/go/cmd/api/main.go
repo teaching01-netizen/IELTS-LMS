@@ -686,6 +686,8 @@ func BuildRouter(app *App) http.Handler {
 		// one transaction, plus the per-actor receipt lookup used to recover a
 		// lost response.
 		r.With(limitTier(app, httpx.TierWrites, userKey())).Route("/sat", func(r chi.Router) {
+			r.With(limitTier(app, httpx.TierAuthedReads, userKey())).Get("/practice/schedules/{scheduleID}/learning-state", authorize("GET /api/v1/sat/practice/schedules/{scheduleID}/learning-state", practiceLearningStateHandler(app)))
+			r.With(limitTier(app, httpx.TierWrites, userKey())).Post("/practice/schedules/{scheduleID}/attempts", authorize("POST /api/v1/sat/practice/schedules/{scheduleID}/attempts", practiceStartHandler(app)))
 			r.With(adminLimit).Post("/exams/{id}/rooms", authorize("POST /api/v1/sat/exams/{id}/rooms", satRoomCreate(app)))
 			r.With(adminLimit).Get("/exam-config/defaults", authorize("GET /api/v1/sat/exam-config/defaults", satExamConfigDefaults(app)))
 			r.With(adminLimit).Get("/room-operations/{operationKey}", authorize("GET /api/v1/sat/room-operations/{operationKey}", satRoomOperationGet(app)))
@@ -704,6 +706,8 @@ func BuildRouter(app *App) http.Handler {
 		// thing charged to the next module's clock. No route in this group
 		// streams or upgrades.
 		r.With(studentLimit, chimw.Compress(5, "application/json")).Route("/assessment-delivery", func(r chi.Router) {
+			authzRoute(r, "GET", "/schedules/{scheduleID}/student-pause", satStudentPauseHandler(app))
+			authzRoute(r, "PUT", "/schedules/{scheduleID}/student-pause", satStudentPauseHandler(app))
 			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
 				authzRoute(r, "GET", "/schedules/{scheduleID}/state", deliveryStateHandler(app))
 				authzRoute(r, "GET", "/schedules/{scheduleID}/answered-exam", deliveryAnsweredExamHandler(app))
@@ -733,6 +737,8 @@ func BuildRouter(app *App) http.Handler {
 			authzRoute(r, "GET", "/versions/{versionID}", versionSummaryHandler(app))
 		})
 		r.With(limitTier(app, httpx.TierAuthedReads, userKey())).With(adminLimit).Route("/schedules", func(r chi.Router) {
+			authzRoute(r, "GET", "/{id}/sat-learning-settings", satLearningSettingsGet(app))
+			authzRoute(r, "PUT", "/{id}/sat-learning-settings", satLearningSettingsPut(app))
 			authzRoute(r, "GET", "/", schedulesListHandler(app))
 			authzRoute(r, "POST", "/", schedulesCreateHandler(app))
 			authzRoute(r, "GET", "/{id}", schedulesGetHandler(app))

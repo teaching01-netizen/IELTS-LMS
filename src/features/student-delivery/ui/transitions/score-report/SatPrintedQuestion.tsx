@@ -8,7 +8,12 @@ import { SatQuestionHeader } from '../../question/SatQuestionHeader';
 import { SatQuestionWorkspace } from '../../question/SatQuestionWorkspace';
 import { SatSingleChoiceAnswer } from '../../question/SatSingleChoiceAnswer';
 import { SatStudentProducedAnswer } from '../../question/SatStudentProducedAnswer';
-import type { LoadMediaUrl } from '../SatScoreReport';
+import type {
+  AnsweredExamKeyAnswer,
+  AnsweredExamKeyEntry,
+  LoadMediaUrl,
+} from '../SatScoreReport';
+import { keyResultLabel, printedCorrectAnswers } from './SatAnswerKeyTable';
 
 const PRINT_READING_PREFERENCES = createSatReadingPreferences();
 const ignoreAction = () => undefined;
@@ -23,6 +28,8 @@ export function SatPrintedQuestion({
   sectionKey,
   answer,
   markedForReview,
+  correctAnswers,
+  result,
   loadMediaUrl,
   onMediaFailure,
 }: {
@@ -32,6 +39,10 @@ export function SatPrintedQuestion({
   sectionKey: string;
   answer: string | null;
   markedForReview: boolean;
+  /** Only from the server's authorized key projection; absent keeps the answer-only page. */
+  correctAnswers?: readonly AnsweredExamKeyAnswer[] | undefined;
+  /** The server's verdict for this question; never computed here. */
+  result?: AnsweredExamKeyEntry['result'] | undefined;
   loadMediaUrl?: LoadMediaUrl | undefined;
   onMediaFailure?: (() => void) | undefined;
 }) {
@@ -61,6 +72,16 @@ export function SatPrintedQuestion({
       <div className="sat-paper-question-meta">
         <h3>Question {questionNumber}</h3>
         <p>Your answer: {answerLabel}</p>
+        {correctAnswers?.length ? (
+          <p className="sat-paper-question-key">
+            Correct answer: {printedCorrectAnswers(correctAnswers)}
+          </p>
+        ) : null}
+        {result ? (
+          <p className="sat-paper-question-result" data-key-result={result}>
+            Result: {keyResultLabel(result)}
+          </p>
+        ) : null}
       </div>
       <div className="sat-paper-exam-frame">
       <SatQuestionWorkspace

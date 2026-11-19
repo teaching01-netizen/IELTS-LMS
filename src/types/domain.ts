@@ -98,6 +98,7 @@ export interface ExamEntity {
   /** SAT only: show the score report on completion; off shows "SAT complete" only. */
   satSectionScope?: SatPublishScope | undefined;
   satScoreReportEnabled?: boolean | undefined;
+  satLearningDefaults?: import("../shared/sat/learningPolicy").SatActivityPolicy | undefined;
   /** SAT only: has a classroom plan (custom modules), so it runs in Classroom rooms only. */
   satCustomModules?: boolean | undefined;
 

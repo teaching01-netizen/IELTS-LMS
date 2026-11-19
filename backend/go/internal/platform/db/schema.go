@@ -40,6 +40,10 @@ var RequiredTables = []string{
 	"sat_room_operations",
 	// Native SAT downloads (0092): browser grants and artifact cleanup.
 	"sat_pdf_exports",
+	"sat_activity_policies",
+	"sat_attempt_learning",
+	"sat_practice_students",
+	"sat_practice_start_receipts",
 	// SAT configurable forms (0101): registration admission and native Eva.
 	"assessment_form_responses",
 	// Staff-assisted exam recovery (0105, 0108): a missing grant table would
@@ -92,6 +96,10 @@ var RequiredColumns = []RequiredColumn{
 	{Table: "exam_schedules", Column: "sat_session_mode"},
 	// SAT score report switch (0085): terminalization reads the release gate.
 	{Table: "exam_entities", Column: "sat_score_report_enabled"},
+	{Table: "exam_entities", Column: "sat_learning_defaults"},
+	{Table: "student_attempts", Column: "sat_student_paused_at"},
+	{Table: "sat_activity_policies", Column: "unlimited_retakes"},
+	{Table: "sat_activity_policies", Column: "pause_on_leave"},
 	{Table: "exam_entities", Column: "sat_section_scope"},
 	{Table: "sat_room_operations", Column: "response_snapshot"},
 	{Table: "sat_pdf_exports", Column: "scope_key"},

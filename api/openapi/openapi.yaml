@@ -23,6 +23,133 @@ tags:
   - name: sat
   - name: act
 paths:
+  /schedules/{scheduleId}/sat-learning-settings:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [schedules]
+      summary: Read a schedule's learning policy (practice/session alias)
+      responses:
+        "200":
+          description: Operation succeeded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatActivityPolicy" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      tags: [schedules]
+      summary: Save a schedule's learning policy (practice/session alias)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SatActivityPolicyInput" }
+      responses:
+        "200":
+          description: Operation succeeded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatActivityPolicy" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/Error" }
+  /assessment-delivery/schedules/{scheduleId}/student-pause:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [assessment-delivery]
+      summary: Read personal exam pause availability and state
+      security: [{ attemptBearer: [] }]
+      responses:
+        "200":
+          description: Current pause state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatStudentPauseState" }
+        default: { $ref: "#/components/responses/Error" }
+    put:
+      tags: [assessment-delivery]
+      summary: Pause or resume the authenticated student's personal exam clock
+      security: [{ attemptBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paused, controlEpoch]
+              properties:
+                paused: { type: boolean }
+                controlEpoch: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Updated pause state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatStudentPauseState" }
+        default: { $ref: "#/components/responses/Error" }
+  /sat/practice/schedules/{scheduleID}/learning-state:
+    parameters:
+      - name: scheduleID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: entrySession
+        in: query
+        required: false
+        schema: { type: string }
+    get:
+      tags: [sat]
+      summary: Read the student's own SAT room retake availability
+      description: Account-session or retained practice-entry capability only. Returns measured completion count, policy, active attempt and own history. No cross-student or cross-schedule enumeration.
+      responses:
+        "200":
+          description: Operation succeeded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatPracticeLearningState" }
+        default: { $ref: "#/components/responses/Error" }
+  /sat/practice/schedules/{scheduleID}/attempts:
+    parameters:
+      - name: scheduleID
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [sat]
+      summary: Start another timed SAT exam
+      description: Requires an account session + CSRF or the retained practice-entry capability. The operation key binds mode, intent and observed ordinal; a retry returns the original attempt and snapshot.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, maxLength: 64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, intent, observedOrdinal]
+              properties:
+                mode: { type: string, enum: [test] }
+                intent: { type: string, enum: [retake] }
+                observedOrdinal: { type: integer, minimum: 1 }
+                entrySession: { type: string }
+                clientSessionId: { type: string }
+      responses:
+        "200":
+          description: Operation succeeded
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatPracticeStartResult" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        default: { $ref: "#/components/responses/Error" }
   /auth/login:
     post:
       security: []
@@ -5531,6 +5658,95 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   schemas:
+    SatPracticeAttemptSummary:
+      type: object
+      required: [attemptId, ordinal, mode, status, acceptedAt]
+      properties:
+        attemptId: { type: string, format: uuid }
+        ordinal: { type: integer, minimum: 1 }
+        mode: { type: string, enum: [test, study] }
+        learning: { $ref: "#/components/schemas/SatAttemptLearning" }
+        attemptStatus: { type: string, enum: [active, submitted, terminated] }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        acceptedAt: { type: string, format: date-time }
+    SatStudentPauseState:
+      type: object
+      required: [allowed, paused, controlEpoch]
+      properties:
+        allowed: { type: boolean }
+        paused: { type: boolean }
+        controlEpoch: { type: integer, minimum: 0 }
+    SatPracticeLearningState:
+      type: object
+      required: [scheduleId, policy, completedTestAttempts, requiredCompletions, eligible, canStart, canRetakeTest, reason, capabilities, lastOrdinal, attempts]
+      properties:
+        scheduleId: { type: string, format: uuid }
+        policy: { $ref: "#/components/schemas/SatActivityPolicy" }
+        completedTestAttempts: { type: integer, minimum: 0 }
+        requiredCompletions: { type: integer, minimum: 1 }
+        eligible: { type: boolean }
+        canStart: { type: boolean }
+        reason: { type: string, nullable: true, enum: [disabled, completion_required, active_attempt, starts_closed, null] }
+        capabilities: { $ref: "#/components/schemas/SatStudyCapabilities" }
+        canRetakeTest: { type: boolean }
+        lastOrdinal: { type: integer, minimum: 0 }
+        activeAttempt: { allOf: [{ $ref: "#/components/schemas/SatPracticeAttemptSummary" }], nullable: true }
+        attempts:
+          type: array
+          items: { $ref: "#/components/schemas/SatPracticeAttemptSummary" }
+    SatPracticeStartResult:
+      type: object
+      required: [scheduleId, attemptId, ordinal, disposition, attemptStatus, acceptedAt, learning]
+      properties:
+        scheduleId: { type: string, format: uuid }
+        attemptId: { type: string, format: uuid }
+        ordinal: { type: integer, minimum: 1 }
+        disposition: { type: string, enum: [started, already_active, replayed] }
+        attemptStatus: { type: string, enum: [active, submitted, terminated] }
+        acceptedAt: { type: string, format: date-time }
+        learning: { $ref: "#/components/schemas/SatAttemptLearning" }
+        clientSessionId: { type: string }
+        attemptToken: { type: string }
+        attemptExpiresAt: { type: string, format: date-time }
+        credentialPolicy: { type: string }
+    SatStudyPermissions:
+      type: object
+      required: [enabled, requiredCompletions, revealAnswers, untimed]
+      properties:
+        enabled: { type: boolean }
+        requiredCompletions: { type: integer, minimum: 1, maximum: 2147483647 }
+        revealAnswers: { type: boolean }
+        untimed: { type: boolean }
+    SatActivityPolicy:
+      type: object
+      required: [revision, reportVisible, includeAnswerKeyInPdf, study]
+      properties:
+        revision: { type: integer, minimum: 0 }
+        reportVisible: { type: boolean }
+        includeAnswerKeyInPdf: { type: boolean }
+        unlimitedRetakes: { type: boolean, default: false }
+        pauseOnLeave: { type: boolean, default: false }
+        study: { $ref: "#/components/schemas/SatStudyPermissions" }
+    SatActivityPolicyInput:
+      allOf:
+        - $ref: "#/components/schemas/SatActivityPolicy"
+        - type: object
+          required: [expectedRevision]
+          properties:
+            expectedRevision: { type: integer, minimum: 0 }
+    SatStudyCapabilities:
+      type: object
+      required: [revealAnswers, untimed]
+      properties:
+        revealAnswers: { type: boolean }
+        untimed: { type: boolean }
+    SatAttemptLearning:
+      type: object
+      required: [mode, policyRevision, capabilities]
+      properties:
+        mode: { type: string, enum: [test, study] }
+        policyRevision: { type: integer, minimum: 0 }
+        capabilities: { $ref: "#/components/schemas/SatStudyCapabilities" }
     AuthSession:
       type: object
       required: [user, csrfToken, expiresAt, idleTimeoutAt, remembered, credentialAuthenticatedAt]

@@ -26,6 +26,8 @@ import (
 	"github.com/google/uuid"
 
 	examdomain "example.com/ielts-proctoring/internal/exams"
+	"example.com/ielts-proctoring/internal/satlearning"
+
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/satstartcode"
@@ -915,7 +917,13 @@ func insertBackingScheduleTx(ctx context.Context, q tx.Tx, scheduleID, examID st
 	if err := satstartcode.ApplyCreateModeTx(ctx, q, scheduleID, mode, createdBy); err != nil {
 		return err
 	}
-	return persistLinkSATSession(ctx, q, scheduleID, pin, satSession, scope)
+	if err := persistLinkSATSession(ctx, q, scheduleID, pin, satSession, scope); err != nil {
+		return err
+	}
+	if pin.providerKey == "sat" {
+		return satlearning.CopyExamDefaultsTx(ctx, q, examID, scheduleID, createdBy)
+	}
+	return nil
 }
 
 // persistLinkSATSession stores the classroom configuration on the backing

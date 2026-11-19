@@ -47,7 +47,7 @@ const (
 // SATScoreReportOpenSQL reports whether an SAT attempt's student score report
 // is open: the exam's report switch is on and the attempt sat a classroom
 // session. Standard Practice sittings never get a report, whatever the switch.
-const SATScoreReportOpenSQL = "SELECT COALESCE(e.sat_score_report_enabled, FALSE) AND COALESCE(sch.sat_session_mode, 'practice') = 'classroom' FROM student_attempts sa JOIN exam_schedules sch ON sch.id = sa.schedule_id JOIN exam_entities e ON e.id = sch.exam_id WHERE sa.id = ?"
+const SATScoreReportOpenSQL = "SELECT COALESCE(p.report_visible, COALESCE(e.sat_score_report_enabled, FALSE) AND COALESCE(sch.sat_session_mode, 'practice') = 'classroom') FROM student_attempts sa JOIN exam_schedules sch ON sch.id = sa.schedule_id JOIN exam_entities e ON e.id = sch.exam_id LEFT JOIN sat_activity_policies p ON p.schedule_id = sch.id WHERE sa.id = ?"
 
 // satClassroomRawScoreAvailableSQL matches the raw score shape the list API
 // can display. A merely present classroomRaw key (including JSON null or an

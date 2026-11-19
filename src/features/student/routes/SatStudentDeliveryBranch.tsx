@@ -61,6 +61,7 @@ export function SatStudentDeliveryBranch({
         bootstrapSeed={satBootstrapSeed}
         initialIsLoading={false}
         onExit={onExit}
+        allowRoomRetakes
       />
     </SatWriterLockGate>
   );

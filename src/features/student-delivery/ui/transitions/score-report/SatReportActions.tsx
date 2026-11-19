@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { PreparedAnsweredExamPdf } from "../../../api/answeredExamPdf";
 
 /** The answered-exam PDF download, shown at the top of the report. */
@@ -13,13 +14,15 @@ export function SatReportDownload({
   ready?: PreparedAnsweredExamPdf | null;
   onPrint: () => void;
 }) {
+  const descriptionId = useId();
   if (!canPrint) return null;
   return (
-    <div className="mt-4 sm:max-w-sm">
+    <div className="w-full sm:w-56">
       {ready ? (
         <a
           href={ready.downloadUrl}
           download={ready.filename}
+          aria-describedby={descriptionId}
           referrerPolicy="no-referrer"
           onClick={(event) => {
             if (Date.parse(ready.expiresAt) <= Date.now()) {
@@ -34,11 +37,12 @@ export function SatReportDownload({
       ) : (
         <button
           type="button"
+          aria-describedby={descriptionId}
           disabled={download === "preparing"}
           onClick={onPrint}
           className="sat-touch-target sat-pressable min-h-11 w-full rounded-full border border-[var(--sat-divider)] px-6 text-[14px] font-semibold disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
         >
-          {download === "preparing" ? "Preparing answered exam…" : "Save answered exam as PDF"}
+          {download === "preparing" ? "Preparing PDF…" : "Download exam PDF"}
         </button>
       )}
       {ready ? (
@@ -47,23 +51,22 @@ export function SatReportDownload({
           onClick={onPrint}
           className="sat-touch-target mt-2 min-h-11 text-[13px] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
         >
-          Prepare PDF again
+          Create a new PDF
         </button>
       ) : null}
+      <p id={descriptionId} className="mt-2 text-[13px] leading-5 text-[var(--sat-text-secondary)]">
+        Includes your score, the exam questions, and your answers.
+      </p>
       {download === "failed" ? (
         <p role="alert" className="mt-2 text-[14px] text-[var(--sat-danger)]">
-          Your answered exam could not be fully loaded, so no PDF was made. Check your connection
-          and try again.
+          Couldn’t prepare your PDF. Check your connection and try again.
         </p>
-      ) : (
+      ) : null}
+      {download === "preparing" || ready ? (
         <p role="status" className="mt-2 text-[13px] text-[var(--sat-text-secondary)]">
-          {download === "preparing"
-            ? "Preparing your PDF. You can stay on this page."
-            : ready
-              ? "Your PDF is ready. Check your downloads."
-              : "It includes your score report, answer summary, and the exam questions with your answers marked for study."}
+          {ready ? "Your PDF is ready. Check your downloads." : "Your download will start automatically."}
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

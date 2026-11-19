@@ -9,6 +9,8 @@ export interface PreparedAnsweredExamPdf {
 
 export interface PrepareAnsweredExamPdfRequest {
   view: unknown;
+  /** Request the separately authorized key table; server falls back to answer-only. */
+  includeAnswerKey?: boolean;
 }
 
 /** Only a small JSON response enters JavaScript; the browser downloads the file. */

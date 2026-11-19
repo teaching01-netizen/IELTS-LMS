@@ -1,3 +1,6 @@
+import { SatPauseAndLeaveAction, SatStudentPausedScreen } from "../ui/transitions/SatStudentPause";
+import { useSatStudentPause } from "../hooks/useSatStudentPause";
+import { SatRoomRetakeActions } from "../ui/transitions/SatRoomRetakeActions";
 import { SatSectionEntryScreen } from "../ui/SatSectionEntryScreen";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 
@@ -87,6 +90,7 @@ export interface SatStudentSessionRouteProps {
   // assessmentDeliveryApi.bootstrap). Optional + backwards-compatible.
   bootstrapSeed?: SatBootstrapSeed | null;
   initialIsLoading?: boolean;
+  allowRoomRetakes?: boolean;
   onExit: () => void | Promise<void>;
 }
 
@@ -133,6 +137,7 @@ export function SatStudentSessionRoute({
   controlEpoch,
   bootstrapSeed = null,
   initialIsLoading = false,
+  allowRoomRetakes = false,
   onExit,
 }: SatStudentSessionRouteProps) {
   const exam = useSatExamController({
@@ -148,6 +153,7 @@ export function SatStudentSessionRoute({
     bootstrapSeed,
     initialIsLoading,
   });
+  const pause = useSatStudentPause(scheduleId, attemptId, Boolean(exam.data), exam.persistence);
   const reading = useSatReadingPreferences(scheduleId, attemptId);
   /**
    * Whether the eliminator is ON — one switch for the whole attempt: turned on,
@@ -608,6 +614,7 @@ export function SatStudentSessionRoute({
             onExit={onExit}
             recoveryExceptions={completionRecoveryExceptions}
             eva={eva}
+            retakeActions={allowRoomRetakes ? <SatRoomRetakeActions scheduleId={scheduleId} attemptId={attemptId} candidateId={candidateId} /> : null}
             answered={{
               key: `student:${scheduleId}:${attemptId}`,
               sections: data.sections,
@@ -618,6 +625,15 @@ export function SatStudentSessionRoute({
       />,
     );
   }
+  if (pause.state?.paused && stage.kind !== "terminated") {
+    return stageHost(
+      { kind: "error", key: `student-paused:${identityKey}` },
+      <SatStudentPausedScreen pending={pause.pending} error={pause.error} onAction={() => void pause.setPaused(false)} />,
+    );
+  }
+  const pauseAction = pause.state?.allowed && !exam.blocked && !exam.answerInteractionBlocked ? (
+    <SatPauseAndLeaveAction pending={pause.pending} error={pause.error} onAction={() => void pause.setPaused(true)} />
+  ) : null;
   if (stage.kind === "awaiting-route") {
     lastValidFrameRef.current = null;
     return stageHost(stage, <SatAwaitingRouteScreen onExit={onExit} />);
@@ -689,7 +705,8 @@ export function SatStudentSessionRoute({
   ) : null;
   const withCalculatorHost = (content: ReactNode) => (
     <>
-      {!inModulePhase && !inReviewPhase ? <>{leaseConflictNotice}{staffControlNotice}</> : null}
+      {!inModulePhase && !inReviewPhase ? <>{leaseConflictNotice}{pauseAction}
+              {staffControlNotice}</> : null}
       {content}
     </>
   );
@@ -987,6 +1004,7 @@ export function SatStudentSessionRoute({
                   {visibleUnsynced === "offline" ? SAT_COPY.notice.unsyncedOffline : SAT_COPY.notice.unsyncedSlow}
                 </SatControlBanner>
               ) : null}
+              {pauseAction}
               {staffControlNotice}
               {visibleWarning ? <SatControlBanner tone="warning" onDismiss={() => setDismissedNotices((current) => ({ ...current, warning: exam.warning }))}>Proctor message: {visibleWarning}</SatControlBanner> : null}
               {visibleError ? <SatControlBanner tone="error" onDismiss={() => setDismissedNotices((current) => ({ ...current, error }))}>{visibleError}</SatControlBanner> : null}
@@ -1025,7 +1043,7 @@ export function SatStudentSessionRoute({
   const toggleEliminationMode = eliminator.toggle;
   const response = responseForQuestion(state.responses, questionId);
   const interactionBlocked =
-    exam.blocked || exam.isSubmitting || exam.answerInteractionBlocked || persistenceInteractionBlocked;
+    exam.blocked || exam.isSubmitting || exam.answerInteractionBlocked || persistenceInteractionBlocked || pause.pending;
   const directions = hasStructuredContent(stateModule.instructions)
     ? stateModule.instructions
     : hasStructuredContent(stateSection.instructions)
@@ -1106,7 +1124,8 @@ export function SatStudentSessionRoute({
                 {visibleUnsynced === "offline" ? SAT_COPY.notice.unsyncedOffline : SAT_COPY.notice.unsyncedSlow}
               </SatControlBanner>
             ) : null}
-            {staffControlNotice}
+            {pauseAction}
+              {staffControlNotice}
               {visibleWarning ? <SatControlBanner tone="warning" onDismiss={() => setDismissedNotices((current) => ({ ...current, warning: exam.warning }))}>Proctor message: {visibleWarning}</SatControlBanner> : null}
             {visibleError ? <SatControlBanner tone="error" onDismiss={() => setDismissedNotices((current) => ({ ...current, error }))}>{visibleError}</SatControlBanner> : null}
           </>

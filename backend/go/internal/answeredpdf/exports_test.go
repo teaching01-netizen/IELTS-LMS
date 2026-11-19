@@ -271,3 +271,34 @@ func TestExportDiscardAfterCancellationAndRetryFailedCleanup(t *testing.T) {
 		db.Close()
 	}
 }
+
+func TestExportReserveSeparatesKeyedVariant(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	binding := Binding{Kind: "student", OwnerID: "u", AttemptID: "attempt", SessionID: "session", IncludeAnswerKey: true}
+	scope := BrowserHash("student\x00u\x00attempt\x00session\x00keyed")
+	raw, _ := json.Marshal(binding)
+	mock.ExpectBegin()
+	mock.ExpectExec("SET time_zone").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT id FROM student_attempts").WithArgs("attempt").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("attempt"))
+	mock.ExpectQuery("SELECT state FROM sat_pdf_exports").WithArgs(scope).WillReturnRows(sqlmock.NewRows([]string{"state"}))
+	mock.ExpectExec("UPDATE sat_pdf_exports SET scope_key = NULL").WithArgs(scope).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO sat_pdf_exports").
+		WithArgs(sqlmock.AnyArg(), scope, "student", "u", "attempt", BrowserHash("cookie"), raw, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	row, err := NewExports(db, objectstore.NewLocalStore(t.TempDir())).Reserve(t.Context(), binding, BrowserHash("cookie"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !row.Binding.IncludeAnswerKey {
+		t.Fatal("keyed binding variant was not preserved")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

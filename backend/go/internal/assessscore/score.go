@@ -134,26 +134,39 @@ func SATCorrectAnswer(answerJSON string) (correct any, ok bool) {
 	}
 }
 
-// SATChoiceLabels maps each single-choice option id to its display letter in
-// authored option order. Student-produced responses have no option labels.
-func SATChoiceLabels(answerJSON string) map[string]string {
-	var def struct {
-		Kind    string `json:"kind"`
-		Options []struct {
-			ID string `json:"id"`
-		} `json:"options"`
-	}
-	if strings.TrimSpace(answerJSON) == "" || json.Unmarshal([]byte(answerJSON), &def) != nil || def.Kind != "single_choice" {
+// SATChoiceOption is the minimal option identity the label projection needs.
+type SATChoiceOption struct {
+	ID string `json:"id"`
+}
+
+// SATChoiceLabelsFromDefinition maps authored option order to display letters.
+// It is shared by the answered-exam read and the authorized reveal projection
+// so a correct key can never be printed as a raw option id.
+func SATChoiceLabelsFromDefinition(kind string, options []SATChoiceOption) map[string]string {
+	if kind != "single_choice" {
 		return map[string]string{}
 	}
-	labels := make(map[string]string, len(def.Options))
-	for i, option := range def.Options {
+	labels := make(map[string]string, len(options))
+	for i, option := range options {
 		if option.ID == "" {
 			continue
 		}
 		labels[option.ID] = choiceLetter(i)
 	}
 	return labels
+}
+
+// SATChoiceLabels maps each single-choice option id to its display letter in
+// authored option order. Student-produced responses have no option labels.
+func SATChoiceLabels(answerJSON string) map[string]string {
+	var def struct {
+		Kind    string            `json:"kind"`
+		Options []SATChoiceOption `json:"options"`
+	}
+	if strings.TrimSpace(answerJSON) == "" || json.Unmarshal([]byte(answerJSON), &def) != nil {
+		return map[string]string{}
+	}
+	return SATChoiceLabelsFromDefinition(def.Kind, def.Options)
 }
 
 func choiceLetter(index int) string {
