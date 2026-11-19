@@ -59,6 +59,7 @@ export type ProctorSessionDetailPayload = {
   runtime: Parameters<typeof proctorFacade.mapRuntime>[0];
   sessions: Array<{
     attemptId: string;
+    satAttemptOrdinal?: number | undefined;
     studentId: string;
     studentName: string;
     studentEmail: string;

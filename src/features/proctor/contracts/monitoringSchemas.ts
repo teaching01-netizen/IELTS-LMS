@@ -42,6 +42,7 @@ const runtimeSchema = z.looseObject({
 
 const studentSessionSchema = z.looseObject({
   attemptId: z.string().min(1),
+  satAttemptOrdinal: z.number().int().positive().optional(),
   studentId: z.string(),
   studentName: z.string(),
   scheduleId: z.string(),

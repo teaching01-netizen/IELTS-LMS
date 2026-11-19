@@ -200,6 +200,7 @@ type SessionRuntime struct {
 
 // StudentSessionSummary mirrors Rust StudentSessionSummary (camelCase).
 type StudentSessionSummary struct {
+	SATAttemptOrdinal           int        `json:"satAttemptOrdinal,omitempty"`
 	AttemptID                   string     `json:"attemptId"`
 	StudentID                   string     `json:"studentId"`
 	StudentName                 string     `json:"studentName"`
@@ -1335,6 +1336,7 @@ type studentSessionRow struct {
 	satRecoveryDeadlineAt                                                                 sql.NullTime
 	satRecoveryBoundaryRevision                                                           sql.NullInt64
 	satStaffSection                                                                       sql.NullString
+	satAttemptOrdinal                                                                     int
 }
 
 // studentSessionColumns mirrors Rust load_student_sessions (explicit list).
@@ -1360,12 +1362,14 @@ const studentSessionColumns = "sa.id, sa.candidate_id, sa.candidate_name, sa.can
 	"WHEN sat_entry_boundary.module_attempt_id IS NOT NULL THEN 'entry' END, " +
 	"COALESCE(sat_module_boundary.recovery_deadline_at, sat_entry_boundary.entry_deadline_at), " +
 	"COALESCE(sat_module_boundary.revision, sat_entry_boundary.revision), " +
-	"CASE WHEN sa.sat_staff_control IS NOT NULL THEN COALESCE((SELECT section_key FROM assessment_sections WHERE id=sat_module.section_id), '') END"
+	"CASE WHEN sa.sat_staff_control IS NOT NULL THEN COALESCE((SELECT section_key FROM assessment_sections WHERE id=sat_module.section_id), '') END, " +
+	"CASE WHEN e.provider_key = 'sat' THEN COALESCE(sat_history.ordinal, 1) ELSE 0 END"
 
 const studentSessionFrom = "FROM student_attempts sa " + studentSessionJoins
 
 // studentSessionJoins hydrates each selected attempt row `sa`.
 const studentSessionJoins = "JOIN exam_entities e ON e.id = sa.exam_id " +
+	"LEFT JOIN sat_attempt_learning sat_history ON e.provider_key = 'sat' AND sat_history.attempt_id = sa.id " +
 	"LEFT JOIN student_attempt_presence presence ON presence.attempt_id = sa.id " +
 	"LEFT JOIN assessment_module_attempts sat_attempt ON sat_attempt.id = (" +
 	"SELECT ma2.id FROM assessment_module_attempts ma2 " +
@@ -1413,7 +1417,7 @@ func scanStudentSessionRow(row interface{ Scan(dest ...any) error }) (studentSes
 		&r.satEntryStartsAt, &r.satEntryProctorRearmAt, &r.satEntryAutoStartAt,
 		&r.satStartCodeRequired, &r.satStartCodeAcceptedAt,
 		&r.satRecoveryModuleAttemptID, &r.satRecoveryModuleTitle, &r.satRecoveryPhase, &r.satRecoveryKind,
-		&r.satRecoveryDeadlineAt, &r.satRecoveryBoundaryRevision, &r.satStaffSection,
+		&r.satRecoveryDeadlineAt, &r.satRecoveryBoundaryRevision, &r.satStaffSection, &r.satAttemptOrdinal,
 	); err != nil {
 		return studentSessionRow{}, err
 	}
@@ -2178,6 +2182,7 @@ func attemptRowToSession(row studentSessionRow, runtime SessionRuntime, score *s
 		recoveryRevision = &value
 	}
 	summary := StudentSessionSummary{
+		SATAttemptOrdinal:             row.satAttemptOrdinal,
 		SatStartState:                 satStartState,
 		AttemptID:                     row.id,
 		StudentID:                     row.candidateID,

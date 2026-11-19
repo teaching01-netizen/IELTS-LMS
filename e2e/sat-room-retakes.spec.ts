@@ -349,7 +349,11 @@ test("Classroom start code, WCODE retake, pause and keyed PDF", async ({ browser
     await staff.reload({ waitUntil: "domcontentloaded" });
     const roster = staff.getByRole("option").filter({ hasText: "SAT Retake Student" });
     await expect(roster).toHaveCount(2);
-    await expect(roster.filter({ hasText: "Finished" })).toHaveCount(1);
+    const firstRoomRow = staff.getByRole("option", { name: /SAT Retake Student, Attempt 1/ });
+    const secondRoomRow = staff.getByRole("option", { name: /SAT Retake Student, Attempt 2/ });
+    await expect(firstRoomRow.getByText("Attempt 1", { exact: true })).toBeVisible();
+    await expect(firstRoomRow).toContainText("Finished");
+    await expect(secondRoomRow.getByText("Attempt 2", { exact: true })).toBeVisible();
     await staff.goto(`${root}/sat/exams/${examId}/responses?access=${scheduleId}`);
     const rows = staff.getByRole("row").filter({ hasText: "SAT Retake Student" });
     await expect(rows).toHaveCount(2);

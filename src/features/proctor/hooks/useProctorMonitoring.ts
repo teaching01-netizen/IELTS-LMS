@@ -41,6 +41,7 @@ import {
 
 function mapBackendSessionSummary(payload: {
   attemptId: string;
+  satAttemptOrdinal?: number | undefined;
   studentId: string;
   studentName: string;
   studentEmail: string;
@@ -92,6 +93,7 @@ function mapBackendSessionSummary(payload: {
 
   return {
     id: payload.attemptId,
+    satAttemptOrdinal: payload.satAttemptOrdinal,
     studentId: payload.studentId,
     name: payload.studentName,
     email: payload.studentEmail,

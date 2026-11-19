@@ -18,18 +18,18 @@ func scheduleProbeRows() *sqlmock.Rows {
 	)
 }
 
-// rosterPageRows builds full 52-column roster rows (scanStudentSessionRow
+// rosterPageRows builds full roster rows (scanStudentSessionRow
 // shape) so the page hydrates real summaries: the live attempt columns include
 // the runtime identity fence (sa.revision + the active SAT module attempt's id,
 // module id and revision) the proctor merge orders projections by, and the
 // attempt's unfinished SAT break stage (id, state, duration, pause, offer
 // instant, deadline).
 func rosterPageRows() *sqlmock.Rows {
-	cols := []string{"id", "candidate_id", "candidate_name", "candidate_email", "schedule_id", "current_module", "phase", "integrity", "violations_snapshot", "exam_id", "exam_title", "updated_at", "proctor_status", "last_warning_id", "last_heartbeat_at", "last_heartbeat_status", "provider_key", "title", "module_key", "adaptive_role", "started_at", "paused_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds", "revision", "id", "module_id", "revision", "id", "state", "duration_seconds", "accumulated_paused_seconds", "starts_at", "paused_at", "entry_starts_at", "deadline_at", "id", "module_id", "title", "entry_generation", "entry_starts_at", "entry_proctor_rearm_at", "auto_start_at", "sat_start_code_required", "sat_start_code_accepted_at", "sat_recovery_module_attempt_id", "sat_recovery_module_title", "sat_recovery_phase", "sat_recovery_kind", "sat_recovery_deadline_at", "sat_recovery_boundary_revision", "sat_staff_section"}
+	cols := []string{"id", "candidate_id", "candidate_name", "candidate_email", "schedule_id", "current_module", "phase", "integrity", "violations_snapshot", "exam_id", "exam_title", "updated_at", "proctor_status", "last_warning_id", "last_heartbeat_at", "last_heartbeat_status", "provider_key", "title", "module_key", "adaptive_role", "started_at", "paused_at", "allocated_seconds", "extension_seconds", "accumulated_paused_seconds", "revision", "id", "module_id", "revision", "id", "state", "duration_seconds", "accumulated_paused_seconds", "starts_at", "paused_at", "entry_starts_at", "deadline_at", "id", "module_id", "title", "entry_generation", "entry_starts_at", "entry_proctor_rearm_at", "auto_start_at", "sat_start_code_required", "sat_start_code_accepted_at", "sat_recovery_module_attempt_id", "sat_recovery_module_title", "sat_recovery_phase", "sat_recovery_kind", "sat_recovery_deadline_at", "sat_recovery_boundary_revision", "sat_staff_section", "sat_attempt_ordinal"}
 	return sqlmock.NewRows(cols).
-		AddRow("att-3", "c3", "Cara", "c@x", "sched-1", "listening", "live", `{}`, `[]`, "exam-1", "Exam", time.Now().UTC(), "active", nil, nil, nil, "ielts", nil, nil, nil, nil, nil, nil, nil, nil, int64(3), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, nil, nil, nil, nil, nil, nil, nil, nil).
-		AddRow("att-2", "c2", "Bob", "b@x", "sched-1", "listening", "live", `{}`, `[]`, "exam-1", "Exam", time.Now().UTC(), "active", nil, nil, nil, "ielts", nil, nil, nil, nil, nil, nil, nil, nil, int64(2), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, nil, nil, nil, nil, nil, nil, nil, nil).
-		AddRow("att-1", "c1", "Ann", "a@x", "sched-1", "listening", "live", `{}`, `[]`, "exam-1", "Exam", time.Now().UTC(), "active", nil, nil, nil, "ielts", nil, nil, nil, nil, nil, nil, nil, nil, int64(1), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, nil, nil, nil, nil, nil, nil, nil, nil)
+		AddRow("att-3", "c3", "Cara", "c@x", "sched-1", "listening", "live", `{}`, `[]`, "exam-1", "Exam", time.Now().UTC(), "active", nil, nil, nil, "ielts", nil, nil, nil, nil, nil, nil, nil, nil, int64(3), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, nil, nil, nil, nil, nil, nil, nil, nil, 0).
+		AddRow("att-2", "c2", "Bob", "b@x", "sched-1", "listening", "live", `{}`, `[]`, "exam-1", "Exam", time.Now().UTC(), "active", nil, nil, nil, "ielts", nil, nil, nil, nil, nil, nil, nil, nil, int64(2), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, nil, nil, nil, nil, nil, nil, nil, nil, 0).
+		AddRow("att-1", "c1", "Ann", "a@x", "sched-1", "listening", "live", `{}`, `[]`, "exam-1", "Exam", time.Now().UTC(), "active", nil, nil, nil, "ielts", nil, nil, nil, nil, nil, nil, nil, nil, int64(1), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, false, nil, nil, nil, nil, nil, nil, nil, nil, 0)
 }
 
 // D4 RED: cursor page returns rows + next cursor (no gaps/dups contract:

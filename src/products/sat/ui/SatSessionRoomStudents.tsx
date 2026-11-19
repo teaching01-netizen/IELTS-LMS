@@ -169,7 +169,8 @@ export function SatRoomStudentRow({
   const heroScaled = score?.scaled ?? null;
   const showHeroSkeleton = scoresLoading && scoreKind === 'scored' && heroScaled == null;
   const heroText = heroScaled ? formatScaled(heroScaled) : '—';
-  const ariaLabel = `Open ${student.name}${attentionReason ? `, needs attention: ${attentionReason}` : ''}${score?.srLabel ? `, ${score.srLabel}` : ''}`;
+  const attemptLabel = student.satAttemptOrdinal != null ? `Attempt ${student.satAttemptOrdinal}` : null;
+  const ariaLabel = `Open ${student.name}${attemptLabel ? `, ${attemptLabel}` : ''}${attentionReason ? `, needs attention: ${attentionReason}` : ''}${score?.srLabel ? `, ${score.srLabel}` : ''}`;
 
   return (
     <button
@@ -189,6 +190,11 @@ export function SatRoomStudentRow({
           <span className="min-w-0 break-words">
             <span className="sat-room__row-name text-[16px] font-semibold leading-6 tracking-[-0.01em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{student.name}</span>
             <span className="ml-2 hidden text-[14px] tabular-nums text-[var(--sat-staff-text-tertiary,#6e6e73)] @md:inline">{student.studentId}</span>
+            {attemptLabel ? (
+              <span className="ml-2 inline-flex whitespace-nowrap rounded-full border border-[var(--sat-staff-border-hairline)] bg-[var(--sat-staff-fill-faint)] px-2 py-0.5 align-middle text-[12px] font-semibold tabular-nums text-[var(--sat-staff-text-secondary,#515154)]">
+                {attemptLabel}
+              </span>
+            ) : null}
             {attentionReason ? (
               <AlertTriangle size={14} className="ml-1.5 inline-block -translate-y-px align-baseline text-[var(--sat-staff-warning-dot,#d97706)]" aria-hidden="true" />
             ) : null}

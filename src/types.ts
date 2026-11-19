@@ -814,6 +814,7 @@ export interface Violation {
 
 export interface StudentSession {
   id: string;
+  satAttemptOrdinal?: number | undefined;
   studentId: string;
   name: string;
   email: string;
