@@ -308,6 +308,25 @@ func summaryIDs(summaries []proctor.ProctorSessionSummary) []string {
 	return ids
 }
 
+// fixtureSummaries keeps only the rooms this test owns, preserving response
+// order. TEST_MYSQL_DSN is shared with the rest of the package, so a full-suite
+// run can have unrelated schedules in the database; exact-set assertions must
+// scope to this test's unique room ids rather than assume an empty table.
+func fixtureSummaries(t *testing.T, fx *satRoomFixture, summaries []proctor.ProctorSessionSummary) []proctor.ProctorSessionSummary {
+	t.Helper()
+	owned := make(map[string]bool, len(fx.rooms))
+	for i := range fx.rooms {
+		owned[fx.rooms[i].id] = true
+	}
+	out := make([]proctor.ProctorSessionSummary, 0, len(summaries))
+	for _, s := range summaries {
+		if owned[s.Schedule.ID] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // assertRoomIDs proves the exact authorized room set and ordering.
 func assertRoomIDs(t *testing.T, label string, summaries []proctor.ProctorSessionSummary, want []string) {
 	t.Helper()
@@ -482,16 +501,16 @@ func TestSATRoomSummariesRouteScopeAndParity(t *testing.T) {
 	proctor2 := newSATRoomSession(fx.proctor2ID, auth.RoleProctor)
 
 	// --- P1: admin provider scope is the authorized SAT set, once per room ---
-	adminSAT := h.get(t, admin, satRoomsPath+"?providerKey=sat")
+	adminSAT := fixtureSummaries(t, fx, h.get(t, admin, satRoomsPath+"?providerKey=sat"))
 	assertRoomIDs(t, "admin ?providerKey=sat", adminSAT, fx.expectedRoomIDs("sat"))
 
 	// --- P1: admin observer keeps the same visibility ---
-	observerSAT := h.get(t, observer, satRoomsPath+"?providerKey=sat")
+	observerSAT := fixtureSummaries(t, fx, h.get(t, observer, satRoomsPath+"?providerKey=sat"))
 	assertRoomIDs(t, "admin observer ?providerKey=sat", observerSAT, fx.expectedRoomIDs("sat"))
 
 	// --- P1: proctor provider scope: duplicate grant -> ONE room, revoked
 	// grant and other-provider/role grants excluded ---
-	proctorSAT := h.get(t, proctor1, satRoomsPath+"?providerKey=sat")
+	proctorSAT := fixtureSummaries(t, fx, h.get(t, proctor1, satRoomsPath+"?providerKey=sat"))
 	assertRoomIDs(t, "proctor ?providerKey=sat", proctorSAT, fx.expectedProctor1IDs("sat"))
 	if n := countSummaryID(proctorSAT, fx.id("satLive")); n != 1 {
 		t.Fatalf("duplicate active assignment on satLive must yield ONE summary, got %d", n)
@@ -503,18 +522,18 @@ func TestSATRoomSummariesRouteScopeAndParity(t *testing.T) {
 	}
 
 	// --- P1: a proctor with no assignments sees [] ---
-	proctor2SAT := h.get(t, proctor2, satRoomsPath+"?providerKey=sat")
+	proctor2SAT := fixtureSummaries(t, fx, h.get(t, proctor2, satRoomsPath+"?providerKey=sat"))
 	if len(proctor2SAT) != 0 {
 		t.Fatalf("proctor with no assignments must see [], got %v", summaryIDs(proctor2SAT))
 	}
-	proctor2All := h.get(t, proctor2, satRoomsPath)
+	proctor2All := fixtureSummaries(t, fx, h.get(t, proctor2, satRoomsPath))
 	if len(proctor2All) != 0 {
 		t.Fatalf("unassigned proctor without provider must see [], got %v", summaryIDs(proctor2All))
 	}
 
 	// --- P1: proctor without provider sees ALL actively assigned rooms
 	// (SAT + IELTS), never an unassigned room, in the same SQL order ---
-	proctorAll := h.get(t, proctor1, satRoomsPath)
+	proctorAll := fixtureSummaries(t, fx, h.get(t, proctor1, satRoomsPath))
 	assertRoomIDs(t, "proctor unfiltered", proctorAll, fx.expectedProctor1IDs(""))
 	if n := countSummaryID(proctorAll, fx.id("ieltsRoom")); n != 1 {
 		t.Fatalf("proctor's active IELTS assignment must be visible without the provider filter, got %d", n)
@@ -526,7 +545,7 @@ func TestSATRoomSummariesRouteScopeAndParity(t *testing.T) {
 	}
 
 	// --- P1: other-provider isolation and invalid-provider validation ---
-	adminIELTS := h.get(t, admin, satRoomsPath+"?providerKey=ielts")
+	adminIELTS := fixtureSummaries(t, fx, h.get(t, admin, satRoomsPath+"?providerKey=ielts"))
 	assertRoomIDs(t, "admin ?providerKey=ielts", adminIELTS, fx.expectedRoomIDs("ielts"))
 
 	bogus := h.rawGet(t, admin, satRoomsPath+"?providerKey=bogus")
@@ -544,7 +563,7 @@ func TestSATRoomSummariesRouteScopeAndParity(t *testing.T) {
 
 	// --- P2: unfiltered admin route returns the full seeded set in the same
 	// order as the unscoped service path ---
-	adminAll := h.get(t, admin, satRoomsPath)
+	adminAll := fixtureSummaries(t, fx, h.get(t, admin, satRoomsPath))
 	assertRoomIDs(t, "admin unfiltered", adminAll, fx.expectedRoomIDs(""))
 
 	// Every summary field is exercised against independently declared values.
@@ -581,7 +600,7 @@ func TestSATRoomSummariesRouteScopeAndParity(t *testing.T) {
 	for i := range adminSAT {
 		assertSummaryParity(t, adminSAT[i], oracleSAT[i])
 	}
-	if got, want := summaryIDs(adminAll), summaryIDs(oracle); !reflect.DeepEqual(got, want) {
+	if got, want := summaryIDs(adminAll), summaryIDs(fixtureSummaries(t, fx, oracle)); !reflect.DeepEqual(got, want) {
 		t.Fatalf("unfiltered route order must match the unscoped service order\n got: %v\nwant: %v", got, want)
 	}
 
@@ -600,7 +619,7 @@ func TestSATRoomSummariesCommittedRevocation(t *testing.T) {
 	proctor1 := newSATRoomSession(fx.proctor1ID, auth.RoleProctor)
 	ctx := context.Background()
 
-	before := h.get(t, proctor1, satRoomsPath+"?providerKey=sat")
+	before := fixtureSummaries(t, fx, h.get(t, proctor1, satRoomsPath+"?providerKey=sat"))
 	assertRoomIDs(t, "proctor ?providerKey=sat before revocation", before, fx.expectedProctor1IDs("sat"))
 
 	if _, err := db.ExecContext(ctx,
@@ -609,7 +628,7 @@ func TestSATRoomSummariesCommittedRevocation(t *testing.T) {
 		t.Fatalf("commit revocation of proctor1's satUpcomingA assignment: %v", err)
 	}
 
-	afterRevoke := h.get(t, proctor1, satRoomsPath+"?providerKey=sat")
+	afterRevoke := fixtureSummaries(t, fx, h.get(t, proctor1, satRoomsPath+"?providerKey=sat"))
 	assertRoomIDs(t, "proctor ?providerKey=sat after committed revocation", afterRevoke, []string{fx.id("satLive")})
 }
 
