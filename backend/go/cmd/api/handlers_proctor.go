@@ -96,61 +96,19 @@ func liveModeStaleOutboxCount(ctx context.Context, db *sql.DB, scheduleID string
 //
 // Mirrors backend/crates/api/src/routes/proctor.rs list_sessions/get_session.
 // Role gate is Admin|AdminObserver|Proctor on both routes. Scoping (same
-// split as Rust): proctors are filtered/checked against their live
+// split as Rust): proctors are scoped by their live
 // schedule_staff_assignments rows (user_id + role='proctor' + revoked_at IS
 // NULL, mirroring the Rust assigned_schedule_ids helper and the
-// gradingAssignedScheduleIDs pattern); out-of-scope schedules collapse the
-// list and 404 the detail (never a cross-schedule leak). ?providerKey= is
-// validated to sat|ielts|act with a 422 VALIDATION_ERROR otherwise (Rust
-// behavior), applied via the exams-provider join from
-// provider_schedule_ids. ?mode=dashboard switches the audit/alert limits
+// gradingAssignedScheduleIDs pattern). The list route applies that
+// assignment and ?providerKey= at SQL selection time (proctor.ListSessions
+// scope) so runtimes and grouped counts only read authorized rooms; the
+// detail route checks one assignment and 404s (never a cross-schedule leak).
+// ?providerKey= is validated to sat|ielts|act with a 422 VALIDATION_ERROR
+// otherwise (Rust behavior), applied through the same provider relationship
+// as the old provider_schedule_ids helper (exam_entities.id =
+// exam_schedules.exam_id). ?mode=dashboard switches the audit/alert limits
 // (defaults 200/100, mirroring Rust); otherwise limits are unbounded and
 // alerts build from the audit rows with no second query.
-
-// proctorAssignedScheduleIDs loads the proctor's live assignment set
-// (schedule_staff_assignments, user_id + role='proctor' + revoked_at IS
-// NULL), mirroring the Rust assigned_schedule_ids helper. It returns an
-// empty non-nil slice when the proctor holds no assignments so the list
-// collapses to zero rows and the detail 404s.
-func proctorAssignedScheduleIDs(ctx context.Context, db *sql.DB, userID string) ([]string, error) {
-	rows, err := db.QueryContext(ctx,
-		"SELECT schedule_id FROM schedule_staff_assignments WHERE user_id = ? AND role = 'proctor' AND revoked_at IS NULL",
-		userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []string{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
-	}
-	return out, rows.Err()
-}
-
-// proctorProviderScheduleIDs resolves the schedule ids owned by a provider,
-// mirroring the Rust provider_schedule_ids join.
-func proctorProviderScheduleIDs(ctx context.Context, db *sql.DB, providerKey string) (map[string]bool, error) {
-	rows, err := db.QueryContext(ctx,
-		"SELECT schedules.id FROM exam_schedules schedules JOIN exam_entities exams ON exams.id = schedules.exam_id WHERE exams.provider_key = ?",
-		providerKey)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := map[string]bool{}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out[id] = true
-	}
-	return out, rows.Err()
-}
 
 // proctorHasLiveAssignment reports one live proctor assignment row for the
 // schedule (actor_id OR user_id, never revoked). Misses 404, mirroring the
@@ -201,6 +159,8 @@ func proctorLimitParam(r *http.Request, key string, def int) int {
 
 // proctorSessionsHandler serves the session summary list. Proctors see only
 // assigned schedules; ?providerKey= filters to sat|ielts|act (422 otherwise).
+// Both filters are pushed into the service's schedule query so hydration and
+// grouped counts never run for rooms this caller cannot see.
 func proctorSessionsHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sess := requireRole(w, r, auth.RoleAdmin, auth.RoleAdminObserver, auth.RoleProctor)
@@ -212,51 +172,20 @@ func proctorSessionsHandler(app *App) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		var allowed map[string]bool
-		if sess.Role == auth.RoleProctor {
-			ids, err := proctorAssignedScheduleIDs(ctx, app.DB, sess.UserID)
-			if err != nil {
-				httpx.WriteError(w, r, err)
-				return
-			}
-			allowed = make(map[string]bool, len(ids))
-			for _, id := range ids {
-				allowed[id] = true
-			}
-		}
+		scope := proctor.SessionListScope{}
 		if providerKey := strings.TrimSpace(r.URL.Query().Get("providerKey")); providerKey != "" {
 			if providerKey != "sat" && providerKey != "ielts" && providerKey != "act" {
 				httpx.WriteError(w, r, &apperrors.Error{Code: apperrors.CodeValidation, Message: "providerKey must be sat, ielts, or act.", HTTPStatus: http.StatusUnprocessableEntity})
 				return
 			}
-			ids, err := proctorProviderScheduleIDs(ctx, app.DB, providerKey)
-			if err != nil {
-				httpx.WriteError(w, r, err)
-				return
-			}
-			if allowed == nil {
-				allowed = ids
-			} else {
-				for id := range allowed {
-					if !ids[id] {
-						delete(allowed, id)
-					}
-				}
-			}
+			scope.ProviderKey = providerKey
 		}
-		summaries, err := app.Proctor.ListSessions(ctx, proctorActorOf(sess), app.Config.LiveModeEnabled)
+		summaries, err := app.Proctor.ListSessions(ctx, proctorActorOf(sess), app.Config.LiveModeEnabled, scope)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
-		out := []proctor.ProctorSessionSummary{}
-		for _, s := range summaries {
-			if allowed != nil && !allowed[s.Schedule.ID] {
-				continue
-			}
-			out = append(out, s)
-		}
-		httpx.WriteJSON(w, http.StatusOK, out)
+		httpx.WriteJSON(w, http.StatusOK, summaries)
 	}
 }
 

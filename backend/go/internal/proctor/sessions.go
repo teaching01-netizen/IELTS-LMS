@@ -497,10 +497,49 @@ func scanSessionSchedule(row interface{ Scan(dest ...any) error }) (SessionSched
 	return s, nil
 }
 
+// sessionScheduleScope is the SQL selection scope for the schedule list:
+// the provider relationship and/or the authenticated proctor's live
+// assignment are applied in the schedule query itself, before any runtime or
+// grouped-count read runs for the page.
+type sessionScheduleScope struct {
+	ProviderKey   string
+	ProctorUserID *string
+}
+
 // loadSessionSchedules lists schedules ordered by start time, mirroring
 // SchedulingService::list_schedules for platform readers.
-func loadSessionSchedules(ctx context.Context, q sessionQuerier) ([]SessionSchedule, error) {
-	rows, err := q.QueryContext(ctx, "SELECT "+sessionScheduleColumns+" FROM exam_schedules ORDER BY start_time ASC, created_at DESC")
+//
+// The scope predicates are deliberately the same relationships the HTTP
+// handler used to apply after the read (proctorAssignedScheduleIDs /
+// proctorProviderScheduleIDs), so a fixed database state selects exactly the
+// same rooms:
+//   - provider: exam_entities.id = exam_schedules.exam_id joined on
+//     exam_entities.provider_key, the old provider_schedule_ids join.
+//   - assignment: schedule_staff_assignments.schedule_id =
+//     exam_schedules.id with user_id + role='proctor' + revoked_at IS NULL,
+//     the old assigned_schedule_ids predicate set.
+//
+// Both are EXISTS semi-joins so a duplicate assignment grant (the table has
+// no unique constraint over schedule/user/role) still yields ONE schedule
+// row and therefore one summary per room; an inner join would multiply it.
+// The zero scope renders the legacy query byte-for-byte.
+func loadSessionSchedules(ctx context.Context, q sessionQuerier, scope sessionScheduleScope) ([]SessionSchedule, error) {
+	query := "SELECT " + sessionScheduleColumns + " FROM exam_schedules"
+	predicates := make([]string, 0, 2)
+	args := make([]any, 0, 2)
+	if scope.ProviderKey != "" {
+		predicates = append(predicates, "EXISTS (SELECT 1 FROM exam_entities WHERE exam_entities.id = exam_schedules.exam_id AND exam_entities.provider_key = ?)")
+		args = append(args, scope.ProviderKey)
+	}
+	if scope.ProctorUserID != nil {
+		predicates = append(predicates, "EXISTS (SELECT 1 FROM schedule_staff_assignments WHERE schedule_staff_assignments.schedule_id = exam_schedules.id AND schedule_staff_assignments.user_id = ? AND schedule_staff_assignments.role = 'proctor' AND schedule_staff_assignments.revoked_at IS NULL)")
+		args = append(args, *scope.ProctorUserID)
+	}
+	if len(predicates) > 0 {
+		query += " WHERE " + strings.Join(predicates, " AND ")
+	}
+	query += " ORDER BY start_time ASC, created_at DESC"
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -2536,11 +2575,20 @@ func loadDegradedMap(ctx context.Context, q sessionQuerier, liveModeEnabled bool
 	return out, rows.Err()
 }
 
+// SessionListScope narrows ListSessions before any runtime/count read.
+// The zero value preserves the unscoped list.
+type SessionListScope struct {
+	ProviderKey string
+}
+
 // ListSessions returns one summary per schedule: schedule + hydrated
 // runtime + grouped student/active counts + admission totals + alert/
 // violation counts + degraded flags. It mirrors Rust list_sessions before
-// the handler-side assignment/provider filters.
-func (s *Service) ListSessions(ctx context.Context, actor Actor, liveModeEnabled bool) ([]ProctorSessionSummary, error) {
+// the handler-side assignment/provider filters, now applied at SQL selection
+// time: the provider scope and the authenticated proctor's live assignment
+// restrict the schedule query, so runtimes and every grouped count only read
+// the selected rooms.
+func (s *Service) ListSessions(ctx context.Context, actor Actor, liveModeEnabled bool, scope SessionListScope) ([]ProctorSessionSummary, error) {
 	if err := requireSessionReader(actor); err != nil {
 		return nil, err
 	}
@@ -2549,7 +2597,12 @@ func (s *Service) ListSessions(ctx context.Context, actor Actor, liveModeEnabled
 		return nil, err
 	}
 	now := time.Now().UTC()
-	schedules, err := loadSessionSchedules(ctx, q)
+	sqlScope := sessionScheduleScope{ProviderKey: strings.TrimSpace(scope.ProviderKey)}
+	if actor.Role == RoleProctor {
+		userID := actor.ID
+		sqlScope.ProctorUserID = &userID
+	}
+	schedules, err := loadSessionSchedules(ctx, q, sqlScope)
 	if err != nil {
 		return nil, err
 	}
