@@ -81,23 +81,57 @@ func LayoutSample(title string, targets []satpdflayout.Option, answerKey bool) (
 			}
 			section := &exam.Sections[index]
 			id := fmt.Sprintf("sample-%d-%d", index, len(section.Modules))
+			question, correct := sampleQuestion(id, target.SectionKey)
 			section.Modules = append(section.Modules, delivery.DeliveryModule{
 				ID: id, ModuleKey: target.ModuleKey, Title: option.Label, DisplayOrder: len(section.Modules),
-				Questions: []delivery.DeliveredQuestion{{
-					ExamQuestionID: id, QuestionID: id, QuestionType: "single_choice",
-					Prompt: json.RawMessage(`{"version":1,"nodes":[{"type":"paragraph","id":"sample-prompt","text":"Which number equals 2 + 2?"}]}`),
-					Answer: json.RawMessage(`{"kind":"single_choice","options":[{"id":"a","content":{"version":1,"nodes":[{"type":"paragraph","id":"sample-a","text":"4"}]}},{"id":"b","content":{"version":1,"nodes":[{"type":"paragraph","id":"sample-b","text":"5"}]}}]}`),
-				}},
+				Questions: []delivery.DeliveredQuestion{question},
 			})
 			exam.Attempt.ModuleAttempts = append(exam.Attempt.ModuleAttempts, delivery.ModuleAttempt{ID: id, ModuleID: id, StartedAt: &now})
+			exam.Attempt.Responses = append(exam.Attempt.Responses, delivery.ResponseSnapshot{
+				ModuleAttemptID: id, ExamQuestionID: id, Response: json.RawMessage(`"a"`),
+			})
 			if exam.AnswerKey != nil {
 				exam.AnswerKey.Entries = append(exam.AnswerKey.Entries, delivery.AnsweredExamKeyEntry{
-					ModuleID: id, ExamQuestionID: id, Result: "unanswered",
-					CorrectAnswers: []satlearning.AnswerKeyAnswer{{Label: "A", Text: "4"}},
+					ModuleID: id, ExamQuestionID: id, Result: "correct",
+					CorrectAnswers: []satlearning.AnswerKeyAnswer{{Label: "A", Text: correct}},
 				})
 			}
 		}
 	}
-	view := json.RawMessage(`{"primaryLabel":"Sample score","primaryScore":{"kind":"raw","correct":1,"total":2},"subjects":[{"key":"math","label":"Sample result","score":{"kind":"raw","correct":1,"total":2},"rawCorrect":1,"rawTotal":2,"modules":[],"domains":[]}],"mode":"test"}`)
+	view := json.RawMessage(`{"primaryLabel":"Raw score","primaryScore":{"kind":"raw","correct":1,"total":2},"subjects":[{"key":"math","label":"Math","score":{"kind":"raw","correct":1,"total":2},"rawCorrect":1,"rawTotal":2,"modules":[],"domains":[]}],"mode":"test"}`)
 	return exam, view
+}
+
+func sampleQuestion(id, subject string) (delivery.DeliveredQuestion, string) {
+	prompt := "If 3x + 5 = 20, what is the value of x?"
+	choices := []string{"5", "7", "15", "25"}
+	stimulus := ""
+	if subject == "reading-writing" {
+		stimulus = "The museum extended its hours during the summer. This gave visitors more time to explore the exhibits."
+		prompt = "Which choice best describes the relationship between the two sentences?"
+		choices = []string{"The second sentence explains an effect of the first.", "The second sentence introduces a contrasting idea.", "The second sentence restates the same information.", "The second sentence questions the first."}
+	}
+	type paragraph struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+		Text string `json:"text"`
+	}
+	content := func(id, text string) map[string]any {
+		return map[string]any{"version": 1, "nodes": []paragraph{{Type: "paragraph", ID: id, Text: text}}}
+	}
+	options := make([]map[string]any, len(choices))
+	for i, choice := range choices {
+		key := string(rune('a' + i))
+		options[i] = map[string]any{"id": key, "content": content(key, choice)}
+	}
+	// These payloads contain only strings, slices and maps of JSON values.
+	answer, _ := json.Marshal(map[string]any{"kind": "single_choice", "options": options})
+	promptJSON, _ := json.Marshal(content("prompt", prompt))
+	question := delivery.DeliveredQuestion{
+		ExamQuestionID: id, QuestionID: id, QuestionType: "single_choice", Prompt: promptJSON, Answer: answer,
+	}
+	if stimulus != "" {
+		question.Stimulus, _ = json.Marshal(content("stimulus", stimulus))
+	}
+	return question, choices[0]
 }

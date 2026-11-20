@@ -184,9 +184,15 @@ func satPDFLayoutPreviewHandler(app *App) http.HandlerFunc {
 		var request struct {
 			Layout          *satpdflayout.Layout `json:"layout"`
 			SampleAnswerKey bool                 `json:"sampleAnswerKey"`
+			SectionSample   *satpdflayout.Target `json:"sectionSample"`
+			SampleBook      bool                 `json:"sampleBook"`
 		}
 		if err := decodePDFLayoutRequest(w, r, &request); err != nil {
 			httpx.WriteError(w, r, err)
+			return
+		}
+		if request.SampleBook && request.SectionSample != nil {
+			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation, "Choose one sample preview mode."))
 			return
 		}
 		if request.Layout != nil && session.Role == auth.RoleAdminObserver {
@@ -194,15 +200,32 @@ func satPDFLayoutPreviewHandler(app *App) http.HandlerFunc {
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(answeredpdf.RenderTimeout + 5*time.Second))
-		pdf, err := app.AnsweredPDF.RenderPrepared(r.Context(), func(ctx context.Context) ([]byte, error) {
+		pdf, err := app.AnsweredPDF.RenderPreview(r.Context(), func(ctx context.Context) ([]byte, error) {
 			saved, err := app.PDFLayouts.Read(ctx, examID)
 			if err != nil {
 				return nil, err
 			}
-			exam, view := answeredpdf.LayoutSample(title, saved.Targets, request.SampleAnswerKey)
-			layout, err := app.PDFLayouts.ResolvePreview(ctx, examID, request.Layout, answeredpdf.VisibleLayoutTargets(exam, true))
+			withKey := request.SampleBook || request.SampleAnswerKey || request.SectionSample != nil && request.SectionSample.Kind == "answerKey"
+			exam, view := answeredpdf.LayoutSample(title, saved.Targets, withKey)
+			visible := answeredpdf.VisibleLayoutTargets(exam, true)
+			if request.SectionSample != nil {
+				if !visible[*request.SectionSample] {
+					return nil, apperrors.New(apperrors.CodeValidation, "This section is unavailable for the sample.")
+				}
+			}
+			// The editor shows uploaded pages separately from generated sections.
+			if request.SectionSample != nil || request.SampleBook {
+				visible = nil
+			}
+			layout, err := app.PDFLayouts.ResolvePreview(ctx, examID, request.Layout, visible)
 			if err != nil {
 				return nil, err
+			}
+			if request.SectionSample != nil {
+				return answeredpdf.MarshalSectionSample(exam, view, layout, *request.SectionSample)
+			}
+			if request.SampleBook {
+				return answeredpdf.MarshalSampleBook(exam, view, layout)
 			}
 			return answeredpdf.MarshalPayload(exam, view, map[string]string{}, layout)
 		})

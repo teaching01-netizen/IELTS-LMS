@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ResolvedPdfLayout } from "@shared/sat/pdfLayout";
+import type { PdfTarget, ResolvedPdfLayout } from "@shared/sat/pdfLayout";
 import { useSearchParams } from "react-router-dom";
 import {
   AnsweredExamPaper,
@@ -16,6 +16,8 @@ interface PrintPayload {
   view: StudentScoreReportView | null;
   media: Record<string, string>;
   layout?: ResolvedPdfLayout;
+  sectionSample?: PdfTarget;
+  sampleBook?: boolean;
   /** Optional top-level copy for older renderers; the exam field wins. */
   answerKey?: AnsweredExam["answerKey"];
 }
@@ -24,6 +26,7 @@ const TOKEN = /^[0-9a-f]{32}$/;
 // Geometry shared with backend/go/internal/answeredpdf (paper and viewport).
 // #root holds the app chrome (connection notice); only the paper prints.
 const PAGE_STYLE = `@page { size: A4 landscape; margin: 10mm; }
+@page sat-image-page { size: A4 landscape; margin: 0; }
 html, body { background: #fff; margin: 0; }
 #root { display: none !important; }`;
 
@@ -103,6 +106,8 @@ export function SatAnsweredPrintRoute() {
           mediaFailed.current = true;
         }}
         layout={payload.layout}
+        sectionSample={payload.sectionSample}
+        sampleBook={payload.sampleBook === true}
         paperRef={paperRef}
       />
     </>,

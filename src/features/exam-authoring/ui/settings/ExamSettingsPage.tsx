@@ -13,7 +13,8 @@ import { DeliverySettingsPanel } from "./DeliverySettingsPanel";
 import { ScoreConverterPanel } from "../release/ScoreConverterPanel";
 import { ScoreReportSettingPanel } from "../release/ScoreReportSettingPanel";
 import { useExamQuery } from "../../api/examQueries";
-import { ExamPdfLayoutPanel } from "./pdf-layout/ExamPdfLayoutPanel";
+import { SatButton } from "../../../../products/sat/ui/SatPage";
+import { releaseSurfaceClass } from "../release/releaseUi";
 import { FormsSettingsPanel } from "./FormsSettingsPanel";
 
 const SETTINGS_SCORING_PANEL_ID = "sat-settings-scoring";
@@ -32,12 +33,10 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
   // Counted per owner so a saved delivery panel cannot clear unsaved forms.
   const [deliveryDirty, setDeliveryDirty] = useState(0);
   const [formsDirty, setFormsDirty] = useState(0);
-  const [pdfDirty, setPdfDirty] = useState(0);
-  const dirtyCount = deliveryDirty + formsDirty + pdfDirty;
+  const dirtyCount = deliveryDirty + formsDirty;
   const clearDirty = useCallback(() => {
     setDeliveryDirty(0);
     setFormsDirty(0);
-    setPdfDirty(0);
   }, []);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
 
@@ -129,7 +128,17 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
           </div>
           <ScoreReportSettingPanel exam={exam} onSaved={() => examQuery.refetch()} />
           <ScoreConverterPanel examId={exam.id} canEdit={exam.canEdit} />
-          {exam.providerKey === "sat" ? <ExamPdfLayoutPanel key={exam.id} examId={exam.id} canEdit={exam.canEdit} onDirtyChange={setPdfDirty} /> : null}
+          {exam.providerKey === "sat" ? (
+            <section className={releaseSurfaceClass + " flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6"} aria-label="Exam PDF">
+              <div>
+                <h3 className="font-semibold">Exam PDF</h3>
+                <p className="mt-1 text-sm text-muted-foreground">Manage the image pages and branding for this exam.</p>
+              </div>
+              <SatButton variant="secondary" onClick={() => go(examWorkspacePath(exam.id, "settings") + "/pdf")}>
+                {exam.canEdit ? "Customize PDF" : "View PDF layout"}
+              </SatButton>
+            </section>
+          ) : null}
         </section>
       </div>
 

@@ -144,3 +144,37 @@ func TestPreparationSharesRenderBoundAndCancellation(t *testing.T) {
 		t.Fatalf("incomplete preparation returned a file: %d %v", len(pdf), err)
 	}
 }
+
+func TestPreviewLeavesRenderCapacityForDownloads(t *testing.T) {
+	r := New(nil, 2)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.RenderPreview(ctx, func(ctx context.Context) ([]byte, error) {
+			close(started)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+		done <- err
+	}()
+	<-started
+
+	prepared := errors.New("download preparation ran")
+	build := func(context.Context) ([]byte, error) { return nil, prepared }
+	if _, err := r.RenderPreview(t.Context(), build); !errors.Is(err, ErrBusy) {
+		t.Fatalf("concurrent preview got %v, want ErrBusy", err)
+	}
+	if _, err := r.RenderPrepared(t.Context(), build); !errors.Is(err, prepared) {
+		t.Fatalf("preview blocked download preparation: %v", err)
+	}
+
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled preview returned %v", err)
+	}
+	if _, err := r.RenderPreview(t.Context(), build); !errors.Is(err, prepared) {
+		t.Fatalf("canceled preview leaked capacity: %v", err)
+	}
+}

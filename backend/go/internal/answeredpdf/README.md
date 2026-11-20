@@ -133,3 +133,11 @@ affected notes app. For each app, verify importing, scrolling all pages, zooming
 text and figures, adding an annotation, closing, and reopening the document.
 Compare against the original on the same device. No physical iPad was available
 during automated verification.
+
+## SAT PDF editor in Storybook
+
+Run `bun run storybook:sat-pdf` from the repository root with Go and Chromium
+installed. This builds the app and Storybook and serves the SAT PDF editor on
+`http://127.0.0.1:6016`. The local preview endpoint uses fictional exam data and
+draft artwork from the story. It calls the student PDF renderer without a
+database, account, or student records.

@@ -494,6 +494,14 @@ const baseRoutes = [
             },
           },
           {
+            path: "exams/:examId/settings/pdf",
+            errorElement: <RouteErrorBoundary />,
+            lazy: async () => {
+              const { ExamPdfLayoutRoute } = await import("../../features/exam-authoring/routes/ExamPdfLayoutRoute");
+              return { element: withAuth(<ExamPdfLayoutRoute />, ["admin", "builder"]) };
+            },
+          },
+          {
             // Results are admin/grader/proctor only; the builder role must not
             // gain read access to results through the exam workspace.
             path: "exams/:examId/responses",

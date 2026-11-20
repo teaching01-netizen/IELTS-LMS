@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import type { PdfImagePurpose, PdfLayoutAsset } from "@shared/sat/pdfLayout";
 import { SatButton } from "../../../../../products/sat/ui/SatPage";
-import { uploadSatPdfImage } from "../../../api/satPdfLayoutApi";
+import type { SatPdfLayoutApi } from "../../../api/satPdfLayoutApi";
 
 export const pdfInputClass = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground";
 
@@ -10,13 +10,15 @@ export function pdfErrorMessage(error: unknown, fallback: string) {
 }
 
 export function PdfLayoutImageForm({
-  examId, purpose, title, description, requireDescription, onCancel, onUploaded, onDenied,
+  examId, purpose, title, description, requireDescription, placementNote, uploadImage, onCancel, onUploaded, onDenied,
 }: {
   examId: string;
   purpose: PdfImagePurpose;
   title: string;
   description: string;
   requireDescription: boolean;
+  placementNote?: string | undefined;
+  uploadImage: SatPdfLayoutApi["upload"];
   onCancel: () => void;
   onUploaded: (asset: PdfLayoutAsset, description: string) => void;
   onDenied: (error: unknown) => void;
@@ -49,7 +51,7 @@ export function PdfLayoutImageForm({
     setUploading(true);
     setError("");
     try {
-      const asset = await uploadSatPdfImage(examId, purpose, file, controller.signal);
+      const asset = await uploadImage(examId, purpose, file, controller.signal);
       if (!controller.signal.aborted) onUploaded(asset, text.trim());
     } catch (error) {
       if (controller.signal.aborted) return;
@@ -64,6 +66,7 @@ export function PdfLayoutImageForm({
   return (
     <form className="space-y-4" onSubmit={(event) => void submit(event)}>
       <h3 className="text-lg font-semibold">{title}</h3>
+      {purpose === "slide" ? <p className="text-sm text-muted-foreground">{placementNote ?? "This image becomes one page in the PDF."}</p> : null}
       <label className="block space-y-2 text-sm" htmlFor={controlId + "-file"}>
         <span>Choose a PNG or JPEG up to {limit} MiB</span>
         <input
@@ -87,7 +90,19 @@ export function PdfLayoutImageForm({
           }}
         />
       </label>
-      {file ? (
+      {purpose === "slide" ? (
+        <p className="text-sm text-muted-foreground">The whole image is scaled to fit. An A4 landscape image fills the page edge to edge.</p>
+      ) : null}
+      {file && purpose === "slide" ? (
+        <figure className="space-y-2">
+          {thumbnail ? (
+            <div className="relative aspect-[297/210] overflow-hidden rounded-md border border-border bg-white">
+              <img className="absolute inset-0 h-full w-full object-contain" src={thumbnail} alt="Slide fitted to an A4 landscape page" />
+            </div>
+          ) : null}
+          <figcaption className="break-all text-sm">{file.name}</figcaption>
+        </figure>
+      ) : file ? (
         <div className="flex items-center gap-3 break-all text-sm">
           {thumbnail ? <img className="h-16 w-24 rounded object-contain" src={thumbnail} alt="" /> : null}
           {file.name}

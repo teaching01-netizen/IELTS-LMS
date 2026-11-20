@@ -3292,6 +3292,8 @@ paths:
               properties:
                 layout: { $ref: "#/components/schemas/SatPdfLayout" }
                 sampleAnswerKey: { type: boolean, default: false }
+                sectionSample: { $ref: "#/components/schemas/SatPdfLayoutTarget" }
+                sampleBook: { type: boolean, default: false, description: "Render and index all generated sections for the editor canvas." }
       responses:
         "200":
           description: Sample PDF

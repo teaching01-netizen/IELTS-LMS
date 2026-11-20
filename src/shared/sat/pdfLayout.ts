@@ -53,6 +53,8 @@ export interface ResolvedPdfLayout {
   images: Record<string, string>;
 }
 
+export const samplePageMarkerOrigin = "https://sat-pdf-preview.invalid/section/";
+
 export function pdfTargetKey(target: PdfTarget): string {
   switch (target.kind) {
     case "reviewSubject":

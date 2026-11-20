@@ -55,18 +55,34 @@ var (
 
 // Renderer prints papers with a bounded number of concurrent browsers.
 type Renderer struct {
-	frontend http.Handler
-	slots    chan struct{}
+	frontend     http.Handler
+	slots        chan struct{}
+	previewSlots chan struct{}
 }
 
 // New serves the SPA from frontend and allows at most slots renders at once.
 func New(frontend http.Handler, slots int) *Renderer {
-	return &Renderer{frontend: frontend, slots: make(chan struct{}, slots)}
+	return &Renderer{
+		frontend: frontend, slots: make(chan struct{}, slots),
+		previewSlots: make(chan struct{}, max(1, slots-1)),
+	}
 }
 
 // Render prints payload (the JSON the print route reads) to PDF bytes.
 func (r *Renderer) Render(ctx context.Context, payload []byte) ([]byte, error) {
 	return r.RenderPrepared(ctx, func(context.Context) ([]byte, error) { return payload, nil })
+}
+
+// RenderPreview limits authoring previews within the shared capacity so they
+// cannot occupy every slot on a renderer configured for concurrent downloads.
+func (r *Renderer) RenderPreview(ctx context.Context, build func(context.Context) ([]byte, error)) ([]byte, error) {
+	select {
+	case r.previewSlots <- struct{}{}:
+	default:
+		return nil, ErrBusy
+	}
+	defer func() { <-r.previewSlots }()
+	return r.RenderPrepared(ctx, build)
 }
 
 // RenderPrepared includes media preparation in the same concurrency and time

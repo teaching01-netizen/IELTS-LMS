@@ -286,28 +286,53 @@ test("Classroom start code, WCODE retake, pause and keyed PDF", async ({ browser
     await shortenActiveModule(attemptId);
     await expect(page.getByRole("region", { name: "Score report" })).toBeVisible({ timeout: 90_000 });
     const settingsEditor = await admin.newPage();
+    let sampleBooks = 0;
+    settingsEditor.on("request", (request) => {
+      if (request.method() === "POST" && request.url().endsWith("/sat-pdf-layout/preview")
+        && request.postDataJSON()?.sampleBook) sampleBooks += 1;
+    });
     await settingsEditor.goto(`${root}/sat/exams/${examId}/settings?panel=scoring`);
     await settingsEditor.getByRole("button", { name: "Customize PDF" }).click();
-    const editor = settingsEditor.getByRole("dialog", { name: "Customize PDF" });
+    await expect(settingsEditor).toHaveURL(new RegExp("/sat/exams/" + examId + "/settings/pdf$"));
+    const editor = settingsEditor.getByRole("region", { name: "PDF editor" });
+    const outline = editor.getByRole("navigation", { name: "PDF outline" });
+    await expect(editor.getByRole("img", { name: "Cover sample PDF page" })).toBeVisible({ timeout: 60_000 });
+    await outline.getByRole("button", { name: /^Score report/ }).click();
+    await expect(editor.getByRole("img", { name: "Score report sample PDF page" })).toBeVisible({ timeout: 60_000 });
+    await outline.getByRole("button", { name: /^Answer key/ }).click();
+    await expect(editor.getByRole("img", { name: "Answer key sample PDF page" })).toBeVisible({ timeout: 60_000 });
+    await outline.getByRole("button", { name: /^Cover$/ }).click();
+    await expect(editor.getByRole("img", { name: "Cover sample PDF page" })).toBeVisible();
+    expect(sampleBooks).toBe(1);
+    await expect(settingsEditor.getByRole("navigation", { name: "Digital SAT" })).toHaveCount(0);
+    await expect(settingsEditor.getByRole("dialog")).toHaveCount(0);
     await editor.getByRole("button", { name: "Add image after Cover" }).click();
     const image = await readFile("src/assets/warwick-institute-logo.png");
     await editor.getByLabel("Choose image").setInputFiles({ name: "Orientation.png", mimeType: "image/png", buffer: image });
+    await expect(editor.getByRole("img", { name: "Slide fitted to an A4 landscape page" })).toBeVisible();
     await editor.getByLabel("Image description").fill("Orientation slide");
     await editor.getByRole("button", { name: "Use image" }).click();
-    await expect(editor.getByRole("region", { name: "Cover image pages" }).getByText("Orientation.png", { exact: true })).toBeVisible();
-    await editor.getByRole("button", { name: "Branding" }).click();
+    await expect(editor.getByRole("navigation", { name: "PDF outline" }).getByRole("button", { name: /Orientation.png/ })).toBeVisible();
+    await editor.getByRole("button", { name: "Logos & watermarks" }).click();
     await editor.getByRole("button", { name: "Replace left watermark" }).click();
     await editor.getByLabel("Choose image").setInputFiles({ name: "Campus-logo.png", mimeType: "image/png", buffer: image });
     await editor.getByRole("button", { name: "Use image" }).click();
     await expect(editor.getByRole("listitem").filter({ hasText: "Left watermark" }).getByText("Campus-logo.png", { exact: true })).toBeVisible();
+    await expect(editor.getByRole("img", { name: "Left watermark sample PDF page" })).toBeVisible({ timeout: 60_000 });
     await editor.getByRole("button", { name: "Preview PDF" }).click();
     await expect(editor.getByRole("link", { name: "Download sample PDF" })).toBeVisible({ timeout: 90_000 });
-    await editor.getByRole("button", { name: "Back to editor" }).click();
-    await editor.getByRole("button", { name: "Save layout" }).click();
-    await expect(editor.getByText("Layout saved. New PDFs use this layout.")).toBeVisible();
-    await settingsEditor.reload({ waitUntil: "domcontentloaded" });
+    await editor.getByRole("button", { name: "Back to editing" }).click();
+    await settingsEditor.evaluate(() => window.history.back());
+    const leave = editor.getByRole("region", { name: "Leave the PDF editor?" });
+    await expect(leave).toBeVisible();
+    await leave.getByRole("button", { name: "Keep editing" }).click();
+    await expect(leave).toHaveCount(0);
+    await editor.getByRole("button", { name: "Back to settings" }).click();
+    await leave.getByRole("button", { name: "Save and leave" }).click();
+    await expect(settingsEditor).toHaveURL(new RegExp("/sat/exams/" + examId + "/settings[?]panel=scoring$"));
     await settingsEditor.getByRole("button", { name: "Customize PDF" }).click();
-    await expect(editor.getByRole("region", { name: "Cover image pages" }).getByText("Orientation.png")).toBeVisible();
+    await settingsEditor.reload({ waitUntil: "domcontentloaded" });
+    await expect(editor.getByRole("navigation", { name: "PDF outline" }).getByRole("button", { name: /Orientation.png/ })).toBeVisible();
     await settingsEditor.close();
     const download = page.waitForEvent("download", { timeout: 90_000 });
     const prepare = page.waitForResponse((res) => res.url().endsWith(`/schedules/${scheduleId}/prepare`));
@@ -317,6 +342,24 @@ test("Classroom start code, WCODE retake, pause and keyed PDF", async ({ browser
     expect(prepared.request().postDataJSON()).toMatchObject({ includeAnswerKey: true });
     const pdf = await readFile(await (await download).path());
     expect(pdf.subarray(0, 4).toString()).toBe("%PDF");
+    const { getDocument, OPS } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const pdfTask = getDocument({ data: new Uint8Array(pdf), useWasm: false });
+    try {
+      const report = await pdfTask.promise;
+      for (const number of [1, 2, 3]) {
+        const sheet = await report.getPage(number);
+        const content = await sheet.getTextContent();
+        const text = content.items.map((item) => "str" in item ? item.str : "").join(" ").trim();
+        if (number === 2) {
+          expect(text).toBe("");
+          expect((await sheet.getOperatorList()).fnArray).toContain(OPS.paintImageXObject);
+        } else {
+          expect(text).toContain("LEGAL DISCLAIMER");
+        }
+      }
+    } finally {
+      await pdfTask.destroy();
+    }
 
     const latest = await saved.json();
     const revoke = await admin.request.put(settingsUrl, {

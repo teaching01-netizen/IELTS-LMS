@@ -9,7 +9,7 @@ import type {
   AssessmentResult,
   SATRecoveryResolutionReceipt,
 } from "../../contracts/assessmentDelivery";
-import { pdfTargetKey, type PdfSide, type PdfTarget, type ResolvedPdfLayout } from "@shared/sat/pdfLayout";
+import { pdfTargetKey, samplePageMarkerOrigin, type PdfSide, type PdfTarget, type ResolvedPdfLayout } from "@shared/sat/pdfLayout";
 import type { SatAttemptLearning } from "@shared/sat/learningPolicy";
 import { logWarn } from "../../../../shared/observability/errorLogger";
 import { SatKnowledgeSkills } from "./score-report/SatKnowledgeSkills";
@@ -529,9 +529,15 @@ function PaperScoreSummary({ view }: { view: StudentScoreReportView }) {
   );
 }
 
-function PaperFrontMatter({ children }: { children: ReactNode }) {
+function SamplePageMarker({ target }: { target: PdfTarget }) {
+  // Chromium writes this link as a PDF annotation so the editor can locate the
+  // section even when earlier sections span several pages.
+  return <a className="sat-paper-sample-marker" href={samplePageMarkerOrigin + encodeURIComponent(pdfTargetKey(target))}>Section index</a>;
+}
+
+function PaperFrontMatter({ children, separate }: { children: ReactNode; separate?: boolean }) {
   return (
-    <table className="sat-paper-table" role="presentation">
+    <table className={separate ? "sat-paper-table sat-paper-review" : "sat-paper-table"} role="presentation">
       <tbody><tr><td>{children}</td></tr></tbody>
       <PaperFooter />
     </table>
@@ -540,14 +546,9 @@ function PaperFrontMatter({ children }: { children: ReactNode }) {
 
 function PaperSlide({ source, description }: { source: string | undefined; description: string }) {
   return (
-    <table className="sat-paper-table sat-paper-slide" role="presentation">
-      <tbody><tr><td>
-        <div className="sat-paper-slide-image">
-          <img data-pdf-design-image src={source} alt={description} loading="eager" />
-        </div>
-      </td></tr></tbody>
-      <PaperFooter />
-    </table>
+    <div className="sat-paper-slide">
+      <img data-pdf-design-image src={source} alt={description} loading="eager" />
+    </div>
   );
 }
 
@@ -569,6 +570,8 @@ export function AnsweredExamPaper({
   onMediaFailure,
   generation,
   layout,
+  sectionSample,
+  sampleBook,
   paperRef,
 }: {
   exam: AnsweredExam;
@@ -579,6 +582,8 @@ export function AnsweredExamPaper({
   onMediaFailure?: (() => void) | undefined;
   generation?: number;
   layout?: ResolvedPdfLayout | undefined;
+  sectionSample?: PdfTarget | undefined;
+  sampleBook?: boolean;
   paperRef?: Ref<HTMLDivElement>;
 }) {
   const moduleIdByAttempt = new Map<string, string>();
@@ -622,6 +627,7 @@ export function AnsweredExamPaper({
   const paperMode: SatAttemptMode = view?.mode === "study" ? "study" : "test";
   const mediaFailure = onMediaFailure ? () => onMediaFailure() : undefined;
   const slides = (target: PdfTarget, side: PdfSide) => {
+    if (sectionSample || sampleBook) return [];
     const targetKey = pdfTargetKey(target);
     return (layout?.layout.slides ?? [])
       .filter((slide) => slide.side === side && pdfTargetKey(slide.target) === targetKey)
@@ -704,6 +710,14 @@ export function AnsweredExamPaper({
     kind: "answerKey",
     content: <SatAnswerKeyTable modules={keyModules} answers={answers} entries={keyEntries} />,
   });
+  const renderedFrontSections = sectionSample
+    ? frontSections.filter(({ kind }) => sectionSample.kind === kind)
+    : frontSections;
+  const reviewModules = printableModules.filter(({ section, module }) => {
+    if (!sectionSample || sectionSample.kind === "examReview") return true;
+    if (sectionSample.kind === "reviewSubject") return section.sectionKey === sectionSample.sectionKey;
+    return sectionSample.kind === "reviewModule" && section.sectionKey === sectionSample.sectionKey && module.moduleKey === sectionSample.moduleKey;
+  });
   const frontMatter: ReactNode[] = [];
   let group: ReactNode[] = [];
   const appendSlides = (pages: ReactNode[]) => {
@@ -712,7 +726,17 @@ export function AnsweredExamPaper({
     frontMatter.push(...pages);
     group = [];
   };
-  frontSections.forEach(({ kind, content }, index) => {
+  renderedFrontSections.forEach(({ kind, content }, index) => {
+    if (sampleBook) {
+      frontMatter.push(
+        <PaperFrontMatter key={kind} separate={index > 0}>
+          <SamplePageMarker target={{ kind }} />
+          {frontHeader}
+          {content}
+        </PaperFrontMatter>,
+      );
+      return;
+    }
     appendSlides(slides({ kind }, "before"));
     group.push(<Fragment key={kind}>{index === 0 ? frontHeader : null}{content}</Fragment>);
     appendSlides(slides({ kind }, "after"));
@@ -733,23 +757,23 @@ export function AnsweredExamPaper({
         right={logoSource(layout?.layout.logos.rightWatermark?.assetId)}
       />
       {slides({ kind: "cover" }, "before")}
-      <PaperTitlePage
+      {!sectionSample || sectionSample.kind === "cover" ? <PaperTitlePage
         exam={exam}
         hasScoreReport={Boolean(view)}
-        hasAnswerKey={keyed}
+        hasAnswerKey={keyed && !sampleBook}
         mode={paperMode}
         subjects={[...new Set(printableModules.map(({ section }) => SAT_SECTION_LABEL[section.sectionKey] ?? section.title))]}
         moduleCount={printableModules.length}
         logo={cover && coverSource ? { source: coverSource, description: cover.description ?? "" } : undefined}
-      />
+      /> : null}
       {slides({ kind: "cover" }, "after")}
       {frontMatter}
-      {printableModules.length ? slides({ kind: "examReview" }, "before") : null}
-      {printableModules.map(({ section, sectionNo, module }, index) => {
+      {reviewModules.length ? slides({ kind: "examReview" }, "before") : null}
+      {reviewModules.map(({ section, sectionNo, module }, index) => {
         const subject: PdfTarget = { kind: "reviewSubject", sectionKey: section.sectionKey };
         const moduleTarget: PdfTarget = { kind: "reviewModule", sectionKey: section.sectionKey, moduleKey: module.moduleKey };
-        const firstInSubject = printableModules[index - 1]?.section.id !== section.id;
-        const lastInSubject = printableModules[index + 1]?.section.id !== section.id;
+        const firstInSubject = reviewModules[index - 1]?.section.id !== section.id;
+        const lastInSubject = reviewModules[index + 1]?.section.id !== section.id;
         const sectionLabel = SAT_SECTION_LABEL[section.sectionKey] ?? section.title;
         return (
           <Fragment key={module.id}>
@@ -759,6 +783,7 @@ export function AnsweredExamPaper({
             <thead>
               <tr>
                 <td>
+                  {sampleBook ? <SamplePageMarker target={moduleTarget} /> : null}
                   <div className="sat-paper-runhead" data-runhead-module={module.id}>
                     <div className="sat-paper-runhead-title">
                       <strong>{exam.examTitle?.trim() || "Digital SAT"}</strong>
@@ -770,7 +795,7 @@ export function AnsweredExamPaper({
                     </div>
                   </div>
                   <p className="sat-paper-review-note">
-                    {keyed
+                    {keyed && !sampleBook
                       ? "Your selected choice is circled; written answers appear in the answer box. The correct answer for each question is shown."
                       : "Your selected choice is circled; written answers appear in the answer box. Correct answers are not shown."}
                   </p>
@@ -783,7 +808,7 @@ export function AnsweredExamPaper({
               .map((question, index) => {
                 const answer = answers.get(`${module.id}:${question.examQuestionId}`) ?? null;
                 const marked = markedForReview.has(`${module.id}:${question.examQuestionId}`);
-                const keyEntry = keyEntries.get(`${module.id}:${question.examQuestionId}`);
+                const keyEntry = sampleBook ? undefined : keyEntries.get(`${module.id}:${question.examQuestionId}`);
                 return (
                   <tr key={question.examQuestionId} className="sat-paper-question-row">
                     <td>
@@ -812,7 +837,7 @@ export function AnsweredExamPaper({
           </Fragment>
         );
       })}
-      {printableModules.length ? slides({ kind: "examReview" }, "after") : null}
+      {reviewModules.length ? slides({ kind: "examReview" }, "after") : null}
     </div>
   );
 }

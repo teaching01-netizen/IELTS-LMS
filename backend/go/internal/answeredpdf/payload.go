@@ -62,12 +62,26 @@ func BuildPayloadWithLayout(ctx context.Context, exam *delivery.AnsweredExam, vi
 }
 
 func MarshalPayload(exam *delivery.AnsweredExam, view json.RawMessage, figures map[string]string, layout *satpdflayout.Resolved) ([]byte, error) {
+	return marshalPayload(exam, view, figures, layout, nil, false)
+}
+
+func MarshalSectionSample(exam *delivery.AnsweredExam, view json.RawMessage, layout *satpdflayout.Resolved, section satpdflayout.Target) ([]byte, error) {
+	return marshalPayload(exam, view, map[string]string{}, layout, &section, false)
+}
+
+func MarshalSampleBook(exam *delivery.AnsweredExam, view json.RawMessage, layout *satpdflayout.Resolved) ([]byte, error) {
+	return marshalPayload(exam, view, map[string]string{}, layout, nil, true)
+}
+
+func marshalPayload(exam *delivery.AnsweredExam, view json.RawMessage, figures map[string]string, layout *satpdflayout.Resolved, section *satpdflayout.Target, sampleBook bool) ([]byte, error) {
 	return json.Marshal(struct {
-		Exam   *delivery.AnsweredExam `json:"exam"`
-		View   json.RawMessage        `json:"view"`
-		Media  map[string]string      `json:"media"`
-		Layout *satpdflayout.Resolved `json:"layout,omitempty"`
-	}{exam, view, figures, layout})
+		Exam          *delivery.AnsweredExam `json:"exam"`
+		View          json.RawMessage        `json:"view"`
+		Media         map[string]string      `json:"media"`
+		Layout        *satpdflayout.Resolved `json:"layout,omitempty"`
+		SectionSample *satpdflayout.Target   `json:"sectionSample,omitempty"`
+		SampleBook    bool                   `json:"sampleBook,omitempty"`
+	}{exam, view, figures, layout, section, sampleBook})
 }
 
 // Filename preserves the browser's existing sanitization and UTF-16 length bound.

@@ -72,7 +72,7 @@ export function SatRoot() {
   // re-opened (with a fresh token and a fresh local replay) on the way back,
   // and any edit the author had not yet acknowledged went with it.
   const authoringExamMatch = location.pathname.match(
-    /^\/sat\/exams\/([^/]+)(?:\/(release|preview|access|settings|responses))?\/?$/,
+    /^\/sat\/exams\/([^/]+)(?:\/(release|preview|access|settings(?:\/pdf)?|responses))?\/?$/,
   );
   const collaborationExamId = authoringExamMatch?.[1]
     ? decodeURIComponent(authoringExamMatch[1])
@@ -83,7 +83,7 @@ export function SatRoot() {
   // shape between authoring, settings, publish review, access and responses.
   // Session room (/sat/sessions/:id) and result detail (/sat/results/:id) keep
   // the sidebar.
-  const isDetailPage = /^\/sat\/exams\/[^/]+($|\/(release|preview|access|settings|responses)\/?$)/.test(location.pathname);
+  const isDetailPage = /^\/sat\/exams\/[^/]+($|\/(release|preview|access|settings(?:\/pdf)?|responses)\/?$)/.test(location.pathname);
 
   return (
     <SurfaceScopeContext.Provider value="sat-product sat-staff-root">

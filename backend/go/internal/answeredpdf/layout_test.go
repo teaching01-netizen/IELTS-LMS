@@ -7,11 +7,14 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 
 	"example.com/ielts-proctoring/internal/satpdflayout"
 	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
@@ -102,16 +105,20 @@ func TestRenderCustomLayoutKeepsSlidePageOrder(t *testing.T) {
 	branded := map[int]bool{}
 	for i, page := range images {
 		for _, im := range page {
-			config, _, err := image.DecodeConfig(im)
+			embedded, _, err := image.Decode(im)
 			if err != nil {
 				t.Fatalf("page %d: decode image: %v", i+1, err)
 			}
-			branded[config.Width] = true
-			if config.Width >= 41 && config.Width <= 51 && config.Height == 36 {
+			branded[embedded.Bounds().Dx()] = true
+			// Chromium may embed just the cropped region. Identify the fixture by
+			// its fill color, which survives cropping.
+			bounds := embedded.Bounds()
+			pixel := color.NRGBAModel.Convert(embedded.At(bounds.Min.X+bounds.Dx()/2, bounds.Min.Y+bounds.Dy()/2)).(color.NRGBA)
+			if pixel.R == 20 && pixel.B == 150 && pixel.G%3 == 0 && pixel.G >= 41*3 && pixel.G <= 51*3 {
 				if got[i] != 0 {
 					t.Fatalf("page %d has multiple slide images", i+1)
 				}
-				got[i] = config.Width
+				got[i] = int(pixel.G / 3)
 			}
 		}
 	}
@@ -168,4 +175,96 @@ func TestRenderCustomLayoutKeepsSlidePageOrder(t *testing.T) {
 		}
 	}
 
+}
+
+func TestRenderSectionSamples(t *testing.T) {
+	r := renderer(t)
+	math := sampleTargets()
+	reading := []satpdflayout.Option{
+		{Target: satpdflayout.Target{Kind: "reviewSubject", SectionKey: "reading-writing"}, Label: "Reading and Writing"},
+		{Target: satpdflayout.Target{Kind: "reviewModule", SectionKey: "reading-writing", ModuleKey: "rw-m1"}, Label: "Module 1"},
+	}
+	math[2].Label = "Module 2 · Higher"
+	math = append(math, satpdflayout.Option{Target: satpdflayout.Target{Kind: "reviewModule", SectionKey: "math", ModuleKey: "math-m2-lower"}, Label: "Module 2 · Lower"})
+	options := append(reading, math[0], math[1], math[3], math[2])
+	exam, view := LayoutSample("SAT Practice 04", options, true)
+	for _, sample := range []struct {
+		name   string
+		target satpdflayout.Target
+		pages  int
+	}{
+		{"cover", satpdflayout.Target{Kind: "cover"}, 1},
+		{"scoreReport", satpdflayout.Target{Kind: "scoreReport"}, 1},
+		{"answerSummary", satpdflayout.Target{Kind: "answerSummary"}, 1},
+		{"answerKey", satpdflayout.Target{Kind: "answerKey"}, 1},
+		{"examReview", satpdflayout.Target{Kind: "examReview"}, 4},
+		{"reviewSubject-reading-writing", reading[0].Target, 1},
+		{"reviewModule-reading-writing-rw-m1", reading[1].Target, 1},
+		{"reviewSubject-math", math[0].Target, 3},
+		{"reviewModule-math-math-m1", math[1].Target, 1},
+		{"reviewModule-math-math-m2-higher", math[2].Target, 1},
+		{"reviewModule-math-math-m2-lower", math[3].Target, 1},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			payload, err := MarshalSectionSample(exam, view, nil, sample.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pdf, err := r.Render(t.Context(), payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pages, err := api.PageDims(t.Context(), bytes.NewReader(pdf), pdfConfiguration())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(pages) != sample.pages {
+				t.Fatalf("got %d pages, want %d", len(pages), sample.pages)
+			}
+		})
+	}
+}
+
+func TestSampleBookIndexesGeneratedSections(t *testing.T) {
+	r := renderer(t)
+	exam, view := LayoutSample("Sample book", sampleTargets(), true)
+	payload, err := MarshalSampleBook(exam, view, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdf, err := r.Render(t.Context(), payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotations, err := api.Annotations(t.Context(), bytes.NewReader(pdf), nil, pdfConfiguration())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const markerPrefix = "https://sat-pdf-preview.invalid/section/"
+	found := make(map[string]int)
+	for page, annotationsByKind := range annotations {
+		for _, annotation := range annotationsByKind[model.AnnLink].Map {
+			link, ok := annotation.(model.LinkAnnotation)
+			if !ok || !strings.HasPrefix(link.URI, markerPrefix) {
+				continue
+			}
+			key, err := url.PathUnescape(strings.TrimPrefix(link.URI, markerPrefix))
+			if err != nil {
+				t.Fatal(err)
+			}
+			found[key] = page
+		}
+	}
+	want := map[string]int{
+		"scoreReport":                       2,
+		"answerSummary":                     3,
+		"answerKey":                         4,
+		`["reviewModule","math","math-m1"]`: 5,
+		`["reviewModule","math","math-m2-higher"]`: 6,
+	}
+	for key, page := range want {
+		if got := found[key]; got != page {
+			t.Errorf("section %s points to page %d, want %d", key, got, page)
+		}
+	}
 }
