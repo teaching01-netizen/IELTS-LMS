@@ -717,6 +717,7 @@ func BuildRouter(app *App) http.Handler {
 		r.With(studentLimit, chimw.Compress(5, "application/json")).Route("/assessment-delivery", func(r chi.Router) {
 			authzRoute(r, "GET", "/schedules/{scheduleID}/student-pause", satStudentPauseHandler(app))
 			authzRoute(r, "PUT", "/schedules/{scheduleID}/student-pause", satStudentPauseHandler(app))
+			authzRoute(r, "GET", "/schedules/{scheduleID}/sat-policy", satStudentPolicyStateHandler(app))
 			r.With(limitTier(app, httpx.TierAuthedReads, attemptKey())).Group(func(r chi.Router) {
 				authzRoute(r, "GET", "/schedules/{scheduleID}/state", deliveryStateHandler(app))
 				authzRoute(r, "GET", "/schedules/{scheduleID}/answered-exam", deliveryAnsweredExamHandler(app))

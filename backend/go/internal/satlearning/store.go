@@ -17,12 +17,38 @@ const policyColumns = `policy_revision, report_visible, include_answer_key_in_pd
 // the room mode, individual timing, and exam-level results switch.
 // Database failures are errors, never a silent default.
 func LoadPolicyTx(ctx context.Context, q tx.Tx, scheduleID string) (Policy, error) {
+	return loadPolicyTx(ctx, q, scheduleID, false)
+}
+
+// LoadPolicyCurrentTx reads the same effective policy with locking reads, so a
+// state-changing decision (admission, pause) is ordered after every committed
+// policy write. The room row is locked FOR SHARE first, which also serializes
+// the absent-policy case against a room save that inserts the row.
+func LoadPolicyCurrentTx(ctx context.Context, q tx.Tx, scheduleID string) (Policy, error) {
 	if scheduleID == "" {
 		return Policy{}, invalid("scheduleId", "A schedule is required.")
 	}
+	var id string
+	if err := q.QueryRowContext(ctx, `SELECT id FROM exam_schedules WHERE id = ? FOR SHARE`, scheduleID).Scan(&id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Policy{}, invalid("scheduleId", "The room does not exist.")
+		}
+		return Policy{}, err
+	}
+	return loadPolicyTx(ctx, q, scheduleID, true)
+}
+
+func loadPolicyTx(ctx context.Context, q tx.Tx, scheduleID string, lock bool) (Policy, error) {
+	if scheduleID == "" {
+		return Policy{}, invalid("scheduleId", "A schedule is required.")
+	}
+	query := `SELECT ` + policyColumns + `
+		FROM sat_activity_policies WHERE schedule_id = ?`
+	if lock {
+		query += " FOR SHARE"
+	}
 	var policy Policy
-	err := q.QueryRowContext(ctx, `SELECT `+policyColumns+`
-		FROM sat_activity_policies WHERE schedule_id = ?`, scheduleID).
+	err := q.QueryRowContext(ctx, query, scheduleID).
 		Scan(&policy.Revision, &policy.ReportVisible, &policy.IncludeAnswerKeyInPdf,
 			&policy.Study.Enabled, &policy.Study.RequiredCompletions,
 			&policy.Study.RevealAnswers, &policy.Study.Untimed, &policy.UnlimitedRetakes, &policy.PauseOnLeave)
@@ -41,6 +67,12 @@ func LoadPolicyTx(ctx context.Context, q tx.Tx, scheduleID string) (Policy, erro
 	// bindings) keep the exact pre-policy gate: the exam switch AND classroom
 	// session mode. Only Classroom rooms with individual timers default to
 	// retakes, since shared-timer rooms cannot start a fresh timed attempt.
+	//
+	// This read stays non-locking: taking the exam row here would invert the
+	// exam-save lock order (exam -> room -> policy) and deadlock. The room
+	// FOR SHARE lock already serializes against an exam save, which materializes
+	// a room policy row before it changes the legacy flag, so a committed
+	// change is observed by the policy read above rather than this fallback.
 	err = q.QueryRowContext(ctx, `SELECT COALESCE(e.sat_score_report_enabled, FALSE)
 			AND COALESCE(sch.sat_session_mode, 'practice') = 'classroom',
 			COALESCE(sch.sat_session_mode, 'practice') = 'classroom'
@@ -145,12 +177,19 @@ func CountCompletedTestAttemptsTx(ctx context.Context, q tx.Tx, scope Completion
 // SavePolicyTx writes one optimistic-concurrency revision for a schedule and
 // projects report visibility into the legacy classroom field. Both the
 // classroom assignment alias and the schedule alias call this one writer.
+//
+// Every writer locks the parent room row first. That serializes two writers
+// against an absent policy row: without it both could read revision 0 and the
+// second INSERT ... ON DUPLICATE KEY would silently overwrite the first.
 func SavePolicyTx(ctx context.Context, q tx.Tx, scheduleID string, policy Policy, expectedRevision int64, actorID string) (Policy, error) {
 	if scheduleID == "" {
 		return Policy{}, invalid("scheduleId", "A schedule is required.")
 	}
 	policy = NormalizePolicy(policy)
 	if err := ValidatePolicy(policy); err != nil {
+		return Policy{}, err
+	}
+	if err := lockScheduleTx(ctx, q, scheduleID); err != nil {
 		return Policy{}, err
 	}
 	var current int64
@@ -167,7 +206,29 @@ func SavePolicyTx(ctx context.Context, q tx.Tx, scheduleID string, policy Policy
 	}
 	next := policy
 	next.Revision = current + 1
-	if _, err := q.ExecContext(ctx, `INSERT INTO sat_activity_policies
+	if err := writePolicyTx(ctx, q, scheduleID, next, actorID); err != nil {
+		return Policy{}, err
+	}
+
+	return next, nil
+}
+
+// lockScheduleTx serializes every policy writer on the parent room, including
+// the absent-policy case where there is no policy row to lock. It is the same
+// row room creation already locks, so an exam save and a room save establish
+// the order exam -> room -> policy.
+func lockScheduleTx(ctx context.Context, q tx.Tx, scheduleID string) error {
+	var id string
+	err := q.QueryRowContext(ctx, `SELECT id FROM exam_schedules WHERE id = ? FOR UPDATE`, scheduleID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return invalid("scheduleId", "The room does not exist.")
+	}
+	return err
+}
+
+// writePolicyTx upserts one complete policy row. Callers own the revision.
+func writePolicyTx(ctx context.Context, q tx.Tx, scheduleID string, policy Policy, actorID string) error {
+	_, err := q.ExecContext(ctx, `INSERT INTO sat_activity_policies
 		(schedule_id, policy_revision, report_visible, include_answer_key_in_pdf,
 		 study_enabled, study_required_completions, study_reveal_answers, study_untimed, unlimited_retakes, pause_on_leave, updated_by)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -182,13 +243,135 @@ func SavePolicyTx(ctx context.Context, q tx.Tx, scheduleID string, policy Policy
 			unlimited_retakes = VALUES(unlimited_retakes),
 			pause_on_leave = VALUES(pause_on_leave),
 			updated_by = VALUES(updated_by)`,
-		scheduleID, next.Revision, next.ReportVisible, next.IncludeAnswerKeyInPdf,
-		next.Study.Enabled, next.Study.RequiredCompletions, next.Study.RevealAnswers,
-		next.Study.Untimed, next.UnlimitedRetakes, next.PauseOnLeave, nullableActor(actorID)); err != nil {
-		return Policy{}, err
-	}
+		scheduleID, policy.Revision, policy.ReportVisible, policy.IncludeAnswerKeyInPdf,
+		policy.Study.Enabled, policy.Study.RequiredCompletions, policy.Study.RevealAnswers,
+		policy.Study.Untimed, policy.UnlimitedRetakes, policy.PauseOnLeave, nullableActor(actorID))
+	return err
+}
 
-	return next, nil
+// ApplyExamDefaultsTx fans one accepted exam save out to every scheduled or
+// running SAT room. Callers must hold the exam row lock and must call it
+// before changing the exam's legacy score-report flag: an absent room policy
+// resolves its fallback from that flag, and the fan-out has to capture the
+// pre-save fallback so an unchanged field keeps its old value.
+//
+// Only the fields in change are written; a room's own choices for unchanged
+// fields survive. Closed and cancelled rooms keep their policy. The return
+// value counts rooms whose effective policy actually changed.
+func ApplyExamDefaultsTx(ctx context.Context, q tx.Tx, examID string, change PolicyChange, defaults Policy, actorID string) (int, error) {
+	if examID == "" {
+		return 0, invalid("examId", "An exam is required.")
+	}
+	if !change.Any() {
+		return 0, nil
+	}
+	defaults = NormalizePolicy(defaults)
+	if err := ValidatePolicy(defaults); err != nil {
+		return 0, err
+	}
+	// The legacy exam flag is the fallback for a room without a policy row. A
+	// results change rewrites that flag, so first freeze every room that still
+	// relies on it. This keeps closed and cancelled rooms on their own policy
+	// while the eligible fan-out below changes only the scheduled/live ones.
+	if change.ReportVisible {
+		if err := freezeLegacyPoliciesTx(ctx, q, examID, actorID); err != nil {
+			return 0, err
+		}
+	}
+	rows, err := q.QueryContext(ctx, `SELECT id FROM exam_schedules
+		WHERE exam_id = ? AND provider_key = 'sat' AND status IN ('scheduled', 'live')
+		ORDER BY id FOR UPDATE`, examID)
+	if err != nil {
+		return 0, err
+	}
+	var scheduleIDs []string
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				scheduleIDs = append(scheduleIDs, id)
+			}
+		}
+		err = rows.Err()
+	}()
+	if err != nil {
+		return 0, err
+	}
+	applied := 0
+	for _, scheduleID := range scheduleIDs {
+		current, err := LoadPolicyTx(ctx, q, scheduleID)
+		if err != nil {
+			return applied, err
+		}
+		next := ApplyPolicyChange(current, defaults, change)
+		if samePolicyExceptRevision(current, next) {
+			continue
+		}
+		next.Revision = current.Revision + 1
+		if err := writePolicyTx(ctx, q, scheduleID, next, actorID); err != nil {
+			return applied, err
+		}
+		applied++
+	}
+	return applied, nil
+}
+
+// freezeLegacyPoliciesTx materializes the pre-save effective policy of every
+// SAT room that has no policy row. Callers run it before changing the legacy
+// exam-level results flag, so a closed room keeps the value it had instead of
+// silently following the exam. Rows are written at revision 0: this is a
+// snapshot, not a staff edit, and the first explicit room save still starts
+// from 0.
+func freezeLegacyPoliciesTx(ctx context.Context, q tx.Tx, examID, actorID string) error {
+	rows, err := q.QueryContext(ctx, `SELECT id FROM exam_schedules
+		WHERE exam_id = ? AND provider_key = 'sat'
+		ORDER BY id FOR UPDATE`, examID)
+	if err != nil {
+		return err
+	}
+	var scheduleIDs []string
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				scheduleIDs = append(scheduleIDs, id)
+			}
+		}
+		err = rows.Err()
+	}()
+	if err != nil {
+		return err
+	}
+	for _, scheduleID := range scheduleIDs {
+		var exists int
+		err := q.QueryRowContext(ctx, `SELECT 1 FROM sat_activity_policies WHERE schedule_id = ? FOR SHARE`, scheduleID).Scan(&exists)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		current, err := LoadPolicyTx(ctx, q, scheduleID)
+		if err != nil {
+			return err
+		}
+		if err := writePolicyTx(ctx, q, scheduleID, current, actorID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// samePolicyExceptRevision compares every persisted policy field but the
+// optimistic-concurrency token.
+func samePolicyExceptRevision(a, b Policy) bool {
+	return a.ReportVisible == b.ReportVisible &&
+		a.IncludeAnswerKeyInPdf == b.IncludeAnswerKeyInPdf &&
+		a.UnlimitedRetakes == b.UnlimitedRetakes &&
+		a.PauseOnLeave == b.PauseOnLeave &&
+		a.Study == b.Study
 }
 
 // CopyExamDefaultsTx pins a configured library policy when a new room is

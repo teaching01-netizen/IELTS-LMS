@@ -18,6 +18,7 @@ func init() {
 		"PUT /{id}/sat-learning-settings":           {MinRoles: writeStaff},
 		"GET /schedules/{scheduleID}/student-pause": {Bearer: true, Scope: ScopeAttemptOwner},
 		"PUT /schedules/{scheduleID}/student-pause": {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /schedules/{scheduleID}/sat-policy":     {Bearer: true, Scope: ScopeAttemptOwner},
 		// "GET /" is shared by exams-list (readStaff), schedules-list
 		// (admin/builder) and results-list (admin/grader/proctor): the
 		// middleware admits the UNION; each handler enforces its own

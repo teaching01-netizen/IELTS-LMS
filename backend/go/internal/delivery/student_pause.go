@@ -9,6 +9,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	examruntime "example.com/ielts-proctoring/internal/runtime"
+	"example.com/ielts-proctoring/internal/satlearning"
 )
 
 type StudentPauseState struct {
@@ -60,6 +61,12 @@ func (s *Service) ReadStudentPause(ctx context.Context, scheduleID, attemptID st
 func (s *Service) SetStudentPause(ctx context.Context, scheduleID, attemptID string, pause bool, epoch uint64, writerBinding ...string) (StudentPauseState, error) {
 	var out StudentPauseState
 	err := s.runner.WithTxRCRetry(ctx, 3, func(ctx context.Context, q tx.Tx) error {
+		// Order the policy cutover before the decision: a committed room save
+		// that turned Pause and leave off must deny a new self-pause. READ
+		// COMMITTED keeps every later plain read current too.
+		if _, err := satlearning.LoadPolicyCurrentTx(ctx, q, scheduleID); err != nil {
+			return err
+		}
 		state, terminal, staffControlled, err := readStudentPause(ctx, q, scheduleID, attemptID, true)
 		if err != nil {
 			return err

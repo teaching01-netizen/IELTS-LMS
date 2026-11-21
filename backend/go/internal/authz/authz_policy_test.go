@@ -55,6 +55,7 @@ var expectedAnnotated = []string{
 	"PUT /{id}/sat-learning-settings",
 	"GET /schedules/{scheduleID}/student-pause",
 	"PUT /schedules/{scheduleID}/student-pause",
+	"GET /schedules/{scheduleID}/sat-policy",
 	"GET /session", "POST /logout", "POST /logout-all",
 	"POST /student/device-recovery/{grantID}/claim",
 	"POST /student/device-recovery/{grantID}/ready",

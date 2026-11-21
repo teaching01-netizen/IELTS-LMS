@@ -197,7 +197,11 @@ type Exam struct {
 	// download on completion; off, the student only sees "SAT complete".
 	SatLearningDefaults   *satlearning.Policy `json:"satLearningDefaults,omitempty"`
 	SatScoreReportEnabled bool                `json:"satScoreReportEnabled"`
-	SatSectionScope       SATPublishScope     `json:"satSectionScope"`
+	// SatLearningRoomsUpdated is the response-only count of scheduled/live SAT
+	// rooms whose effective policy this exam save changed. It is omitted on
+	// reads and on saves that changed no room-scoped setting.
+	SatLearningRoomsUpdated int             `json:"satLearningRoomsUpdated,omitempty"`
+	SatSectionScope         SATPublishScope `json:"satSectionScope"`
 	// SatCustomModules: the exam has a classroom plan, so it runs in Classroom
 	// rooms only; otherwise it is the full adaptive (Practice-capable) test.
 	SatCustomModules bool `json:"satCustomModules"`
@@ -274,6 +278,9 @@ type UpdateRequest struct {
 	Status         *string
 	Visibility     *string
 	OrganizationID *string
+	// ActorID attributes the room fan-out of one exam save. It is optional for
+	// direct service calls; the HTTP path always sets the authenticated actor.
+	ActorID string
 	// SatScoreReportEnabled toggles the SAT completion score report (SAT only).
 	SatLearningDefaults   *satlearning.Policy
 	SatScoreReportEnabled *bool
@@ -570,6 +577,7 @@ func (s *Service) UpdateForActor(ctx context.Context, actor auth.ActorContext, i
 	if actor.Role != auth.RoleAdmin {
 		req.OrganizationID = nil
 	}
+	req.ActorID = actor.UserID
 	exam, err := s.Update(ctx, id, req)
 	if err != nil {
 		return Exam{}, err
@@ -854,6 +862,22 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Exa
 		if (req.SatScoreReportEnabled != nil || req.SatLearningDefaults != nil) && existing.ProviderKey != ProviderSAT {
 			return validationError("The score report setting applies to SAT exams only.")
 		}
+		// Freeze the room-scoped diff before anything in this transaction
+		// changes. An absent room policy resolves its fallback from the old
+		// exam flag, so the fan-out runs before the flag update below.
+		var change satlearning.PolicyChange
+		if req.SatLearningDefaults != nil {
+			before := effectiveExamLearningDefaults(existing)
+			after := satlearning.NormalizePolicy(*req.SatLearningDefaults)
+			change = satlearning.DiffPolicy(before, after)
+		}
+		roomsUpdated := 0
+		if change.Any() {
+			roomsUpdated, err = satlearning.ApplyExamDefaultsTx(ctx, q, id, change, *req.SatLearningDefaults, req.ActorID)
+			if err != nil {
+				return err
+			}
+		}
 		var scoreReport any
 		if req.SatScoreReportEnabled != nil {
 			scoreReport = *req.SatScoreReportEnabled
@@ -876,10 +900,24 @@ func (s *Service) Update(ctx context.Context, id string, req UpdateRequest) (Exa
 		if err != nil {
 			return err
 		}
+		e.SatLearningRoomsUpdated = roomsUpdated
 		updated = e
 		return nil
 	})
 	return updated, err
+}
+
+// effectiveExamLearningDefaults is the pre-save policy an exam save diffs
+// against. An exam that has never saved defaults inherits the legacy
+// score-report switch and the zeroed room settings, which is exactly what a
+// newly created room would resolve.
+func effectiveExamLearningDefaults(e Exam) satlearning.Policy {
+	if e.SatLearningDefaults != nil {
+		return satlearning.NormalizePolicy(*e.SatLearningDefaults)
+	}
+	policy := satlearning.DefaultPolicy()
+	policy.ReportVisible = e.SatScoreReportEnabled
+	return policy
 }
 
 // examPurgeStatements run before the exam row is deleted. The exam cascade

@@ -69,6 +69,55 @@ func NormalizePolicy(p Policy) Policy {
 	return p
 }
 
+// PolicyChange names the room-scoped settings one exam save changed. Study is
+// an exam-only preference and never fans out.
+type PolicyChange struct {
+	UnlimitedRetakes      bool
+	ReportVisible         bool
+	IncludeAnswerKeyInPdf bool
+	PauseOnLeave          bool
+}
+
+// Any reports whether the save changes at least one room-scoped setting.
+func (c PolicyChange) Any() bool {
+	return c.UnlimitedRetakes || c.ReportVisible || c.IncludeAnswerKeyInPdf || c.PauseOnLeave
+}
+
+// DiffPolicy returns the room-scoped fields whose effective values differ
+// between the pre-save and post-save exam defaults. Both sides must already be
+// normalized: a hidden report's key is off on both sides, so a key-only save
+// while results are off is a no-op.
+func DiffPolicy(before, after Policy) PolicyChange {
+	return PolicyChange{
+		UnlimitedRetakes:      before.UnlimitedRetakes != after.UnlimitedRetakes,
+		ReportVisible:         before.ReportVisible != after.ReportVisible,
+		IncludeAnswerKeyInPdf: before.IncludeAnswerKeyInPdf != after.IncludeAnswerKeyInPdf,
+		PauseOnLeave:          before.PauseOnLeave != after.PauseOnLeave,
+	}
+}
+
+// ApplyPolicyChange merges the changed exam-default fields into one room's
+// effective policy. Unchanged fields keep the room's own value, so a later
+// room save wins until the exam changes that same field again. Normalization
+// runs after the merge: hiding results clears the room's key, and a key-only
+// change against a room that hides results leaves its key off.
+func ApplyPolicyChange(current, defaults Policy, change PolicyChange) Policy {
+	next := current
+	if change.UnlimitedRetakes {
+		next.UnlimitedRetakes = defaults.UnlimitedRetakes
+	}
+	if change.ReportVisible {
+		next.ReportVisible = defaults.ReportVisible
+	}
+	if change.IncludeAnswerKeyInPdf {
+		next.IncludeAnswerKeyInPdf = defaults.IncludeAnswerKeyInPdf
+	}
+	if change.PauseOnLeave {
+		next.PauseOnLeave = defaults.PauseOnLeave
+	}
+	return NormalizePolicy(next)
+}
+
 // Eligible applies the inclusive completion threshold. Disabled Study is
 // never eligible regardless of the measured count.
 func Eligible(p Policy, completed int64) bool {

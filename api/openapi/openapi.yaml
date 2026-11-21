@@ -93,6 +93,25 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SatStudentPauseState" }
         default: { $ref: "#/components/responses/Error" }
+  /assessment-delivery/schedules/{scheduleId}/sat-policy:
+    parameters:
+      - name: scheduleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [assessment-delivery]
+      summary: Read the live Results and scoring policy for the authenticated attempt
+      security: [{ attemptBearer: [] }]
+      responses:
+        "200":
+          description: Student-safe live policy projection
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SatLivePolicy" }
+        "304":
+          description: The client already holds this policy revision
+        default: { $ref: "#/components/responses/Error" }
   /sat/practice/schedules/{scheduleID}/learning-state:
     parameters:
       - name: scheduleID
@@ -5906,6 +5925,15 @@ components:
         allowed: { type: boolean }
         paused: { type: boolean }
         controlEpoch: { type: integer, minimum: 0 }
+    SatLivePolicy:
+      type: object
+      required: [revision, reportVisible, includeAnswerKeyInPdf, unlimitedRetakes, pauseOnLeave]
+      properties:
+        revision: { type: integer, minimum: 0 }
+        reportVisible: { type: boolean }
+        includeAnswerKeyInPdf: { type: boolean }
+        unlimitedRetakes: { type: boolean }
+        pauseOnLeave: { type: boolean }
     SatPracticeLearningState:
       type: object
       required: [scheduleId, policy, completedTestAttempts, requiredCompletions, eligible, canStart, canRetakeTest, reason, capabilities, lastOrdinal, attempts]

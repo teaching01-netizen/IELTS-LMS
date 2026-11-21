@@ -405,7 +405,7 @@ func (s *Service) startPracticeAttemptTx(ctx context.Context, q tx.Tx, scheduleI
 			map[string]any{"lastOrdinal": latestOrdinal, "attemptStatus": practiceAttemptStatus(latest)})
 	}
 
-	policy, err := satlearning.LoadPolicyTx(ctx, q, scheduleID)
+	policy, err := satlearning.LoadPolicyCurrentTx(ctx, q, scheduleID)
 	if err != nil {
 		return PracticeAttempt{}, err
 	}
