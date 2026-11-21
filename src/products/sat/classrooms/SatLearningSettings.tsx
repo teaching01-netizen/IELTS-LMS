@@ -87,7 +87,7 @@ export function SatLearningSettings({
         Results and retakes
       </h3>
       {examDefaults ? (
-        <p className="classroom-exam-setting__help">New rooms and assignments use these settings. You can change them for each room or assignment.</p>
+        <p className="classroom-exam-setting__help">Applies to this exam and to its scheduled and running rooms, including paused rooms. New rooms and assignments use these settings. Closed rooms keep their own settings.</p>
       ) : null}
       <Toggle
         id={`${prefix}-retakes`}

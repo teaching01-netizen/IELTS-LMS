@@ -6,10 +6,15 @@ import { ScoreReportSettingPanel } from "../ScoreReportSettingPanel";
 const mocks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   isPending: false,
+  hasBackendStatusCode: vi.fn(),
 }));
 
 vi.mock("../../../api/examQueries", () => ({
   useSaveExamMutation: () => ({ mutateAsync: mocks.mutateAsync, isPending: mocks.isPending }),
+}));
+
+vi.mock("../../../../../services/backendBridge", () => ({
+  hasBackendStatusCode: mocks.hasBackendStatusCode,
 }));
 
 const exam: ExamEntity = {
@@ -58,6 +63,7 @@ describe("ScoreReportSettingPanel", () => {
 
   it("shows save errors and keeps the exam refresh from running", async () => {
     mocks.mutateAsync.mockRejectedValue(new Error("Save failed"));
+    mocks.hasBackendStatusCode.mockReturnValue(false);
     const onSaved = vi.fn().mockResolvedValue(undefined);
     render(<ScoreReportSettingPanel exam={exam} onSaved={onSaved} />);
 
@@ -66,6 +72,30 @@ describe("ScoreReportSettingPanel", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Save failed");
     expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it("keeps the draft and offers a reload after a revision conflict", async () => {
+    mocks.mutateAsync.mockRejectedValue(new Error("Exam changed while you were editing; refresh before retrying."));
+    mocks.hasBackendStatusCode.mockImplementation((_error: unknown, status: number) => status === 409);
+    const onSaved = vi.fn().mockResolvedValue(undefined);
+    render(<ScoreReportSettingPanel exam={exam} onSaved={onSaved} />);
+
+    fireEvent.click(screen.getByRole("switch", { name: "Show results" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    expect(await screen.findByText(/Exam changed while you were editing/)).toBeInTheDocument();
+    // The dirty choice survives; reloading the base does not discard it.
+    expect(screen.getByRole("switch", { name: "Show results" })).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Reload latest" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("switch", { name: "Show results" })).toBeChecked();
+  });
+
+  it("describes the exam-wide scope and the saved values", () => {
+    render(<ScoreReportSettingPanel exam={exam} onSaved={vi.fn()} />);
+    expect(screen.getByText(/scheduled or running room/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Closed rooms keep their own settings/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Currently saved:/i)).toBeInTheDocument();
   });
 
   it("disables edits while the save is pending or the staff member cannot edit", () => {
