@@ -17,11 +17,17 @@ export function useAnsweredExamDownload(
   source: AnsweredExamDownloadSource | null,
   view?: StudentScoreReportView | null,
   /**
-   * Ask for the separately authorized key table by default. The server decides
+   * Request the separately authorized key table by default. The server decides
    * from the live policy and falls back to the answer-only paper when keys are
    * not permitted, so an unprivileged caller never learns more by asking.
    */
-  includeAnswerKey = true
+  includeAnswerKey = true,
+  /**
+   * Whether the newest observed live policy still allows the key. This flag
+   * only revokes a prepared export; it never narrows the request, because a
+   * foreground poll can predate a committed enable.
+   */
+  answerKeysAllowed = includeAnswerKey
 ) {
   const [download, setDownload] = useState<"idle" | "preparing" | "ready" | "failed">("idle");
   const [ready, setReady] = useState<PreparedAnsweredExamPdf | null>(null);
@@ -36,6 +42,16 @@ export function useAnsweredExamDownload(
       active.current = null;
     };
   }, [source?.key]);
+  // A live policy that turns the key off revokes the prepared reference
+  // immediately. An in-flight prepare is deliberately not aborted: the server
+  // decides the artifact from the live policy and rechecks it again on
+  // download, so a foreground poll that predates the save must not cancel a
+  // prepare the server would allow.
+  useEffect(() => {
+    if (answerKeysAllowed) return;
+    setReady(null);
+    setDownload("idle");
+  }, [answerKeysAllowed]);
   const prepare = useCallback(async () => {
     if (!source || active.current) return;
     const controller = new AbortController();

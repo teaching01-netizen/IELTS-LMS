@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { assessmentDeliveryApi, type SatStudentPauseState } from "../api/assessmentDeliveryApi";
 import type { SatResponsePersistence } from "./useSatResponsePersistence";
 
@@ -7,6 +7,8 @@ export function useSatStudentPause(
   attemptId: string,
   ready: boolean,
   persistence: SatResponsePersistence,
+  /** The live room-policy revision; a change rereads the control. */
+  policyRevision?: number,
 ) {
   const key = JSON.stringify([scheduleId, attemptId]);
   const activeKey = useRef(key);
@@ -14,22 +16,31 @@ export function useSatStudentPause(
   const [status, setStatus] = useState<{ key: string; state: SatStudentPauseState }>();
   const [action, setAction] = useState<{ key: string; pending: boolean; error?: string }>();
   const requestKey = useRef<string | null>(null);
+  const readSequence = useRef(0);
   const state = status?.key === key ? status.state : undefined;
+
+  const readState = useCallback(async () => {
+    const mine = ++readSequence.current;
+    try {
+      const next = await assessmentDeliveryApi.studentPause(scheduleId, attemptId);
+      // A policy reread may race the initial read; only the newest applies.
+      if (activeKey.current === key && mine === readSequence.current) {
+        setStatus({ key, state: next });
+      }
+    } catch {
+      // The existing exam remains usable when the optional control is unavailable.
+    }
+  }, [attemptId, key, scheduleId]);
 
   useEffect(() => {
     if (!ready) return;
-    let active = true;
-    async function read() {
-      try {
-        const next = await assessmentDeliveryApi.studentPause(scheduleId, attemptId);
-        if (active && requestKey.current !== key) setStatus({ key, state: next });
-      } catch {
-        // The existing exam remains usable when the optional control is unavailable.
-      }
-    }
-    void read();
-    return () => { active = false; };
-  }, [attemptId, key, ready, scheduleId]);
+    void readState();
+  }, [ready, readState]);
+
+  useEffect(() => {
+    if (!ready || policyRevision === undefined) return;
+    void readState();
+  }, [policyRevision, ready, readState]);
 
   async function setPaused(paused: boolean) {
     if (!state || requestKey.current === key) return;

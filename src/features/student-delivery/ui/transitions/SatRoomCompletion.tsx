@@ -1,24 +1,31 @@
-import { useId, useState, type ComponentProps } from "react";
+import { useEffect, useId, useState, type ComponentProps } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { assessmentDeliveryApi } from "../../api/assessmentDeliveryApi";
+import { assessmentDeliveryApi, type SatLivePolicy } from "../../api/assessmentDeliveryApi";
+import { satPolicySignature } from "../../hooks/useSatLivePolicy";
 import { SatCompleteScreen } from "./SatCompleteScreen";
 
 type Props = ComponentProps<typeof SatCompleteScreen> & {
   scheduleId: string;
   attemptId: string;
+  /** Live, revisioned policy. A newer value wins over the bootstrap props. */
+  livePolicy?: SatLivePolicy | null;
 };
 
-export function SatRoomCompletion({ scheduleId, attemptId, ...current }: Props) {
+export function SatRoomCompletion({ scheduleId, attemptId, livePolicy = null, ...current }: Props) {
   const pickerId = useId();
   const [selection, setSelection] = useState<string | null>(null);
   const selectedAttemptId = selection ?? attemptId;
   const isHistorical = selectedAttemptId !== attemptId;
+  const reportVisible = livePolicy?.reportVisible ?? current.reportVisible ?? true;
+  const answerKeysAllowed = livePolicy?.includeAnswerKeyInPdf ?? current.answerKeysAllowed ?? true;
+  const allowRetakes = livePolicy?.unlimitedRetakes ?? true;
+  const policySignature = satPolicySignature(livePolicy);
   const historyKey = ["sat", "completed-attempts", scheduleId, attemptId];
   const history = useQuery({
     queryKey: historyKey,
     queryFn: ({ signal }) => assessmentDeliveryApi.completedSatAttempts(scheduleId, attemptId, signal),
     retry: false,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
   });
   const report = useQuery({
     queryKey: [...historyKey, selectedAttemptId],
@@ -26,13 +33,38 @@ export function SatRoomCompletion({ scheduleId, attemptId, ...current }: Props) 
     enabled: isHistorical,
     networkMode: "always",
     retry: false,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
   });
+  // The latest attempt's live projection: the bootstrap result may predate a
+  // policy change, so a foreground refresh replaces it with the current one.
+  const liveReport = useQuery({
+    queryKey: [...historyKey, attemptId, "live", policySignature],
+    queryFn: ({ signal }) => assessmentDeliveryApi.completedSatResult(scheduleId, attemptId, attemptId, signal),
+    enabled: !isHistorical && reportVisible,
+    networkMode: "always",
+    retry: false,
+    refetchOnWindowFocus: true,
+  });
+  // Every accepted policy change re-reads the visible results, including the
+  // attempt history and whichever attempt the picker is showing. The refetch
+  // functions are stable; depending on the query objects would refetch on
+  // every render.
+  const { refetch: refetchHistory } = history;
+  const { refetch: refetchReport } = report;
+  useEffect(() => {
+    if (!policySignature) return;
+    void refetchHistory();
+    if (isHistorical) void refetchReport();
+  }, [policySignature, isHistorical, refetchHistory, refetchReport]);
   const attempts = history.data?.attempts ?? [];
   const selected = attempts.find((attempt) => attempt.attemptId === selectedAttemptId);
   const attemptLabel = selected ? `Attempt ${selected.ordinal}` : "Attempt";
-  const canSelect = attempts.length > 1 && attempts.some((attempt) => attempt.attemptId === attemptId);
-  const loading = isHistorical && (report.isPending || report.isFetching);
+  const canSelect = reportVisible && attempts.length > 1 && attempts.some((attempt) => attempt.attemptId === attemptId);
+  // A background policy refetch must not unmount the visible report (that
+  // would abort an in-flight PDF prepare). Only the first load without data
+  // shows the skeleton.
+  const loading = isHistorical && report.isPending;
+  const currentResult = liveReport.data?.result ?? current.result;
 
   return (
     <>
@@ -69,7 +101,16 @@ export function SatRoomCompletion({ scheduleId, attemptId, ...current }: Props) 
           </div>
         </div>
       ) : null}
-      {!isHistorical ? <SatCompleteScreen key={attemptId} {...current} /> : (
+      {!isHistorical ? (
+        <SatCompleteScreen
+          key={attemptId}
+          {...current}
+          result={currentResult}
+          reportVisible={reportVisible}
+          answerKeysAllowed={answerKeysAllowed}
+          retakeActions={allowRetakes ? current.retakeActions : null}
+        />
+      ) : (
         loading || report.isError ? (
           <div className="sat-ui min-h-[70dvh] bg-[var(--sat-background)] px-4 py-8 text-[var(--sat-text)] sm:px-6">
             <main className="mx-auto max-w-[920px]">
@@ -97,7 +138,9 @@ export function SatRoomCompletion({ scheduleId, attemptId, ...current }: Props) 
             key={selectedAttemptId}
             result={report.data?.result ?? null}
             onExit={current.onExit}
-            retakeActions={current.retakeActions}
+            reportVisible={reportVisible}
+            answerKeysAllowed={answerKeysAllowed}
+            retakeActions={allowRetakes ? current.retakeActions : null}
             answered={{
               key: `student:${scheduleId}:${selectedAttemptId}`,
               sections: current.answered?.sections ?? [],

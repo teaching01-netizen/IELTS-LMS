@@ -47,7 +47,19 @@ import type {
 } from "../contracts/assessmentDelivery";
 
 const ATTEMPT_REFRESH_WINDOW_MS = 5 * 60 * 1_000;
-const attemptCandidates = new Map<string, string>();
+
+/**
+ * One room's live Results and scoring policy as the student is allowed to see
+ * it. Mirrors the server projection in
+ * `backend/go/internal/delivery/student_policy_state.go`.
+ */
+export type SatLivePolicy = {
+  revision: number;
+  reportVisible: boolean;
+  includeAnswerKeyInPdf: boolean;
+  unlimitedRetakes: boolean;
+  pauseOnLeave: boolean;
+};const attemptCandidates = new Map<string, string>();
 const attemptPreferredSessions = new Map<string, string>();
 interface LifecycleStateReadFlight {
   promise: Promise<AssessmentDeliveryState>;
@@ -458,6 +470,20 @@ export const assessmentDeliveryApi = {
       backendGet<{ result: AssessmentResult | null }>(
         `/v1/sat/practice/schedules/${encodeURIComponent(scheduleId)}/completed-attempts?attemptId=${encodeURIComponent(selectedAttemptId)}`,
         { ...config, signal, retries: 0 },
+      ),
+    );
+  },
+
+  /**
+   * The live, student-safe Results and scoring policy for one attempt. Tiny
+   * enough to poll in the foreground; contains no keys or answers. A completed
+   * attempt still resolves, so a completion screen can observe a revocation.
+   */
+  satPolicy(scheduleId: string, attemptId: string, signal?: AbortSignal) {
+    return attemptRequest(scheduleId, attemptId, (config) =>
+      backendGet<SatLivePolicy>(
+        `/v1/assessment-delivery/schedules/${encodeURIComponent(scheduleId)}/sat-policy`,
+        signal ? { ...config, signal, retries: 0 } : { ...config, retries: 0 },
       ),
     );
   },

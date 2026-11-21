@@ -269,6 +269,55 @@ describe("SatCompleteScreen", () => {
     expect(screen.getByRole("region", { name: "Score report" })).not.toHaveTextContent(/Estimated/);
   });
 
+  it("hides a previously loaded score when the live policy revokes results", () => {
+    const { rerender } = render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} />);
+    expect(screen.getByRole("region", { name: "Score report" })).toBeInTheDocument();
+    rerender(<SatCompleteScreen result={reportResult} onExit={vi.fn()} reportVisible={false} />);
+    expect(screen.queryByRole("region", { name: "Score report" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: SAT_COPY.transitions.completeTitle })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: SAT_COPY.transitions.backToDashboard })).toBeInTheDocument();
+  });
+
+  it("keeps the receipt and eligible retake when results are hidden", () => {
+    render(
+      <SatCompleteScreen
+        result={reportResult}
+        onExit={vi.fn()}
+        reportVisible={false}
+        retakeActions={<button type="button">Take the exam again</button>}
+      />,
+    );
+    expect(screen.queryByRole("region", { name: "Score report" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Take the exam again" })).toBeInTheDocument();
+  });
+
+  it("lets the server decide the key and clears a prepared export when revoked", async () => {
+    const preparePdf = vi.fn().mockResolvedValue(prepared());
+    const { rerender } = render(
+      <SatCompleteScreen
+        result={reportResult}
+        onExit={vi.fn()}
+        answered={sourceOf(answeredExam(), { preparePdf })}
+        answerKeysAllowed
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Download exam PDF/ }));
+    await waitFor(() => expect(preparePdf).toHaveBeenCalledTimes(1));
+    // The client always asks; the server applies the live policy.
+    expect(preparePdf.mock.calls[0]?.[0]).toMatchObject({ includeAnswerKey: true });
+    expect(await screen.findByRole("link", { name: "Download PDF again" })).toBeInTheDocument();
+
+    rerender(
+      <SatCompleteScreen
+        result={reportResult}
+        onExit={vi.fn()}
+        answered={sourceOf(answeredExam(), { preparePdf })}
+        answerKeysAllowed={false}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByRole("link", { name: "Download PDF again" })).not.toBeInTheDocument());
+  });
+
   it("prints the answer sheet and, after it, the full exam review with the student's answers marked", () => {
     const { container } = render(<AnsweredExamPaper exam={answeredExam()} generation={1} />);
     const paper = container.querySelector<HTMLElement>(".sat-answered-paper")!;

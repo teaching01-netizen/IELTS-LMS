@@ -1,5 +1,6 @@
 import { SatPauseAndLeaveAction, SatStudentPausedScreen } from "../ui/transitions/SatStudentPause";
 import { useSatStudentPause } from "../hooks/useSatStudentPause";
+import { useSatLivePolicy } from "../hooks/useSatLivePolicy";
 import { SatRoomCompletion } from "../ui/transitions/SatRoomCompletion";
 import { SatRoomRetakeActions } from "../ui/transitions/SatRoomRetakeActions";
 import { SatSectionEntryScreen } from "../ui/SatSectionEntryScreen";
@@ -154,7 +155,8 @@ export function SatStudentSessionRoute({
     bootstrapSeed,
     initialIsLoading,
   });
-  const pause = useSatStudentPause(scheduleId, attemptId, Boolean(exam.data), exam.persistence);
+  const livePolicy = useSatLivePolicy(scheduleId, attemptId, Boolean(exam.data));
+  const pause = useSatStudentPause(scheduleId, attemptId, Boolean(exam.data), exam.persistence, livePolicy.policy?.revision);
   const reading = useSatReadingPreferences(scheduleId, attemptId);
   /**
    * Whether the eliminator is ON — one switch for the whole attempt: turned on,
@@ -627,10 +629,17 @@ export function SatStudentSessionRoute({
               key={attemptId}
               scheduleId={scheduleId}
               attemptId={attemptId}
+              livePolicy={livePolicy.policy ?? null}
               {...completion}
               retakeActions={<SatRoomRetakeActions scheduleId={scheduleId} attemptId={attemptId} candidateId={candidateId} />}
             />
-          ) : <SatCompleteScreen {...completion} />;
+          ) : (
+            <SatCompleteScreen
+              {...completion}
+              reportVisible={livePolicy.policy?.reportVisible ?? true}
+              answerKeysAllowed={livePolicy.policy?.includeAnswerKeyInPdf ?? true}
+            />
+          );
         }}
       />,
     );
@@ -641,7 +650,7 @@ export function SatStudentSessionRoute({
       <SatStudentPausedScreen pending={pause.pending} error={pause.error} onAction={() => void pause.setPaused(false)} />,
     );
   }
-  const pauseAction = pause.state?.allowed && !exam.blocked && !exam.answerInteractionBlocked ? (
+  const pauseAction = pause.state?.allowed && livePolicy.policy?.pauseOnLeave !== false && !exam.blocked && !exam.answerInteractionBlocked ? (
     <SatPauseAndLeaveAction pending={pause.pending} error={pause.error} onAction={() => void pause.setPaused(true)} />
   ) : null;
   if (stage.kind === "awaiting-route") {

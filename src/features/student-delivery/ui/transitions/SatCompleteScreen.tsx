@@ -17,6 +17,8 @@ export function SatCompleteScreen({
   recoveryExceptions = [],
   retakeActions,
   eva = null,
+  reportVisible = true,
+  answerKeysAllowed = true,
 }: {
   result: AssessmentResult | null;
   onExit: () => void | Promise<void>;
@@ -25,10 +27,20 @@ export function SatCompleteScreen({
   retakeActions?: ReactNode;
   /** The shared Eva SIM status group, identical in both branches. */
   eva?: ReactNode;
+  /**
+   * The live Show results policy. False renders the completion receipt even
+   * when the previously loaded bootstrap result still carried a score.
+   */
+  reportVisible?: boolean;
+  /**
+   * The live Include answer key policy. False asks the server for an
+   * answer-only PDF and drops any previously prepared keyed export.
+   */
+  answerKeysAllowed?: boolean;
 }) {
-  const report = classroomReport(result);
+  const report = reportVisible ? classroomReport(result) : null;
   if (!report) return <SatCompletionOnly onExit={onExit} recoveryExceptions={recoveryExceptions} retakeActions={retakeActions} eva={eva} />;
-  return <SatScoreReport report={report} answered={answered} onExit={onExit} recoveryExceptions={recoveryExceptions} retakeActions={retakeActions} eva={eva} />;
+  return <SatScoreReport report={report} answered={answered} onExit={onExit} recoveryExceptions={recoveryExceptions} retakeActions={retakeActions} eva={eva} answerKeysAllowed={answerKeysAllowed} />;
 }
 
 function SatCompletionOnly({ onExit, recoveryExceptions, retakeActions, eva }: {

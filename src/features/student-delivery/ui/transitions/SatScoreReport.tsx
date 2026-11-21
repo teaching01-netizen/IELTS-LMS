@@ -213,6 +213,7 @@ export function SatScoreReport({
   recoveryExceptions = [],
   retakeActions,
   eva = null,
+  answerKeysAllowed = true,
 }: {
   report: ClassroomReport;
   answered: AnsweredExamSource | null;
@@ -221,12 +222,17 @@ export function SatScoreReport({
   retakeActions?: ReactNode;
   /** The shared Eva SIM status group (see SatCompleteScreen). */
   eva?: ReactNode;
+  /**
+   * Live policy for the answer key. False withholds the on-screen key and asks
+   * the server for an answer-only PDF; the server rechecks the same policy.
+   */
+  answerKeysAllowed?: boolean;
 }) {
   const view = useMemo(
     () => buildStudentScoreReportView(report, answered?.sections),
     [report, answered?.sections]
   );
-  const { download, ready, prepare } = useAnsweredExamDownload(answered, view);
+  const { download, ready, prepare } = useAnsweredExamDownload(answered, view, true, answerKeysAllowed);
   const issues = view.issues.join(",");
   useEffect(() => {
     // Codes only: nothing here identifies the student.
