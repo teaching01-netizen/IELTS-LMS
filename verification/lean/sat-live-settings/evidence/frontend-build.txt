@@ -1,0 +1,11 @@
+# bun 1.4.4, node v26.0.0
+# command: bun run typecheck
+$ tsc --noEmit
+typecheck_exit=0
+
+# command: bun run build
+dist/assets/index-BwGtQoGa.js                                 668.79 kB │ gzip: 204.62 kB
+dist/assets/mathlive.min-BosAORP5.js                          825.52 kB │ gzip: 226.68 kB
+✓ built in 21.53s
+compress-dist: 9.4 MB -> 2.3 MB brotli
+build_exit=0

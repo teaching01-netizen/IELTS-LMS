@@ -1,0 +1,121 @@
+# toolchain
+Lake version 5.0.0-6caaee8 (Lean version 4.19.0)
+
+# lake build
+ℹ [5/5] Replayed AxiomAudit
+info: ./././proof/AxiomAudit.lean:7:0: SatLiveSettings.examSave_applies_changed_retakes (st : St) (target id : Nat) (c : Change) (d : Policy)
+  (hexam : (st.rooms id).exam = target) (hopen : (st.rooms id).closed = false) (hchange : c.retakes = true) :
+  ((st.examSave target c d).rooms id).policy.retakes = d.norm.retakes
+info: ./././proof/AxiomAudit.lean:8:0: SatLiveSettings.examSave_keeps_unchanged_field (st : St) (target id : Nat) (c : Change) (d : Policy)
+  (hexam : (st.rooms id).exam = target) (hopen : (st.rooms id).closed = false) (hchange : c.pause = false) :
+  ((st.examSave target c d).rooms id).policy.pause = (st.rooms id).policy.pause
+info: ./././proof/AxiomAudit.lean:9:0: SatLiveSettings.examSave_preserves_closed_room (st : St) (target id : Nat) (c : Change) (d : Policy)
+  (hclosed : (st.rooms id).closed = true) : (st.examSave target c d).rooms id = st.rooms id
+info: ./././proof/AxiomAudit.lean:10:0: SatLiveSettings.examSave_preserves_other_exam (st : St) (target id : Nat) (c : Change) (d : Policy)
+  (hexam : (st.rooms id).exam ≠ target) : (st.examSave target c d).rooms id = st.rooms id
+info: ./././proof/AxiomAudit.lean:11:0: SatLiveSettings.examSave_noop_preserves_rooms (st : St) (target : Nat) (c : Change) (d : Policy)
+  (hany : c.any = false) : st.examSave target c d = st
+info: ./././proof/AxiomAudit.lean:12:0: SatLiveSettings.roomSave_requires_current {st s : St} {id : Nat} {p : Policy} {expected : Nat}
+  (h : st.roomSave id p expected = some s) : expected = (st.rooms id).rev
+info: ./././proof/AxiomAudit.lean:13:0: SatLiveSettings.roomSave_advances_revision {st s : St} {id : Nat} {p : Policy} {expected : Nat}
+  (h : st.roomSave id p expected = some s) : (s.rooms id).rev = (st.rooms id).rev + 1
+info: ./././proof/AxiomAudit.lean:14:0: SatLiveSettings.stale_replay_rejected {st s1 : St} {id : Nat} {p1 p2 : Policy} {expected : Nat}
+  (h : st.roomSave id p1 expected = some s1) : s1.roomSave id p2 expected = none
+info: ./././proof/AxiomAudit.lean:15:0: SatLiveSettings.wrong_revision_is_noop {st : St} {id : Nat} {p : Policy} {expected : Nat}
+  (h : expected ≠ (st.rooms id).rev) : st.roomSave id p expected = none
+info: ./././proof/AxiomAudit.lean:16:0: SatLiveSettings.latest_write_wins {st s1 s2 : St} {id : Nat} {p1 p2 : Policy} {expected : Nat}
+  (h1 : st.roomSave id p1 expected = some s1) (h2 : s1.roomSave id p2 expected = some s2) : False
+info: ./././proof/AxiomAudit.lean:17:0: SatLiveSettings.grant_uses_current_policy (st : St) (target id : Nat) (c : Change) (d : Policy)
+  (hexam : (st.rooms id).exam = target) (hopen : (st.rooms id).closed = false) (hchange : c.pause = true) :
+  ((st.examSave target c d).grant id fun p => p.pause) = d.norm.pause
+info: ./././proof/AxiomAudit.lean:18:0: SatLiveSettings.admitted_attempt_keeps_snapshot (st : St) (id : Nat) (a : Attempt) (field : Policy → Bool)
+  (hadmitted : a.admitted = true) : Attempt.grant st id a field = field a.snapshot
+info: ./././proof/AxiomAudit.lean:19:0: SatLiveSettings.hidden_results_clear_key (st : St) (target id : Nat) (c : Change) (d : Policy)
+  (hexam : (st.rooms id).exam = target) (hopen : (st.rooms id).closed = false) (hresults : c.results = true)
+  (hhidden : d.norm.results = false) : ((st.examSave target c d).rooms id).policy.keys = false
+info: ./././proof/AxiomAudit.lean:20:0: SatLiveSettings.key_only_change_keeps_hidden_room (st : St) (target id : Nat) (c : Change) (d : Policy)
+  (hexam : (st.rooms id).exam = target) (hopen : (st.rooms id).closed = false) (hkey : c.keys = true)
+  (hnoresults : c.results = false) (hroomhidden : (st.rooms id).policy.results = false) :
+  ((st.examSave target c d).rooms id).policy.results = false ∧ ((st.examSave target c d).rooms id).policy.keys = false
+info: ./././proof/AxiomAudit.lean:21:0: SatLiveSettings.stale_observation_ignored (c : Client) (rev : Nat) (p : Policy) (h : rev < c.seen) : c.observe rev p = c
+info: ./././proof/AxiomAudit.lean:22:0: SatLiveSettings.fresh_observation_applies (c : Client) (rev : Nat) (p : Policy) (h : ¬rev < c.seen) :
+  (c.observe rev p).results = p.results
+info: ./././proof/AxiomAudit.lean:23:0: SatLiveSettings.revocation_survives_stale_response (c : Client) (revNew revOld : Nat) (pnew pold : Policy)
+  (hnew : c.seen ≤ revNew) (hold : revOld < revNew) :
+  ((c.observe revNew pnew).observe revOld pold).results = pnew.results
+info: ./././proof/AxiomAudit.lean:24:0: SatLiveSettings.key_revocation_survives_stale_response (c : Client) (revNew revOld : Nat) (pnew pold : Policy)
+  (hnew : c.seen ≤ revNew) (hold : revOld < revNew) : ((c.observe revNew pnew).observe revOld pold).keys = pnew.keys
+info: ./././proof/AxiomAudit.lean:25:0: SatLiveSettings.fair_read_converges (c : Client) (rev : Nat) (p : Policy) (h : c.seen ≤ rev) :
+  (c.observe rev p).results = p.results ∧ (c.observe rev p).keys = p.keys ∧ (c.observe rev p).pause = p.pause
+info: ./././proof/AxiomAudit.lean:26:0: SatLiveSettings.defaults_only_save_keeps_room :
+  (baseSt.examSave 0 { }
+          (let __src := Policy.default;
+          { retakes := __src.retakes, results := true, keys := __src.keys, pause := __src.pause })).rooms
+      0 =
+    baseSt.rooms 0
+info: ./././proof/AxiomAudit.lean:27:0: SatLiveSettings.unfenced_duplicate_write_overwrites (p1 p2 : Policy) :
+  (((baseSt.roomSaveUnfenced 0 p1).roomSaveUnfenced 0 p2).rooms 0).policy = p2.norm
+info: ./././proof/AxiomAudit.lean:28:0: SatLiveSettings.fenced_first_write_conflicts :
+  ((baseSt.roomSave 0
+            (let __src := Policy.default;
+            { retakes := __src.retakes, results := true, keys := __src.keys, pause := __src.pause })
+            0).bind
+        fun s =>
+        s.roomSave 0
+          (let __src := Policy.default;
+          { retakes := __src.retakes, results := __src.results, keys := __src.keys, pause := true })
+          0).isNone =
+    true
+info: ./././proof/AxiomAudit.lean:29:0: SatLiveSettings.unfenced_stale_response_restores_score :
+  (revokedClient.observeUnfenced 3
+        (let __src := Policy.default;
+        { retakes := __src.retakes, results := true, keys := __src.keys, pause := __src.pause })).results =
+    true
+info: ./././proof/AxiomAudit.lean:30:0: SatLiveSettings.fenced_stale_response_keeps_revocation :
+  (revokedClient.observe 3
+        (let __src := Policy.default;
+        { retakes := __src.retakes, results := true, keys := __src.keys, pause := __src.pause })).results =
+    false
+info: ./././proof/AxiomAudit.lean:31:0: SatLiveSettings.unchecked_prepared_export_leaks_after_revocation : servedKeyed false true false = true
+info: ./././proof/AxiomAudit.lean:32:0: SatLiveSettings.checked_prepared_export_withholds_after_revocation : servedKeyed true true false = false
+info: ./././proof/AxiomAudit.lean:33:0: SatLiveSettings.key_only_change_cannot_reveal_hidden_room :
+  (baseSt.roomSave 0
+          (let __src := Policy.default;
+          { retakes := __src.retakes, results := false, keys := true, pause := __src.pause })
+          0).isSome =
+      true ∧
+    Option.map (fun s => (s.rooms 0).policy.keys)
+        (baseSt.roomSave 0
+          (let __src := Policy.default;
+          { retakes := __src.retakes, results := false, keys := true, pause := __src.pause })
+          0) =
+      some false
+info: ./././proof/AxiomAudit.lean:35:0: 'SatLiveSettings.examSave_applies_changed_retakes' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:36:0: 'SatLiveSettings.examSave_keeps_unchanged_field' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:37:0: 'SatLiveSettings.examSave_preserves_closed_room' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:38:0: 'SatLiveSettings.examSave_preserves_other_exam' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:39:0: 'SatLiveSettings.examSave_noop_preserves_rooms' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:40:0: 'SatLiveSettings.roomSave_requires_current' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:41:0: 'SatLiveSettings.roomSave_advances_revision' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:42:0: 'SatLiveSettings.stale_replay_rejected' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:43:0: 'SatLiveSettings.wrong_revision_is_noop' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:44:0: 'SatLiveSettings.latest_write_wins' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:45:0: 'SatLiveSettings.grant_uses_current_policy' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:46:0: 'SatLiveSettings.admitted_attempt_keeps_snapshot' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:47:0: 'SatLiveSettings.hidden_results_clear_key' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:48:0: 'SatLiveSettings.key_only_change_keeps_hidden_room' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:49:0: 'SatLiveSettings.stale_observation_ignored' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:50:0: 'SatLiveSettings.fresh_observation_applies' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:51:0: 'SatLiveSettings.revocation_survives_stale_response' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:52:0: 'SatLiveSettings.key_revocation_survives_stale_response' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:53:0: 'SatLiveSettings.fair_read_converges' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:54:0: 'SatLiveSettings.defaults_only_save_keeps_room' depends on axioms: [propext]
+info: ./././proof/AxiomAudit.lean:55:0: 'SatLiveSettings.unfenced_duplicate_write_overwrites' depends on axioms: [propext, Quot.sound]
+info: ./././proof/AxiomAudit.lean:56:0: 'SatLiveSettings.fenced_first_write_conflicts' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:57:0: 'SatLiveSettings.unfenced_stale_response_restores_score' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:58:0: 'SatLiveSettings.fenced_stale_response_keeps_revocation' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:59:0: 'SatLiveSettings.unchecked_prepared_export_leaks_after_revocation' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:60:0: 'SatLiveSettings.checked_prepared_export_withholds_after_revocation' does not depend on any axioms
+info: ./././proof/AxiomAudit.lean:61:0: 'SatLiveSettings.key_only_change_cannot_reveal_hidden_room' does not depend on any axioms
+Build completed successfully.
+exit=0

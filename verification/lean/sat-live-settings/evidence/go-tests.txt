@@ -1,0 +1,13 @@
+# go go version go1.26.3 darwin/arm64
+# commit: e10825b0f2e704876716b11bd09789b42fa15005 + working tree
+# no TEST_MYSQL_DSN (MySQL-gated tests skip)
+ok  	example.com/ielts-proctoring/internal/satlearning	0.474s
+ok  	example.com/ielts-proctoring/internal/exams	0.527s
+ok  	example.com/ielts-proctoring/internal/schedules	0.814s
+ok  	example.com/ielts-proctoring/internal/delivery	1.388s
+ok  	example.com/ielts-proctoring/internal/results	3.928s
+ok  	example.com/ielts-proctoring/internal/terminalization	1.763s
+ok  	example.com/ielts-proctoring/internal/authz	1.839s
+ok  	example.com/ielts-proctoring/cmd/api	3.388s
+ok  	example.com/ielts-proctoring/cmd/migrate	0.925s
+exit=0

@@ -1,0 +1,30 @@
+# lean 4.19.0 kernel; proof/AxiomAudit.lean
+# command: elan run leanprover/lean4:v4.19.0 lake env lean proof/AxiomAudit.lean
+'SatLiveSettings.examSave_applies_changed_retakes' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.examSave_keeps_unchanged_field' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.examSave_preserves_closed_room' depends on axioms: [propext]
+'SatLiveSettings.examSave_preserves_other_exam' depends on axioms: [propext]
+'SatLiveSettings.examSave_noop_preserves_rooms' depends on axioms: [propext]
+'SatLiveSettings.roomSave_requires_current' depends on axioms: [propext]
+'SatLiveSettings.roomSave_advances_revision' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.stale_replay_rejected' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.wrong_revision_is_noop' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.latest_write_wins' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.grant_uses_current_policy' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.admitted_attempt_keeps_snapshot' depends on axioms: [propext]
+'SatLiveSettings.hidden_results_clear_key' depends on axioms: [propext]
+'SatLiveSettings.key_only_change_keeps_hidden_room' depends on axioms: [propext]
+'SatLiveSettings.stale_observation_ignored' depends on axioms: [propext]
+'SatLiveSettings.fresh_observation_applies' depends on axioms: [propext]
+'SatLiveSettings.revocation_survives_stale_response' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.key_revocation_survives_stale_response' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.fair_read_converges' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.defaults_only_save_keeps_room' depends on axioms: [propext]
+'SatLiveSettings.unfenced_duplicate_write_overwrites' depends on axioms: [propext, Quot.sound]
+'SatLiveSettings.fenced_first_write_conflicts' does not depend on any axioms
+'SatLiveSettings.unfenced_stale_response_restores_score' does not depend on any axioms
+'SatLiveSettings.fenced_stale_response_keeps_revocation' does not depend on any axioms
+'SatLiveSettings.unchecked_prepared_export_leaks_after_revocation' does not depend on any axioms
+'SatLiveSettings.checked_prepared_export_withholds_after_revocation' does not depend on any axioms
+'SatLiveSettings.key_only_change_cannot_reveal_hidden_room' does not depend on any axioms
+exit=0

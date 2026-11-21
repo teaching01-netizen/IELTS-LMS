@@ -1,0 +1,62 @@
+# Browser evidence (real Go API + disposable MySQL 9.6.0)
+
+Environment:
+
+* Go 1.26.3; Bun 1.4.4; Node 26.0.0
+* Chromium 147 (Playwright), `--workers=1`
+* Disposable MySQL 9.6.0 on `127.0.0.1:3307`, migrated from empty through
+  `0133_sat_exam_pdf_layout.sql`
+* Database: `ielts_sat_e2e`
+
+## Existing live-classroom regression (retakes, pause, keyed PDF)
+
+```
+DATABASE_URL='e2e:<password>@tcp(127.0.0.1:3307)/ielts_sat_e2e?...' \
+TEST_DATABASE_URL='...' SAT_RETAKE_E2E_DISPOSABLE=1 \
+bunx playwright test --config playwright.sat-room-retakes.config.ts \
+  --project=chromium --workers=1
+```
+
+Result: `2 passed (1.4m)`.
+
+## Live settings feature
+
+```
+DATABASE_URL='e2e:<password>@tcp(127.0.0.1:3307)/ielts_sat_e2e?...' \
+TEST_DATABASE_URL='...' SAT_LIVE_SETTINGS_E2E_DISPOSABLE=1 \
+bunx playwright test --config playwright.sat-live-settings.config.ts \
+  --project=chromium --workers=1
+```
+
+Result: `2 passed (1.0m)`.
+
+Test 1 — `an exam save updates running rooms and a connected student without a refresh`:
+
+* seeded a published SAT exam with results/keys/retakes/pause off and two
+  classroom access-link rooms (both pinned the exam defaults);
+* student joined room 1, started with the room code, answered, and completed
+  with the receipt only;
+* staff `PATCH /v1/exams/{id}` with `satLearningDefaults` (results, keys,
+  retakes, pause on) returned `satLearningRoomsUpdated: 2`;
+* both room policy rows read back the new values;
+* the already-completed student's **Score report** appeared without navigation
+  (foreground poll), then disappeared without navigation after a second exam
+  save turned results off;
+* a room-only `PUT` on room 2 set results on for room 2 and left room 1 off.
+
+Test 2 — `pause and leave turns on and off during an active timed attempt`:
+
+* pause was off at admission (no control);
+* an exam save turned pause on and the **Pause and leave** control appeared
+  without a refresh;
+* pausing reached the paused screen;
+* an exam save turned pause off while paused; **Resume exam** still worked
+  (admitted continuation), and the pause control was absent after resume.
+
+## Not measured yet
+
+* p50/p95/p99 commit-to-observation under the stated load profile;
+* two API processes with production-equivalent read routing and cache;
+* the held-response trace across a reconnect and two API instances (the
+  sequence fence is unit-tested, not browser-traced);
+* the retake on/off browser behavior (Go tests cover the admission decision).

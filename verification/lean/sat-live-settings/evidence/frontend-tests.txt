@@ -1,0 +1,32 @@
+# command: bunx vitest run <feature suites>
+ ✓ src/features/student-delivery/ui/break/SatBreakFlow.test.tsx (4 tests) 678ms
+ ✓ src/features/student-delivery/ui/help/SatShortcutsModal.test.tsx (4 tests) 614ms
+ ✓ src/features/student-delivery/ui/primitives/satOverlayZ.test.ts (3 tests) 14ms
+ ✓ src/features/student-delivery/ui/annotations/satSelectionDragGuard.test.ts (7 tests) 12ms
+ ✓ src/features/student-delivery/application/__tests__/satPollCadence.test.ts (5 tests) 5ms
+ ✓ src/features/student-delivery/ui/question/SatSingleChoiceAnswer.guard.test.tsx (2 tests) 352ms
+ ✓ src/features/student-delivery/ui/feedback/__tests__/SatLoadingSurface.test.tsx (7 tests) 425ms
+ ✓ src/features/student-delivery/ui/transitions/SatEntrySurfaces.test.tsx (3 tests) 567ms
+ ✓ src/features/student-delivery/domain/satToolActions.test.ts (2 tests) 14ms
+ ✓ src/features/student-delivery/infrastructure/satAnnotationEducationStore.test.ts (4 tests) 5ms
+ ✓ src/features/student-delivery/hooks/useSatShortcuts.test.tsx (3 tests) 249ms
+ ✓ src/features/student-delivery/ui/tools/satToolPointer.test.ts (3 tests) 6ms
+ ✓ src/features/student-delivery/domain/__tests__/satUnsyncedNotice.test.ts (3 tests) 5ms
+ ✓ src/features/student-delivery/domain/satTimerReveal.test.ts (4 tests) 2ms
+ ✓ src/features/student-delivery/ui/entry/__tests__/SatWriterLockGate.test.tsx (2 tests) 852ms
+ ✓ src/features/student-delivery/ui/feedback/SatTimeoutOverlay.test.tsx (3 tests) 328ms
+ ✓ src/features/student-delivery/domain/__tests__/satNoteEntry.test.ts (4 tests) 176ms
+ ✓ src/features/student-delivery/hooks/__tests__/useSatEntryTransitionHold.test.tsx (2 tests) 66ms
+ ✓ src/features/student-delivery/timing/satTemporalModel.test.ts (1 test) 3ms
+ ✓ src/features/student-delivery/ui/transitions/score-report/__tests__/SatReportDownload.test.tsx (2 tests) 335ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ClassroomPlanField.test.tsx (2 tests) 296ms
+ ✓ src/features/student-delivery/ui/zoom/__tests__/satExamZoomGeometry.test.ts (13 tests) 8ms
+ ✓ src/features/student-delivery/domain/satShortcuts.test.ts (3 tests) 6ms
+ ✓ src/features/student-delivery/ui/shell/SatQuestionNavigator.test.tsx (1 test) 171ms
+ ✓ src/features/student-delivery/__tests__/heartbeatCoalesce.test.ts (4 tests) 3ms
+ ✓ src/features/exam-authoring/ui/release/__tests__/ReleaseReadinessParity.test.tsx (1 test) 77ms
+ ✓ src/features/student-delivery/ui/tools/__tests__/satToolPlacementRuntime.test.ts (1 test) 36ms
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  3 failed | 175 passed (178)
+      Tests  5 failed | 1739 passed | 2 skipped (1746)
+exit=1

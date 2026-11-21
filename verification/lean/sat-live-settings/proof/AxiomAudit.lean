@@ -1,0 +1,61 @@
+import Safety
+import Counterexamples
+
+/-! Every exported theorem must depend only on propext / Classical.choice / Quot.sound. -/
+open SatLiveSettings
+
+#check examSave_applies_changed_retakes
+#check examSave_keeps_unchanged_field
+#check examSave_preserves_closed_room
+#check examSave_preserves_other_exam
+#check examSave_noop_preserves_rooms
+#check roomSave_requires_current
+#check roomSave_advances_revision
+#check stale_replay_rejected
+#check wrong_revision_is_noop
+#check latest_write_wins
+#check grant_uses_current_policy
+#check admitted_attempt_keeps_snapshot
+#check hidden_results_clear_key
+#check key_only_change_keeps_hidden_room
+#check stale_observation_ignored
+#check fresh_observation_applies
+#check revocation_survives_stale_response
+#check key_revocation_survives_stale_response
+#check fair_read_converges
+#check defaults_only_save_keeps_room
+#check unfenced_duplicate_write_overwrites
+#check fenced_first_write_conflicts
+#check unfenced_stale_response_restores_score
+#check fenced_stale_response_keeps_revocation
+#check unchecked_prepared_export_leaks_after_revocation
+#check checked_prepared_export_withholds_after_revocation
+#check key_only_change_cannot_reveal_hidden_room
+
+#print axioms examSave_applies_changed_retakes
+#print axioms examSave_keeps_unchanged_field
+#print axioms examSave_preserves_closed_room
+#print axioms examSave_preserves_other_exam
+#print axioms examSave_noop_preserves_rooms
+#print axioms roomSave_requires_current
+#print axioms roomSave_advances_revision
+#print axioms stale_replay_rejected
+#print axioms wrong_revision_is_noop
+#print axioms latest_write_wins
+#print axioms grant_uses_current_policy
+#print axioms admitted_attempt_keeps_snapshot
+#print axioms hidden_results_clear_key
+#print axioms key_only_change_keeps_hidden_room
+#print axioms stale_observation_ignored
+#print axioms fresh_observation_applies
+#print axioms revocation_survives_stale_response
+#print axioms key_revocation_survives_stale_response
+#print axioms fair_read_converges
+#print axioms defaults_only_save_keeps_room
+#print axioms unfenced_duplicate_write_overwrites
+#print axioms fenced_first_write_conflicts
+#print axioms unfenced_stale_response_restores_score
+#print axioms fenced_stale_response_keeps_revocation
+#print axioms unchecked_prepared_export_leaks_after_revocation
+#print axioms checked_prepared_export_withholds_after_revocation
+#print axioms key_only_change_cannot_reveal_hidden_room

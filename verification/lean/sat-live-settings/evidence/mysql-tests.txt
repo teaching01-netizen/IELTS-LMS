@@ -1,0 +1,16 @@
+# MySQL 9.6.0 disposable instance on 127.0.0.1:3307
+# database: ielts_sat_live2 (migrated from empty through 0133)
+# command: TEST_MYSQL_DSN=root@unix(<socket>)/ielts_sat_live2 go test -count=1 ./cmd/api ./internal/schedules -run MySQL
+=== RUN   TestSatExamConfigAtCreateMySQL
+--- PASS: TestSatExamConfigAtCreateMySQL (0.21s)
+=== RUN   TestSatExamLearningDefaultsPinNewRoomsMySQL
+--- PASS: TestSatExamLearningDefaultsPinNewRoomsMySQL (0.13s)
+=== RUN   TestSatExamSaveAppliesChangedFieldsToRoomsMySQL
+--- PASS: TestSatExamSaveAppliesChangedFieldsToRoomsMySQL (0.10s)
+=== RUN   TestSatRoomPolicyAbsentRowWritersConflictMySQL
+--- PASS: TestSatRoomPolicyAbsentRowWritersConflictMySQL (0.15s)
+ok  	example.com/ielts-proctoring/cmd/api	1.683s
+=== RUN   TestSATPracticeRetakeMySQL
+--- PASS: TestSATPracticeRetakeMySQL (0.18s)
+ok  	example.com/ielts-proctoring/internal/schedules	0.600s
+exit=0
