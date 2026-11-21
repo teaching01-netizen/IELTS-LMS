@@ -57,11 +57,12 @@ export function SatRoomLearningSettingsDialog({ scheduleId, onClose }: {
   return (
     <SatFormDialog
       open
+      bodyScroll
       eyebrow="SAT room"
       title="Results and retakes"
       onClose={onClose}
       footer={
-        <div className="flex w-full flex-wrap-reverse items-center justify-end gap-2 px-5 py-3">
+        <div className="flex w-full flex-wrap-reverse items-center justify-end gap-2 px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
           <SatButton variant="quiet" onClick={onClose} disabled={save.isPending}>
             Cancel
           </SatButton>
@@ -90,16 +91,12 @@ export function SatRoomLearningSettingsDialog({ scheduleId, onClose }: {
             </div>
           </div>
         ) : policy ? (
-          // Keep the scope visible and the footer reachable on short screens:
-          // only the settings cards scroll.
-          <div className="max-h-[min(58dvh,560px)] overflow-y-auto overscroll-contain">
-            <SatLearningSettings
-              heading={false}
-              value={policy}
-              onChange={setDraft}
-              disabled={save.isPending}
-            />
-          </div>
+          <SatLearningSettings
+            heading={false}
+            value={policy}
+            onChange={setDraft}
+            disabled={save.isPending}
+          />
         ) : null}
 
         <div aria-live="polite">

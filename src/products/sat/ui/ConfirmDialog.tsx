@@ -179,15 +179,25 @@ type SatFormDialogProps = {
   children: ReactNode;
   size?: "default" | "wide";
   footer?: ReactNode;
+  /**
+   * Pin the header and footer and scroll only the body. Use for sheets whose
+   * content can exceed a phone viewport, so the primary action stays reachable.
+   */
+  bodyScroll?: boolean;
 };
 
 const CLOSE_BUTTON_CLASS = 'sat-btn sat-btn--quiet sat-btn--icon sat-press -mr-2 -mt-2 rounded-full';
 
-function formClass(size: SatFormDialogProps["size"]): string {
-  return `sat-dialog sat-dialog-center sat-product sat-staff-root w-[calc(100vw-40px)] ${size === "wide" ? "max-w-[640px]" : "max-w-[520px]"} overflow-hidden`;
+function formClass(size: SatFormDialogProps["size"], bodyScroll = false): string {
+  return `sat-dialog sat-dialog-center sat-product sat-staff-root w-[calc(100vw-40px)] ${size === "wide" ? "max-w-[640px]" : "max-w-[520px]"} overflow-hidden${bodyScroll ? " flex max-h-[calc(100dvh-48px)] flex-col !overflow-hidden" : ""}`;
 }
 
-function StaticFormDialog({ eyebrow, title, onClose, children, size, footer }: Omit<SatFormDialogProps, 'open'>) {
+function DialogBody({ bodyScroll, children }: { bodyScroll: boolean; children: ReactNode }) {
+  if (!bodyScroll) return <>{children}</>;
+  return <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>;
+}
+
+function StaticFormDialog({ eyebrow, title, onClose, children, size, footer, bodyScroll = false }: Omit<SatFormDialogProps, 'open'>) {
   // useId-scoped title id: two stacked form sheets never collide.
   const titleId = useId();
   useEffect(() => {
@@ -200,8 +210,8 @@ function StaticFormDialog({ eyebrow, title, onClose, children, size, footer }: O
 
   return (
     <div className={OVERLAY_CLASS}>
-      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className={formClass(size)}>
-        <div className="flex items-center justify-between px-5 pb-2 pt-4">
+      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className={formClass(size, bodyScroll)}>
+        <div className="flex shrink-0 items-center justify-between px-5 pb-2 pt-4">
           <div>
             <p className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{eyebrow}</p>
             <h2 id={titleId} className="mt-1 text-[18px] font-semibold tracking-[-0.025em] text-[var(--sat-staff-text-primary,#1d1d1f)]">{title}</h2>
@@ -210,25 +220,25 @@ function StaticFormDialog({ eyebrow, title, onClose, children, size, footer }: O
             <X size={16} aria-hidden="true" />
           </button>
         </div>
-        {children}
+        <DialogBody bodyScroll={bodyScroll}>{children}</DialogBody>
         {footer ? <div className="shrink-0 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))]">{footer}</div> : null}
       </div>
     </div>
   );
 }
 
-export function SatFormDialog({ open, eyebrow, title, onClose, children, size, footer }: SatFormDialogProps) {
+export function SatFormDialog({ open, eyebrow, title, onClose, children, size, footer, bodyScroll = false }: SatFormDialogProps) {
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     if (!open) return null;
-    return <StaticFormDialog eyebrow={eyebrow} title={title} onClose={onClose} {...(size ? { size } : {})} footer={footer}>{children}</StaticFormDialog>;
+    return <StaticFormDialog eyebrow={eyebrow} title={title} onClose={onClose} {...(size ? { size } : {})} footer={footer} bodyScroll={bodyScroll}>{children}</StaticFormDialog>;
   }
   return (
     <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className={OVERLAY_CLASS} />
         <Dialog.Content
-          className={formClass(size)}
+          className={formClass(size, bodyScroll)}
           aria-describedby={undefined}
           onOpenAutoFocus={() => {
             restoreFocusRef.current = captureOverlayReturnTarget();
@@ -242,7 +252,7 @@ export function SatFormDialog({ open, eyebrow, title, onClose, children, size, f
             }
           }}
         >
-          <div className="flex items-center justify-between px-5 pb-2 pt-4">
+          <div className="flex shrink-0 items-center justify-between px-5 pb-2 pt-4">
             <div>
               <p className="text-[14px] font-medium leading-5 text-[var(--sat-staff-text-secondary,#515154)]">{eyebrow}</p>
               <Dialog.Title asChild>
@@ -255,7 +265,7 @@ export function SatFormDialog({ open, eyebrow, title, onClose, children, size, f
               </button>
             </Dialog.Close>
           </div>
-          {children}
+          <DialogBody bodyScroll={bodyScroll}>{children}</DialogBody>
           {footer ? <div className="shrink-0 border-t border-[var(--sat-staff-border-hairline,rgba(0,0,0,0.06))]">{footer}</div> : null}
         </Dialog.Content>
       </Dialog.Portal>

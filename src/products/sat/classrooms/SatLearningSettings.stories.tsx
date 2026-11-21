@@ -40,11 +40,12 @@ function DialogHarness({ initial }: { initial?: Partial<SatActivityPolicy> }) {
   return (
     <SatFormDialog
       open
+      bodyScroll
       eyebrow="SAT room"
       title="Results and retakes"
       onClose={() => undefined}
       footer={
-        <div className="flex w-full flex-wrap-reverse items-center justify-end gap-2 px-5 py-3">
+        <div className="flex w-full flex-wrap-reverse items-center justify-end gap-2 px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
           <SatButton variant="quiet">Cancel</SatButton>
           <SatButton variant="primary">Save changes</SatButton>
         </div>
@@ -55,9 +56,7 @@ function DialogHarness({ initial }: { initial?: Partial<SatActivityPolicy> }) {
           Students already in this room see changes within a few seconds. An exam-wide save can update
           these fields later.
         </SatSettingsScopeNote>
-        <div className="max-h-[min(58dvh,560px)] overflow-y-auto overscroll-contain">
-          <SatLearningSettings heading={false} value={value} onChange={setValue} />
-        </div>
+        <SatLearningSettings heading={false} value={value} onChange={setValue} />
       </div>
     </SatFormDialog>
   );

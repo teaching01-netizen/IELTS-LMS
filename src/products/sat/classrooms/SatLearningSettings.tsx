@@ -62,20 +62,21 @@ function Switch({
       aria-describedby={describedBy}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sat-focus,#005fcc)] disabled:cursor-not-allowed disabled:opacity-40"
+      className="relative -my-2.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sat-focus,#005fcc)] disabled:cursor-not-allowed disabled:opacity-40"
     >
       <span
         aria-hidden="true"
-        className={`absolute inset-0 rounded-full transition-colors duration-150 ${
+        className={`relative h-6 w-11 rounded-full transition-colors duration-150 ${
           checked ? "bg-[var(--sat-accent,#003f87)]" : "bg-[var(--sat-staff-switch-off)]"
         }`}
-      />
-      <span
-        aria-hidden="true"
-        className={`pointer-events-none absolute left-0.5 size-5 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.25)] transition-transform duration-150 ${
-          checked ? "translate-x-5" : "translate-x-0"
-        }`}
-      />
+      >
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,0.25)] transition-transform duration-150 ${
+            checked ? "translate-x-5" : "translate-x-0"
+          }`}
+        />
+      </span>
     </button>
   );
 }
