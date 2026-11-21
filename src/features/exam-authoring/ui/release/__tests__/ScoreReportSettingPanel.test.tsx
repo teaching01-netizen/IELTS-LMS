@@ -52,7 +52,7 @@ describe("ScoreReportSettingPanel", () => {
     expect(retakes).toBeChecked();
     expect(screen.getByRole("switch", { name: "Show results" })).not.toBeChecked();
     fireEvent.click(retakes);
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledWith({
       ...exam,
@@ -68,7 +68,7 @@ describe("ScoreReportSettingPanel", () => {
     render(<ScoreReportSettingPanel exam={exam} onSaved={onSaved} />);
 
     fireEvent.click(screen.getByRole("switch", { name: "Allow retakes" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Save failed");
     expect(onSaved).not.toHaveBeenCalled();
@@ -81,21 +81,21 @@ describe("ScoreReportSettingPanel", () => {
     render(<ScoreReportSettingPanel exam={exam} onSaved={onSaved} />);
 
     fireEvent.click(screen.getByRole("switch", { name: "Show results" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(await screen.findByText(/Exam changed while you were editing/)).toBeInTheDocument();
+    expect(await screen.findByText(/This exam changed while you were editing/)).toBeInTheDocument();
     // The dirty choice survives; reloading the base does not discard it.
     expect(screen.getByRole("switch", { name: "Show results" })).toBeChecked();
-    fireEvent.click(screen.getByRole("button", { name: "Reload latest" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reload latest values" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("switch", { name: "Show results" })).toBeChecked();
   });
 
   it("describes the exam-wide scope and the saved values", () => {
     render(<ScoreReportSettingPanel exam={exam} onSaved={vi.fn()} />);
-    expect(screen.getByText(/scheduled or running room/i)).toBeInTheDocument();
+    expect(screen.getByText(/scheduled, running, and paused rooms/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Closed rooms keep their own settings/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Currently saved:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Saved now/i)).toBeInTheDocument();
   });
 
   it("disables edits while the save is pending or the staff member cannot edit", () => {

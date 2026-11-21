@@ -40,7 +40,16 @@ describe("SatRoomLearningSettingsDialog", () => {
     renderDialog();
     expect(await screen.findByRole("switch", { name: "Show results" })).toBeChecked();
     expect(screen.getByRole("switch", { name: "Allow retakes" })).toBeChecked();
-    expect(screen.getByText(/apply to this room only/i)).toBeInTheDocument();
+    expect(screen.getByText(/applies to this room only/i)).toBeInTheDocument();
+  });
+
+  it("closes without saving from Cancel", async () => {
+    backendGet.mockResolvedValue(policy(4));
+    const onClose = renderDialog();
+    await screen.findByRole("switch", { name: "Show results" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(backendPut).not.toHaveBeenCalled();
   });
 
   it("keeps the draft and offers an explicit reapply after a revision conflict", async () => {
@@ -52,10 +61,10 @@ describe("SatRoomLearningSettingsDialog", () => {
     const onClose = renderDialog();
 
     fireEvent.click(await screen.findByRole("switch", { name: "Show results" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     expect(await screen.findByText(/saved by another teacher/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reapply my changes" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save my changes" })).toBeInTheDocument();
     // The dirty choice survives the conflict; the dialog did not close.
     expect(screen.getByRole("switch", { name: "Show results" })).not.toBeChecked();
     expect(onClose).not.toHaveBeenCalled();
@@ -65,7 +74,7 @@ describe("SatRoomLearningSettingsDialog", () => {
     }));
 
     backendGet.mockResolvedValue(policy(5));
-    fireEvent.click(screen.getByRole("button", { name: "Reapply my changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save my changes" }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(backendPut).toHaveBeenLastCalledWith("/v1/schedules/room-1/sat-learning-settings", expect.objectContaining({
       expectedRevision: 5,

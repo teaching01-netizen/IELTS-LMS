@@ -51,9 +51,33 @@ describe("SatLearningSettings", () => {
     await user.click(answerKey());
     expect(answerKey()).toBeChecked();
     expect(answerKey()).toHaveAccessibleDescription(
-      "The PDF includes correct answers starting with the first completed exam.",
+      "Adds the correct answers to the student’s PDF after their first completed attempt.",
     );
     expect(retakes()).not.toBeChecked();
+  });
+
+  it("groups the controls and explains why the answer key is unavailable", () => {
+    render(<Harness />);
+    expect(screen.getByRole("heading", { name: "Student results" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Retakes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Timer" })).toBeInTheDocument();
+    expect(screen.getByText("Requires Show results")).toBeInTheDocument();
+    expect(screen.getByText("Turning this on also turns on Show results.")).toBeInTheDocument();
+    expect(answerKey()).toHaveAccessibleDescription(
+      "Turn on Show results to make the answer key available.",
+    );
+  });
+
+  it("explains the exam-wide scope for exam defaults", () => {
+    render(
+      <SatLearningSettings
+        examDefaults
+        value={defaultSatClassroomLearningPolicy()}
+        onChange={() => undefined}
+      />,
+    );
+    expect(screen.getByText("Applies to this exam and its rooms")).toBeInTheDocument();
+    expect(screen.getByText(/Closed rooms keep their own settings/)).toBeInTheDocument();
   });
 
   it("leaves results and PDF keys on when staff turn retakes off", async () => {

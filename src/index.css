@@ -3035,6 +3035,7 @@ button:not(:disabled):active > .sat-annotation-press {
   --sat-staff-border-nav: rgba(0, 0, 0, 0.07);
   --sat-staff-border-input: rgba(0, 0, 0, 0.075);
   --sat-staff-border-strong: rgba(0, 0, 0, 0.09);
+  --sat-staff-switch-off: rgba(120, 120, 128, 0.32);
   --sat-staff-separator: var(--sat-separator);
   --sat-staff-separator-strong: var(--sat-separator-strong);
   --sat-staff-fill: var(--sat-fill);
@@ -3242,6 +3243,7 @@ button:not(:disabled):active > .sat-annotation-press {
     --sat-staff-border-nav: var(--sat-separator);
     --sat-staff-border-input: var(--sat-separator-strong);
     --sat-staff-border-strong: var(--sat-separator-strong);
+    --sat-staff-switch-off: var(--sat-separator-strong);
     --sat-staff-fill-faint: var(--sat-separator);
     --sat-staff-fill-chip: var(--sat-separator);
     --sat-staff-skeleton-bar-soft: var(--sat-separator);
@@ -3281,6 +3283,7 @@ button:not(:disabled):active > .sat-annotation-press {
     --sat-staff-text-secondary: CanvasText;
     --sat-staff-text-tertiary: CanvasText;
     --sat-staff-text-faint: GrayText;
+    --sat-staff-switch-off: GrayText;
     --sat-staff-text-inverse: Canvas;
     --sat-staff-text-disabled: GrayText;
     --sat-staff-accent: Highlight;
