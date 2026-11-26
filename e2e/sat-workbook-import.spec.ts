@@ -142,7 +142,7 @@ async function importWordVault(page: Page) {
       }
       expect(text).toContain("Workbook question 1");
       expect(text).toContain("The Word Vault");
-      expect(text).toContain("From Question 01");
+      expect(text.replace(/\s+/g, " ")).toContain("From Question 01");
       expect(text.replace(/\s+/g, "")).toContain("ปรับตัว");
     } finally {
       await pdf.destroy();
