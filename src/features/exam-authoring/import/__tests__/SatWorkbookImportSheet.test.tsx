@@ -284,9 +284,10 @@ describe("SAT workbook import sheet", () => {
       expect(screen.getByText("All 6 modules checked and ready to import")).toBeInTheDocument()
     );
     const replace = screen.getByRole("button", { name: "Replace draft with 147 questions" });
-    expect(replace).toBeDisabled();
-    expect(screen.getByText("Confirm the replacement to continue.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("checkbox", { name: /replaces all 12 questions/ }));
+    // The replace button names the effect; no acknowledgement checkbox gates it.
+    expect(screen.queryByRole("checkbox", { name: /replaces|understand/i })).not.toBeInTheDocument();
+    expect(replace).toBeEnabled();
+    expect(screen.getByText(/Replaces all 12 questions in this draft/)).toBeInTheDocument();
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Examples" }), { button: 0, ctrlKey: false });
     expect(screen.getByLabelText("Question example")).toBeInTheDocument();
     fireEvent.click(replace);
@@ -516,8 +517,6 @@ describe("SAT workbook import sheet", () => {
     expect(screen.getByText("27/27")).toBeInTheDocument();
     expect(screen.getByText(/left unchanged: .*Math · Module 2 — Higher/)).toBeInTheDocument();
     expect(screen.queryByText(/this replaces all 20/)).not.toBeInTheDocument();
-    expect(action).toBeDisabled();
-    fireEvent.click(screen.getByRole("checkbox", { name: /replaces the 20 questions currently in Reading & Writing · Module 1 with 27 questions\. Other modules stay unchanged/ }));
     expect(action).toBeEnabled();
     fireEvent.click(action);
     await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));

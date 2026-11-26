@@ -118,8 +118,7 @@ async function importWordVault(page: Page) {
   await startImport.click();
   await upload(1, "adapt");
   const replace = dialog.getByRole("button", { name: "Replace Word Vault" });
-  await expect(replace).toBeDisabled();
-  await dialog.getByRole("checkbox", { name: "Replace the entire draft Word Vault." }).check();
+  await expect(replace).toBeEnabled();
   await replace.click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText("1 word saved to the draft.")).toBeVisible();

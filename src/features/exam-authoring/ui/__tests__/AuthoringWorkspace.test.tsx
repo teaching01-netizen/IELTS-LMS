@@ -391,7 +391,7 @@ describe("AuthoringWorkspace (spine-only)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Import" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
     expect(await screen.findByRole("dialog", { name: "Import Vocabulary Excel" })).toBeInTheDocument();
-    expect(screen.getByText(/Drag and drop an \.xlsx workbook up to 2 MB/)).toBeInTheDocument();
+    expect(screen.getByText(/\.xlsx up to 2 MB/)).toBeInTheDocument();
   });
 
   it("keeps the vocabulary import out of non-SAT exams", async () => {

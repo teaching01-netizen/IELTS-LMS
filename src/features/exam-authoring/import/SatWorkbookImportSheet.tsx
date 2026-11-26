@@ -79,7 +79,6 @@ export function SatWorkbookImportSheet({
   const [stagedAssets, setStagedAssets] = useState<SatWorkbookStagedAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [failedStep, setFailedStep] = useState<FailedStep | null>(null);
-  const [replaceConfirmed, setReplaceConfirmed] = useState(false);
   const [selectedModuleKey, setSelectedModuleKey] = useState<string | null>(null);
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState(0);
   const [previewTab, setPreviewTab] = useState("examples");
@@ -98,7 +97,6 @@ export function SatWorkbookImportSheet({
     setStagedAssets([]);
     setError(null);
     setFailedStep(null);
-    setReplaceConfirmed(false);
     setSelectedModuleKey(null);
     setSelectedQuestionIndex(0);
   }, []);
@@ -178,7 +176,6 @@ export function SatWorkbookImportSheet({
     setActivity("checking");
     setError(null);
     setFailedStep(null);
-    setReplaceConfirmed(false);
     setFile(nextFile);
     setPreviewTab("workbook");
     setPreview(null);
@@ -239,9 +236,6 @@ export function SatWorkbookImportSheet({
       : `Fix the ${needsAttentionCount === 1 ? "module" : "modules"} marked Needs attention, then choose the file again.`;
   }
   else if (!stagingComplete) importDisabledReason = "Workbook visuals must finish securing first.";
-  else if (replacesContent && !replaceConfirmed) {
-    importDisabledReason = "Confirm the replacement to continue.";
-  }
   const canCommit = importDisabledReason === null && !busy;
 
   const commit = async () => {
@@ -298,20 +292,24 @@ export function SatWorkbookImportSheet({
       onClose={onClose}
       closeDisabled={busy}
       showHeader={false}
-      contentClassName="authoring-dialog-content--workbook au-elevation-sheet flex max-h-[94vh] max-w-[1320px] flex-col overflow-hidden rounded-[20px] p-0"
+      contentClassName="authoring-dialog-content--workbook au-elevation-sheet flex max-h-[94vh] max-w-[1320px] flex-col overflow-hidden rounded-[24px] p-0"
     >
-      <header className="flex shrink-0 items-start justify-between gap-3 border-b border-au-separator px-5 py-4 sm:px-6">
-        <div>
-          <h2 className="text-base font-semibold tracking-[-0.02em] text-slate-950">
+      <header className="flex shrink-0 items-start justify-between gap-4 border-b border-au-separator px-5 py-4 sm:px-6">
+        <div className="min-w-0">
+          <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-slate-950">
             Import SAT from Excel
           </h2>
-          <p className="mt-1 text-xs leading-5 text-slate-600">
-            Upload one workbook. We detect which modules it contains and import only those; every
-            other module, routing and scoring settings stay as they are. If another author saves
-            first, the import conflicts instead of overwriting. Published versions are untouched.
-            After the import you can undo it until you edit further or publish. Nothing changes
-            until you confirm.
+          <p className="mt-1 text-sm leading-5 text-slate-600">
+            Upload one workbook, check every question, and import only the modules it contains.
           </p>
+          <details className="mt-2 text-xs leading-5 text-slate-600">
+            <summary className="cursor-pointer font-semibold text-au-accent">How the import works</summary>
+            <ul className="mt-1 list-disc space-y-1 pl-4">
+              <li>Only the modules in your workbook change. Routing, scoring and other modules stay as they are.</li>
+              <li>If another author saves first, the import conflicts instead of overwriting. Published versions are untouched.</li>
+              <li>Nothing changes until you confirm. Undo stays available until you edit further or publish.</li>
+            </ul>
+          </details>
         </div>
         <button
           type="button"
@@ -326,6 +324,7 @@ export function SatWorkbookImportSheet({
 
       <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[380px_minmax(0,1fr)] lg:overflow-hidden">
         <div className="min-h-0 border-b border-au-separator p-4 sm:p-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+          <p className="mb-2 text-sm font-semibold text-slate-900">Workbook</p>
           <DropTarget
             file={file}
             checking={busy}
@@ -350,7 +349,7 @@ export function SatWorkbookImportSheet({
             type="button"
             onClick={() => void downloadTemplate()}
             aria-describedby="sat-workbook-template-hint"
-            className="authoring-interactive mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-[11px] text-xs font-semibold text-au-accent hover:bg-au-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+            className="authoring-interactive mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-full text-sm font-semibold text-slate-700 hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
           >
             <Download size={14} aria-hidden="true" />
             Download SAT Excel template
@@ -364,7 +363,7 @@ export function SatWorkbookImportSheet({
           </p>
 
           {previewTab === "examples" ? <SatWorkbookExampleGuide example={example} /> : (
-            <p className="mt-3 rounded-xl bg-au-fill p-3 text-xs leading-5 text-slate-600">
+            <p className="mt-3 rounded-2xl bg-au-fill p-3 text-xs leading-5 text-slate-600">
               Prompt → Question text. Stimulus → Passage or image (optional). Open Examples to see where each Excel value appears.
             </p>
           )}
@@ -374,7 +373,7 @@ export function SatWorkbookImportSheet({
               ref={errorRef}
               tabIndex={-1}
               role="alert"
-              className="mt-3 rounded-xl bg-au-danger-tint px-3 py-2.5 text-xs leading-5 text-au-danger-text outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
+              className="mt-3 rounded-2xl bg-au-danger-tint px-3 py-2.5 text-xs leading-5 text-au-danger-text outline-none focus-visible:ring-2 focus-visible:ring-au-accent"
             >
               <div className="flex gap-2">
                 <AlertCircle size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -385,7 +384,7 @@ export function SatWorkbookImportSheet({
                   type="button"
                   disabled={busy}
                   onClick={retryFailedStep}
-                  className="authoring-interactive mt-2 min-h-11 rounded-[10px] bg-au-surface px-3 text-xs font-semibold text-au-danger-text ring-1 ring-au-danger-text/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-40"
+                  className="authoring-interactive mt-2 min-h-11 rounded-full bg-au-surface px-3 text-xs font-semibold text-au-danger-text ring-1 ring-au-danger-text/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-40"
                 >
                   {FAILED_STEP_RETRY_LABEL[failedStep]}
                 </button>
@@ -414,19 +413,19 @@ export function SatWorkbookImportSheet({
 
           {preview ? (
             <>
-              <div className="mt-4 grid grid-cols-4 gap-2">
-                <Metric label="Questions" value={preview.questionCount} />
-                <Metric label="Modules" value={detected.length} />
-                <Metric label="Visuals" value={preview.assets.length} />
-                <Metric label="Issues" value={preview.issues.length} bad={!preview.valid} />
+              <div className="mt-4 flex flex-wrap gap-1.5">
+                <Stat value={preview.questionCount} label="questions" />
+                <Stat value={detected.length} label="modules" />
+                <Stat value={preview.assets.length} label="visuals" />
+                <Stat value={preview.issues.length} label="issues" tone={preview.valid ? "neutral" : "warning"} />
               </div>
 
               <div className="mt-4">
-                <p className="px-1 text-xs font-semibold text-slate-600">
+                <p className="px-1 text-sm font-semibold text-slate-900">
                   {detected.length === 0 ? "Found in your workbook" : `Found in your workbook · ${detected.filter((module) => module.ready).length} of ${detected.length} ready`}
                 </p>
                 {detected.length === 0 ? (
-                  <p className="mt-1 rounded-[10px] bg-au-warning-tint px-3 py-2 text-xs leading-5 text-au-warning-text">
+                  <p className="mt-1 rounded-2xl bg-au-warning-tint px-3 py-2 text-xs leading-5 text-au-warning-text">
                     No module with questions was found. Fill in the rows of at least one module in
                     the template, then choose the file again.
                   </p>
@@ -460,7 +459,7 @@ export function SatWorkbookImportSheet({
                                   setSelectedModuleKey(module.moduleKey);
                                   setSelectedQuestionIndex(0);
                                 }}
-                                className={`flex min-h-11 w-full flex-col justify-center rounded-[10px] px-2.5 py-1 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent ${
+                                className={`flex min-h-11 w-full flex-col justify-center rounded-xl px-2.5 py-1 text-left text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent ${
                                   selected
                                     ? "bg-au-accent-tint-strong text-au-accent"
                                     : "text-slate-700 hover:bg-au-fill"
@@ -508,12 +507,12 @@ export function SatWorkbookImportSheet({
 
               {preview.issues.length ? (
                 <div className="mt-4">
-                  <p className="px-1 text-xs font-semibold text-slate-600">Needs attention</p>
+                  <p className="px-1 text-sm font-semibold text-slate-900">Needs attention</p>
                   <div className="mt-1.5 space-y-1.5">
                     {preview.issues.slice(0, 60).map((issue, index) => (
                       <div
                         key={`${issue.row}-${issue.field}-${index}`}
-                        className="rounded-[10px] bg-au-warning-tint px-3 py-2 text-xs leading-4 text-au-warning-text"
+                        className="rounded-2xl bg-au-warning-tint px-3 py-2 text-xs leading-4 text-au-warning-text"
                       >
                         <strong>
                           {issue.moduleKey ? `${moduleLabel(issue.moduleKey)} · ` : ""}
@@ -527,7 +526,7 @@ export function SatWorkbookImportSheet({
                   </div>
                 </div>
               ) : stagingComplete && activity !== "staging" && detected.length > 0 ? (
-                <div className="mt-4 flex items-center gap-2 rounded-xl bg-au-success-tint px-3 py-2.5 text-xs font-medium text-au-success-text">
+                <div className="mt-4 flex items-center gap-2 rounded-2xl bg-au-success-tint px-3 py-2.5 text-xs font-medium text-au-success-text">
                   <CheckCircle2 size={15} aria-hidden="true" />
                   {detected.length === 1 ? "Module checked and ready to import" : `All ${detected.length} modules checked and ready to import`}
                 </div>
@@ -611,42 +610,18 @@ export function SatWorkbookImportSheet({
         </Tabs>
       </div>
 
-      <footer className="shrink-0 border-t border-au-separator px-5 py-3 sm:px-6">
-        {replacesContent && preview?.valid ? (
-          <label htmlFor="sat-workbook-replacement-confirmation" className="mb-3 flex min-h-11 items-start gap-3 rounded-[12px] bg-au-warning-tint px-3 py-2.5 text-xs leading-5 text-au-warning-text">
-            <input
-              id="sat-workbook-replacement-confirmation"
-              type="checkbox"
-              aria-labelledby="sat-workbook-replacement-confirmation-label"
-              checked={replaceConfirmed}
-              disabled={busy}
-              onChange={(event) => setReplaceConfirmed(event.target.checked)}
-              className="mt-1 h-4 w-4 shrink-0 accent-[var(--au-accent,#2563eb)]"
-            />
-            <span id="sat-workbook-replacement-confirmation-label">
-              {replacesWholeDraft ? (
-                <>I understand this replaces all {questionsLabel(existingQuestionCount)} in the
-                current draft with the {questionsLabel(preview.questionCount)} from this
-                workbook. Published versions are untouched, and I can undo until I edit or
-                publish.</>
-              ) : (
-                <>I understand this replaces the {questionsLabel(replacementCount)} currently in {detectedLabels} with{" "}
-                {questionsLabel(preview.questionCount)}. Other modules stay unchanged. I can undo until I edit or publish.</>
-              )}
-            </span>
-          </label>
-        ) : null}
+      <footer className="shrink-0 border-t border-au-separator bg-au-surface px-5 py-4 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p
             id="sat-workbook-import-hint"
             aria-live="polite"
-            className="max-w-xl text-xs leading-4 text-slate-600"
+            className="max-w-xl text-xs leading-5 text-slate-600"
           >
             {activity === "importing"
               ? "Importing… keep this window open."
               : importDisabledReason ?? (replacesWholeDraft
                 ? replacesContent
-                  ? `${questionsLabel(existingQuestionCount)} in the current draft will be replaced.`
+                  ? `Replaces all ${questionsLabel(existingQuestionCount)} in this draft. Undo stays available until you edit or publish.`
                   : "Import creates the complete draft atomically; a failed import changes nothing."
                 : `${questionsLabel(preview?.questionCount ?? 0)} will be imported into ${detectedLabels}. Other modules stay unchanged.`)}
           </p>
@@ -655,7 +630,7 @@ export function SatWorkbookImportSheet({
               type="button"
               disabled={busy}
               onClick={onClose}
-              className="min-h-11 rounded-full px-4 text-xs font-semibold text-slate-600 hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-35"
+              className="min-h-11 rounded-full px-4 text-sm font-semibold text-slate-600 hover:bg-au-fill focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:opacity-35"
             >
               Cancel
             </button>
@@ -664,7 +639,7 @@ export function SatWorkbookImportSheet({
               disabled={!canCommit}
               aria-describedby="sat-workbook-import-hint"
               onClick={() => void commit()}
-              className="authoring-interactive min-h-11 rounded-[11px] bg-au-accent px-4 text-sm font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35"
+              className="authoring-interactive min-h-11 rounded-full bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35"
             >
               {activity === "importing" ? "Importing…" : importLabel}
             </button>
@@ -806,8 +781,8 @@ function DropTarget({
       disabled={checking}
       aria-label="Choose or drop SAT Excel workbook"
       onClick={onChoose}
-      className={`min-h-11 w-full rounded-[16px] border border-dashed p-5 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:cursor-wait ${
-        dragging ? "border-au-accent/55 bg-au-accent-tint" : "border-au-separator bg-au-fill"
+      className={`min-h-11 w-full rounded-[20px] border border-dashed px-5 py-6 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent disabled:cursor-wait ${
+        dragging ? "border-au-accent/55 bg-au-accent-tint" : "border-au-separator bg-au-fill hover:border-au-accent/40 hover:bg-au-accent-tint/50"
       }`}
       onDragEnter={(event) => {
         event.preventDefault();
@@ -822,30 +797,30 @@ function DropTarget({
         if (nextFile) onDrop(nextFile);
       }}
     >
-      <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-au-surface text-au-accent shadow-sm" aria-hidden="true">
-        <UploadCloud size={18} aria-hidden="true" />
+      <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-au-surface text-au-accent shadow-sm ring-1 ring-au-separator" aria-hidden="true">
+        <UploadCloud size={20} aria-hidden="true" />
       </span>
-      <p className="mt-3 truncate text-sm font-semibold text-slate-800">
+      <p className="mt-3 truncate text-sm font-semibold text-slate-900">
         {checking ? "Preparing workbook…" : (file?.name ?? "Drop your SAT Excel workbook")}
       </p>
       <p className="mt-1 text-xs leading-4 text-slate-600">.xlsx · up to 12 MB</p>
-      <span className="mt-3 inline-flex min-h-11 items-center rounded-full bg-au-surface px-3.5 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-au-accent/10">
+      <span className="mt-3 inline-flex min-h-10 items-center rounded-full bg-au-accent px-4 text-sm font-semibold text-white">
         Choose File
       </span>
     </button>
   );
 }
 
-function Metric({ label, value, bad = false }: { label: string; value: number; bad?: boolean }) {
+function Stat({ label, value, tone = "neutral" }: { label: string; value: number; tone?: "neutral" | "warning" }) {
   return (
-    <div className="rounded-[11px] bg-au-fill px-2.5 py-2">
-      <p className="text-xs font-medium text-slate-600">{label}</p>
-      <p
-        className={`mt-0.5 text-[15px] font-semibold tabular-nums ${bad ? "text-au-warning-text" : "text-slate-800"}`}
-      >
-        {value}
-      </p>
-    </div>
+    <span
+      className={`inline-flex items-baseline gap-1.5 rounded-full px-3 py-1 text-xs ${
+        tone === "warning" ? "bg-au-warning-tint text-au-warning-text" : "bg-au-fill text-slate-700"
+      }`}
+    >
+      <strong className="text-sm font-semibold tabular-nums">{value}</strong>
+      {label}
+    </span>
   );
 }
 
