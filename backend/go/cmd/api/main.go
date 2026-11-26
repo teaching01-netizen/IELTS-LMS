@@ -42,6 +42,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/crypto"
 	"example.com/ielts-proctoring/internal/platform/db"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/platform/objectstore"
 	"example.com/ielts-proctoring/internal/platform/shutdown"
 	"example.com/ielts-proctoring/internal/platform/telemetry"
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -103,6 +104,7 @@ type App struct {
 	AnsweredPDF   *answeredpdf.Renderer
 	PDFExports    *answeredpdf.Exports
 	PDFLayouts    *satpdflayout.Service
+	ObjectStore   objectstore.Store
 	Release       *release.Service
 	Runtime       *runtime.Service
 	Terminal      *terminalization.Service
@@ -291,6 +293,7 @@ func BuildApp(cfg config.Config, pool *sql.DB) *App {
 		app.Media = svc.Media
 		app.PDFExports = svc.PDFExports
 		app.PDFLayouts = svc.PDFLayouts
+		app.ObjectStore = svc.ObjectStore
 		app.Library = svc.Library
 		app.AnswerHistory = svc.AnswerHistory
 		app.Authoring = svc.Authoring

@@ -62,6 +62,7 @@ type Services struct {
 	Media         *media.Service
 	PDFExports    *answeredpdf.Exports
 	PDFLayouts    *satpdflayout.Service
+	ObjectStore   objectstore.Store
 	Library       *library.Service
 	AnswerHistory *answerhistory.Service
 	Authoring     *authoring.Service
@@ -135,6 +136,7 @@ func Build(cfg config.Config, pool *sql.DB, deps Deps) *Services {
 		media.NewHTTPRemoteImageFetcher(media.RemoteImageFetcherOptions{}),
 	)
 	store := objectstore.NewLocalStore(cfg.ObjectStorageLocalRoot)
+	s.ObjectStore = store
 	s.PDFExports = answeredpdf.NewExports(pool, store)
 	s.PDFLayouts = satpdflayout.New(pool, store)
 	s.Exams.SetMediaVerifier(s.Media)

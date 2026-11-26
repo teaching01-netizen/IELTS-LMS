@@ -17,17 +17,20 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// The example is a full paper render. Keep the whole request bounded: a broken
+// database or renderer must fail in under a minute with a retryable message,
+// not hold the connection until a proxy gives up.
 const scoreReportExampleTimeout = 45 * time.Second
 
 // satScoreReportExampleHandler serves the authoring example: a sample paper
-// with every sample question answered correctly, the answer key, the saved PDF
-// layout, and the exam's Word Vault from the current draft (or the latest
-// published version when no draft is open).
+// with every question answered correctly, the answer key, the saved PDF layout,
+// and the exam's Word Vault from the current draft (or the latest published
+// version when no draft is open).
 //
-// This is a preview, never a student artifact: the candidate is "Sample
-// Student", the answer key is always present, and the filename says example.
-// A stale vault blocks the download for the same reason it blocks student
-// PDFs: the example must not print a paper students cannot receive.
+// The rendered artifact is cached per content revision in the object store, so
+// only the first download after a change pays for Chromium. A cheap revision
+// key is checked before the delivery tree, answers, vault, layout and renderer
+// are touched.
 func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, no-store")
@@ -45,23 +48,57 @@ func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "The score report example is unavailable."))
 			return
 		}
+		versionID, versionRevision, examRevision, layoutRevision, err := scoreReportExampleVersion(ctx, app, examID)
+		if err != nil {
+			writeScoreReportExampleError(w, r, err)
+			return
+		}
+		cacheKey := scoreReportExampleCacheKey(examID, versionID, versionRevision, examRevision, layoutRevision, title)
+		if pdf, cached := readCachedScoreReportExample(ctx, app.ObjectStore, examID, cacheKey); cached {
+			slog.InfoContext(ctx, "sat score report example", "exam_id", examID, "stage", "cache_hit")
+			serveScoreReportExample(w, pdf, title)
+			return
+		}
+
+		// One render per exam in this process; the losers re-read the cache.
+		unlock := lockScoreReportExample(examID)
+		defer unlock()
+		versionID, versionRevision, examRevision, layoutRevision, err = scoreReportExampleVersion(ctx, app, examID)
+		if err != nil {
+			writeScoreReportExampleError(w, r, err)
+			return
+		}
+		cacheKey = scoreReportExampleCacheKey(examID, versionID, versionRevision, examRevision, layoutRevision, title)
+		if pdf, cached := readCachedScoreReportExample(ctx, app.ObjectStore, examID, cacheKey); cached {
+			slog.InfoContext(ctx, "sat score report example", "exam_id", examID, "stage", "cache_hit_after_wait")
+			serveScoreReportExample(w, pdf, title)
+			return
+		}
+		started := time.Now()
 		requestID := httpx.RequestIDOf(w, r)
 		pdf, err := app.AnsweredPDF.RenderPreview(ctx, func(ctx context.Context) ([]byte, error) {
 			return buildScoreReportExample(ctx, app, examID, title, requestID)
 		})
 		if err != nil {
+			slog.InfoContext(ctx, "sat score report example", "exam_id", examID, "stage", "render_failed", "elapsed_ms", time.Since(started).Milliseconds())
 			writeScoreReportExampleError(w, r, err)
 			return
 		}
-		w.Header().Set("Content-Type", "application/pdf")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{
-			"filename": answeredpdf.ExampleFilename(title),
-		}))
-		_, _ = w.Write(pdf)
+		// Do not cache a paper that a newer revision has already superseded.
+		if currentVersion, currentVersionRevision, currentExamRevision, currentLayout, versionErr := scoreReportExampleVersion(ctx, app, examID); versionErr == nil {
+			currentKey := scoreReportExampleCacheKey(examID, currentVersion, currentVersionRevision, currentExamRevision, currentLayout, title)
+			if currentKey == cacheKey {
+				writeCachedScoreReportExample(ctx, app.ObjectStore, examID, cacheKey, pdf)
+			}
+		}
+		slog.InfoContext(ctx, "sat score report example", "exam_id", examID, "stage", "rendered",
+			"elapsed_ms", time.Since(started).Milliseconds(), "bytes", len(pdf))
+		serveScoreReportExample(w, pdf, title)
 	}
 }
 
+// buildScoreReportExample runs inside the render slot: vault, layout, real
+// paper and media preparation share the render deadline.
 func buildScoreReportExample(ctx context.Context, app *App, examID, title, requestID string) (payload []byte, err error) {
 	started := time.Now()
 	stage, stageStarted := "version", started
@@ -82,7 +119,7 @@ func buildScoreReportExample(ctx context.Context, app *App, examID, title, reque
 			slog.Attr{Key: "timings", Value: slog.GroupValue(timings...)},
 		)
 	}()
-	versionID, err := scoreReportExampleVersion(ctx, app, examID)
+	versionID, _, _, _, err := scoreReportExampleVersion(ctx, app, examID)
 	if err != nil {
 		return nil, err
 	}
@@ -109,6 +146,15 @@ func buildScoreReportExample(ctx context.Context, app *App, examID, title, reque
 	return answeredpdf.BuildAttemptPayload(ctx, exam, view, app.Media.OpenOriginal, layout, words)
 }
 
+func serveScoreReportExample(w http.ResponseWriter, pdf []byte, title string) {
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{
+		"filename": answeredpdf.ExampleFilename(title),
+	}))
+	_, _ = w.Write(pdf)
+}
+
 func writeScoreReportExampleError(w http.ResponseWriter, r *http.Request, err error) {
 	if r.Context().Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		w.Header().Set("Retry-After", "2")
@@ -120,21 +166,25 @@ func writeScoreReportExampleError(w http.ResponseWriter, r *http.Request, err er
 }
 
 // scoreReportExampleVersion follows the PDF layout editor's version rule: the
-// editable draft when one exists, otherwise the latest published version.
-func scoreReportExampleVersion(ctx context.Context, app *App, examID string) (string, error) {
-	var versionID sql.NullString
-	err := app.DB.QueryRowContext(ctx, `
-		SELECT COALESCE(e.current_draft_version_id, e.current_published_version_id)
+// editable draft when one exists, otherwise the latest published version. The
+// revisions are the cheap cache key inputs.
+func scoreReportExampleVersion(ctx context.Context, app *App, examID string) (versionID string, versionRevision, examRevision, layoutRevision int, err error) {
+	var rawVersionID sql.NullString
+	err = app.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(e.current_draft_version_id, e.current_published_version_id),
+		       COALESCE(v.revision, 0), e.revision,
+		       COALESCE((SELECT revision FROM sat_exam_pdf_layouts WHERE exam_id = e.id), 0)
 		FROM exam_entities e
-		WHERE e.id = ? AND e.provider_key = 'sat' AND e.status <> 'archived'`, examID).Scan(&versionID)
+		LEFT JOIN exam_versions v ON v.id = COALESCE(e.current_draft_version_id, e.current_published_version_id)
+		WHERE e.id = ? AND e.provider_key = 'sat' AND e.status <> 'archived'`, examID).Scan(&rawVersionID, &versionRevision, &examRevision, &layoutRevision)
 	if err == sql.ErrNoRows {
-		return "", apperrors.New(apperrors.CodeNotFound, "SAT exam not found.")
+		return "", 0, 0, 0, apperrors.New(apperrors.CodeNotFound, "SAT exam not found.")
 	}
 	if err != nil {
-		return "", err
+		return "", 0, 0, 0, err
 	}
-	if !versionID.Valid || strings.TrimSpace(versionID.String) == "" {
-		return "", apperrors.New(apperrors.CodeValidation, "Open a draft or publish this exam before downloading a score report example.")
+	if !rawVersionID.Valid || strings.TrimSpace(rawVersionID.String) == "" {
+		return "", 0, 0, 0, apperrors.New(apperrors.CodeValidation, "Open a draft or publish this exam before downloading a score report example.")
 	}
-	return versionID.String, nil
+	return rawVersionID.String, versionRevision, examRevision, layoutRevision, nil
 }
