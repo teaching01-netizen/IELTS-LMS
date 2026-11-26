@@ -15,11 +15,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"example.com/ielts-proctoring/internal/platform/httpx"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/fetch"
@@ -108,8 +111,7 @@ func (r *Renderer) RenderPrepared(ctx context.Context, build func(context.Contex
 	return optimizePDF(ctx, pdf, losslessOptimize)
 }
 
-func (r *Renderer) render(ctx context.Context, payload []byte) ([]byte, error) {
-
+func (r *Renderer) render(ctx context.Context, payload []byte) (pdf []byte, err error) {
 	token, err := randomToken()
 	if err != nil {
 		return nil, err
@@ -138,28 +140,61 @@ func (r *Renderer) render(ctx context.Context, payload []byte) ([]byte, error) {
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("font-render-hinting", "none"),
 	)...)
-	defer cancelAlloc()
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	defer cancelBrowser()
 
-	// Subscribe before navigating so no request goes unanswered.
-	paused := chromedp.Events(browserCtx, fetch.RequestPaused)
-	go func() {
-		for e, err := range paused {
-			if err != nil {
-				return
-			}
-			if e.Request != nil && strings.HasPrefix(e.Request.URL, origin+"/") {
-				_, _ = chromedp.Call(browserCtx, fetch.ContinueRequest, fetch.ContinueRequestParams{RequestID: e.RequestID})
-				continue
-			}
-			_, _ = chromedp.Call(browserCtx, fetch.FailRequest, fetch.FailRequestParams{
-				RequestID: e.RequestID, ErrorReason: network.ErrorReasonBlockedByClient,
-			})
+	started := time.Now()
+	stage, stageStarted := "browser_startup", started
+	timings := make([]slog.Attr, 0, 5)
+	advance := func(next string) {
+		timings = append(timings, slog.Int64(stage+"_ms", time.Since(stageStarted).Milliseconds()))
+		stage, stageStarted = next, time.Now()
+	}
+	defer func() {
+		lastStage := stage
+		advance("")
+		cleanupStarted := time.Now()
+		cancelBrowser()
+		cancelAlloc()
+		status := "ok"
+		switch {
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, chromedp.ErrPollingTimeout):
+			status = "timeout"
+		case errors.Is(err, context.Canceled):
+			status = "canceled"
+		case errors.Is(err, ErrNotPrintable):
+			status = "not_printable"
+		case err != nil:
+			status = "failed"
 		}
+		slog.LogAttrs(ctx, slog.LevelInfo, "SAT answered PDF render",
+			slog.String("request_id", httpx.RequestIDFrom(ctx, nil)),
+			slog.String("stage", lastStage),
+			slog.String("status", status),
+			slog.Int64("elapsed_ms", time.Since(started).Milliseconds()),
+			slog.Int64("cleanup_ms", time.Since(cleanupStarted).Milliseconds()),
+			slog.Int("payload_bytes", len(payload)),
+			slog.Attr{Key: "timings", Value: slog.GroupValue(timings...)},
+		)
 	}()
 
-	pdf, err := chromedp.Run(browserCtx, func(ctx context.Context, t *chromedp.Target) ([]byte, error) {
+	pdf, err = chromedp.Run(browserCtx, func(ctx context.Context, t *chromedp.Target) ([]byte, error) {
+		advance("browser_setup")
+		// Subscribe before enabling interception so no request goes unanswered.
+		paused := cdp.Events(ctx, t, fetch.RequestPaused)
+		go func() {
+			for e, err := range paused {
+				if err != nil {
+					return
+				}
+				if e.Request != nil && strings.HasPrefix(e.Request.URL, origin+"/") {
+					_, _ = cdp.Call(ctx, t, fetch.ContinueRequest, fetch.ContinueRequestParams{RequestID: e.RequestID})
+					continue
+				}
+				_, _ = cdp.Call(ctx, t, fetch.FailRequest, fetch.FailRequestParams{
+					RequestID: e.RequestID, ErrorReason: network.ErrorReasonBlockedByClient,
+				})
+			}
+		}()
 		if _, err := cdp.Call(ctx, t, fetch.Enable, fetch.EnableParams{}); err != nil {
 			return nil, err
 		}
@@ -169,35 +204,46 @@ func (r *Renderer) render(ctx context.Context, payload []byte) ([]byte, error) {
 		if _, err := chromedp.EmulateViewport(viewportW, viewportH)(ctx, t); err != nil {
 			return nil, err
 		}
+		advance("navigate")
 		if _, err := chromedp.Navigate(origin+PrintRoute+"?payload="+token)(ctx, t); err != nil {
 			return nil, err
 		}
+		advance("print_ready")
+		// Use the Go render deadline even if the page's timers stall.
 		state, err := chromedp.Poll[string](`(document.body && document.body.dataset.printState) || ""`,
 			chromedp.WithPollingInterval(100*time.Millisecond),
-			chromedp.WithPollingTimeout(RenderTimeout))(ctx, t)
+			chromedp.WithPollingTimeout(0))(ctx, t)
 		if err != nil {
 			return nil, err
 		}
 		if state != "ready" {
-			return nil, ErrNotPrintable
+			// The page reports why it failed; log it for operations without
+			// returning private content to the caller.
+			pageError, _ := chromedp.Evaluate[string](`(document.body && document.body.dataset.printError) || ""`)(ctx, t)
+			if len(pageError) > 800 {
+				pageError = pageError[:800]
+			}
+			slog.InfoContext(ctx, "SAT answered PDF page failure",
+				slog.String("request_id", httpx.RequestIDFrom(ctx, nil)),
+				slog.String("page_error", pageError),
+				slog.String("print_state", state),
+			)
+			if pageError == "" {
+				return nil, ErrNotPrintable
+			}
+			return nil, fmt.Errorf("%w: %s", ErrNotPrintable, pageError)
 		}
+		advance("print_pdf")
 		return chromedp.PrintToPDF(
 			chromedp.PDFPaper(chromedp.PaperSize{Width: paperWidthIn, Height: paperHeightIn}),
 			chromedp.PDFPreferCSSPageSize(),
 			chromedp.PDFPrintBackground(),
 		)(ctx, t)
 	})
-	// A paper that never reports a state within the bound is not printable.
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	if errors.Is(err, ErrNotPrintable) {
-		return nil, ErrNotPrintable
-	}
-	if err != nil {
-		return nil, err
-	}
-	return pdf, nil
+	return pdf, err
 }
 
 func randomToken() (string, error) {

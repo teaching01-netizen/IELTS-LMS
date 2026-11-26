@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"example.com/ielts-proctoring/internal/platform/httpx"
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 )
@@ -38,6 +39,7 @@ func optimizePDF(ctx context.Context, original []byte, optimize func(context.Con
 	defer func() {
 		// Codes only: parser errors can quote private PDF content.
 		slog.InfoContext(ctx, "SAT answered PDF optimization",
+			"request_id", httpx.RequestIDFrom(ctx, nil),
 			"original_bytes", len(original), "output_bytes", len(result),
 			"optimization_ms", time.Since(started).Milliseconds(), "status", status)
 	}()

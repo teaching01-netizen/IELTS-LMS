@@ -5,6 +5,7 @@ const originalFetch = global.fetch;
 
 afterEach(() => {
   global.fetch = originalFetch;
+  vi.useRealTimers();
 });
 
 describe("scoreReportExampleApi", () => {
@@ -43,5 +44,18 @@ describe("scoreReportExampleApi", () => {
     );
     expect(result.blob).toBe(blob);
     expect(result.filename).toBe("SAT Practice 04 - Score report example.pdf");
+  });
+
+  it("aborts a stalled example download with a retry message", async () => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn((_url, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    }));
+
+    const result = expect(scoreReportExampleApi.download("exam-1")).rejects.toThrow(
+      "The score report example took too long. Try again."
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await result;
   });
 });

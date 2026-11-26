@@ -151,6 +151,9 @@ func TestBuildSampleAnsweredExamUsesTheRealPaper(t *testing.T) {
 	if exam.ExamID != "exam-1" || exam.ExamTitle != "Practice" || exam.CandidateName != "Sample Student" || exam.VersionID != "v1" {
 		t.Fatalf("identity is incomplete: %+v", exam)
 	}
+	if len(exam.Sections) != 2 || len(exam.Sections[0].Modules) != 1 {
+		t.Fatalf("the exam must carry the real tree: %+v", exam.Sections)
+	}
 	if len(exam.Attempt.ModuleAttempts) != 2 || len(exam.Attempt.Responses) != 3 || len(exam.AnswerKey.Entries) != 3 {
 		t.Fatalf("paper rows are incomplete: attempts=%d responses=%d key=%d",
 			len(exam.Attempt.ModuleAttempts), len(exam.Attempt.Responses), len(exam.AnswerKey.Entries))

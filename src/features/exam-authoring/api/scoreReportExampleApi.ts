@@ -28,18 +28,30 @@ export function exampleFilename(disposition: string | null): string {
 
 export const scoreReportExampleApi = {
   async download(examId: string): Promise<ScoreReportExampleDownload> {
-    const response = await fetch(path(examId), {
-      credentials: "same-origin",
-      headers: { Accept: "application/pdf" },
-    });
-    if (!response.ok) throw await apiClient.errorFromResponse(response);
-    if (response.headers.get("Content-Type")?.split(";")[0] !== "application/pdf") {
-      throw new Error("The score report example did not return a PDF.");
+    // The server caps itself below this; the client cap only protects against
+    // a proxy holding the connection after the server is gone.
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 60_000);
+    try {
+      const response = await fetch(path(examId), {
+        credentials: "same-origin",
+        headers: { Accept: "application/pdf" },
+        signal: controller.signal,
+      });
+      if (!response.ok) throw await apiClient.errorFromResponse(response);
+      if (response.headers.get("Content-Type")?.split(";")[0] !== "application/pdf") {
+        throw new Error("The score report example did not return a PDF.");
+      }
+      return {
+        blob: await response.blob(),
+        filename: exampleFilename(response.headers.get("Content-Disposition")),
+      };
+    } catch (cause) {
+      if (controller.signal.aborted) throw new Error("The score report example took too long. Try again.");
+      throw cause;
+    } finally {
+      window.clearTimeout(timer);
     }
-    return {
-      blob: await response.blob(),
-      filename: exampleFilename(response.headers.get("Content-Disposition")),
-    };
   },
 };
 

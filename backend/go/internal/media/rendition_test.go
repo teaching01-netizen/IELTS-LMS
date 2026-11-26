@@ -359,12 +359,12 @@ func TestOpenDeliveryServesRenditionOnceReady(t *testing.T) {
 	if err := store.Put(context.Background(), "assets/a1", src, "image/png"); err != nil {
 		t.Fatal(err)
 	}
-	read := func() (string, []byte) {
+	read := func(open func(context.Context, string) (Content, error)) (string, []byte) {
 		t.Helper()
 		mock.ExpectQuery(regexp.QuoteMeta("FROM media_assets WHERE id = ?")).
 			WithArgs("a1").
 			WillReturnRows(assetRow("a1", StatusFinalized, "assets/a1", "image/png"))
-		content, err := svc.OpenDelivery(context.Background(), "a1")
+		content, err := open(context.Background(), "a1")
 		if err != nil {
 			t.Fatalf("open delivery: %v", err)
 		}
@@ -376,20 +376,27 @@ func TestOpenDeliveryServesRenditionOnceReady(t *testing.T) {
 		return content.ContentType, body
 	}
 
+	if ct, body := read(svc.OpenOriginal); ct != "image/png" || !bytes.Equal(body, src) {
+		t.Fatalf("original-only read must serve the original (%s, %d bytes)", ct, len(body))
+	}
+	if len(svc.renditions.attempted) != 0 {
+		t.Fatal("original-only read started rendition work")
+	}
+
 	// First request: no rendition yet -> the original, never a wait.
-	if ct, body := read(); ct != "image/png" || !bytes.Equal(body, src) {
+	if ct, body := read(svc.OpenDelivery); ct != "image/png" || !bytes.Equal(body, src) {
 		t.Fatalf("first read must serve the original (%s, %d bytes)", ct, len(body))
 	}
 	svc.renditions.wg.Wait()
 	// Later requests get the screen-sized copy.
-	if _, body := read(); len(body) == 0 || len(body) >= len(src) {
+	if _, body := read(svc.OpenDelivery); len(body) == 0 || len(body) >= len(src) {
 		t.Fatalf("rendition must be served once ready: %d bytes vs original %d", len(body), len(src))
 	}
 	// An empty marker means the original is already the best copy.
 	if err := os.WriteFile(filepath.Join(root, "assets", "a1"+deliveryRenditionSuffix), nil, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if _, body := read(); !bytes.Equal(body, src) {
+	if _, body := read(svc.OpenDelivery); !bytes.Equal(body, src) {
 		t.Fatalf("empty marker must serve the original")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

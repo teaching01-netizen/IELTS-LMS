@@ -1,12 +1,44 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"example.com/ielts-proctoring/internal/answeredpdf"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"github.com/DATA-DOG/go-sqlmock"
 )
+
+func TestScoreReportExampleRenderErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		status     int
+		message    string
+		retryAfter string
+	}{
+		{"deadline", fmt.Errorf("print readiness: %w", context.DeadlineExceeded), http.StatusServiceUnavailable,
+			"The score report example took too long. Please retry.", "2"},
+		{"busy", answeredpdf.ErrBusy, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "5"},
+		{"incomplete", answeredpdf.ErrNotPrintable, http.StatusUnprocessableEntity,
+			"The answered exam could not be printed completely.", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			writeScoreReportExampleError(w, httptest.NewRequest(http.MethodGet, "/", nil), tt.err)
+			if w.Code != tt.status || !strings.Contains(w.Body.String(), tt.message) ||
+				w.Header().Get("Retry-After") != tt.retryAfter {
+				t.Fatalf("status=%d headers=%v body=%s", w.Code, w.Header(), w.Body.String())
+			}
+		})
+	}
+}
 
 func TestScoreReportExampleVersionUsesDraftThenPublished(t *testing.T) {
 	db, mock, err := sqlmock.New()

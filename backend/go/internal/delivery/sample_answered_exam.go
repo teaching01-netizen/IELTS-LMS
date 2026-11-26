@@ -36,7 +36,7 @@ func (s *Service) SampleAnsweredExam(ctx context.Context, versionID, examID, exa
 func buildSampleAnsweredExam(versionID, examID, examTitle, candidateName string, sections []DeliverySection, answers map[string]sampleAnswer) (*AnsweredExam, json.RawMessage, error) {
 	exam := &AnsweredExam{
 		ExamID: examID, AttemptID: "sample", ExamTitle: examTitle,
-		CandidateName: candidateName, VersionID: versionID,
+		CandidateName: candidateName, VersionID: versionID, Sections: sections,
 		AnswerKey: &AnsweredExamAnswerKey{Available: true, VersionID: versionID, Entries: []AnsweredExamKeyEntry{}},
 	}
 	started := time.Unix(0, 0).UTC()

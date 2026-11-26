@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
@@ -14,6 +16,8 @@ import (
 	"example.com/ielts-proctoring/internal/satwordvault"
 	"github.com/go-chi/chi/v5"
 )
+
+const scoreReportExampleTimeout = 45 * time.Second
 
 // satScoreReportExampleHandler serves the authoring example: a sample paper
 // with every sample question answered correctly, the answer key, the saved PDF
@@ -27,6 +31,11 @@ import (
 func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "private, no-store")
+		ctx, cancel := context.WithTimeout(r.Context(), scoreReportExampleTimeout)
+		defer cancel()
+		r = r.WithContext(ctx)
+		deadline, _ := ctx.Deadline()
+		_ = http.NewResponseController(w).SetWriteDeadline(deadline.Add(5 * time.Second))
 		examID := chi.URLParam(r, "examID")
 		_, title, ok := requireSATPDFLayoutAccess(app, w, r, examID, false)
 		if !ok {
@@ -36,42 +45,12 @@ func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "The score report example is unavailable."))
 			return
 		}
-		versionID, err := scoreReportExampleVersion(r.Context(), app, examID)
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		words, stale, err := satwordvault.Read(r.Context(), app.DB, versionID)
-		if err != nil {
-			httpx.WriteError(w, r, MapDBError(err))
-			return
-		}
-		if stale > 0 {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeValidation,
-				"The Word Vault has stale question references. Re-import the vocabulary workbook before downloading an example."))
-			return
-		}
-		layout, err := app.PDFLayouts.ResolvePreview(r.Context(), examID, nil, nil)
-		if err != nil {
-			httpx.WriteError(w, r, MapDBError(err))
-			return
-		}
-		exam, view, err := app.Delivery.SampleAnsweredExam(r.Context(), versionID, examID, title, "Sample Student")
-		if err != nil {
-			httpx.WriteError(w, r, err)
-			return
-		}
-		payload, err := answeredpdf.BuildAttemptPayload(r.Context(), exam, view, app.Media.OpenFinalized, layout, words)
-		if err != nil {
-			pdfExportError(w, r, err)
-			return
-		}
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(answeredpdf.RenderTimeout + 5*time.Second))
-		pdf, err := app.AnsweredPDF.RenderPreview(r.Context(), func(context.Context) ([]byte, error) {
-			return payload, nil
+		requestID := httpx.RequestIDOf(w, r)
+		pdf, err := app.AnsweredPDF.RenderPreview(ctx, func(ctx context.Context) ([]byte, error) {
+			return buildScoreReportExample(ctx, app, examID, title, requestID)
 		})
 		if err != nil {
-			pdfExportError(w, r, err)
+			writeScoreReportExampleError(w, r, err)
 			return
 		}
 		w.Header().Set("Content-Type", "application/pdf")
@@ -81,6 +60,63 @@ func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 		}))
 		_, _ = w.Write(pdf)
 	}
+}
+
+func buildScoreReportExample(ctx context.Context, app *App, examID, title, requestID string) (payload []byte, err error) {
+	started := time.Now()
+	stage, stageStarted := "version", started
+	timings := make([]slog.Attr, 0, 5)
+	advance := func(next string) {
+		timings = append(timings, slog.Int64(stage+"_ms", time.Since(stageStarted).Milliseconds()))
+		stage, stageStarted = next, time.Now()
+	}
+	defer func() {
+		lastStage := stage
+		advance("")
+		slog.LogAttrs(ctx, slog.LevelInfo, "SAT score report example preparation",
+			slog.String("request_id", requestID),
+			slog.String("exam_id", examID),
+			slog.String("stage", lastStage),
+			slog.Bool("ok", err == nil),
+			slog.Int64("elapsed_ms", time.Since(started).Milliseconds()),
+			slog.Attr{Key: "timings", Value: slog.GroupValue(timings...)},
+		)
+	}()
+	versionID, err := scoreReportExampleVersion(ctx, app, examID)
+	if err != nil {
+		return nil, err
+	}
+	advance("word_vault")
+	words, stale, err := satwordvault.Read(ctx, app.DB, versionID)
+	if err != nil {
+		return nil, err
+	}
+	if stale > 0 {
+		return nil, apperrors.New(apperrors.CodeValidation,
+			"The Word Vault has stale question references. Re-import the vocabulary workbook before downloading an example.")
+	}
+	advance("layout")
+	layout, err := app.PDFLayouts.ResolvePreview(ctx, examID, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	advance("paper")
+	exam, view, err := app.Delivery.SampleAnsweredExam(ctx, versionID, examID, title, "Sample Student")
+	if err != nil {
+		return nil, err
+	}
+	advance("media")
+	return answeredpdf.BuildAttemptPayload(ctx, exam, view, app.Media.OpenOriginal, layout, words)
+}
+
+func writeScoreReportExampleError(w http.ResponseWriter, r *http.Request, err error) {
+	if r.Context().Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		w.Header().Set("Retry-After", "2")
+		httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable,
+			"The score report example took too long. Please retry."))
+		return
+	}
+	pdfExportError(w, r, err)
 }
 
 // scoreReportExampleVersion follows the PDF layout editor's version rule: the

@@ -44,13 +44,25 @@ type Content struct {
 	Body        io.ReadSeekCloser
 }
 
-// OpenFinalized streams the original bytes of a finalized asset.
+// OpenFinalized streams a finalized original and warms its delivery rendition.
 func (s *Service) OpenFinalized(ctx context.Context, assetID string) (Content, error) {
+	return s.openFinalized(ctx, assetID, true)
+}
+
+// OpenOriginal streams a finalized original for a consumer that only needs
+// the original, such as a PDF export.
+func (s *Service) OpenOriginal(ctx context.Context, assetID string) (Content, error) {
+	return s.openFinalized(ctx, assetID, false)
+}
+
+func (s *Service) openFinalized(ctx context.Context, assetID string, warmDelivery bool) (Content, error) {
 	asset, err := s.finalizedAsset(ctx, assetID)
 	if err != nil {
 		return Content{}, err
 	}
-	s.renditions.kick(s.store, asset)
+	if warmDelivery {
+		s.renditions.kick(s.store, asset)
+	}
 	body, err := s.openObject(ctx, asset.ObjectKey)
 	if err != nil {
 		return Content{}, serviceUnavailable()
