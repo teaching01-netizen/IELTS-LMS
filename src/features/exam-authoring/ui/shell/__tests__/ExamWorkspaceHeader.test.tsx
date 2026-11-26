@@ -61,6 +61,19 @@ describe("ExamWorkspaceHeader", () => {
     expect(screen.queryByRole("button", { name: /^create room$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /preview/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /student access/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /score report example/i })).not.toBeInTheDocument();
+  });
+
+  it("downloads the score report example beside Preview and shows its busy state", () => {
+    const onDownloadExample = vi.fn();
+    const { rerender } = render(<ExamWorkspaceHeader {...props({ onDownloadExample })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Download score report example" }));
+    expect(onDownloadExample).toHaveBeenCalledOnce();
+
+    rerender(<ExamWorkspaceHeader {...props({ onDownloadExample, downloadExampleBusy: true })} />);
+    const busy = screen.getByRole("button", { name: "Download score report example" });
+    expect(busy).toBeDisabled();
+    expect(busy).toHaveTextContent("Preparing…");
   });
 
   it("shows an issue indicator only when there are issues, with a count in its name", () => {

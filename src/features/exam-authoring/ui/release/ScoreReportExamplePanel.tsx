@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 import { SatButton } from "../../../../products/sat/ui/SatPage";
-import { scoreReportExampleApi } from "../../api/scoreReportExampleApi";
+import { saveScoreReportExample } from "../../api/scoreReportExampleApi";
 import { releaseSurfaceClass } from "./releaseUi";
 
 /**
@@ -18,15 +18,7 @@ export function ScoreReportExamplePanel({ examId }: { examId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const { blob, filename } = await scoreReportExampleApi.download(examId);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      await saveScoreReportExample(examId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Couldn’t prepare the example. Try again.");
     } finally {

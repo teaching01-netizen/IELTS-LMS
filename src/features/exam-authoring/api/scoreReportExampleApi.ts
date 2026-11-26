@@ -42,3 +42,16 @@ export const scoreReportExampleApi = {
     };
   },
 };
+
+/** Fetch and save the example in one step, shared by Settings and the workspace header. */
+export async function saveScoreReportExample(examId: string): Promise<void> {
+  const { blob, filename } = await scoreReportExampleApi.download(examId);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}

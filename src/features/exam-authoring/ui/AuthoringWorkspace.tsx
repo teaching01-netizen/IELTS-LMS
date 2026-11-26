@@ -22,6 +22,7 @@ import {
   useReorderAssessmentQuestions,
 } from "../api/assessmentQueries";
 import { assessmentKeys, authoringEffects } from "../api/authoringQueryEffects";
+import { saveScoreReportExample } from "../api/scoreReportExampleApi";
 import { toDraftOpenErrorInfo, useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
 import { AuthoringLifecycleSurface } from "./AuthoringLifecycleSurface";
 import { useDraftOpenOnEntry } from "./useDraftOpenOnEntry";
@@ -233,6 +234,7 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [wordVaultNotice, setWordVaultNotice] = useState<string | null>(null);
+  const [exampleBusy, setExampleBusy] = useState(false);
   const [focusField, setFocusField] = useState<string | null>(null);
   // Which FIELD an inspector shortcut belongs to is a workspace concern (the
   // deep-link path names fields, not overlays), so the rule stays here and asks
@@ -507,6 +509,23 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
     },
     [examId, queryClient, setWordVaultOpen]
   );
+
+  // The Questions header carries the example download beside Preview, so a
+  // teacher can check the report shape without leaving the draft.
+  const downloadScoreReportExample = useCallback(async () => {
+    if (exampleBusy) return;
+    setExampleBusy(true);
+    setNavigationError(null);
+    try {
+      await saveScoreReportExample(examId);
+    } catch (cause) {
+      setNavigationError(
+        cause instanceof Error ? cause.message : "Couldn’t prepare the score report example. Try again."
+      );
+    } finally {
+      setExampleBusy(false);
+    }
+  }, [examId, exampleBusy, setNavigationError]);
 
   // The server's copy of the open question. ONE projection, read by both rules
   // that need it: the seed the editors, the room and the three-way compare are
@@ -1341,6 +1360,12 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
               }
               onPreview={() => goAfterFlush(`/sat/exams/${examId}/preview`)}
               previewDisabled={!shell}
+              {...(shell.providerKey === "sat" && canOpenDraft
+                ? {
+                    onDownloadExample: () => void downloadScoreReportExample(),
+                    downloadExampleBusy: exampleBusy,
+                  }
+                : {})}
               {...(chrome.canCreateSession ? { onCreateSession: () => openCreateRoom() } : {})}
               issueCount={totalErrors}
               onOpenIssues={() => {

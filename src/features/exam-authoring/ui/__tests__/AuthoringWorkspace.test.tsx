@@ -39,6 +39,7 @@ const harness = vi.hoisted(() => ({
   },
   mutations: { create: vi.fn(), batchCreate: vi.fn(), duplicate: vi.fn(), reorder: vi.fn(), bulk: vi.fn(), validate: vi.fn(), loadSample: vi.fn() },
   api: { getSatWorkbookUndoState: vi.fn(), getShell: vi.fn(), getQuestion: vi.fn(), saveQuestionRevision: vi.fn(), deleteQuestion: vi.fn() },
+  example: { save: vi.fn() },
 }));
 
 vi.mock("../../api/assessmentQueries", () => ({
@@ -64,6 +65,9 @@ vi.mock("../../api/assessmentQueries", () => ({
   useEnsureDraftShell: (...args: unknown[]) => (harness.useEnsureDraft as (...a: unknown[]) => unknown)(...args),
 }));
 vi.mock("../../api/assessmentAuthoringApi", () => ({ assessmentAuthoringApi: harness.api }));
+vi.mock("../../api/scoreReportExampleApi", () => ({
+  saveScoreReportExample: (...args: unknown[]) => (harness.example.save as (...a: unknown[]) => unknown)(...args),
+}));
 vi.mock("../../hooks/useQuestionAutosave", () => ({
   useQuestionAutosave: (...args: unknown[]) => (harness.useQuestionAutosave as (...a: unknown[]) => unknown)(...args),
 }));
@@ -177,6 +181,7 @@ function setupDefaults() {
   for (const fn of [harness.useAuthoringShell, harness.useExamQuestion, harness.useQuestionAutosave, harness.useOptionalAuthSession, harness.useCreate, harness.useBatchCreate, harness.useDuplicate, harness.useReorder, harness.useBulk, harness.useValidation, harness.useLoadSample, harness.useReleaseReadiness, harness.useEnsureDraft]) (fn as { mockReset: () => void }).mockReset();
   for (const fn of Object.values(harness.mutations)) (fn as { mockReset: () => void }).mockReset();
   for (const fn of Object.values(harness.api)) (fn as { mockReset: () => void }).mockReset();
+  (harness.example.save as { mockReset: () => void }).mockReset();
   const autosave = harness.autosave;
   for (const fn of [autosave.scheduleAutosave, autosave.flushNow, autosave.commitAndAdvance, autosave.retry]) (fn as { mockReset: () => void }).mockReset();
   autosave.status = "saved"; autosave.lastSavedAt = null; autosave.isOffline = false; autosave.hasPendingChanges = false;
@@ -409,6 +414,14 @@ describe("AuthoringWorkspace (spine-only)", () => {
     renderWorkspace();
     await screen.findByRole("heading", { name: "SAT Practice 1" });
     expect(screen.queryByRole("button", { name: "Import" })).not.toBeInTheDocument();
+  });
+
+  it("downloads the score report example from the Questions header", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    (harness.example.save as unknown as { mockResolvedValue: (value: unknown) => void }).mockResolvedValue(undefined);
+    renderWorkspace();
+    fireEvent.click(await screen.findByRole("button", { name: "Download score report example" }));
+    await waitFor(() => expect(harness.example.save).toHaveBeenCalledWith("exam-1"));
   });
 
   it("adds a question after the active one with an order-protected placement", async () => {

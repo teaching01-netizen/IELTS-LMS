@@ -1,7 +1,7 @@
 import { useId, type ReactNode, type Ref } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { spineMotion } from "@/src/shared/motion";
-import { AlertTriangle, ArrowLeft, CalendarPlus, Eye, FileUp, MoreHorizontal, Settings2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarPlus, Download, Eye, FileUp, MoreHorizontal, Settings2 } from "lucide-react";
 import { SatWorkspaceSwitcher } from "@/src/products/sat/ui/SatWorkspaceNav";
 import { SatMenu, type SatMenuItem } from "@/src/products/sat/ui/Menu";
 import { SatStatusPill } from "@/src/products/sat/ui/SatPage";
@@ -42,6 +42,9 @@ export interface ExamWorkspaceHeaderProps {
   collaborationSlot?: ReactNode;
   onPreview?: (() => void) | undefined;
   previewDisabled?: boolean;
+  /** Downloads the authoring score report example; absent when unavailable. */
+  onDownloadExample?: (() => void) | undefined;
+  downloadExampleBusy?: boolean;
   /** Primary task action for staff who can create a room. */
   onCreateSession?: (() => void) | undefined;
   /** Optional focus target for hosts that must restore focus after a sheet closes. */
@@ -84,7 +87,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
   const reduceMotion = useReducedMotion();
   const {
     examTitle, lifecycle, activeTab, pendingTab = null, showResponses, onSelectTab, onBack, saveSlot, collaborationSlot,
-    onPreview, previewDisabled, onCreateSession, onCreateSessionRef, onQuickSettings,
+    onPreview, previewDisabled, onDownloadExample, downloadExampleBusy = false, onCreateSession, onCreateSessionRef, onQuickSettings,
     issueCount = 0, onOpenIssues,
     importItems, menuItems, contextLine,
   } = props;
@@ -168,6 +171,19 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
             <button type="button" onClick={onPreview} disabled={previewDisabled} aria-label="Preview exam" className={QUIET}>
               <Eye size={16} aria-hidden="true" />
               <span className="hidden lg:inline">Preview</span>
+            </button>
+          ) : null}
+          {onDownloadExample ? (
+            <button
+              type="button"
+              onClick={onDownloadExample}
+              disabled={downloadExampleBusy}
+              aria-label="Download score report example"
+              title="Download a score report example with the answer key and The Word Vault"
+              className={QUIET}
+            >
+              <Download size={16} aria-hidden="true" />
+              <span className="hidden lg:inline">{downloadExampleBusy ? "Preparing…" : "Example PDF"}</span>
             </button>
           ) : null}
           {onCreateSession ? (
