@@ -9,6 +9,7 @@ import (
 
 	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satwordvault"
 )
 
 // Shell loads the current-draft authoring projection (mirrors shell()).
@@ -172,6 +173,9 @@ func (s *Service) clonePublishedSATToDraftTx(ctx context.Context, q tx.Tx, examI
 	}
 	draftVersionID := uuid.NewString()
 	if _, err := q.ExecContext(ctx, "INSERT INTO exam_versions (id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision, sat_classroom_plan, sat_flexible_count) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, TRUE, FALSE, 0, ?, ?)", draftVersionID, examID, nextVersionNumber, publishedVersionID, contentSnapshot, configSnapshot, actorID, classroomPlan, flexibleCount); err != nil {
+		return "", err
+	}
+	if err := satwordvault.Copy(ctx, q, publishedVersionID, draftVersionID); err != nil {
 		return "", err
 	}
 	type sectionCloneRow struct {

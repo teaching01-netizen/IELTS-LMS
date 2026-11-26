@@ -17,6 +17,7 @@ import (
 	"example.com/ielts-proctoring/internal/delivery"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/httpx"
+	"example.com/ielts-proctoring/internal/satwordvault"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -33,6 +34,21 @@ func pdfExportError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		httpx.WriteError(w, r, MapDBError(err))
 	}
+}
+
+// Student callers have already built the authorized, report-visible attempt.
+func studentPDFWordVault(ctx context.Context, app *App, exam *delivery.AnsweredExam, student bool) ([]satwordvault.PrintedEntry, error) {
+	if !student {
+		return nil, nil
+	}
+	words, stale, err := satwordvault.Read(ctx, app.DB, exam.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	if stale > 0 {
+		return nil, answeredpdf.ErrNotPrintable
+	}
+	return words, nil
 }
 
 func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
@@ -154,7 +170,11 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 			if student {
 				open = app.Media.OpenDelivery
 			}
-			return answeredpdf.BuildPayloadWithLayout(ctx, exam, request.View, open, layout)
+			words, err := studentPDFWordVault(ctx, app, exam, student)
+			if err != nil {
+				return nil, err
+			}
+			return answeredpdf.BuildAttemptPayload(ctx, exam, request.View, open, layout, words)
 		})
 		if err != nil {
 			pdfExportError(w, r, err)

@@ -306,3 +306,45 @@
     object-fit: contain;
   }
 }
+
+@font-face {
+  font-family: "SAT Word Vault Thai";
+  src: url("./fonts/noto-sans-thai.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 100 900;
+  unicode-range: U+0E00-0E7F;
+}
+
+@media print {
+  .sat-paper-word-vault { break-before: page; }
+  .sat-paper-word-vault h2 {
+    margin-block: 5mm 3mm;
+    font-size: 22pt;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .sat-paper-word-vault thead th {
+    padding-block: 2mm;
+    border-bottom: 0.7pt solid var(--paper-rule);
+    color: var(--paper-muted);
+    font-size: 8.5pt;
+    text-align: left;
+  }
+  .sat-paper-word-vault tbody tr { break-inside: avoid; }
+  .sat-paper-word-vault tbody tr > :is(th, td) {
+    padding: 2.5mm 4mm 2.5mm 0;
+    border-bottom: 0.5pt solid var(--paper-rule);
+    font-family: "SAT Word Vault Thai", var(--font-sat-ui), sans-serif;
+    text-align: left;
+    vertical-align: top;
+  }
+  .sat-paper-word-vault tbody th { font-weight: 400; }
+  .sat-paper-word-vault tbody th strong { font-size: 11pt; }
+  .sat-paper-word-vault tbody th span {
+    display: block;
+    color: var(--paper-muted);
+    font-size: 8pt;
+  }
+  .sat-word-vault-example { margin-top: 1.25mm; }
+  .sat-word-vault-example strong { color: var(--paper-muted); }
+}

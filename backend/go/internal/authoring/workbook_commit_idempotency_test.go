@@ -133,6 +133,7 @@ func expectReplaceBody(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery("MAX.version_number").WithArgs("exam-1").
 		WillReturnRows(sqlmock.NewRows([]string{"next"}).AddRow(7))
 	mock.ExpectExec("INSERT INTO exam_versions").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO sat_word_vaults").WithArgs(sqlmock.AnyArg(), "v-1").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("FROM assessment_sections WHERE exam_version_id").WithArgs("v-1").
 		WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions", "tool_policy"}).AddRow("sec-1", "reading-writing", "RW", 0, 1920, 600, `{}`, `{}`))
 	mock.ExpectExec("INSERT INTO assessment_sections").WillReturnResult(sqlmock.NewResult(0, 1))

@@ -3195,6 +3195,137 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-word-vault:
+    parameters:
+      - { name: examId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [authoring]
+      summary: Read the draft and published Word Vault status
+      responses:
+        "200":
+          description: Version status and vocabulary counts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [draftId, draftCount, publishedCount, staleCount]
+                properties:
+                  draftId: { type: string }
+                  draftCount: { type: integer }
+                  publishedCount: { type: integer }
+                  staleCount: { type: integer }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-word-vault/template:
+    parameters:
+      - { name: examId, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [authoring]
+      summary: Download the independent SAT vocabulary workbook template
+      responses:
+        "200":
+          description: Vocabulary template
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-word-vault/preview:
+    parameters:
+      - { name: examId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [authoring]
+      summary: Check a vocabulary workbook against the editable SAT draft
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "200":
+          description: Checked entries, cell diagnostics, module impact and draft fence
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [draftId, revision, digest, before, entries, impact, issues]
+                properties:
+                  draftId: { type: string }
+                  revision: { type: integer }
+                  digest: { type: string }
+                  before: { type: integer }
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      required: [moduleKey, module, question, word, thai, definition, example]
+                      properties:
+                        moduleKey: { type: string }
+                        module: { type: string }
+                        question: { type: integer }
+                        word: { type: string }
+                        thai: { type: string }
+                        definition: { type: string }
+                        example: { type: string }
+                  impact:
+                    type: array
+                    items:
+                      type: object
+                      required: [module, before, after]
+                      properties:
+                        module: { type: string }
+                        before: { type: integer }
+                        after: { type: integer }
+                  issues:
+                    type: array
+                    items:
+                      type: object
+                      required: [row, column, message]
+                      properties:
+                        row: { type: integer }
+                        column: { type: string }
+                        message: { type: string }
+        "403": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-word-vault/commit:
+    parameters:
+      - { name: examId, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [authoring]
+      summary: Atomically replace the complete draft Word Vault
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, commit]
+              properties:
+                file: { type: string, format: binary }
+                commit:
+                  type: string
+                  description: JSON with draftId, revision, digest, confirmed and operationKey
+      responses:
+        "200":
+          description: Durable import receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [draftId, revision, count]
+                properties:
+                  draftId: { type: string }
+                  revision: { type: integer }
+                  count: { type: integer }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
   /assessment-authoring/exams/{examId}/sat-pdf-layout:
     parameters:
       - name: examId

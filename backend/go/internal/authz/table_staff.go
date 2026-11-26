@@ -18,7 +18,7 @@ func init() {
 		"PUT /{id}/sat-learning-settings":           {MinRoles: writeStaff},
 		"GET /schedules/{scheduleID}/student-pause": {Bearer: true, Scope: ScopeAttemptOwner},
 		"PUT /schedules/{scheduleID}/student-pause": {Bearer: true, Scope: ScopeAttemptOwner},
-		"GET /schedules/{scheduleID}/sat-policy":     {Bearer: true, Scope: ScopeAttemptOwner},
+		"GET /schedules/{scheduleID}/sat-policy":    {Bearer: true, Scope: ScopeAttemptOwner},
 		// "GET /" is shared by exams-list (readStaff), schedules-list
 		// (admin/builder) and results-list (admin/grader/proctor): the
 		// middleware admits the UNION; each handler enforces its own
@@ -250,8 +250,10 @@ func init() {
 		// route() (annotated, mount-relative) — see BuildRouter lines
 		// 414-415 — so they need annotated keys here IN ADDITION to the
 		// full-path keys in table_fullpath.go.
-		"POST /exams/{examID}/sat-workbook-preview": {MinRoles: writeStaff},
-		"POST /exams/{examID}/sat-workbook-commit":  {MinRoles: writeStaff},
+		"POST /exams/{examID}/sat-word-vault/preview": {MinRoles: writeStaff},
+		"POST /exams/{examID}/sat-word-vault/commit":  {MinRoles: writeStaff},
+		"POST /exams/{examID}/sat-workbook-preview":   {MinRoles: writeStaff},
+		"POST /exams/{examID}/sat-workbook-commit":    {MinRoles: writeStaff},
 		"GET /dashboard":                              {MinRoles: resultsRead},
 		"GET /analytics":                              {MinRoles: resultsRead},
 		"POST /export":                                {MinRoles: resultsRW},

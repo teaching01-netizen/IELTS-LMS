@@ -16,6 +16,7 @@ import { useExamQuery } from "../../api/examQueries";
 import { SatButton } from "../../../../products/sat/ui/SatPage";
 import { releaseSurfaceClass } from "../release/releaseUi";
 import { FormsSettingsPanel } from "./FormsSettingsPanel";
+import { WordVaultSettings } from "./WordVaultSettings";
 
 const SETTINGS_SCORING_PANEL_ID = "sat-settings-scoring";
 export const SETTINGS_FORMS_PANEL_ID = "sat-settings-forms";
@@ -52,7 +53,7 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
 
   // A create-room finding about the converter deep-links here with ?panel=scoring.
   const panel = searchParams.get("panel");
-  const focusPanelId = panel === "scoring" ? SETTINGS_SCORING_PANEL_ID : panel === "forms" ? SETTINGS_FORMS_PANEL_ID : null;
+  const focusPanelId = panel === "scoring" ? SETTINGS_SCORING_PANEL_ID : panel === "forms" ? SETTINGS_FORMS_PANEL_ID : panel === "word-vault" ? "sat-settings-word-vault" : null;
   useEffect(() => {
     if (!focusPanelId) return;
     const frame = window.requestAnimationFrame(() => {
@@ -128,6 +129,17 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
           </div>
           <ScoreReportSettingPanel exam={exam} onSaved={() => examQuery.refetch()} />
           <ScoreConverterPanel examId={exam.id} canEdit={exam.canEdit} />
+          {exam.providerKey === "sat" ? (
+            <WordVaultSettings
+              key={exam.id}
+              examId={exam.id}
+              canEdit={exam.canEdit}
+              onEditExam={() => {
+                requestAuthoringDraftOnEntry(exam.id);
+                go(examWorkspacePath(exam.id, "questions"));
+              }}
+            />
+          ) : null}
           {exam.providerKey === "sat" ? (
             <section className={releaseSurfaceClass + " flex flex-wrap items-center justify-between gap-4 p-5 sm:p-6"} aria-label="Exam PDF">
               <div>

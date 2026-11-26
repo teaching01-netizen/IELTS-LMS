@@ -647,6 +647,10 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Post("/exams/{examID}/shell", authorize("POST /api/v1/assessment-authoring/exams/{examID}/shell", authorOpenShellHandler(app)))
 			r.With(adminLimit).Get("/exams/{examID}/preview", authorize("GET /api/v1/assessment-authoring/exams/{examID}/preview", authorPreviewHandler(app)))
 			r.With(adminLimit).Post("/exams/{examID}/load-sample", authorize("POST /api/v1/assessment-authoring/exams/{examID}/load-sample", authorSampleHandler(app)))
+			r.With(adminLimit).Get("/exams/{examID}/sat-word-vault", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-word-vault", wordVaultHandler(app, "status")))
+			r.With(adminLimit).Get("/exams/{examID}/sat-word-vault/template", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-word-vault/template", wordVaultHandler(app, "template")))
+			authzRoute(r, "POST", "/exams/{examID}/sat-word-vault/preview", wordVaultHandler(app, "preview"))
+			authzRoute(r, "POST", "/exams/{examID}/sat-word-vault/commit", wordVaultHandler(app, "commit"))
 			r.With(adminLimit).Get("/exams/{examID}/sat-workbook-template", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-workbook-template", authorSatWorkbookTemplateHandler(app)))
 			// Workbook import tiers keep the 64MiB global ceiling.
 			authzRoute(r, "POST", "/exams/{examID}/sat-workbook-preview", authorPreviewImportHandler(app))

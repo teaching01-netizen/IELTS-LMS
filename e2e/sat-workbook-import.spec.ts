@@ -22,18 +22,18 @@ async function createExam(page: Page, flexible: boolean) {
     await wizard.getByRole("radio", { name: "Reading & Writing: Module 1 only" }).check();
     await wizard.getByRole("spinbutton", { name: "Module 1", exact: true }).fill("1");
     await next.click();
-    await wizard.getByRole("switch", { name: "Show score report when a Classroom sitting ends" }).check();
+    await wizard.getByRole("switch", { name: "Show results", exact: true }).check();
+    await expect(wizard.getByRole("switch", { name: "Include answer key in PDF" })).not.toBeChecked();
     await next.click();
-    await wizard.getByRole("button", { name: "Create exam", exact: true }).focus();
-    await page.keyboard.press("Enter");
+    await wizard.getByRole("button", { name: "Create exam", exact: true }).click();
   } else {
     await wizard.getByRole("button", { name: "Create with standard settings" }).click();
   }
-  await expect(page).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i);
+  await expect(page).toHaveURL(/\/sat\/exams\/[0-9a-f-]+$/i, { timeout: 20_000 });
 }
 
 async function openWorkbookImport(page: Page) {
-  await page.getByRole("button", { name: "Import questions", exact: true }).click();
+  await page.getByRole("button", { name: "Import questions", exact: true }).click({ timeout: 30_000 });
   await page.getByRole("menuitem", { name: /Import Excel workbook/ }).click();
   const dialog = page.getByRole("dialog", { name: "Import SAT from Excel" });
   await expect(dialog).toBeVisible();
@@ -82,6 +82,50 @@ async function makePartialWorkbook(page: Page, dialog: Locator) {
   };
 }
 
+async function importWordVault(page: Page) {
+  const exam = new URL(page.url());
+  await page.goto(exam.pathname + "/settings");
+  const startImport = page.getByRole("button", { name: "Import Vocabulary Excel" });
+  await startImport.click({ timeout: 30_000 });
+  const dialog = page.getByRole("dialog", { name: "Import Vocabulary Excel" });
+  await expect(dialog.getByRole("button", { name: "Upload workbook" })).toBeFocused();
+  const [download] = await Promise.all([
+    page.waitForEvent("download"),
+    dialog.getByRole("button", { name: "Download vocabulary template" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("SAT-Vocabulary-Template.xlsx");
+  const archive = unzipSync(await readFile(await download.path()));
+  const worksheet = "xl/worksheets/sheet1.xml";
+  const template = strFromU8(archive[worksheet]!);
+  async function upload(question: number, word: string) {
+    const row = ["rw-m1", String(question), word, "ปรับตัว", "To adjust to a new situation.", "The team adapted to the new schedule."];
+    const cells = row.map((value, index) => `<c r="${String.fromCharCode(65 + index)}2" t="inlineStr"><is><t>${value}</t></is></c>`).join("");
+    archive[worksheet] = strToU8(template.replace("</sheetData>", `<row r="2">${cells}</row></sheetData>`));
+    await dialog.getByLabel("Choose vocabulary workbook").setInputFiles({
+      name: "vocabulary.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: Buffer.from(zipSync(archive)),
+    });
+  }
+  await upload(99, "obsolete");
+  await expect(dialog.getByRole("heading", { name: "Workbook needs attention" })).toBeFocused();
+  await expect(dialog.getByText("Vocabulary · B2")).toBeVisible();
+  await upload(1, "obsolete");
+  await expect(dialog.getByRole("heading", { name: "Review vocabulary" })).toBeFocused();
+  await dialog.getByRole("button", { name: "Import 1 word" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(startImport).toBeFocused();
+  await startImport.click();
+  await upload(1, "adapt");
+  const replace = dialog.getByRole("button", { name: "Replace Word Vault" });
+  await expect(replace).toBeDisabled();
+  await dialog.getByRole("checkbox", { name: "Replace the entire draft Word Vault." }).check();
+  await replace.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("1 word saved to the draft.")).toBeVisible();
+  await page.goto(exam.href);
+}
+
 test("flexible SAT workbook goes from import and retry to a released student score", async ({ page, browser }) => {
   // The student sits a real one-minute module and finishes on its server clock.
   test.setTimeout(120_000);
@@ -125,6 +169,19 @@ test("flexible SAT workbook goes from import and retry to a released student sco
   await sitClassroomExam(page, browser);
 });
 
+test("Word Vault imports separately and ends the released student PDF", async ({ page, browser }) => {
+  test.setTimeout(240_000);
+  await createExam(page, true);
+  const dialog = await openWorkbookImport(page);
+  const workbook = await makePartialWorkbook(page, dialog);
+  await dialog.getByLabel("Choose SAT Excel workbook").setInputFiles(workbook);
+  await dialog.getByRole("button", { name: "Import 20 questions" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("tab", { name: /^Module 1, 20 of 27 questions ready/ })).toBeVisible({ timeout: 15_000 });
+  await importWordVault(page);
+  await sitClassroomExam(page, browser, true);
+});
+
 test("standard SAT blocks the same 20-question workbook at preview", async ({ page }) => {
   await createExam(page, false);
   const dialog = await openWorkbookImport(page);
@@ -138,12 +195,12 @@ test("standard SAT blocks the same 20-question workbook at preview", async ({ pa
   await expect(page.getByRole("tab", { name: /^Module 1, 0 of 27 questions ready/ })).toBeVisible();
 });
 
-async function sitClassroomExam(staff: Page, browser: Browser) {
+async function sitClassroomExam(staff: Page, browser: Browser, checkWordVault = false) {
   const roomName = `Workbook Classroom ${Date.now()}`;
   const createRoom = staff.getByRole("button", { name: "Create room", exact: true });
   await createRoom.first().click();
   const setup = staff.getByRole("dialog", { name: "Create room" });
-  await setup.getByLabel("Room name").fill(roomName);
+  await setup.getByLabel("Room name").fill(roomName, { timeout: 30_000 });
   await setup.getByRole("button", { name: /^Classroom/ }).click();
   await setup.getByText("More options", { exact: true }).click();
   await setup.getByRole("button", { name: /Name \+ email only/i }).click();
@@ -191,6 +248,34 @@ async function sitClassroomExam(staff: Page, browser: Browser) {
       }
     }
     await expect(student.getByRole("region", { name: "Score report" })).toContainText("15 of 20", { timeout: 75_000 });
+    // The dedicated PDF run builds the print bundle before starting the API.
+    if (!checkWordVault || !process.env["FRONTEND_DIST_DIR"]) return;
+    const [download, prepared] = await Promise.all([
+      student.waitForEvent("download", { timeout: 95_000 }),
+      student.waitForResponse((response) => response.url().endsWith(`/schedules/${receipt.room.scheduleId}/prepare`), { timeout: 95_000 }),
+      student.getByRole("button", { name: "Download exam PDF" }).click(),
+    ]);
+    expect(prepared.ok(), await prepared.text()).toBe(true);
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const pdf = getDocument({ data: new Uint8Array(await readFile(await download.path())), useWasm: false });
+    try {
+      const document = await pdf.promise;
+      async function text(pageNumber: number) {
+        const page = await document.getPage(pageNumber);
+        const content = await page.getTextContent();
+        return content.items.map((item) => "str" in item ? item.str : "").join(" ").replace(/\s+/g, " ").trim();
+      }
+      expect(await text(document.numPages - 1)).toContain("Workbook question 20");
+      const appendix = await text(document.numPages);
+      expect(appendix).toContain("The Word Vault");
+      // PDF extraction can return Thai glyph clusters as separate text items.
+      expect(appendix.replace(/\s+/g, "")).toContain("ปรับตัว");
+      expect(appendix).toContain("From Question 01");
+      expect(appendix).toContain("The team adapted to the new schedule.");
+      expect(appendix).not.toContain("obsolete");
+    } finally {
+      await pdf.destroy();
+    }
   } finally {
     await Promise.all([studentContext.close(), proctorContext.close()]);
   }

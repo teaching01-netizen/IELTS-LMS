@@ -75,6 +75,7 @@ func TestValidateDraftPlanOnlyRequiresDeliveredModules(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "type", "prompt", "answer"}))
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
 	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+	mock.ExpectQuery("FROM sat_word_vaults").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"entries"}))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 	if err != nil {
 		t.Fatal(err)
@@ -144,6 +145,7 @@ func converterGate(t *testing.T, plan, policy string) []Issue {
 	}
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(policyRows)
 	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+	mock.ExpectQuery("FROM sat_word_vaults").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"entries"}))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 	if err != nil {
 		t.Fatal(err)

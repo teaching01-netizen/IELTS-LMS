@@ -12,6 +12,7 @@ import (
 	"example.com/ielts-proctoring/internal/authoringrealtime"
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/tx"
+	"example.com/ielts-proctoring/internal/satwordvault"
 )
 
 type satWorkbookDraft struct {
@@ -1052,6 +1053,9 @@ func cloneSATDraftVersionTx(ctx context.Context, q tx.Tx, examID, sourceVersionI
 	if _, err := q.ExecContext(ctx, `INSERT INTO exam_versions
 		(id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, is_draft, is_published, revision, sat_classroom_plan, sat_flexible_count)
 		VALUES (?, ?, ?, ?, ?, ?, NULL, ?, FALSE, FALSE, 0, ?, ?)`, checkpointID, examID, nextVersion, sourceVersionID, contentSnapshot, configSnapshot, actorID, classroomPlan, flexible); err != nil {
+		return "", err
+	}
+	if err := satwordvault.Copy(ctx, q, sourceVersionID, checkpointID); err != nil {
 		return "", err
 	}
 

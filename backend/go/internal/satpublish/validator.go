@@ -13,6 +13,7 @@ import (
 	"example.com/ielts-proctoring/internal/assessmentforms/definition"
 	"example.com/ielts-proctoring/internal/assessscore"
 	"example.com/ielts-proctoring/internal/satconvert"
+	"example.com/ielts-proctoring/internal/satwordvault"
 )
 
 // Queryer is the smallest database boundary needed to validate a draft. It is
@@ -315,7 +316,15 @@ func ValidateDraftForScope(ctx context.Context, q Queryer, versionID string, sco
 	if err != nil {
 		return nil, err
 	}
-	return append(issues, formIssues...), nil
+	_, staleWords, err := satwordvault.Read(ctx, q, versionID)
+	if err != nil {
+		return nil, err
+	}
+	issues = append(issues, formIssues...)
+	if staleWords > 0 {
+		issues = append(issues, issue("sat.word_vault.stale", "wordVault", "Some Word Vault entries refer to questions that were replaced. Update the vocabulary workbook in Results & scoring."))
+	}
+	return issues, nil
 }
 
 // validateForms seals registration/Eva definitions with the release: a

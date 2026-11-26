@@ -32,6 +32,7 @@ vi.mock("../../release/ScoreReportSettingPanel", () => ({
 }));
 // The forms editor has its own suite; this page suite owns delivery + guard.
 vi.mock("../FormsSettingsPanel", () => ({ FormsSettingsPanel: () => null }));
+vi.mock("../WordVaultSettings", () => ({ WordVaultSettings: () => <div data-testid="word-vault-panel" /> }));
 vi.mock("../../release/ScoreConverterPanel", () => ({
   ScoreConverterPanel: () => <div data-testid="score-converter-panel" />,
 }));

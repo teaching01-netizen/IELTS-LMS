@@ -42,6 +42,7 @@ func TestClonePublishedSATToDraftTxPreservesFlexibleFlag(t *testing.T) {
 			mock.ExpectExec(regexp.QuoteMeta("sat_flexible_count")).
 				WithArgs(sqlmock.AnyArg(), "exam-1", 4, "pub-1", "{}", "{}", "actor-1", `{"math":"m1_only"}`, flag).
 				WillReturnResult(sqlmock.NewResult(1, 1))
+			mock.ExpectExec("INSERT INTO sat_word_vaults").WithArgs(sqlmock.AnyArg(), "pub-1").WillReturnResult(sqlmock.NewResult(0, 0))
 			mock.ExpectQuery(regexp.QuoteMeta("FROM assessment_sections WHERE exam_version_id")).
 				WithArgs("pub-1").
 				WillReturnRows(sqlmock.NewRows([]string{"id", "section_key", "title", "display_order", "duration_seconds", "break_after_seconds", "instructions", "tool_policy"}))

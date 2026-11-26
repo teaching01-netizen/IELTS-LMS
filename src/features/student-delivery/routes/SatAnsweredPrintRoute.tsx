@@ -1,3 +1,4 @@
+import type { WordVaultEntry } from "@shared/sat/wordVault";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PdfTarget, ResolvedPdfLayout } from "@shared/sat/pdfLayout";
@@ -16,6 +17,7 @@ interface PrintPayload {
   view: StudentScoreReportView | null;
   media: Record<string, string>;
   layout?: ResolvedPdfLayout;
+  wordVault?: WordVaultEntry[];
   sectionSample?: PdfTarget;
   sampleBook?: boolean;
   /** Optional top-level copy for older renderers; the exam field wins. */
@@ -81,7 +83,16 @@ export function SatAnsweredPrintRoute() {
         window.setTimeout(() => void check(), 100);
         return;
       }
-      await document.fonts.ready;
+      try {
+        if (payload.wordVault?.length) {
+          const fonts = await document.fonts.load('10pt "SAT Word Vault Thai"', "ปรับตัว");
+          if (fonts.length === 0) throw new Error("The Thai print font is unavailable.");
+        }
+        await document.fonts.ready;
+      } catch {
+        if (!cancelled) setPrintState("failed");
+        return;
+      }
       if (cancelled) return;
       fitAnsweredPaper(paper);
       setPrintState("ready");
@@ -106,6 +117,7 @@ export function SatAnsweredPrintRoute() {
           mediaFailed.current = true;
         }}
         layout={payload.layout}
+        wordVault={payload.wordVault}
         sectionSample={payload.sectionSample}
         sampleBook={payload.sampleBook === true}
         paperRef={paperRef}

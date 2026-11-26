@@ -19,7 +19,7 @@ export function satIssueRoute(
   if (destination.kind === "unresolved") return null;
   // Converter findings are fixed in Settings (Results & scoring).
   if (destination.kind === "score-policy") {
-    return { path: `${examWorkspacePath(examId, "settings")}?panel=scoring`, needsDraft: false };
+    return { path: `${examWorkspacePath(examId, "settings")}?panel=${issue.path === "wordVault" ? "word-vault" : "scoring"}`, needsDraft: false };
   }
   const params = new URLSearchParams();
   if (destination.kind === "question") {

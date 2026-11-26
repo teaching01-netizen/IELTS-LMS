@@ -58,6 +58,7 @@ export const SAT_PUBLISH_READINESS_FAMILIES = [
     ],
   },
   { id: "score-converter", label: "Score converter", codes: ["sat.converter.invalid", "sat.converter.missing"] },
+  { id: "word-vault", label: "The Word Vault", codes: ["sat.word_vault.stale"] },
   { id: "forms", label: "Registration form & Eva SIM", codes: ["sat.forms.invalid", "sat.forms.incomplete"] },
 ] as const;
 
@@ -412,7 +413,7 @@ export function resolvePublishIssueDestination(
     if (questionId) return { kind: "question", questionId, field };
     return { kind: "unresolved", reason: UNRESOLVED_ISSUE_REASON };
   }
-  if (path === "scoringPolicy" || path.startsWith("scoringPolicy.")) {
+  if (path === "wordVault" || path === "scoringPolicy" || path.startsWith("scoringPolicy.")) {
     return { kind: "score-policy" };
   }
   const moduleMatch = MODULE_PATH.exec(path);

@@ -1,3 +1,5 @@
+import type { WordVaultEntry } from "@shared/sat/wordVault";
+import { SatWordVaultPaper } from "./score-report/SatWordVaultPaper";
 /* eslint-disable jsx-a11y/control-has-associated-label -- Presentational, aria-hidden print tables use rows and cells for native page repetition. */
 import { Fragment, useEffect, useMemo, type ReactNode, type Ref } from "react";
 import "./score-report/sat-answered-paper.css";
@@ -377,11 +379,11 @@ function PaperLegalNotice() {
   );
 }
 
-function PaperFooter() {
+function PaperFooter({ columns = 1 }: { columns?: number } = {}) {
   return (
     <tfoot>
       <tr>
-        <td><PaperLegalNotice /></td>
+        <td colSpan={columns}><PaperLegalNotice /></td>
       </tr>
     </tfoot>
   );
@@ -576,6 +578,7 @@ export function AnsweredExamPaper({
   onMediaFailure,
   generation,
   layout,
+  wordVault = [],
   sectionSample,
   sampleBook,
   paperRef,
@@ -588,6 +591,7 @@ export function AnsweredExamPaper({
   onMediaFailure?: (() => void) | undefined;
   generation?: number;
   layout?: ResolvedPdfLayout | undefined;
+  wordVault?: readonly WordVaultEntry[] | undefined;
   sectionSample?: PdfTarget | undefined;
   sampleBook?: boolean;
   paperRef?: Ref<HTMLDivElement>;
@@ -753,7 +757,7 @@ export function AnsweredExamPaper({
     <div
       ref={paperRef}
       className="sat-answered-paper hidden bg-white text-left text-black print:block"
-      aria-hidden={layout ? undefined : true}
+      aria-hidden={layout || wordVault.length ? undefined : true}
       data-complete={complete && designReady}
       data-generation={generation}
       data-answer-key-mode={keyed ? "keyed" : "answer-only"}
@@ -844,6 +848,11 @@ export function AnsweredExamPaper({
         );
       })}
       {reviewModules.length ? slides({ kind: "examReview" }, "after") : null}
+      <SatWordVaultPaper
+        entries={wordVault}
+        examTitle={exam.examTitle?.trim() || "Digital SAT"}
+        footer={<PaperFooter columns={3} />}
+      />
     </div>
   );
 }

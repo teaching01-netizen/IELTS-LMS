@@ -32,6 +32,8 @@ func init() {
 		"POST /api/v1/assessment-authoring/exams/{examID}/shell":                                   {MinRoles: writeStaff},
 		"GET /api/v1/assessment-authoring/exams/{examID}/preview":                                  {MinRoles: readStaff},
 		"POST /api/v1/assessment-authoring/exams/{examID}/load-sample":                             {MinRoles: writeStaff},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-word-vault":                           {MinRoles: readStaff},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-word-vault/template":                  {MinRoles: readStaff},
 		"GET /api/v1/assessment-authoring/exams/{examID}/sat-workbook-template":                    {MinRoles: readStaff},
 		"POST /api/v1/assessment-authoring/exams/{examID}/sat-workbook-preview":                    {MinRoles: writeStaff},
 		"POST /api/v1/assessment-authoring/exams/{examID}/sat-workbook-commit":                     {MinRoles: writeStaff},

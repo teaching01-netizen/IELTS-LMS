@@ -91,8 +91,8 @@ func migDir(t *testing.T) string {
 // bumped 104->109. Claim operation identity (0110) bumps 109->110. Any other
 // count/max/gap change fails loudly.
 const (
-	pinnedMigrationFiles = 123
-	pinnedMigrationMax   = 133
+	pinnedMigrationFiles = 124
+	pinnedMigrationMax   = 134
 )
 
 // reservedSequences holds sequence numbers claimed by concurrent lanes but

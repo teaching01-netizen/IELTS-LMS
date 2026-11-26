@@ -951,7 +951,7 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
         // question column: leave the builder for its section.
         void (async () => {
           if (await flushBeforeRouteChange()) {
-            navigate(`${examWorkspacePath(examId, "settings")}?panel=scoring`);
+            navigate(`${examWorkspacePath(examId, "settings")}?panel=${issue.path === "wordVault" ? "word-vault" : "scoring"}`);
           }
         })();
         return;

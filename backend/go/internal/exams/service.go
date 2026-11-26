@@ -33,6 +33,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/httpx"
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/satpublish"
+	"example.com/ielts-proctoring/internal/satwordvault"
 )
 
 // Provider keys.
@@ -1478,6 +1479,11 @@ func (s *Service) ReopenDraft(ctx context.Context, examID string, actorID string
 		newVersionID := uuid.NewString()
 		if _, err := q.ExecContext(ctx, "INSERT INTO exam_versions (id, exam_id, version_number, parent_version_id, content_snapshot, config_snapshot, validation_snapshot, created_by, created_at, is_draft, is_published, revision) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NOW(), TRUE, FALSE, 0)", newVersionID, examID, nextVersionNumber, nullableStrPtr(parentVersionID), seedContent, seedConfig, strings.TrimSpace(actorID)); err != nil {
 			return err
+		}
+		if latestID != "" && EffectiveProviderKey(exam.ProviderKey, exam.ExamType) == ProviderSAT {
+			if err := satwordvault.Copy(ctx, q, latestID, newVersionID); err != nil {
+				return err
+			}
 		}
 		res, err := q.ExecContext(ctx, "UPDATE exam_entities SET current_draft_version_id = ?, updated_at = NOW(), revision = revision + 1 WHERE id = ? AND current_draft_version_id IS NULL", newVersionID, examID)
 		if err != nil {

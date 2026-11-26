@@ -13,15 +13,16 @@ import (
 	"example.com/ielts-proctoring/internal/media"
 	"example.com/ielts-proctoring/internal/satpdflayout"
 	"example.com/ielts-proctoring/internal/satpublish"
+	"example.com/ielts-proctoring/internal/satwordvault"
 )
 
 // BuildPayload loads only figures in the already-authorized projection. The
 // caller selects OpenDelivery for students and OpenFinalized for staff.
 func BuildPayload(ctx context.Context, exam *delivery.AnsweredExam, view json.RawMessage, load func(context.Context, string) (media.Content, error)) ([]byte, error) {
-	return BuildPayloadWithLayout(ctx, exam, view, load, nil)
+	return BuildAttemptPayload(ctx, exam, view, load, nil, nil)
 }
 
-func BuildPayloadWithLayout(ctx context.Context, exam *delivery.AnsweredExam, view json.RawMessage, load func(context.Context, string) (media.Content, error), layout *satpdflayout.Resolved) ([]byte, error) {
+func BuildAttemptPayload(ctx context.Context, exam *delivery.AnsweredExam, view json.RawMessage, load func(context.Context, string) (media.Content, error), layout *satpdflayout.Resolved, words []satwordvault.PrintedEntry) ([]byte, error) {
 	figures := map[string]string{}
 	total := 0
 	for _, section := range exam.Sections {
@@ -58,30 +59,35 @@ func BuildPayloadWithLayout(ctx context.Context, exam *delivery.AnsweredExam, vi
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return MarshalPayload(exam, view, figures, layout)
+	return MarshalAttemptPayload(exam, view, figures, layout, words)
 }
 
 func MarshalPayload(exam *delivery.AnsweredExam, view json.RawMessage, figures map[string]string, layout *satpdflayout.Resolved) ([]byte, error) {
-	return marshalPayload(exam, view, figures, layout, nil, false)
+	return MarshalAttemptPayload(exam, view, figures, layout, nil)
+}
+
+func MarshalAttemptPayload(exam *delivery.AnsweredExam, view json.RawMessage, figures map[string]string, layout *satpdflayout.Resolved, words []satwordvault.PrintedEntry) ([]byte, error) {
+	return marshalPayload(exam, view, figures, layout, nil, false, words)
 }
 
 func MarshalSectionSample(exam *delivery.AnsweredExam, view json.RawMessage, layout *satpdflayout.Resolved, section satpdflayout.Target) ([]byte, error) {
-	return marshalPayload(exam, view, map[string]string{}, layout, &section, false)
+	return marshalPayload(exam, view, map[string]string{}, layout, &section, false, nil)
 }
 
 func MarshalSampleBook(exam *delivery.AnsweredExam, view json.RawMessage, layout *satpdflayout.Resolved) ([]byte, error) {
-	return marshalPayload(exam, view, map[string]string{}, layout, nil, true)
+	return marshalPayload(exam, view, map[string]string{}, layout, nil, true, nil)
 }
 
-func marshalPayload(exam *delivery.AnsweredExam, view json.RawMessage, figures map[string]string, layout *satpdflayout.Resolved, section *satpdflayout.Target, sampleBook bool) ([]byte, error) {
+func marshalPayload(exam *delivery.AnsweredExam, view json.RawMessage, figures map[string]string, layout *satpdflayout.Resolved, section *satpdflayout.Target, sampleBook bool, words []satwordvault.PrintedEntry) ([]byte, error) {
 	return json.Marshal(struct {
-		Exam          *delivery.AnsweredExam `json:"exam"`
-		View          json.RawMessage        `json:"view"`
-		Media         map[string]string      `json:"media"`
-		Layout        *satpdflayout.Resolved `json:"layout,omitempty"`
-		SectionSample *satpdflayout.Target   `json:"sectionSample,omitempty"`
-		SampleBook    bool                   `json:"sampleBook,omitempty"`
-	}{exam, view, figures, layout, section, sampleBook})
+		Exam          *delivery.AnsweredExam      `json:"exam"`
+		View          json.RawMessage             `json:"view"`
+		Media         map[string]string           `json:"media"`
+		Layout        *satpdflayout.Resolved      `json:"layout,omitempty"`
+		SectionSample *satpdflayout.Target        `json:"sectionSample,omitempty"`
+		SampleBook    bool                        `json:"sampleBook,omitempty"`
+		WordVault     []satwordvault.PrintedEntry `json:"wordVault,omitempty"`
+	}{exam, view, figures, layout, section, sampleBook, words})
 }
 
 // Filename preserves the browser's existing sanitization and UTF-16 length bound.

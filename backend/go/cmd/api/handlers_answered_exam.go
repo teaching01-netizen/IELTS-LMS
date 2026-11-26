@@ -128,7 +128,11 @@ func writeAnsweredPDF(app *App, w http.ResponseWriter, r *http.Request, req answ
 		if err != nil {
 			return nil, err
 		}
-		return answeredpdf.MarshalPayload(exam, req.View, req.Media, layout)
+		words, err := studentPDFWordVault(ctx, app, exam, student)
+		if err != nil {
+			return nil, err
+		}
+		return answeredpdf.MarshalAttemptPayload(exam, req.View, req.Media, layout, words)
 	})
 	switch {
 	case errors.Is(err, answeredpdf.ErrBusy):

@@ -188,6 +188,7 @@ func TestValidateDraftCountsEveryQuestionAsOperational(t *testing.T) {
 	policy := converterJSON(t, map[string]map[string]string{"math": {"m2_higher_only": "s"}}, map[string]int{"s": 2})
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}).AddRow("estimated_sat", policy))
 	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+	mock.ExpectQuery("FROM sat_word_vaults").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"entries"}))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 	if err != nil {
 		t.Fatal(err)
@@ -213,6 +214,7 @@ func TestValidateDraftRequiresAllThreeModulesInSelectedSection(t *testing.T) {
 			AddRow("q2", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
 	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+	mock.ExpectQuery("FROM sat_word_vaults").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"entries"}))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeReadingWriting)
 	if err != nil {
 		t.Fatal(err)
@@ -301,6 +303,7 @@ func TestValidateDraftThresholdGateMatrix(t *testing.T) {
 					AddRow(SectionMath, fmt.Sprintf(`{"minimumCorrectForHigher":%d}`, tc.threshold)))
 			mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
 			mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+			mock.ExpectQuery("FROM sat_word_vaults").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"entries"}))
 			issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 			if err != nil {
 				t.Fatal(err)
@@ -374,6 +377,7 @@ func TestValidateDraftThresholdGateSkipsNonM1Shapes(t *testing.T) {
 			// No assessment_routing_policies expectation: the gate must not read it.
 			mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
 			mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+			mock.ExpectQuery("FROM sat_word_vaults").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"entries"}))
 			issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 			if err != nil {
 				t.Fatal(err)
@@ -408,6 +412,7 @@ func TestValidateDraftFlexibleM1Only(t *testing.T) {
 			AddRow("q1", "single_choice", content("Prompt"), choiceAnswer("A", "A", "B", "C", "D")))
 	mock.ExpectQuery("assessment_scoring_policies").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"policy_key", "policy_config"}))
 	mock.ExpectQuery("config_snapshot").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(`{}`))
+	mock.ExpectQuery("FROM sat_word_vaults").WithArgs("draft").WillReturnRows(sqlmock.NewRows([]string{"entries"}))
 	issues, err := ValidateDraftForScope(context.Background(), db, "draft", ScopeMath)
 	if err != nil {
 		t.Fatal(err)
