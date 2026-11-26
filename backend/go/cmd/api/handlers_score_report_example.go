@@ -32,7 +32,7 @@ func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		if app.AnsweredPDF == nil || app.PDFLayouts == nil || app.DB == nil {
+		if app.AnsweredPDF == nil || app.PDFLayouts == nil || app.Delivery == nil || app.Media == nil || app.DB == nil {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "The score report example is unavailable."))
 			return
 		}
@@ -51,20 +51,19 @@ func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 				"The Word Vault has stale question references. Re-import the vocabulary workbook before downloading an example."))
 			return
 		}
-		editor, err := app.PDFLayouts.Read(r.Context(), examID)
-		if err != nil {
-			httpx.WriteError(w, r, MapDBError(err))
-			return
-		}
 		layout, err := app.PDFLayouts.ResolvePreview(r.Context(), examID, nil, nil)
 		if err != nil {
 			httpx.WriteError(w, r, MapDBError(err))
 			return
 		}
-		exam, view := answeredpdf.LayoutSample(title, editor.Targets, true)
-		payload, err := answeredpdf.MarshalAttemptPayload(exam, view, map[string]string{}, layout, words)
+		exam, view, err := app.Delivery.SampleAnsweredExam(r.Context(), versionID, examID, title, "Sample Student")
 		if err != nil {
-			httpx.WriteError(w, r, apperrors.New(apperrors.CodeInternal, "The score report example could not be prepared."))
+			httpx.WriteError(w, r, err)
+			return
+		}
+		payload, err := answeredpdf.BuildAttemptPayload(r.Context(), exam, view, app.Media.OpenFinalized, layout, words)
+		if err != nil {
+			pdfExportError(w, r, err)
 			return
 		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(answeredpdf.RenderTimeout + 5*time.Second))

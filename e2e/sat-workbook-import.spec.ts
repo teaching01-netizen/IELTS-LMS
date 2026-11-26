@@ -140,6 +140,7 @@ async function importWordVault(page: Page) {
         const content = await rendered.getTextContent();
         text += `${content.items.map((item) => "str" in item ? item.str : "").join(" ")} `;
       }
+      expect(text).toContain("Workbook question 1");
       expect(text).toContain("The Word Vault");
       expect(text).toContain("From Question 01");
       expect(text.replace(/\s+/g, "")).toContain("ปรับตัว");

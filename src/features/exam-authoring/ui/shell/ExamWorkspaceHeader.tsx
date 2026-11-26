@@ -179,7 +179,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
               onClick={onDownloadExample}
               disabled={downloadExampleBusy}
               aria-label="Download score report example"
-              title="Download a score report example with the answer key and The Word Vault"
+              title="Download this exam’s score report example with the answer key and The Word Vault"
               className={QUIET}
             >
               <Download size={16} aria-hidden="true" />

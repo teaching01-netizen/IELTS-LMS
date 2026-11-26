@@ -35,8 +35,8 @@ export function ScoreReportExamplePanel({ examId }: { examId: string }) {
         <div className="min-w-0">
           <h3 id="sat-score-report-example-title" className="font-semibold">Score report example</h3>
           <p className="mt-1 max-w-xl text-sm text-muted-foreground">
-            A sample student report built from example questions: every answer marked correct, with the answer key and
-            The Word Vault from this exam’s current draft. Published exams keep their own vocabulary.
+            A sample of this exam’s student report: every question marked correct, with the answer key and The Word
+            Vault. Built from the current draft, or the published version when no draft is open.
           </p>
         </div>
         <SatButton variant="secondary" disabled={busy} onClick={() => void download()}>
