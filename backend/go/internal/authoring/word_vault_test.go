@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -194,5 +195,83 @@ func TestWordVaultVersionLifecycleMySQL(t *testing.T) {
 	words, stale, err := satwordvault.Read(ctx, f.DB, last.DraftID)
 	if err != nil || stale != 0 || len(words) != 2 || words[0].Word != "lower" || words[1].Word != "higher" {
 		t.Fatalf("published words changed: %+v stale=%d err=%v", words, stale, err)
+	}
+}
+
+func wordVaultSheetText(t *testing.T, book *excelize.File, sheet string) string {
+	t.Helper()
+	rows, err := book.GetRows(sheet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text strings.Builder
+	for _, row := range rows {
+		for _, cell := range row {
+			text.WriteString(cell)
+			text.WriteString("\n")
+		}
+	}
+	return text.String()
+}
+
+func TestWordVaultTemplateCarriesTheImportContract(t *testing.T) {
+	template, err := WordVaultTemplate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	book, err := excelize.OpenReader(bytes.NewReader(template))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer book.Close()
+
+	if sheets := book.GetSheetList(); len(sheets) != 3 || sheets[0] != wordVaultSheet || sheets[1] != wordVaultGuideSheet || sheets[2] != wordVaultInstructionsSheet {
+		t.Fatalf("unexpected sheets: %v", sheets)
+	}
+
+	// The guide must document the rules the parser actually enforces, so a
+	// teacher or an AI tool does not discover them only after a failed upload.
+	guide := wordVaultSheetText(t, book, wordVaultGuideSheet)
+	for _, want := range []string{
+		"Reading & Writing · Module 1",
+		"rw-m2-lower",
+		"rw-m2-higher",
+		"Question number",
+		"200 entries",
+		"2 MB",
+		"replaces the ENTIRE draft Word Vault",
+		"Thai script",
+		"sat.word_vault.stale",
+		"header row clears an existing vault",
+	} {
+		if !strings.Contains(guide, want) {
+			t.Fatalf("guide is missing %q", want)
+		}
+	}
+
+	instructions := wordVaultSheetText(t, book, wordVaultInstructionsSheet)
+	for _, want := range []string{"COPYABLE SYSTEM PROMPT", "NOT IMPORT READY", "Question number", "MODULE MAP"} {
+		if !strings.Contains(instructions, want) {
+			t.Fatalf("AI instructions are missing %q", want)
+		}
+	}
+
+	prompt, err := book.GetCellValue(wordVaultInstructionsSheet, "B4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prompt) < 1200 {
+		t.Fatalf("the copyable AI prompt is too thin: %d characters", len(prompt))
+	}
+	for _, want := range []string{"OUTPUT CONTRACT", "NOT IMPORT READY", "Vocabulary", "Thai meaning"} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("AI prompt is missing %q", want)
+		}
+	}
+
+	// The template itself must stay a valid header-only import: uploading it
+	// unchanged either clears an existing draft vault or is a no-op.
+	if rows, issues, err := parseWordVault(template); err != nil || len(rows) != 0 || len(issues) != 0 {
+		t.Fatalf("template must be a valid empty import: rows=%+v issues=%+v err=%v", rows, issues, err)
 	}
 }

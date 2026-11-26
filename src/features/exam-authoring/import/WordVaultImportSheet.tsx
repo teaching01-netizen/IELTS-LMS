@@ -177,7 +177,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
         />
         {!preview ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-au-fill px-4 py-3">
-            <p className="text-xs leading-5 text-slate-600">New here? The template has a filled guide and an example.</p>
+            <p className="text-xs leading-5 text-slate-600">New here? The template includes the full guide and a copyable AI prompt.</p>
             <SatButton variant="secondary" disabled={downloading} onClick={() => void download()}>
               <Download size={16} aria-hidden="true" /> {downloading ? "Downloading…" : "Download vocabulary template"}
             </SatButton>

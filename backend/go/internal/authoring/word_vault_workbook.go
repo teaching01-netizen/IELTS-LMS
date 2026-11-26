@@ -34,66 +34,6 @@ type wordVaultRow struct {
 	entry    satwordvault.Entry
 }
 
-func WordVaultTemplate() ([]byte, error) {
-	book := excelize.NewFile()
-	defer book.Close()
-	if err := book.SetSheetName("Sheet1", wordVaultSheet); err != nil {
-		return nil, err
-	}
-	if _, err := book.NewSheet("Guide"); err != nil {
-		return nil, err
-	}
-	headers := make([]any, len(wordVaultHeaders))
-	for i, header := range wordVaultHeaders {
-		headers[i] = header
-	}
-	if err := book.SetSheetRow(wordVaultSheet, "A1", &headers); err != nil {
-		return nil, err
-	}
-	guide := [][]any{
-		{"The Word Vault", "Fill in Vocabulary. A confirmed upload replaces the entire draft Word Vault."},
-		{"Module", "Use the matching Reading & Writing module. Use the question number shown in that module."},
-		{"Example (reference only)", "Reading & Writing · Module 1", 1, "adapt", "ปรับตัว", "To adjust to a new situation.", "The team adapted to the new schedule."},
-	}
-	for _, spec := range satWorkbookModules {
-		if spec.sectionKey == SectionReadingWriting {
-			guide = append(guide, []any{"Module label", spec.label})
-		}
-	}
-	for i, row := range guide {
-		if err := book.SetSheetRow("Guide", "A"+strconv.Itoa(i+1), &row); err != nil {
-			return nil, err
-		}
-	}
-	headerStyle, err := book.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true, Color: "#14375C"},
-		Fill: excelize.Fill{Type: "pattern", Pattern: 1, Color: []string{"#E6F1FC"}},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if err := book.SetCellStyle(wordVaultSheet, "A1", "F1", headerStyle); err != nil {
-		return nil, err
-	}
-	if err := book.SetPanes(wordVaultSheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"}); err != nil {
-		return nil, err
-	}
-	for i, width := range []float64{38, 18, 26, 28, 50, 50} {
-		column, _ := excelize.ColumnNumberToName(i + 1)
-		if err := book.SetColWidth(wordVaultSheet, column, column, width); err != nil {
-			return nil, err
-		}
-	}
-	if err := book.SetColWidth("Guide", "A", "G", 32); err != nil {
-		return nil, err
-	}
-	out, err := book.WriteToBuffer()
-	if err != nil {
-		return nil, err
-	}
-	return out.Bytes(), nil
-}
-
 func parseWordVault(data []byte) ([]wordVaultRow, []WordVaultIssue, error) {
 	if len(data) > MaxWordVaultBytes {
 		return nil, nil, &WorkbookError{TooLarge: true, Message: "Vocabulary workbooks must be 2 MB or smaller."}
