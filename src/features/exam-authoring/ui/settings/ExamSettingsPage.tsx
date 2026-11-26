@@ -12,6 +12,7 @@ import { satListReturnTarget } from "@/src/products/sat/ui/useSatListReturn";
 import { DeliverySettingsPanel } from "./DeliverySettingsPanel";
 import { ScoreConverterPanel } from "../release/ScoreConverterPanel";
 import { ScoreReportSettingPanel } from "../release/ScoreReportSettingPanel";
+import { ScoreReportExamplePanel } from "../release/ScoreReportExamplePanel";
 import { useExamQuery } from "../../api/examQueries";
 import { SatButton } from "../../../../products/sat/ui/SatPage";
 import { releaseSurfaceClass } from "../release/releaseUi";
@@ -128,6 +129,7 @@ export function ExamSettingsPage({ exam }: { exam: ExamEntity }) {
             </p>
           </div>
           <ScoreReportSettingPanel exam={exam} onSaved={() => examQuery.refetch()} />
+          {exam.providerKey === "sat" ? <ScoreReportExamplePanel examId={exam.id} /> : null}
           <ScoreConverterPanel examId={exam.id} canEdit={exam.canEdit} />
           {exam.providerKey === "sat" ? (
             <WordVaultSettings

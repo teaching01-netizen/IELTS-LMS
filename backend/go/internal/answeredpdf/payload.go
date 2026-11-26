@@ -92,21 +92,7 @@ func marshalPayload(exam *delivery.AnsweredExam, view json.RawMessage, figures m
 
 // Filename preserves the browser's existing sanitization and UTF-16 length bound.
 func Filename(candidate, exam string, scored bool) string {
-	part := func(s string) string {
-		s = strings.Map(func(r rune) rune {
-			if unicode.IsControl(r) || strings.ContainsRune(`<>:"/\|?*`, r) {
-				return ' '
-			}
-			return r
-		}, s)
-		s = strings.Join(strings.Fields(s), " ")
-		units := utf16.Encode([]rune(s))
-		if len(units) > 80 {
-			s = string(utf16.Decode(units[:80]))
-		}
-		return strings.TrimRight(s, ". ")
-	}
-	name, title := part(candidate), part(exam)
+	name, title := filenamePart(candidate), filenamePart(exam)
 	if title == "" {
 		title = "Digital SAT"
 	}
@@ -119,4 +105,29 @@ func Filename(candidate, exam string, scored bool) string {
 		parts = append(parts, name)
 	}
 	return strings.Join(append(parts, title, suffix), " - ") + ".pdf"
+}
+
+// ExampleFilename names the authoring download so it can never be mistaken for
+// a real student's report.
+func ExampleFilename(exam string) string {
+	title := filenamePart(exam)
+	if title == "" {
+		title = "Digital SAT"
+	}
+	return title + " - Score report example.pdf"
+}
+
+func filenamePart(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || strings.ContainsRune(`<>:"/\|?*`, r) {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.Join(strings.Fields(s), " ")
+	units := utf16.Encode([]rune(s))
+	if len(units) > 80 {
+		s = string(utf16.Decode(units[:80]))
+	}
+	return strings.TrimRight(s, ". ")
 }

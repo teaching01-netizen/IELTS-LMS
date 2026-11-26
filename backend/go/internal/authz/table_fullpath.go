@@ -72,6 +72,7 @@ func init() {
 		"POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets":          {MinRoles: writeStaff},
 		"GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets/{assetID}": {MinRoles: readStaff},
 		"POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout/preview":  {MinRoles: readStaff},
+		"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-report-example": {MinRoles: readStaff},
 		// SAT one-action room creation (internal/satrooms): admin/builder write;
 		// the receipt lookup is the actor's own operation key.
 		"POST /api/v1/sat/exams/{id}/rooms":              {MinRoles: writeStaff},

@@ -223,6 +223,8 @@ describe("ExamSettingsPage", () => {
     expect(screen.getByRole("heading", { name: "Results & scoring" })).toBeInTheDocument();
     expect(screen.getByTestId("score-report-panel")).toBeInTheDocument();
     expect(screen.getByTestId("score-converter-panel")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Score report example" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Download example PDF/ })).toBeInTheDocument();
   });
 
   it("offers an explicit Edit this exam action when only a published version exists", () => {

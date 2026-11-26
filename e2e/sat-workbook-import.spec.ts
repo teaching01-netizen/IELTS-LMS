@@ -122,6 +122,31 @@ async function importWordVault(page: Page) {
   await replace.click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText("1 word saved to the draft.")).toBeVisible();
+  // The dedicated PDF run builds the print bundle; the example needs the same
+  // Chromium renderer as the student artifact.
+  if (process.env["FRONTEND_DIST_DIR"]) {
+    const [example] = await Promise.all([
+      page.waitForEvent("download", { timeout: 95_000 }),
+      page.getByRole("button", { name: "Download example PDF" }).click(),
+    ]);
+    expect(example.suggestedFilename()).toMatch(/Score report example\.pdf$/);
+    const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const pdf = getDocument({ data: new Uint8Array(await readFile(await example.path())), useWasm: false });
+    try {
+      const document = await pdf.promise;
+      let text = "";
+      for (let number = 1; number <= document.numPages; number++) {
+        const rendered = await document.getPage(number);
+        const content = await rendered.getTextContent();
+        text += `${content.items.map((item) => "str" in item ? item.str : "").join(" ")} `;
+      }
+      expect(text).toContain("The Word Vault");
+      expect(text).toContain("From Question 01");
+      expect(text.replace(/\s+/g, "")).toContain("ปรับตัว");
+    } finally {
+      await pdf.destroy();
+    }
+  }
   await page.goto(exam.href);
 }
 

@@ -3454,6 +3454,25 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /assessment-authoring/exams/{examId}/sat-score-report-example:
+    get:
+      tags: [authoring]
+      summary: Download a sample SAT score report with every answer correct and the Word Vault
+      parameters:
+        - name: examId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Example score report PDF (attachment)
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /assessment-authoring/exams/{examId}/sat-score-converter:
     get:
       tags: [authoring]

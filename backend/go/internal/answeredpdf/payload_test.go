@@ -109,3 +109,14 @@ func TestServerPayloadKeepsOnlyTheAuthorizedKeyVariant(t *testing.T) {
 		t.Fatalf("answer-only payload carried keys: %+v", plain.Exam.AnswerKey)
 	}
 }
+
+func TestExampleFilenameIsAnExample(t *testing.T) {
+	for _, tc := range []struct{ title, want string }{
+		{"SAT: Practice / 04?", "SAT Practice 04 - Score report example.pdf"},
+		{"  ", "Digital SAT - Score report example.pdf"},
+	} {
+		if got := ExampleFilename(tc.title); got != tc.want {
+			t.Fatalf("got %q want %q", got, tc.want)
+		}
+	}
+}

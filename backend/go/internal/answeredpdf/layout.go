@@ -98,8 +98,65 @@ func LayoutSample(title string, targets []satpdflayout.Option, answerKey bool) (
 			}
 		}
 	}
-	view := json.RawMessage(`{"primaryLabel":"Raw score","primaryScore":{"kind":"raw","correct":1,"total":2},"subjects":[{"key":"math","label":"Math","score":{"kind":"raw","correct":1,"total":2},"rawCorrect":1,"rawTotal":2,"modules":[],"domains":[]}],"mode":"test"}`)
+	view := sampleView(exam)
 	return exam, view
+}
+
+// sampleView makes the example internally consistent: every sample question is
+// answered correctly, so the summary, the subject rows and the answer key all
+// report the same perfect raw result instead of a hardcoded fraction.
+func sampleView(exam *delivery.AnsweredExam) json.RawMessage {
+	subjects := []map[string]any{}
+	correctTotal, questionTotal := 0, 0
+	for _, section := range exam.Sections {
+		modules := []map[string]any{}
+		correct, total := 0, 0
+		for _, module := range section.Modules {
+			count := len(module.Questions)
+			if count == 0 {
+				continue
+			}
+			correct += count
+			total += count
+			modules = append(modules, map[string]any{
+				"key": module.ModuleKey, "label": module.Title,
+				"rawCorrect": count, "rawTotal": count,
+			})
+		}
+		if total == 0 {
+			continue
+		}
+		correctTotal += correct
+		questionTotal += total
+		subjects = append(subjects, map[string]any{
+			"key": section.SectionKey, "label": section.Title,
+			"score":      map[string]any{"kind": "raw", "correct": correct, "total": total},
+			"rawCorrect": correct, "rawTotal": total,
+			"modules": modules, "domains": []any{},
+		})
+	}
+	layout := "partial-results"
+	switch {
+	case len(subjects) >= 2:
+		layout = "full-sat"
+	case len(subjects) == 1:
+		layout = "single-subject"
+	}
+	view := map[string]any{
+		"layout":            layout,
+		"title":             "Score report & exam review",
+		"primaryLabel":      "Raw score",
+		"primaryScore":      map[string]any{"kind": "raw", "correct": correctTotal, "total": questionTotal},
+		"subjects":          subjects,
+		"showCombinedScore": len(subjects) >= 2,
+		"notice":            "Sample report: every question is answered correctly.",
+		"methodology":       map[string]any{"isEstimated": false, "converterVersion": nil},
+		"mode":              "test",
+		"assistance":        map[string]any{"revealAnswers": false, "untimed": false},
+		"issues":            []any{},
+	}
+	out, _ := json.Marshal(view)
+	return out
 }
 
 func sampleQuestion(id, subject string) (delivery.DeliveredQuestion, string) {

@@ -3,6 +3,7 @@ package answeredpdf
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/draw"
@@ -266,5 +267,45 @@ func TestSampleBookIndexesGeneratedSections(t *testing.T) {
 		if got := found[key]; got != page {
 			t.Errorf("section %s points to page %d, want %d", key, got, page)
 		}
+	}
+}
+
+func TestLayoutSampleReportsEveryQuestionCorrect(t *testing.T) {
+	options := []satpdflayout.Option{
+		{Target: satpdflayout.Target{Kind: "reviewSubject", SectionKey: "reading-writing"}, Label: "Reading & Writing"},
+		{Target: satpdflayout.Target{Kind: "reviewModule", SectionKey: "reading-writing", ModuleKey: "rw-m1"}, Label: "Module 1"},
+		{Target: satpdflayout.Target{Kind: "reviewSubject", SectionKey: "math"}, Label: "Math"},
+		{Target: satpdflayout.Target{Kind: "reviewModule", SectionKey: "math", ModuleKey: "math-m1"}, Label: "Module 1"},
+	}
+	_, view := LayoutSample("Sample", options, true)
+	var parsed struct {
+		Layout            string `json:"layout"`
+		ShowCombinedScore bool   `json:"showCombinedScore"`
+		Notice            string `json:"notice"`
+		PrimaryScore      struct {
+			Kind    string `json:"kind"`
+			Correct int    `json:"correct"`
+			Total   int    `json:"total"`
+		} `json:"primaryScore"`
+		Subjects []struct {
+			Key        string `json:"key"`
+			RawCorrect int    `json:"rawCorrect"`
+			RawTotal   int    `json:"rawTotal"`
+		} `json:"subjects"`
+	}
+	if err := json.Unmarshal(view, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Layout != "full-sat" || !parsed.ShowCombinedScore {
+		t.Fatalf("two subjects must read as a full SAT report: %+v", parsed)
+	}
+	if parsed.PrimaryScore.Kind != "raw" || parsed.PrimaryScore.Correct != 2 || parsed.PrimaryScore.Total != 2 {
+		t.Fatalf("sample summary must be perfect: %+v", parsed.PrimaryScore)
+	}
+	if len(parsed.Subjects) != 2 || parsed.Subjects[0].Key != "reading-writing" || parsed.Subjects[0].RawCorrect != 1 || parsed.Subjects[0].RawTotal != 1 {
+		t.Fatalf("sample subject totals are inconsistent: %+v", parsed.Subjects)
+	}
+	if parsed.Notice == "" {
+		t.Fatal("the example must say it is a sample")
 	}
 }

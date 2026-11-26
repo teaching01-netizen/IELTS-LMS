@@ -681,6 +681,7 @@ func BuildRouter(app *App) http.Handler {
 			r.With(adminLimit).Post("/exams/{examID}/sat-pdf-assets", authorize("POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets", satPDFAssetUploadHandler(app)))
 			r.With(adminLimit).Get("/exams/{examID}/sat-pdf-assets/{assetID}", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets/{assetID}", satPDFAssetReadHandler(app)))
 			r.With(adminLimit).Post("/exams/{examID}/sat-pdf-layout/preview", authorize("POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout/preview", satPDFLayoutPreviewHandler(app)))
+			r.With(adminLimit).Get("/exams/{examID}/sat-score-report-example", authorize("GET /api/v1/assessment-authoring/exams/{examID}/sat-score-report-example", satScoreReportExampleHandler(app)))
 			r.With(adminLimit).Get("/exams/{examID}/forms", authorize("GET /api/v1/assessment-authoring/exams/{examID}/forms", authorFormsHandler(app)))
 			r.With(adminLimit).Put("/exams/{examID}/forms", authorize("PUT /api/v1/assessment-authoring/exams/{examID}/forms", authorFormsHandler(app)))
 		})

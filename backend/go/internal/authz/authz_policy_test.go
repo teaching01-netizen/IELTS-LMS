@@ -216,6 +216,7 @@ var expectedFullPaths = []string{
 	"GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout",
 	"PUT /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout",
 	"POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-layout/preview",
+	"GET /api/v1/assessment-authoring/exams/{examID}/sat-score-report-example",
 	"POST /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets",
 	"GET /api/v1/assessment-authoring/exams/{examID}/sat-pdf-assets/{assetID}",
 	// SAT one-action room creation.
