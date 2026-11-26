@@ -33,7 +33,7 @@ async function createExam(page: Page, flexible: boolean) {
 }
 
 async function openWorkbookImport(page: Page) {
-  await page.getByRole("button", { name: "Import questions", exact: true }).click({ timeout: 30_000 });
+  await page.getByRole("button", { name: "Import", exact: true }).click({ timeout: 30_000 });
   await page.getByRole("menuitem", { name: /Import Excel workbook/ }).click();
   const dialog = page.getByRole("dialog", { name: "Import SAT from Excel" });
   await expect(dialog).toBeVisible();

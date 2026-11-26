@@ -31,6 +31,9 @@ export interface AuthoringOverlays {
   setImportOpen: (next: SetStateAction<boolean>) => void;
   workbookImportOpen: boolean;
   setWorkbookImportOpen: (next: SetStateAction<boolean>) => void;
+  /** The vocabulary workbook importer, beside the exam workbook importer. */
+  wordVaultOpen: boolean;
+  setWordVaultOpen: (next: SetStateAction<boolean>) => void;
   sampleDialogOpen: boolean;
   setSampleDialogOpen: (next: SetStateAction<boolean>) => void;
   jumpPaletteOpen: boolean;
@@ -64,6 +67,11 @@ export function useAuthoringOverlays(): AuthoringOverlays {
   const [sampleDialogOpen, setSampleDialogOpen] = useOverlayToggle(
     overlayStack,
     "sample",
+    "dialog"
+  );
+  const [wordVaultOpen, setWordVaultOpen] = useOverlayToggle(
+    overlayStack,
+    "word-vault",
     "dialog"
   );
   const [jumpPaletteOpen, setJumpPaletteOpen] = useOverlayToggle(overlayStack, "palette", "dialog");
@@ -147,6 +155,8 @@ export function useAuthoringOverlays(): AuthoringOverlays {
     setImportOpen,
     workbookImportOpen,
     setWorkbookImportOpen,
+    wordVaultOpen,
+    setWordVaultOpen,
     sampleDialogOpen,
     setSampleDialogOpen,
     jumpPaletteOpen,

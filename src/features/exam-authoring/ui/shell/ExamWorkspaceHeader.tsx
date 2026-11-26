@@ -150,7 +150,7 @@ export function ExamWorkspaceHeader(props: ExamWorkspaceHeaderProps) {
           ) : null}
           {importItems && importItems.length > 0 ? (
             <SatMenu
-              label="Import questions"
+              label="Import"
               icon={FileUp}
               align="end"
               width={248}

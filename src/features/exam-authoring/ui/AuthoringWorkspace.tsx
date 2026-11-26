@@ -21,7 +21,7 @@ import {
   useLoadSatSampleExam,
   useReorderAssessmentQuestions,
 } from "../api/assessmentQueries";
-import { authoringEffects } from "../api/authoringQueryEffects";
+import { assessmentKeys, authoringEffects } from "../api/authoringQueryEffects";
 import { toDraftOpenErrorInfo, useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
 import { AuthoringLifecycleSurface } from "./AuthoringLifecycleSurface";
 import { useDraftOpenOnEntry } from "./useDraftOpenOnEntry";
@@ -46,10 +46,12 @@ import { PRESENCE_COPY } from "./collaboration/collaborationCopy";
 import { validateSatQuestion } from "../providers/sat/satProvider";
 import { QuestionImportSheet } from "../import/QuestionImportSheet";
 import { SatWorkbookImportSheet } from "../import/SatWorkbookImportSheet";
+import { WordVaultImportSheet } from "../import/WordVaultImportSheet";
 import { SampleExamLoadDialog } from "./SampleExamLoadDialog";
 import { WorkbookImportUndoBanner } from "./WorkbookImportUndoBanner";
 import { useOptionalAuthSession } from "../../auth/api/authSession";
 import { buildStaffDraftKey } from "../../../utils/staffDraftKey";
+import { wordCountLabel } from "@shared/sat/wordVault";
 import { AuthoringConfirmDialog, restoreAuthoringFocus } from "./authoringPrimitives";
 import { resolvePublishIssueDestination } from "./release/releaseSelectors";
 import {
@@ -204,6 +206,8 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
     setImportOpen,
     workbookImportOpen,
     setWorkbookImportOpen,
+    wordVaultOpen,
+    setWordVaultOpen,
     sampleDialogOpen,
     setSampleDialogOpen,
     jumpPaletteOpen,
@@ -228,6 +232,7 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
   useEffect(() => () => { routeIntentRef.current += 1; }, []);
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
+  const [wordVaultNotice, setWordVaultNotice] = useState<string | null>(null);
   const [focusField, setFocusField] = useState<string | null>(null);
   // Which FIELD an inspector shortcut belongs to is a workspace concern (the
   // deep-link path names fields, not overlays), so the rule stays here and asks
@@ -478,6 +483,30 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
     setNavigationError,
     setImportOpen: setWorkbookImportOpen,
   });
+
+  // The vocabulary workbook stages against the SAME draft the author is editing,
+  // so its entry point lives in the Import menu beside the exam workbook. Flush
+  // the open question first: the commit bumps the draft revision, and a write
+  // that lands after it would be measured against a revision the server moved
+  // past.
+  const openWordVaultImport = useCallback(async () => {
+    setNavigationError(null);
+    setWordVaultNotice(null);
+    if (!(await flushBeforeNavigation())) return;
+    setWordVaultOpen(true);
+  }, [flushBeforeNavigation, setNavigationError, setWordVaultOpen]);
+
+  const handleWordVaultSaved = useCallback(
+    (count: number) => {
+      setWordVaultOpen(false);
+      setWordVaultNotice(
+        count === 0 ? "Draft vocabulary removed." : `${wordCountLabel(count)} saved to the draft.`
+      );
+      void queryClient.invalidateQueries({ queryKey: assessmentKeys.wordVault(examId) });
+      void authoringEffects.shellChanged(queryClient, examId);
+    },
+    [examId, queryClient, setWordVaultOpen]
+  );
 
   // The server's copy of the open question. ONE projection, read by both rules
   // that need it: the seed the editors, the room and the three-way compare are
@@ -1335,6 +1364,17 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
                         label: "Import Excel workbook…",
                         onSelect: () => void openWorkbookImport(),
                       },
+                      // The SAT Word Vault is a separate workbook contract (its
+                      // own template, sheet and replacement rule), so it sits
+                      // past a divider rather than reading as a third exam format.
+                      ...(shell.providerKey === "sat"
+                        ? [{
+                            id: "word-vault-import",
+                            label: "Import vocabulary workbook…",
+                            separatorBefore: true,
+                            onSelect: () => void openWordVaultImport(),
+                          }]
+                        : []),
                     ],
                   }
                 : {})}
@@ -1413,6 +1453,14 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
               {navigationError ? (
                 <div role="alert" className="border-b px-5 py-2 text-center text-xs font-medium">
                   {navigationError}
+                </div>
+              ) : null}
+              {wordVaultNotice ? (
+                <div role="status" className="flex flex-wrap items-center justify-center gap-2 border-b px-5 py-2 text-center text-xs font-medium">
+                  <span>{wordVaultNotice}</span>
+                  <button type="button" className="font-semibold underline" onClick={() => setWordVaultNotice(null)}>
+                    Dismiss
+                  </button>
                 </div>
               ) : null}
               {activeRaceNotice ? (
@@ -1667,6 +1715,14 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
             existingQuestionCount={totalAuthored}
             onClose={closeWorkbookImport}
             onCommitted={handleWorkbookCommitted}
+          />
+        ) : null}
+        {wordVaultOpen && shell.providerKey === "sat" ? (
+          <WordVaultImportSheet
+            open
+            examId={examId}
+            onClose={() => setWordVaultOpen(false)}
+            onSaved={handleWordVaultSaved}
           />
         ) : null}
         <SampleExamLoadDialog

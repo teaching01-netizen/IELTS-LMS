@@ -67,6 +67,12 @@ export const assessmentKeys = {
   readiness: (examId: string, versionId: string, versionRevision: number, publishScope: SatPublishScope = "full") =>
     ["assessment", examId, "readiness", versionId, versionRevision, publishScope] as const,
   question: (examQuestionId: string) => ["assessment-question", examQuestionId] as const,
+  /**
+   * The draft's Word Vault status/counts. Read by the Settings panel and
+   * invalidated by whichever surface committed the workbook, so both entries
+   * into the import see the same answer.
+   */
+  wordVault: (examId: string) => ["assessment", examId, "word-vault"] as const,
 };
 
 /**

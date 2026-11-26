@@ -102,7 +102,7 @@ describe("ExamWorkspaceHeader", () => {
         })}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Import questions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Replace exam from workbook/ }));
     expect(second).toHaveBeenCalledOnce();
     expect(first).not.toHaveBeenCalled();

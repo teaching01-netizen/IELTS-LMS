@@ -376,18 +376,39 @@ describe("AuthoringWorkspace (spine-only)", () => {
     expect(screen.getByRole("button", { name: /^Question 1\. /i })).toBeInTheDocument();
   });
 
-  it("offers one Import menu with both import paths for authors", async () => {
+  it("offers one Import menu with every import path for authors", async () => {
     harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
     renderWorkspace();
-    fireEvent.click(await screen.findByRole("button", { name: "Import questions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
     expect(screen.getByRole("menuitem", { name: /Add questions to this module/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /Import Excel workbook/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ })).toBeInTheDocument();
+  });
+
+  it("opens the Word Vault importer from the Import menu, beside the exam workbook", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    renderWorkspace();
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
+    expect(await screen.findByRole("dialog", { name: "Import Vocabulary Excel" })).toBeInTheDocument();
+    expect(screen.getByText(/Drag and drop an \.xlsx workbook up to 2 MB/)).toBeInTheDocument();
+  });
+
+  it("keeps the vocabulary import out of non-SAT exams", async () => {
+    const shell = makeShell();
+    shell.providerKey = "ielts";
+    harness.shellResult.data = { state: "READY", shell };
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    renderWorkspace();
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    expect(screen.getByRole("menuitem", { name: /Import Excel workbook/ })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /Import vocabulary workbook/ })).not.toBeInTheDocument();
   });
 
   it("hides Import from roles that cannot edit", async () => {
     renderWorkspace();
     await screen.findByRole("heading", { name: "SAT Practice 1" });
-    expect(screen.queryByRole("button", { name: "Import questions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Import" })).not.toBeInTheDocument();
   });
 
   it("adds a question after the active one with an order-protected placement", async () => {
