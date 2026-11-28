@@ -182,6 +182,8 @@ Cases below name which one to expect.
 | G7 | P1 | Both adaptive branches | Entries on M2-Lower and M2-Higher; student took one | Both branches' words appear; the student is not filtered to the branch they sat |
 | G8 | P2 | Source reference | Any appendix | Reads `From Question 01`-style labels matching the workbook's question number |
 | G9 | P2 | Page furniture | Last pages | A4 landscape, footer/pagination continues from the review pages, no clipped table |
+| G10 | P1 | Staff copy matches the student's | From Results → *View answers* → `Download answered exam (PDF)` | The appendix is present, with the same words as the student's download. Adding this case came from a live check: the staff route used to skip the vault entirely, so a teacher saw a paper with no appendix while the student saw one |
+
 
 ### H. Publish integration
 
@@ -316,6 +318,19 @@ Vitest: `AuthoringWorkspace.test.tsx` 38/38. Go: `satpublish`, `exams`, `authz`,
 | F1, F2, F3, F5 | Need direct API calls as observer/other-tenant; not exercised in this pass |
 | G2, G3, G5, G7, G9 | Need a second PDF scenario (draft-only edit, empty vault, page furniture) |
 | I1–I7 | Needs a real browser a11y pass (Safari + Firefox) |
+
+### G10 — staff paper regression, found in the field
+
+A teacher downloading from the response panel got a paper with no appendix. The
+staff prepare route passed `student=false` into the vault loader, which returned
+`nil` by design (the release scoped staff PDFs out). That scope line was wrong
+for the button teachers actually use, so the loader no longer branches on the
+caller: both routes now attach the vocabulary pinned to the attempt's version,
+and a reference the version cannot resolve still refuses the print.
+
+Verified by `TestAnsweredPDFWordVaultCoversStaffDownloadsMySQL` (entries served,
+stale reference refused) and `TestPreparedPDFRoutesMySQL` (both routes still
+render through Chromium).
 
 ### B13 fix — verified after the log above
 

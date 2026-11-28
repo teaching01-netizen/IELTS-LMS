@@ -36,11 +36,12 @@ func pdfExportError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
-// Student callers have already built the authorized, report-visible attempt.
-func studentPDFWordVault(ctx context.Context, app *App, exam *delivery.AnsweredExam, student bool) ([]satwordvault.PrintedEntry, error) {
-	if !student {
-		return nil, nil
-	}
+// Both callers arrive with an authorized attempt, so the appendix is the same
+// artifact for staff and students: the vocabulary pinned to the version the
+// attempt was taken on. Staff downloads used to skip it, which made the paper a
+// teacher opens from the response panel silently differ from the one the
+// student downloads.
+func answeredPDFWordVault(ctx context.Context, app *App, exam *delivery.AnsweredExam) ([]satwordvault.PrintedEntry, error) {
 	words, stale, err := satwordvault.Read(ctx, app.DB, exam.VersionID)
 	if err != nil {
 		return nil, err
@@ -170,7 +171,7 @@ func prepareAnsweredPDFHandler(app *App, student bool) http.HandlerFunc {
 			if student {
 				open = app.Media.OpenDelivery
 			}
-			words, err := studentPDFWordVault(ctx, app, exam, student)
+			words, err := answeredPDFWordVault(ctx, app, exam)
 			if err != nil {
 				return nil, err
 			}

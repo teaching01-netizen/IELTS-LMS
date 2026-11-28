@@ -128,7 +128,7 @@ func writeAnsweredPDF(app *App, w http.ResponseWriter, r *http.Request, req answ
 		if err != nil {
 			return nil, err
 		}
-		words, err := studentPDFWordVault(ctx, app, exam, student)
+		words, err := answeredPDFWordVault(ctx, app, exam)
 		if err != nil {
 			return nil, err
 		}

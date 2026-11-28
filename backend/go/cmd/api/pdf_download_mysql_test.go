@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"image"
 	"image/png"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"example.com/ielts-proctoring/internal/platform/tx"
 	"example.com/ielts-proctoring/internal/results"
 	"example.com/ielts-proctoring/internal/satpdflayout"
+	"example.com/ielts-proctoring/internal/satwordvault"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/pdfcpu/pdfcpu/pkg/api"
@@ -202,5 +204,50 @@ func TestPreparedPDFRoutesMySQL(t *testing.T) {
 	}
 	if _, err := app.PDFExports.Cleanup(t.Context(), 100); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The staff paper a teacher opens from the response panel is the same artifact
+// as the student's, so it carries the same appendix. It used to skip it, which
+// made the two downloads silently disagree.
+func TestAnsweredPDFWordVaultCoversStaffDownloadsMySQL(t *testing.T) {
+	ctx := t.Context()
+	f := newSATV2CompletionFixture(t)
+	app := &App{DB: f.db}
+
+	var versionID, questionID, moduleKey string
+	if err := f.db.QueryRowContext(ctx, "SELECT published_version_id FROM student_attempts WHERE id = ?", f.attemptID).Scan(&versionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.QueryRowContext(ctx, `SELECT eq.question_id, m.module_key
+		FROM assessment_exam_questions eq
+		JOIN assessment_modules m ON m.id = eq.module_id
+		JOIN assessment_sections s ON s.id = m.section_id
+		WHERE s.exam_version_id = ?
+		ORDER BY s.display_order, m.display_order, eq.display_order, eq.id LIMIT 1`, versionID).Scan(&questionID, &moduleKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := satwordvault.Replace(ctx, f.db, versionID, []satwordvault.Entry{{
+		ModuleKey: moduleKey, QuestionID: questionID,
+		Word: "adapt", Thai: "ปรับตัว", Definition: "To adjust to new conditions.", Example: "We adapt.",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	words, err := answeredPDFWordVault(ctx, app, &delivery.AnsweredExam{VersionID: versionID})
+	if err != nil || len(words) != 1 || words[0].Word != "adapt" {
+		t.Fatalf("staff answered PDF lost the word vault: %+v %v", words, err)
+	}
+
+	// A reference the version can no longer resolve refuses the print instead of
+	// printing a word against the wrong question.
+	if err := satwordvault.Replace(ctx, f.db, versionID, []satwordvault.Entry{{
+		ModuleKey: moduleKey, QuestionID: "missing-question",
+		Word: "adapt", Thai: "ปรับตัว", Definition: "To adjust to new conditions.", Example: "We adapt.",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := answeredPDFWordVault(ctx, app, &delivery.AnsweredExam{VersionID: versionID}); !errors.Is(err, answeredpdf.ErrNotPrintable) {
+		t.Fatalf("stale vocabulary must refuse the print: %v", err)
 	}
 }
