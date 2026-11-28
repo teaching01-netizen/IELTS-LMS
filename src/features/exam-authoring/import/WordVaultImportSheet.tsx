@@ -120,7 +120,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
   return (
     <AuthoringDialog
       open={open} title="Import Vocabulary Excel"
-      description="Upload the full vocabulary list for this draft."
+      description="Upload the vocabulary you want to save for this draft."
       showHeader={false}
       onClose={onClose} closeDisabled={closeDisabled}
       contentClassName={`flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[24px] p-0 ${preview ? "max-w-[860px]" : "max-w-[540px]"}`}
@@ -128,7 +128,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
       <header className="flex shrink-0 items-start justify-between gap-4 border-b border-au-separator px-5 py-4 sm:px-6">
         <div className="min-w-0">
           <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-slate-950">Import Vocabulary Excel</h2>
-          <p className="mt-1 text-sm leading-5 text-slate-600">Upload the full word list for this draft. Published exams keep their own.</p>
+          <p className="mt-1 text-sm leading-5 text-slate-600">Add words to any Reading &amp; Writing questions in this draft. You can skip questions or modules.</p>
         </div>
         <button
           type="button"

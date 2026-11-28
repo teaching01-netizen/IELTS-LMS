@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"example.com/ielts-proctoring/internal/platform/tx"
@@ -223,8 +224,12 @@ func bindWordVaultRows(rows []wordVaultRow, modules []satwordvault.Module) ([]sa
 			issues = append(issues, WordVaultIssue{row.number, "A", "This module is not present in the current draft."})
 			continue
 		}
+		if len(questions) == 0 {
+			issues = append(issues, WordVaultIssue{row.number, "B", "Add a question to this module before attaching vocabulary."})
+			continue
+		}
 		if row.question > len(questions) {
-			issues = append(issues, WordVaultIssue{row.number, "B", "This question number is not present in the module."})
+			issues = append(issues, WordVaultIssue{row.number, "B", fmt.Sprintf("Question %d is missing from the current draft. Valid numbers for this module are 1–%d.", row.question, len(questions))})
 			continue
 		}
 		entry := row.entry

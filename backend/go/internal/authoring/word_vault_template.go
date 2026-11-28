@@ -193,6 +193,7 @@ func wordVaultGuideRows() [][]string {
 		{"Example sentence", "One sentence that shows the word in use.", "1–320 characters, one line. Required for every entry."},
 		{"All six columns", "Every row needs all six values.", "A blank word, Thai meaning, definition or example is reported and blocks the import."},
 		{"MODULE", "The label or key must describe a module present in the current draft.", "A missing module is reported by row and column."},
+		{"CUSTOM EXAMS", "Use only the Reading & Writing questions you want to attach words to.", "Module 1 only, either Module 2 branch on its own, and flexible question counts are supported. You can skip any question or module."},
 		{"QUESTION NUMBER", "Question 1 is the first question in that module as currently authored.", "It matches the Order column of the question workbook in the same draft."},
 		{"QUESTION NUMBER", "Enter a positive whole number: 7, not Q7, 7.0, or a cell reference.", "The number is the position, not the question ID."},
 		{"QUESTION NUMBER", "Several words may point at the same question; one row per word.", "Identical rows are rejected as duplicates; different words on one question are allowed."},
@@ -244,7 +245,7 @@ func wordVaultInstructionRows() [][]string {
 		{"R01", "Source fidelity", "Only supplied material may justify a word, Thai meaning, definition, or example. Never invent one."},
 		{"R02", "Workbook integrity", "Keep the three sheet names and the six Vocabulary headers in row 1. Write data only on Vocabulary."},
 		{"R03", "Module map", "Use one of the three Reading & Writing labels or module keys from Guide. Math modules are invalid."},
-		{"R04", "Question resolution", "Question number is the 1-based position in that module. It must exist; never guess a number."},
+		{"R04", "Question resolution", "Use the question's existing 1-based position in its module. Custom and flexible exams can use any subset of their questions."},
 		{"R05", "Field limits", "Word 1–80, Thai 1–160, definition 1–320, example 1–320 characters. All four are required on every row."},
 		{"R06", "Thai text", "Thai script, one line, no control characters. Do not substitute a transliteration or an English gloss."},
 		{"R07", "Duplicates", "Identical rows are rejected. The same word attached to different questions is allowed."},
@@ -280,7 +281,7 @@ OUTPUT CONTRACT
 1. Write ONLY on the Vocabulary sheet, starting at row 2. Keep row 1 and the six headers exactly: Module | Question number | Vocabulary word | Thai meaning | English definition | Example sentence.
 2. One row = one vocabulary entry attached to one question. Do not add columns, merged cells, notes, or data written as color.
 3. Module must be one of the three Reading & Writing labels (or module keys) in Guide > MODULE MAP, copied exactly. Math modules are invalid.
-4. Question number is the 1-based position of the question in that module as currently authored. It must exist. Never guess; if you cannot confirm it, omit the row and report it.
+4. Question number is the 1-based position of the question in that module as currently authored. For custom or flexible exams, use only the questions and modules present in the supplied draft. Include only the questions that need vocabulary. Never guess; if you cannot confirm a reference, omit the row and report it.
 5. Vocabulary word: the English word or phrase, 1–80 characters. Thai meaning: 1–160 characters in Thai script. English definition: 1–320 characters. Example sentence: 1–320 characters. All four are required. One line per cell, plain text.
 6. Paste values only. No formulas, macros, external links, or embedded media.
 7. At most 200 entries. Empty rows are ignored. Keep the sheet within the first 1,000 rows.

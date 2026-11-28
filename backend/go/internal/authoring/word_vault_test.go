@@ -72,6 +72,29 @@ func TestWordVaultWorkbook(t *testing.T) {
 	}
 }
 
+func TestWordVaultAcceptsPartialCustomDrafts(t *testing.T) {
+	for _, key := range []string{"rw-m1", "rw-m2-lower", "rw-m2-higher"} {
+		t.Run(key, func(t *testing.T) {
+			modules := []satwordvault.Module{{Key: key, Questions: []satwordvault.Question{
+				{ID: "first", Number: 1}, {ID: "second", Number: 2},
+			}}}
+			data := wordVaultTestBook(t, testWordRow(key, 2, "adapt"), testWordRow(key, 3, "adjust"))
+			rows, parseIssues, err := parseWordVault(data)
+			if err != nil || len(parseIssues) != 0 {
+				t.Fatalf("parse custom exam rows: %v %v", parseIssues, err)
+			}
+			entries, issues := bindWordVaultRows(rows, modules)
+			if len(entries) != 1 || entries[0].ModuleKey != key || entries[0].QuestionID != "second" {
+				t.Fatalf("expected a word tied to only the second question: %+v", entries)
+			}
+			if len(issues) != 1 || issues[0].Row != 3 || issues[0].Column != "B" ||
+				!strings.Contains(issues[0].Message, "1–2") {
+				t.Fatalf("expected just an out-of-range question diagnostic: %+v", issues)
+			}
+		})
+	}
+}
+
 func TestWordVaultVersionLifecycleMySQL(t *testing.T) {
 	f := seedReadPerfFixture(t)
 	ctx := t.Context()
