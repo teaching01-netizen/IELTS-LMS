@@ -8,6 +8,7 @@ package db
 // uniqueness-guard fail-closed, all via sqlmock (no live DB).
 import (
 	"context"
+	"slices"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
@@ -37,8 +38,15 @@ func TestVerifyFailsClosedOnMissingTable(t *testing.T) {
 }
 
 func TestSchemaGuardListSizes(t *testing.T) {
-	if len(RequiredTables) != 17 {
-		t.Fatalf("RequiredTables = %d entries, want 17", len(RequiredTables))
+	if len(RequiredTables) != 19 {
+		t.Fatalf("RequiredTables = %d entries, want 19", len(RequiredTables))
+	}
+	// The exam PDF layout editor reads and writes these on every request; a
+	// missing table must refuse to boot rather than fail the first save.
+	for _, table := range []string{"sat_exam_pdf_layouts", "sat_exam_pdf_assets"} {
+		if !slices.Contains(RequiredTables, table) {
+			t.Fatalf("RequiredTables must include %s", table)
+		}
 	}
 	if len(RequiredIndexes) != 17 {
 		t.Fatalf("RequiredIndexes must include the 10 existing guards, 3 SAT slot indexes, 2 PDF export indexes, and the recovery grant/submission guards, got %d", len(RequiredIndexes))
