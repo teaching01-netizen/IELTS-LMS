@@ -66,6 +66,8 @@ function makeApi(fixture: Fixture): SatPdfLayoutApi {
   ]);
   let saved: PdfLayoutEditorData = {
     revision: customized ? 3 : 0,
+    updatedAt: customized ? "2026-11-28T09:04:00Z" : null,
+    updatedBy: customized ? "staff-1" : null,
     targets,
     assets: customized ? [...assets] : [],
     layout: {
@@ -170,7 +172,8 @@ function Example({ fixture, canEdit, startAtSettings }: {
             <h1 className="mb-5 text-2xl font-semibold">Results &amp; scoring</h1>
             <section className="flex items-center justify-between gap-4 rounded-xl border border-border bg-background p-5" aria-label="Exam PDF">
               <h2 className="font-semibold">Exam PDF</h2>
-              <Link className="rounded-lg border border-border px-4 py-2" to={pdfPath}>{canEdit ? "Customize PDF" : "View PDF layout"}</Link>
+              <p className="mt-1 text-sm text-muted-foreground">Slides and brand marks applied to every PDF prepared for this exam.</p>
+              <Link className="rounded-lg border border-border px-4 py-2" to={pdfPath}>{canEdit ? "Edit PDF layout" : "View PDF layout"}</Link>
             </section>
           </main>
         ),
@@ -196,7 +199,15 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 async function openEditor(canvasElement: HTMLElement) {
-  return within(await within(canvasElement).findByRole("region", { name: "PDF editor" }));
+  return within(await within(canvasElement).findByRole("region", { name: "Exam PDF layout" }));
+}
+
+/** The outline collapses on narrow viewports; open it before using it. */
+async function openOutline(canvasElement: HTMLElement) {
+  const editor = await openEditor(canvasElement);
+  const toggle = editor.queryByRole("button", { name: "Show report outline" });
+  if (toggle) await userEvent.click(toggle);
+  return within(await editor.findByRole("navigation", { name: "Report outline" }));
 }
 
 export const SettingsEntry: Story = { args: { startAtSettings: true } };
@@ -205,19 +216,20 @@ export const DefaultLayout: Story = {
   play: async ({ canvasElement }) => {
     const editor = await openEditor(canvasElement);
     await expect(await editor.findByRole("button", { name: "Save layout" })).toBeDisabled();
-    await expect(await editor.findByRole("img", { name: "Cover sample PDF page" }, { timeout: 20_000 })).toBeVisible();
+    await expect(await editor.findByText("Default layout")).toBeVisible();
+    await expect(await editor.findByRole("img", { name: "Cover sample page" }, { timeout: 20_000 })).toBeVisible();
   },
 };
 
 export const CustomPages: Story = {
   args: { fixture: "custom" },
   play: async ({ canvasElement }) => {
-    const editor = await openEditor(canvasElement);
-    const strip = within(await editor.findByRole("navigation", { name: "PDF outline" }));
-    const section = strip.getByRole("button", { name: /^Cover$/ });
-    const slide = strip.getByRole("button", { name: /Orientation.png/ });
+    const outline = await openOutline(canvasElement);
+    const section = outline.getByRole("button", { name: /^Cover$/ });
+    const slide = outline.getByRole("button", { name: /Orientation\.png/ });
     await expect(section.compareDocumentPosition(slide) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await userEvent.click(slide);
+    const editor = await openEditor(canvasElement);
     await expect(await editor.findByRole("img", { name: "How to use this SAT review." })).toBeInTheDocument();
   },
 };
@@ -226,17 +238,19 @@ export const Branding: Story = {
   args: { fixture: "custom" },
   play: async ({ canvasElement }) => {
     const editor = await openEditor(canvasElement);
-    await userEvent.click(await editor.findByRole("button", { name: "Logos & watermarks" }));
-    await expect(editor.getByText("Campus mark.png")).toBeVisible();
-    await expect(await editor.findByRole("img", { name: "Cover logo sample PDF page" }, { timeout: 20_000 })).toBeVisible();
+    await userEvent.click(await editor.findByRole("radio", { name: "Branding" }));
+    const marks = within(await editor.findByRole("navigation", { name: "Brand marks" }));
+    await expect(marks.getByText("Campus mark.png")).toBeVisible();
+    await expect(await editor.findByRole("img", { name: "Cover logo sample page" }, { timeout: 20_000 })).toBeVisible();
   },
 };
 
 export const AddImage: Story = {
   play: async ({ canvasElement }) => {
     const editor = await openEditor(canvasElement);
-    await userEvent.click(await editor.findByRole("button", { name: "Add image after Cover" }));
-    await expect(editor.getByLabelText("Image description")).toBeVisible();
+    await userEvent.click(await editor.findByRole("button", { name: "Add slide after Cover" }));
+    const dialog = within(await within(canvasElement).findByRole("dialog"));
+    await expect(dialog.getByLabelText("Describe this slide")).toBeVisible();
   },
 };
 
@@ -245,7 +259,9 @@ export const Preview: Story = {
   play: async ({ canvasElement }) => {
     const editor = await openEditor(canvasElement);
     await userEvent.click(await editor.findByRole("button", { name: "Preview PDF" }));
-    await expect(await editor.findByRole("link", { name: "Download sample PDF" }, { timeout: 25_000 })).toBeVisible();
+    await expect(
+      await within(canvasElement).findByRole("link", { name: "Download the sample PDF" }, { timeout: 25_000 }),
+    ).toBeVisible();
   },
 };
 
@@ -262,7 +278,7 @@ export const Loading: Story = {
   args: { fixture: "loading" },
   play: async ({ canvasElement }) => {
     const editor = await openEditor(canvasElement);
-    await expect(editor.getByRole("status")).toHaveTextContent("Loading layout…");
+    await expect(await editor.findByText("Loading the saved layout…")).toBeVisible();
   },
 };
 
@@ -278,9 +294,9 @@ export const LoadFailure: Story = {
 export const SaveConflict: Story = {
   args: { fixture: "conflict" },
   play: async ({ canvasElement }) => {
+    const outline = await openOutline(canvasElement);
+    await userEvent.click(outline.getByRole("button", { name: /Orientation\.png/ }));
     const editor = await openEditor(canvasElement);
-    const strip = within(await editor.findByRole("navigation", { name: "PDF outline" }));
-    await userEvent.click(strip.getByRole("button", { name: /Orientation.png/ }));
     await userEvent.click(await editor.findByRole("button", { name: "Move down" }));
     await userEvent.click(editor.getByRole("button", { name: "Save layout" }));
     await expect(await editor.findByText("Another person changed this layout.")).toBeVisible();
@@ -292,8 +308,9 @@ export const PreviewFailure: Story = {
   play: async ({ canvasElement }) => {
     const editor = await openEditor(canvasElement);
     await userEvent.click(await editor.findByRole("button", { name: "Preview PDF" }));
-    await expect(await editor.findByRole("alert")).toHaveTextContent("Couldn’t generate the preview.");
-    await expect(editor.getByRole("button", { name: "Retry preview" })).toBeEnabled();
+    const dialog = within(await within(canvasElement).findByRole("dialog"));
+    await expect(await dialog.findByRole("alert")).toHaveTextContent("Couldn’t generate the preview.");
+    await expect(dialog.getByRole("button", { name: "Retry preview" })).toBeEnabled();
   },
 };
 
@@ -301,12 +318,12 @@ export const PreviewFailure: Story = {
 export const LeaveWithUnsavedChanges: Story = {
   args: { fixture: "custom" },
   play: async ({ canvasElement }) => {
+    const outline = await openOutline(canvasElement);
+    await userEvent.click(outline.getByRole("button", { name: /Orientation\.png/ }));
     const editor = await openEditor(canvasElement);
-    const strip = within(await editor.findByRole("navigation", { name: "PDF outline" }));
-    await userEvent.click(strip.getByRole("button", { name: /Orientation.png/ }));
     await userEvent.click(await editor.findByRole("button", { name: "Move down" }));
     await userEvent.click(editor.getByRole("button", { name: "Back to settings" }));
-    const leave = within(await editor.findByRole("region", { name: "Leave the PDF editor?" }));
+    const leave = within(await editor.findByRole("region", { name: "Leave the exam PDF layout?" }));
     await expect(leave.getByRole("button", { name: "Save and leave" })).toBeEnabled();
   },
 };

@@ -1,13 +1,38 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { pdfTargetKey, type PdfLayout, type PdfLayoutAsset, type PdfLayoutEditorData, type PdfLogoSlot, type PdfSide, type PdfSlide, type PdfTarget, type PdfTargetOption } from "@shared/sat/pdfLayout";
-import { ArrowDown, ArrowLeft, ArrowUp, Plus } from "lucide-react";
+import {
+  pdfTargetKey,
+  type PdfLayout,
+  type PdfLayoutAsset,
+  type PdfLayoutEditorData,
+  type PdfLogoSlot,
+  type PdfSide,
+  type PdfSlide,
+  type PdfTarget,
+  type PdfTargetOption,
+} from "@shared/sat/pdfLayout";
+import { Eye, Plus, RotateCcw } from "lucide-react";
 import { ApiError } from "@shared/api-client/errors";
-import { SatButton } from "../../../../../products/sat/ui/SatPage";
+import { SatButton, SatSectionHeader, SatStatusPill, type SatStatusTone } from "../../../../../products/sat/ui/SatPage";
+import { SatSegmentedControl } from "../../../../../products/sat/ui/SegmentedControl";
+import { useOptionalAuthSession } from "../../../../auth/api/authSession";
+import { AuthoringConfirmDialog, AuthoringDialog } from "../../authoringPrimitives";
 import { satPdfLayoutApi, type SatPdfLayoutApi } from "../../../api/satPdfLayoutApi";
-import { PdfLayoutImageForm, pdfErrorMessage, pdfInputClass } from "./PdfLayoutImageForm";
-import { PdfSectionSample, usePdfSampleBook } from "./PdfSectionSample";
-import { PdfLayoutPreview } from "./PdfLayoutPreview";
-import { orderedPdfItems, PdfPageStrip } from "./PdfPageStrip";
+import { PdfInspector } from "./PdfInspector";
+import { PdfLayoutImageForm, pdfErrorMessage } from "./PdfLayoutImageForm";
+import { PdfLayoutPreviewDialog } from "./PdfLayoutPreview";
+import { PdfPaperStage, type PdfZoom } from "./PdfPaperStage";
+import { orderedPdfItems, PdfReportOutline } from "./PdfReportOutline";
+import { usePdfSampleBook, useSectionSample } from "./PdfSectionSample";
+import {
+  slideCountLabel,
+  slidePlacementLabel,
+  targetCondition,
+  targetConditionDetail,
+  unavailableTargetLabel,
+} from "./pdfLayoutLabels";
+
+const MAX_SLIDES = 8;
+const MAX_LAYOUT_BYTES = 6 * 1024 * 1024;
 
 const slots: Record<PdfLogoSlot, string> = {
   cover: "Cover logo",
@@ -15,28 +40,39 @@ const slots: Record<PdfLogoSlot, string> = {
   rightWatermark: "Right watermark",
 };
 
-const coverSample: PdfTarget = { kind: "cover" };
-const scoreSample: PdfTarget = { kind: "scoreReport" };
-
-type EditImage =
-  | { kind: "slide"; option: PdfTargetOption; side: PdfSide; existing?: PdfSlide }
-  | { kind: "logo"; slot: PdfLogoSlot };
-
 const slotLocations: Record<PdfLogoSlot, string> = {
   cover: "On the cover page",
-  leftWatermark: "Small, repeated marks on the left",
-  rightWatermark: "One large mark on the right",
+  leftWatermark: "Small, repeated marks on the left of each page",
+  rightWatermark: "One large mark on the right of each page",
 };
 
+type EditImage =
+  | { kind: "slide"; option: PdfTargetOption; target: PdfTarget; side: PdfSide; existing?: PdfSlide; file?: File | undefined }
+  | { kind: "logo"; slot: PdfLogoSlot; file?: File | undefined };
+
 const bucket = (slide: PdfSlide) => pdfTargetKey(slide.target) + ":" + slide.side;
-const maxLayoutBytes = 6 * 1024 * 1024;
 
 function layoutSignature(layout: PdfLayout) {
   const slides = [...layout.slides].sort((a, b) => bucket(a).localeCompare(bucket(b)));
   return JSON.stringify({ slides, logos: layout.logos });
 }
 
-export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange, onBack, leave, api = satPdfLayoutApi }: {
+function formatSavedAt(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+export function ExamPdfLayoutEditor({
+  examId,
+  examTitle,
+  canEdit,
+  onDirtyChange,
+  onBack,
+  leave,
+  api = satPdfLayoutApi,
+}: {
   examId: string;
   examTitle: string;
   canEdit: boolean;
@@ -45,7 +81,6 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
   leave?: { stay: () => void; proceed: () => void } | undefined;
   api?: SatPdfLayoutApi | undefined;
 }) {
-  const [sampleGeneration, setSampleGeneration] = useState(0);
   const [saved, setSaved] = useState<PdfLayoutEditorData | null>(null);
   const [draft, setDraft] = useState<PdfLayout | null>(null);
   const [assets, setAssets] = useState<Record<string, PdfLayoutAsset>>({});
@@ -53,7 +88,7 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
-  const [status, setStatus] = useState("");
+  const [announcement, setAnnouncement] = useState("");
   const [conflict, setConflict] = useState(false);
   const [confirmReload, setConfirmReload] = useState(false);
   const [accessLost, setAccessLost] = useState(false);
@@ -65,21 +100,25 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
   const [selectedSlideId, setSelectedSlideId] = useState<string | null>(null);
   const [upload, setUpload] = useState<EditImage | null>(null);
   const [preview, setPreview] = useState(false);
-  const [openImageSettings, setOpenImageSettings] = useState<string | null>(null);
   const [move, setMove] = useState<{ slide: PdfSlide; target: string; side: PdfSide } | null>(null);
   const [removed, setRemoved] = useState<{ slide: PdfSlide; index: number } | null>(null);
+  const [zoom, setZoom] = useState<PdfZoom>("fit");
+  const [dragSlideId, setDragSlideId] = useState<string | null>(null);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [sampleGeneration, setSampleGeneration] = useState(0);
   const request = useRef<AbortController | null>(null);
   const workspaceRef = useRef<HTMLElement>(null);
-  const leaveHeading = useRef<HTMLHeadingElement>(null);
+  const operationOrigin = useRef<HTMLElement | null>(null);
   const backButton = useRef<HTMLButtonElement>(null);
   const outlineHeading = useRef<HTMLHeadingElement>(null);
   const placementHeading = useRef<HTMLHeadingElement>(null);
-  const operationOrigin = useRef<HTMLElement | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(["examReview"]));
+  const authSession = useOptionalAuthSession();
+
   const dirty = Boolean(saved && draft && layoutSignature(saved.layout) !== layoutSignature(draft));
   const writable = canEdit && !accessLost;
   const draftLogos = draft?.logos;
-  const sampleLayout = useMemo(() => writable && draftLogos ? { slides: [], logos: draftLogos } : undefined, [draftLogos, writable]);
 
   const acceptLayout = useCallback((value: PdfLayoutEditorData) => {
     setSaved(value);
@@ -90,8 +129,9 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
     setExpired([]);
     setMissing([]);
     setRemoved(null);
-    setSelectedSlideId((id) => value.layout.slides.some((slide) => slide.id === id) ? id : null);
+    setSelectedSlideId((id) => (value.layout.slides.some((slide) => slide.id === id) ? id : null));
   }, []);
+
   const reload = useCallback(async () => {
     request.current?.abort();
     const controller = new AbortController();
@@ -103,12 +143,12 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
       if (!controller.signal.aborted) {
         acceptLayout(value);
         setError("");
-        setStatus("");
+        setAnnouncement("");
         setTargetKey("cover");
         setSelectedSlideId(null);
       }
-    } catch (error) {
-      if (!controller.signal.aborted) setLoadError(pdfErrorMessage(error, "Couldn’t load this layout."));
+    } catch (cause) {
+      if (!controller.signal.aborted) setLoadError(pdfErrorMessage(cause, "Couldn’t load this layout."));
     } finally {
       if (request.current === controller) {
         request.current = null;
@@ -116,6 +156,7 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
       }
     }
   }, [acceptLayout, api, examId]);
+
   useEffect(() => {
     void reload();
     return () => {
@@ -123,13 +164,10 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
       request.current = null;
     };
   }, [reload]);
+
   useEffect(() => {
     onDirtyChange(dirty || upload !== null);
   }, [dirty, onDirtyChange, upload]);
-  const leaving = leave !== undefined;
-  useEffect(() => {
-    if (leaving) leaveHeading.current?.focus();
-  }, [leaving]);
 
   const onDenied = useCallback((cause: unknown) => {
     if (cause instanceof ApiError && (cause.status === 403 || cause.status === 401)) {
@@ -138,24 +176,112 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
     }
   }, []);
 
+  const edit = (next: PdfLayout, message?: string) => {
+    setDraft(next);
+    setError("");
+    setAnnouncement(message ?? "");
+  };
+
+  const options = useMemo<PdfTargetOption[]>(() => {
+    const list: PdfTargetOption[] = [...(saved?.targets ?? [])];
+    const known = new Set(list.map((option) => pdfTargetKey(option.target)));
+    for (const slide of draft?.slides ?? []) {
+      const key = pdfTargetKey(slide.target);
+      if (known.has(key)) continue;
+      known.add(key);
+      list.push({ target: slide.target, label: unavailableTargetLabel(slide.target) });
+    }
+    return list;
+  }, [draft, saved]);
+
+  const knownTargets = useMemo(() => new Set((saved?.targets ?? []).map((option) => pdfTargetKey(option.target))), [saved]);
+  const selected = options.find((option) => pdfTargetKey(option.target) === targetKey) ?? options[0];
+  const selectedKey = selected ? pdfTargetKey(selected.target) : "";
+  const outlineLabel = useCallback(
+    (option: PdfTargetOption) => {
+      if (option.target.kind !== "reviewModule") return option.label;
+      const { sectionKey } = option.target;
+      const subject = options.find(
+        ({ target }) => target.kind === "reviewSubject" && target.sectionKey === sectionKey,
+      );
+      return subject ? subject.label + " · " + option.label : option.label;
+    },
+    [options],
+  );
+  const conditionFor = useCallback(
+    (option: PdfTargetOption) => (knownTargets.has(pdfTargetKey(option.target)) ? targetCondition(option.target) : null),
+    [knownTargets],
+  );
+  const conditionDetailFor = useCallback(
+    (option: PdfTargetOption) =>
+      knownTargets.has(pdfTargetKey(option.target)) ? targetConditionDetail(option.target) : null,
+    [knownTargets],
+  );
+
+  const activeSlide = draft?.slides.find((slide) => slide.id === selectedSlideId && pdfTargetKey(slide.target) === selectedKey);
+  const siblings = activeSlide ? draft?.slides.filter((slide) => bucket(slide) === bucket(activeSlide)) ?? [] : [];
+  const position = siblings.findIndex((slide) => slide.id === selectedSlideId);
+  const imageName = (slide: PdfSlide) => assets[slide.assetId]?.filename ?? "Slide";
+  const assetIds = useMemo(
+    () => [
+      ...(draft?.slides.map((page) => page.assetId) ?? []),
+      ...Object.values(draft?.logos ?? {}).flatMap((logo) => (logo ? [logo.assetId] : [])),
+    ],
+    [draft],
+  );
+  const totalBytes = assetIds.reduce((sum, id) => sum + (assets[id]?.bytes ?? 0), 0);
+
+  const invalidReasons = useMemo(() => {
+    const reasons: string[] = [];
+    if (totalBytes > MAX_LAYOUT_BYTES) reasons.push("This layout uses more than 6 MB of images. Remove a slide to save it.");
+    const undescribed = draft?.slides.find((slide) => !slide.description.trim());
+    if (undescribed) reasons.push("Give every slide a description so screen readers can read it.");
+    const broken = [...expired, ...missing].filter((id) => assetIds.includes(id));
+    if (broken.length > 0) reasons.push("Replace the image that could not be loaded before saving.");
+    if ((draft?.slides.length ?? 0) > MAX_SLIDES) reasons.push("This layout has more than 8 slides.");
+    return reasons;
+  }, [assetIds, draft, expired, missing, totalBytes]);
+
+  const canSave = dirty && writable && invalidReasons.length === 0 && !saving && !conflict && !upload && !loading && !loadError;
+
+  const sampleLayout = useMemo(
+    () => (writable && draftLogos ? { slides: [], logos: draftLogos } : undefined),
+    [draftLogos, writable],
+  );
   const samples = usePdfSampleBook({
-    enabled: Boolean(saved) && !loading && !accessLost,
-    identity: JSON.stringify([examId, examTitle, sampleGeneration, writable, draftLogos]),
-    examId, layout: sampleLayout, previewLayout: api.preview, onDenied,
+    enabled: tab === "pages" && Boolean(saved) && !loading && !accessLost,
+    identity: JSON.stringify([examId, sampleGeneration, writable, draftLogos]),
+    examId,
+    layout: sampleLayout,
+    previewLayout: api.preview,
+    onDenied,
+  });
+  const brandingTarget = useMemo<PdfTarget>(() => {
+    if (logoPosition === "cover") return { kind: "cover" };
+    return saved?.targets.find(({ target }) => target.kind === "reviewModule")?.target ?? { kind: "cover" };
+  }, [logoPosition, saved]);
+  const brandingSample = useSectionSample({
+    enabled: tab === "branding" && Boolean(saved) && !loading && !accessLost,
+    identity: JSON.stringify([examId, sampleGeneration, writable, draftLogos, logoPosition]),
+    examId,
+    layout: sampleLayout,
+    target: brandingTarget,
+    previewLayout: api.preview,
+    onDenied,
   });
 
-  const save = async (afterSave?: () => void) => {
+  async function save(afterSave?: () => void) {
     if (!saved || !draft || request.current || !dirty || !writable || conflict) return;
     const controller = new AbortController();
     request.current = controller;
     setSaving(true);
     setError("");
-    setStatus("");
+    setAnnouncement("");
     try {
       const value = await api.save(examId, saved.revision, draft, controller.signal);
       if (!controller.signal.aborted) {
         acceptLayout(value);
-        setStatus("Layout saved. New PDFs use this layout.");
+        setAnnouncement("Layout saved. New PDFs use this layout.");
         afterSave?.();
       }
     } catch (cause) {
@@ -163,7 +289,7 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
       onDenied(cause);
       if (cause instanceof ApiError && cause.status === 409) {
         setConflict(true);
-        setStatus("Another person changed this layout.");
+        setAnnouncement("Another person changed this layout.");
       } else {
         const assetId = cause instanceof ApiError ? cause.details?.["assetId"] : null;
         if (typeof assetId === "string") setExpired((ids) => [...ids, assetId]);
@@ -176,7 +302,7 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
         setSaving(false);
       }
     }
-  };
+  }
 
   const restoreActionFocus = () => {
     requestAnimationFrame(() => {
@@ -184,69 +310,25 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
       const equivalent = origin?.getAttribute("aria-label");
       if (origin?.isConnected) origin.focus();
       else if (equivalent) {
-        const matching = [...(workspaceRef.current?.querySelectorAll<HTMLElement>("[aria-label]") ?? [])]
-          .find((element) => element.getAttribute("aria-label") === equivalent);
+        const matching = [...(workspaceRef.current?.querySelectorAll<HTMLElement>("[aria-label]") ?? [])].find(
+          (element) => element.getAttribute("aria-label") === equivalent,
+        );
         matching?.focus();
       }
     });
   };
+
   const closePanel = () => {
-    setPreview(false);
     setUpload(null);
     restoreActionFocus();
   };
 
   const focusRow = (id: string) => {
     requestAnimationFrame(() => {
-      if (window.matchMedia("(max-width: 767px)").matches) placementHeading.current?.focus();
-      else document.getElementById("pdf-slide-" + id)?.focus();
+      document.getElementById("pdf-slide-" + id)?.focus();
     });
   };
-  const edit = (next: PdfLayout, announcement?: string) => {
-    setDraft(next);
-    setError("");
-    setStatus(announcement ?? "");
-  };
-  const uploaded = (asset: PdfLayoutAsset, description: string) => {
-    if (!draft || !upload || !writable) return;
-    setAssets((value) => ({ ...value, [asset.id]: asset }));
-    if (upload.kind === "logo") {
-      const logo = { assetId: asset.id, ...(description ? { description } : {}) };
-      edit({ ...draft, logos: { ...draft.logos, [upload.slot]: logo } }, slots[upload.slot] + " updated in the draft.");
-      restoreActionFocus();
-    } else {
-      const slide: PdfSlide = {
-        id: upload.existing?.id ?? crypto.randomUUID(),
-        assetId: asset.id, description,
-        target: upload.option.target, side: upload.side,
-      };
-      const slides = upload.existing ? draft.slides.map((old) => old.id === slide.id ? slide : old) : [...draft.slides, slide];
-      edit({ ...draft, slides }, "Image page added " + slide.side + " " + upload.option.label + ".");
-      selectTarget(pdfTargetKey(slide.target), slide.id);
-      focusRow(slide.id);
-    }
-    setUpload(null);
-  };
-  const options = [...(saved?.targets ?? [])];
-  const knownTargets = new Set(options.map((option) => pdfTargetKey(option.target)));
-  for (const slide of draft?.slides ?? []) {
-    const key = pdfTargetKey(slide.target);
-    if (!options.some((option) => pdfTargetKey(option.target) === key)) {
-      const name = "moduleKey" in slide.target ? slide.target.moduleKey : "sectionKey" in slide.target ? slide.target.sectionKey : slide.target.kind;
-      options.push({ target: slide.target, label: name + " (unavailable)" });
-    }
-  }
-  const selected = options.find((option) => pdfTargetKey(option.target) === targetKey) ?? options[0];
-  const selectedKey = selected ? pdfTargetKey(selected.target) : "";
-  const brandingTarget = logoPosition === "cover"
-    ? coverSample
-    : saved?.targets.find(({ target }) => target.kind === "reviewModule")?.target ?? scoreSample;
-  const outlineLabel = (option: PdfTargetOption) => {
-    if (option.target.kind !== "reviewModule") return option.label;
-    const { sectionKey } = option.target;
-    const subject = options.find(({ target }) => target.kind === "reviewSubject" && target.sectionKey === sectionKey);
-    return subject ? subject.label + " · " + option.label : option.label;
-  };
+
   const selectTarget = (key: string, slideId?: string) => {
     setTargetKey(key);
     setSelectedSlideId(slideId ?? null);
@@ -255,48 +337,26 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
       setCollapsed((previous) => {
         const next = new Set(previous);
         next.delete("examReview");
-        if (target.kind === "reviewModule") next.delete(pdfTargetKey({ kind: "reviewSubject", sectionKey: target.sectionKey }));
+        if (target.kind === "reviewModule") {
+          next.delete(pdfTargetKey({ kind: "reviewSubject", sectionKey: target.sectionKey }));
+        }
         return next;
       });
     }
-    setOpenImageSettings(null);
     setMove(null);
-    if (window.matchMedia("(max-width: 767px)").matches) {
-      requestAnimationFrame(() => placementHeading.current?.focus());
-    }
-  };
-  const assetIds = new Set([
-    ...(draft?.slides.map((page) => page.assetId) ?? []),
-    ...Object.values(draft?.logos ?? {}).flatMap((logo) => logo ? [logo.assetId] : []),
-  ]);
-  const total = Array.from(assetIds).reduce((sum, id) => sum + (assets[id]?.bytes ?? 0), 0);
-  const invalid = total > maxLayoutBytes || [...expired, ...missing].some((id) => assetIds.has(id)) ||
-    Boolean(draft?.slides.some((slide) => !slide.description.trim()));
-  const changeOrder = (page: PdfSlide, other: PdfSlide | undefined) => {
-    if (!draft || !other) return;
-    const slides = [...draft.slides];
-    const from = slides.findIndex((slide) => slide.id === page.id);
-    const to = slides.findIndex((slide) => slide.id === other.id);
-    [slides[from], slides[to]] = [other, page];
-    edit({ ...draft, slides }, "Image page moved.");
-    focusRow(page.id);
+    setOutlineOpen(false);
   };
 
-  const activeSlide = draft?.slides.find((slide) => slide.id === selectedSlideId && pdfTargetKey(slide.target) === selectedKey);
-  const siblings = activeSlide ? draft?.slides.filter((slide) => bucket(slide) === bucket(activeSlide)) ?? [] : [];
-  const position = siblings.findIndex((slide) => slide.id === selectedSlideId);
-  const imageName = (slide: PdfSlide) => assets[slide.assetId]?.filename ?? "Image page";
-  const selectUpload = (side: PdfSide, origin: HTMLElement) => {
-    if (!selected) return;
-    operationOrigin.current = origin;
-    setUpload({ kind: "slide", option: selected, side });
-  };
   const toggleCollapsed = (key: string) => {
     const target = selected?.target;
-    if (!collapsed.has(key) && (
-      (key === "examReview" && (target?.kind === "reviewSubject" || target?.kind === "reviewModule")) ||
-      (target?.kind === "reviewModule" && key === pdfTargetKey({ kind: "reviewSubject", sectionKey: target.sectionKey }))
-    )) selectTarget(key);
+    if (
+      !collapsed.has(key) &&
+      ((key === "examReview" && (target?.kind === "reviewSubject" || target?.kind === "reviewModule")) ||
+        (target?.kind === "reviewModule" &&
+          key === pdfTargetKey({ kind: "reviewSubject", sectionKey: target.sectionKey })))
+    ) {
+      selectTarget(key);
+    }
     setCollapsed((previous) => {
       const next = new Set(previous);
       if (next.has(key)) next.delete(key);
@@ -305,295 +365,714 @@ export function ExamPdfLayoutEditor({ examId, examTitle, canEdit, onDirtyChange,
     });
   };
 
-  const thumb = (assetId: string, description: string) => (
-    expired.includes(assetId) ? <span className="text-sm text-destructive">Image unavailable</span>
-      : missing.includes(assetId) ? (
-        <SatButton variant="quiet" onClick={() => setMissing((ids) => ids.filter((id) => id !== assetId))}>Retry image</SatButton>
-      ) : (
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- onError reports a failed thumbnail request.
-        <img className="absolute inset-0 h-full w-full bg-white object-contain"
-          src={api.imageUrl(examId, assetId)} alt={description}
-          onError={() => setMissing((ids) => ids.includes(assetId) ? ids : [...ids, assetId])} />
-      )
-  );
+  const openUpload = (next: EditImage, origin?: HTMLElement | null) => {
+    if (!writable) return;
+    if (origin) operationOrigin.current = origin;
+    setUpload(next);
+  };
 
-  const canSave = dirty && writable && !invalid && !saving && !conflict && !upload && !loading && !loadError;
-  const uploadPanel = upload && writable && draft ? (
-    <aside className="min-w-0 rounded-xl border border-border bg-background p-4" aria-label={upload.kind === "logo" ? "Upload a logo" : "Upload an image page"}>
-      <PdfLayoutImageForm
-          uploadImage={api.upload}
-          examId={examId}
-          title={upload.kind === "logo" ? "Replace " + slots[upload.slot].toLowerCase() : upload.existing ? "Replace slide image" : "Add image " + upload.side + " " + upload.option.label}
-          purpose={upload.kind === "logo" ? "logo" : "slide"}
-          placementNote={upload.kind === "slide" && ["scoreReport", "answerKey"].includes(upload.option.target.kind)
-            ? "This image page appears only when the " + upload.option.label.toLowerCase() + " is released to the student."
-            : undefined}
-          description={upload.kind === "logo" ? draft.logos[upload.slot]?.description ?? "" : upload.existing?.description ?? ""}
-          requireDescription={upload.kind === "slide" || upload.slot === "cover"}
-          onCancel={closePanel}
-          onUploaded={uploaded}
-          onDenied={onDenied}
-        />
-    </aside>
-  ) : null;
+  const uploaded = (
+    asset: PdfLayoutAsset,
+    placement: { description: string; target: PdfTarget; side: PdfSide },
+  ) => {
+    if (!draft || !upload || !writable) return;
+    setAssets((value) => ({ ...value, [asset.id]: asset }));
+    if (upload.kind === "logo") {
+      const logo = { assetId: asset.id, ...(placement.description ? { description: placement.description } : {}) };
+      edit({ ...draft, logos: { ...draft.logos, [upload.slot]: logo } }, slots[upload.slot] + " updated in the draft.");
+      restoreActionFocus();
+    } else {
+      const slide: PdfSlide = {
+        id: upload.existing?.id ?? crypto.randomUUID(),
+        assetId: asset.id,
+        description: placement.description,
+        target: placement.target,
+        side: placement.side,
+      };
+      const slides = upload.existing
+        ? draft.slides.map((old) => (old.id === slide.id ? slide : old))
+        : [...draft.slides, slide];
+      const option = options.find((candidate) => pdfTargetKey(candidate.target) === pdfTargetKey(placement.target));
+      edit(
+        { ...draft, slides },
+        "Slide added " + placement.side + " " + (option ? outlineLabel(option) : "this section") + ".",
+      );
+      selectTarget(pdfTargetKey(placement.target), slide.id);
+      focusRow(slide.id);
+    }
+    setUpload(null);
+  };
+
+  function removeSlide(slide: PdfSlide) {
+    if (!draft || !writable) return;
+    setRemoved({ slide, index: draft.slides.findIndex((item) => item.id === slide.id) });
+    edit({ ...draft, slides: draft.slides.filter((item) => item.id !== slide.id) }, "Slide removed.");
+    selectTarget(selectedKey);
+  }
+
+  const undoRemove = () => {
+    if (!draft || !removed) return;
+    const slides = [...draft.slides];
+    slides.splice(removed.index, 0, removed.slide);
+    edit({ ...draft, slides }, "Slide restored.");
+    selectTarget(pdfTargetKey(removed.slide.target), removed.slide.id);
+    setRemoved(null);
+    focusRow(removed.slide.id);
+  };
+
+  const changeOrder = (page: PdfSlide, other: PdfSlide | undefined) => {
+    if (!draft || !other) return;
+    const slides = [...draft.slides];
+    const from = slides.findIndex((slide) => slide.id === page.id);
+    const to = slides.findIndex((slide) => slide.id === other.id);
+    if (from < 0 || to < 0) return;
+    const moved = slides[from];
+    const swapped = slides[to];
+    if (!moved || !swapped) return;
+    slides[from] = swapped;
+    slides[to] = moved;
+    edit({ ...draft, slides }, "Slide moved.");
+    focusRow(page.id);
+  };
+
+  const resetLayout = () => {
+    if (!draft || !writable) return;
+    edit(
+      { slides: [], logos: { cover: null, leftWatermark: null, rightWatermark: null } },
+      "Layout reset to the default report.",
+    );
+    setResetOpen(false);
+    setSelectedSlideId(null);
+  };
+
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  const removeRef = useRef(removeSlide);
+  removeRef.current = removeSlide;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void saveRef.current();
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const typing =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        target?.isContentEditable;
+      if (typing) return;
+      if ((event.key === "Delete" || event.key === "Backspace") && activeSlide && writable) {
+        event.preventDefault();
+        removeRef.current(activeSlide);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  const canAddSlide = writable && !upload && !saving && (draft?.slides.length ?? 0) < MAX_SLIDES;
+  const slideCount = draft?.slides.length ?? 0;
+  const replacedSlots = Object.values(draft?.logos ?? {}).filter(Boolean).length;
+  const savedAt = formatSavedAt(saved?.updatedAt);
+  const savedByMe = Boolean(saved?.updatedBy && authSession?.session?.user.id === saved.updatedBy);
+
+  const statusTone: SatStatusTone = loading
+    ? "neutral"
+    : conflict
+      ? "changes"
+      : accessLost
+        ? "invalidated"
+        : dirty
+          ? "changes"
+          : (saved?.revision ?? 0) === 0
+            ? "draft"
+            : "published";
+  const statusText = loading
+    ? "Loading"
+    : conflict
+      ? "Someone else changed this layout"
+      : !writable
+        ? "View only"
+        : dirty
+          ? "Unsaved changes"
+          : (saved?.revision ?? 0) === 0
+            ? "Default layout"
+            : "Saved · v" + (saved?.revision ?? 0);
+
+  const sectionLabel = selected ? outlineLabel(selected) : "";
+  const samplePage = samples.book?.pages[selectedKey];
+  const stageHeading = activeSlide ? imageName(activeSlide) : sectionLabel;
+  const stageSubheading = activeSlide
+    ? slidePlacementLabel(activeSlide.side, sectionLabel)
+    : selected
+      ? knownTargets.has(selectedKey)
+        ? "The printed page as it appears in the sample report"
+        : "This section is no longer in the current exam"
+      : null;
+  const stageCaption = activeSlide
+    ? samplePage
+      ? "Prints " + activeSlide.side + " " + sectionLabel + " · sample page " + samplePage.number
+      : "Prints " + activeSlide.side + " " + sectionLabel
+    : samplePage
+      ? "Sample page " + samplePage.number
+      : null;
+
+  const insertSlot = (side: PdfSide) => {
+    if (!selected) return null;
+    const at = side === "before" ? "before " + sectionLabel : "after " + sectionLabel;
+    return (
+      <button
+        type="button"
+        disabled={!canAddSlide}
+        aria-label={"Add slide " + at}
+        onClick={(event) => openUpload({ kind: "slide", option: selected, target: selected.target, side }, event.currentTarget)}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/"));
+          if (!file || !canAddSlide) return;
+          openUpload({ kind: "slide", option: selected, target: selected.target, side, file });
+        }}
+        className="flex min-h-11 w-full items-center gap-3 rounded-[var(--sat-staff-radius-control,8px)] px-3 text-[14px] font-medium text-[var(--sat-staff-text-secondary,#515154)] transition-colors hover:bg-[var(--sat-staff-fill-faint,#7878800f)] hover:text-[var(--sat-staff-text-primary,#1d1d1f)] disabled:opacity-50"
+      >
+        <span className="h-px flex-1 bg-[var(--sat-staff-border-hairline,#0000000f)]" aria-hidden="true" />
+        <span className="inline-flex items-center gap-1.5">
+          <Plus size={15} aria-hidden="true" />
+          Add slide {at}
+        </span>
+        <span className="h-px flex-1 bg-[var(--sat-staff-border-hairline,#0000000f)]" aria-hidden="true" />
+      </button>
+    );
+  };
+
+  const outlineItems = orderedPdfItems(options, draft?.slides ?? [], knownTargets, collapsed);
 
   return (
-    <section ref={workspaceRef} aria-labelledby="sat-pdf-editor-title"
-      className="sat-product min-h-dvh bg-[var(--sat-staff-canvas,#f7f7f8)] text-foreground md:grid md:h-dvh md:grid-rows-[auto_minmax(0,1fr)]">
-      <header className="sticky top-0 z-10 border-b border-border bg-background">
-        <div className="mx-auto max-w-[1440px] space-y-2 px-4 py-2 sm:px-6">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-0">
-            <SatButton ref={backButton} variant="quiet" icon={<ArrowLeft />} onClick={onBack}>Back to settings</SatButton>
-            <div>
-              <h1 id="sat-pdf-editor-title" className="text-lg font-semibold">PDF editor</h1>
-              <p className="text-sm text-muted-foreground">{examTitle}</p>
+    <section
+      ref={workspaceRef}
+      aria-labelledby="sat-pdf-layout-title"
+      className="sat-product bg-[var(--sat-staff-canvas,#f7f7f8)] text-[var(--sat-staff-text-primary,#1d1d1f)]"
+    >
+      <div className="mx-auto w-full max-w-[1240px] px-4 pb-16 pt-6 sm:px-6">
+        <button
+          ref={backButton}
+          type="button"
+          onClick={onBack}
+          className="sat-btn sat-btn--quiet sat-press mb-3 -ml-3"
+        >
+          Back to settings
+        </button>
+        <SatSectionHeader
+          title={<span id="sat-pdf-layout-title">Exam PDF layout</span>}
+          description={
+            "Slides and brand marks applied to every PDF prepared for " + examTitle + "."
+          }
+          actions={
+            <>
+              <SatStatusPill tone={statusTone}>{statusText}</SatStatusPill>
+              <SatButton variant="secondary" icon={<Eye size={16} />} onClick={() => setPreview(true)}>
+                Preview PDF
+              </SatButton>
+              {writable ? (
+                <SatButton variant="primary" pending={saving} disabled={!canSave} onClick={() => void save()}>
+                  Save layout
+                </SatButton>
+              ) : null}
+            </>
+          }
+        />
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+          <span>
+            {slideCount} of {MAX_SLIDES} slides placed
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>
+            {replacedSlots} of 3 brand marks replaced
+          </span>
+          {savedAt && !dirty ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>Saved at {savedAt}{savedByMe ? " by you" : ""}</span>
+            </>
+          ) : null}
+        </div>
+        <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+          New PDFs use this layout. PDFs already prepared keep the version they were created with.
+        </p>
+        {invalidReasons.length > 0 ? (
+          <p role="status" className="mt-3 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
+            {invalidReasons[0]}
+          </p>
+        ) : null}
+        <span role="status" className="sr-only">{announcement}</span>
+
+        {leave ? (
+          <div
+            role="region"
+            aria-labelledby="pdf-leave-title"
+            className="mt-4 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,#0000000f)] bg-[var(--sat-staff-surface,#fff)] p-4"
+          >
+            <h2 id="pdf-leave-title" className="text-[length:var(--sat-staff-type-section-size,20px)] font-semibold leading-[var(--sat-staff-type-section-line,28px)] tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)]">
+              Leave the exam PDF layout?
+            </h2>
+            <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+              {upload
+                ? "An image upload is in progress or waiting for a file."
+                : dirty
+                  ? slideCountLabel(slideCount) +
+                    " and " +
+                    replacedSlots +
+                    " replaced brand " +
+                    (replacedSlots === 1 ? "mark" : "marks") +
+                    " will be discarded."
+                  : "Nothing is saved for this exam yet."}
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <SatButton variant="secondary" disabled={saving} onClick={() => { leave.stay(); backButton.current?.focus(); }}>
+                Keep editing
+              </SatButton>
+              {writable ? (
+                <SatButton variant="primary" disabled={!canSave} onClick={() => void save(leave.proceed)}>
+                  Save and leave
+                </SatButton>
+              ) : null}
+              <SatButton variant="quiet" disabled={saving} onClick={leave.proceed}>
+                Discard changes
+              </SatButton>
             </div>
           </div>
-          {draft ? (
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap gap-1" role="group" aria-label="PDF layout editor section">
-                <SatButton variant={tab === "pages" && !preview ? "secondary" : "quiet"} aria-pressed={tab === "pages" && !preview} disabled={Boolean(upload)}
-                  onClick={() => { setPreview(false); setTab("pages"); }}>Page order</SatButton>
-                <SatButton variant={tab === "branding" && !preview ? "secondary" : "quiet"} aria-pressed={tab === "branding" && !preview} disabled={Boolean(upload)}
-                  onClick={() => { setPreview(false); setTab("branding"); }}>Logos &amp; watermarks</SatButton>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="w-full text-sm text-muted-foreground sm:w-auto" role="status">{status || (dirty ? "Unsaved changes" : !writable ? "View only" : "All changes saved")}</p>
-                {preview ? (
-                  <SatButton variant="secondary" onClick={closePanel}>Back to editing</SatButton>
+        ) : null}
+
+        {confirmReload ? (
+          <div className="mt-4 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,#0000000f)] bg-[var(--sat-staff-surface,#fff)] p-4">
+            <h2 className="text-[length:var(--sat-staff-type-section-size,20px)] font-semibold leading-[var(--sat-staff-type-section-line,28px)] tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)]">
+              Discard your edits and load the latest layout?
+            </h2>
+            <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+              The saved layout replaces the changes you made in this tab.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <SatButton variant="secondary" onClick={() => setConfirmReload(false)}>Keep editing</SatButton>
+              <SatButton variant="primary" onClick={() => { setConfirmReload(false); void reload(); }}>Load latest layout</SatButton>
+            </div>
+          </div>
+        ) : null}
+
+        {conflict ? (
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-warning-border,#d9770638)] bg-[var(--sat-staff-warning-tint,#d977061a)] p-4">
+            <p className="min-w-0 flex-1 text-[14px] leading-5 text-[var(--sat-staff-warning-text,#92400e)]">
+              <span className="font-semibold">Another person changed this layout.</span> Your edits are still here.
+            </p>
+            <SatButton variant="secondary" onClick={() => placementHeading.current?.focus()}>Review my edits</SatButton>
+            <SatButton variant="primary" onClick={() => setConfirmReload(true)}>Load latest layout</SatButton>
+          </div>
+        ) : null}
+
+        {error ? (
+          <p tabIndex={-1} data-pdf-error role="alert" className="mt-4 text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">
+            {error}
+          </p>
+        ) : null}
+        {loadError ? (
+          <div className="mt-4 space-y-3">
+            <p role="alert" className="text-[14px] leading-5 text-[var(--sat-staff-danger,#b42318)]">{loadError}</p>
+            <SatButton variant="secondary" onClick={() => void reload()}>Retry</SatButton>
+            {draft ? <SatButton variant="quiet" onClick={() => setLoadError("")}>Review my edits</SatButton> : null}
+          </div>
+        ) : null}
+
+        {loading ? (
+          <p role="status" className="mt-6 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+            Loading the saved layout…
+          </p>
+        ) : null}
+
+        {!loading && !loadError && draft ? (
+          <div className="mt-6 grid gap-6 xl:grid-cols-[272px_minmax(0,1fr)_304px]">
+            <div className="min-w-0">
+              <button
+                type="button"
+                aria-expanded={outlineOpen}
+                aria-label={(outlineOpen ? "Hide " : "Show ") + (tab === "pages" ? "report outline" : "brand marks")}
+                onClick={() => setOutlineOpen((value) => !value)}
+                className="flex min-h-11 w-full items-center justify-between rounded-[var(--sat-staff-radius-control,8px)] border border-[var(--sat-staff-border-hairline,#0000000f)] bg-[var(--sat-staff-surface,#fff)] px-3 text-[14px] font-semibold xl:hidden"
+              >
+                {tab === "pages" ? "Report outline" : "Brand marks"}
+                <span className="text-[var(--sat-staff-text-tertiary,#6e6e73)]">{outlineOpen ? "Hide" : "Show"}</span>
+              </button>
+              <nav aria-label={tab === "pages" ? "Report outline" : "Brand marks"} className="mt-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3
+                    ref={outlineHeading}
+                    tabIndex={-1}
+                    className="text-[14px] font-semibold uppercase tracking-[0.04em] text-[var(--sat-staff-text-tertiary,#6e6e73)]"
+                  >
+                    {tab === "pages" ? "Report outline" : "Brand marks"}
+                  </h3>
+                  <SatSegmentedControl
+                    label="Layout area"
+                    value={tab}
+                    options={[
+                      { value: "pages", label: "Slides" },
+                      { value: "branding", label: "Branding" },
+                    ]}
+                    onChange={(value) => {
+                      setTab(value);
+                      setOutlineOpen(false);
+                    }}
+                  />
+                </div>
+                {tab === "pages" ? (
+                  <div className={"mt-3 " + (outlineOpen ? "" : "hidden") + " xl:block"}>
+                    <PdfReportOutline
+                      items={outlineItems}
+                      selectedKey={selectedKey}
+                      selectedSlideId={selectedSlideId}
+                      collapsed={collapsed}
+                      label={outlineLabel}
+                      condition={conditionFor}
+                      assetLabel={imageName}
+                      imageUrl={(slide) =>
+                        missing.includes(slide.assetId) || expired.includes(slide.assetId)
+                          ? undefined
+                          : api.imageUrl(examId, slide.assetId)
+                      }
+                      slideCount={(option) =>
+                        draft.slides.filter((slide) => pdfTargetKey(slide.target) === pdfTargetKey(option.target)).length
+                      }
+                      disabled={Boolean(upload) || !writable}
+                      onSelect={selectTarget}
+                      onToggle={toggleCollapsed}
+                      onAddSlide={(option) => openUpload({ kind: "slide", option, target: option.target, side: "after" })}
+                      dragSlideId={dragSlideId}
+                      onDragStartSlide={(slide) => setDragSlideId(slide.id)}
+                      onDragOverSlide={() => undefined}
+                      onDropSlide={(slide) => {
+                        const dragged = dragSlideId ? draft.slides.find((item) => item.id === dragSlideId) : undefined;
+                        setDragSlideId(null);
+                        if (!dragged || dragged.id === slide.id) return;
+                        if (bucket(dragged) !== bucket(slide)) return;
+                        const slides = [...draft.slides];
+                        const from = slides.findIndex((item) => item.id === dragged.id);
+                        slides.splice(from, 1);
+                        const insertAt = slides.findIndex((item) => item.id === slide.id);
+                        slides.splice(insertAt, 0, dragged);
+                        edit({ ...draft, slides }, "Slide moved.");
+                        focusRow(dragged.id);
+                      }}
+                      onDragEndSlide={() => setDragSlideId(null)}
+                    />
+                  </div>
                 ) : (
-                  <SatButton variant="secondary" disabled={Boolean(upload) || saving || (writable && invalid)} aria-label="Preview PDF"
-                    onClick={(event) => { operationOrigin.current = event.currentTarget; setPreview(true); }}>Preview PDF</SatButton>
+                  <ul className={"mt-3 space-y-1 " + (outlineOpen ? "" : "hidden") + " xl:block"}>
+                    {(Object.keys(slots) as PdfLogoSlot[]).map((slot) => {
+                      const logo = draft.logos[slot];
+                      const selectedSlot = logoPosition === slot;
+                      return (
+                        <li key={slot}>
+                          <button
+                            type="button"
+                            aria-current={selectedSlot ? "true" : undefined}
+                            onClick={() => setLogoPosition(slot)}
+                            className={
+                              "flex w-full min-h-11 items-center gap-2 rounded-[var(--sat-staff-radius-control,8px)] px-2 py-1.5 text-left transition-colors " +
+                              (selectedSlot
+                                ? "bg-[var(--sat-staff-accent-tint,#0071e314)]"
+                                : "hover:bg-[var(--sat-staff-fill-faint,#7878800f)]")
+                            }
+                          >
+                            <span className="grid h-9 w-12 shrink-0 place-items-center overflow-hidden rounded-[4px] border border-[var(--sat-staff-border-hairline,#0000000f)] bg-white">
+                              {logo && !missing.includes(logo.assetId) ? (
+                                <img src={api.imageUrl(examId, logo.assetId)} alt="" className="h-full w-full object-contain" />
+                              ) : (
+                                <span className="px-1 text-center text-[11px] leading-3 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+                                  Default
+                                </span>
+                              )}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[14px] font-semibold text-[var(--sat-staff-text-primary,#1d1d1f)]">
+                                {slots[slot]}
+                              </span>
+                              <span className="block truncate text-[13px] leading-4 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+                                {logo ? assets[logo.assetId]?.filename ?? "Custom image" : "Default mark"}
+                              </span>
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
-                {writable ? <SatButton variant="primary" disabled={!canSave} onClick={() => void save()}>{saving ? "Saving…" : "Save layout"}</SatButton> : null}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      </header>
-      <div className="min-w-0 md:overflow-y-auto">
-        <div className="mx-auto max-w-[1440px] space-y-4 p-4 sm:px-6 sm:py-5">
-          {leave ? (
-            <section className="space-y-2 rounded-xl border border-border bg-background p-4" aria-labelledby="pdf-leave-title">
-              <h2 ref={leaveHeading} id="pdf-leave-title" tabIndex={-1} className="font-semibold">Leave the PDF editor?</h2>
-              <p className="text-sm text-muted-foreground">{upload ? "An image upload is in progress or waiting for a file." : "Your PDF layout has unsaved changes."}</p>
-              <div className="flex flex-wrap gap-2">
-                <SatButton variant="secondary" disabled={saving} onClick={() => { leave.stay(); backButton.current?.focus(); }}>Keep editing</SatButton>
-                {writable ? <SatButton variant="primary" disabled={!canSave} onClick={() => void save(leave.proceed)}>Save and leave</SatButton> : null}
-                <SatButton variant="danger-secondary" disabled={saving} onClick={leave.proceed}>Discard changes</SatButton>
-              </div>
-            </section>
-          ) : null}
-          {confirmReload ? (
-            <section className="space-y-2 rounded-xl border border-border bg-background p-4" aria-labelledby="pdf-reload-title">
-              <h2 id="pdf-reload-title" className="font-semibold">Discard edits and load the latest layout?</h2>
-              <p className="text-sm text-muted-foreground">The latest saved layout will replace your draft.</p>
-              <div className="flex flex-wrap gap-2">
-                <SatButton variant="secondary" onClick={() => setConfirmReload(false)}>Keep editing</SatButton>
-                <SatButton variant="primary" onClick={() => { setConfirmReload(false); void reload(); }}>Load latest layout</SatButton>
-              </div>
-            </section>
-          ) : null}
-          {loading ? <p role="status">Loading layout…</p> : null}
-          {loadError ? (
-            <div className="space-y-3">
-              <p role="alert" className="text-destructive">{loadError}</p>
-              <SatButton variant="secondary" onClick={() => void reload()}>Retry</SatButton>
-              {draft ? <SatButton variant="secondary" onClick={() => setLoadError("")}>Review my edits</SatButton> : null}
-            </div>
-          ) : null}
-          {conflict ? (
-            <div className="flex flex-wrap gap-2">
-              <SatButton variant="secondary" onClick={() => workspaceRef.current?.querySelector<HTMLElement>("[aria-pressed=true]")?.focus()}>Review my edits</SatButton>
-              <SatButton variant="secondary" onClick={() => setConfirmReload(true)}>Load latest layout</SatButton>
-            </div>
-          ) : null}
-          {error ? <p tabIndex={-1} data-pdf-error role="alert" className="text-sm text-destructive">{error}</p> : null}
-          {total > maxLayoutBytes ? <p role="alert" className="text-sm text-destructive">Reduce the layout to 6 MiB of images before saving.</p> : null}
-          {!loading && !loadError && draft ? (
-            preview ? (
-              <PdfLayoutPreview previewLayout={api.preview} examId={examId} layout={writable ? draft : undefined} onDenied={onDenied} />
-            ) : tab === "branding" ? (
-            <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)]">
-              <ul className="divide-y divide-border rounded-xl border border-border bg-background">
-                {(Object.keys(slots) as PdfLogoSlot[]).map((slot) => {
-                  const logo = draft.logos[slot];
-                  return (
-                    <li key={slot} className="space-y-2 p-3">
-                      <button type="button" aria-pressed={logoPosition === slot} disabled={Boolean(upload)}
-                        className="min-h-11 w-full rounded-md px-2 text-left font-semibold aria-pressed:bg-muted"
-                        onClick={() => setLogoPosition(slot)}>{slots[slot]}</button>
-                      <div className="flex flex-wrap items-center justify-between gap-2 px-2">
-                        <p className="break-words text-sm text-muted-foreground">{logo ? assets[logo.assetId]?.filename ?? "Custom image" : "Default image"}</p>
-                        {writable ? (
-                          <div className="flex flex-wrap gap-2">
-                            <SatButton variant="secondary" disabled={Boolean(upload) || saving} aria-label={"Replace " + slots[slot].toLowerCase()}
-                              onClick={(event) => { operationOrigin.current = event.currentTarget; setLogoPosition(slot); setUpload({ kind: "logo", slot }); }}>Replace</SatButton>
-                            {logo ? <SatButton variant="quiet" disabled={Boolean(upload) || saving} aria-label={"Restore " + slots[slot].toLowerCase() + " default"} onClick={() => {
-                              setLogoPosition(slot);
-                              edit({ ...draft, logos: { ...draft.logos, [slot]: null } }, slots[slot] + " restored in this draft.");
-                              requestAnimationFrame(() => workspaceRef.current?.querySelector<HTMLElement>(`[aria-label="Replace ${slots[slot].toLowerCase()}"]`)?.focus());
-                            }}>Restore default</SatButton> : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-              <div className="min-w-0 space-y-4">
-                <section className="rounded-xl border border-border bg-muted/50 p-4" aria-label="Branding position">
-                  <h2 className="font-semibold">{slots[logoPosition]} position</h2>
-                  <p className="text-sm text-muted-foreground">{slotLocations[logoPosition]}</p>
-                  <div className="mx-auto mt-4 max-w-[46rem]">
-                    <PdfSectionSample target={brandingTarget} label={slots[logoPosition]} samples={samples} />
-                  </div>
-                </section>
-                {uploadPanel}
-              </div>
-            </div>
-          ) : selected ? (
-            <div className={"grid min-w-0 items-start gap-4 md:grid-cols-[minmax(12rem,15rem)_minmax(0,1fr)] " +
-              (uploadPanel ? "lg:grid-cols-[minmax(12rem,15rem)_minmax(0,1fr)_minmax(16rem,21rem)]" : "")}>
-              <nav className="min-w-0 rounded-xl border border-border bg-background" aria-label="PDF outline">
-                <div className="px-4 pb-2 pt-3">
-                  <h3 ref={outlineHeading} tabIndex={-1} className="font-semibold">PDF pages</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">Select a section or an image in PDF order.</p>
-                </div>
-                <PdfPageStrip items={orderedPdfItems(options, draft.slides, knownTargets, collapsed)}
-                  selectedKey={selectedKey} selectedSlideId={selectedSlideId} collapsed={collapsed} label={outlineLabel}
-                  assetLabel={imageName} imageUrl={(slide) => missing.includes(slide.assetId) || expired.includes(slide.assetId) ? undefined : api.imageUrl(examId, slide.assetId)}
-                  disabled={Boolean(upload)} onSelect={selectTarget} onToggle={toggleCollapsed} />
               </nav>
-              <section className="min-w-0 rounded-xl border border-border bg-muted/50 p-3 sm:p-5" aria-label={selected.label + " image pages"}>
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h3 ref={placementHeading} tabIndex={-1} className="break-words text-lg font-semibold">{activeSlide ? imageName(activeSlide) : outlineLabel(selected)}</h3>
-                    {activeSlide ? (
-                      <p className="text-sm text-muted-foreground">{activeSlide.side === "before" ? "Before " : "After "}{outlineLabel(selected)}</p>
-                    ) : !knownTargets.has(selectedKey) ? (
-                      <p className="text-sm text-muted-foreground">This section is unavailable in the current exam.</p>
-                    ) : null}
-                  </div>
-                  <button type="button" className="min-h-11 rounded-lg px-2 text-sm underline md:hidden" onClick={() => outlineHeading.current?.focus()}>Back to pages</button>
-                </div>
-                <div className="mx-auto mt-4 max-w-[32rem] space-y-3">
-                  {!activeSlide && writable && knownTargets.has(selectedKey) ? (
-                    <div className="flex items-center gap-2">
-                      <span className="h-px flex-1 bg-border" aria-hidden="true" />
-                      <SatButton variant="secondary" icon={<Plus />} disabled={Boolean(upload) || saving || draft.slides.length >= 8} data-add-side="before"
-                        aria-label={"Add image before " + selected.label} onClick={(event) => selectUpload("before", event.currentTarget)}>Add image before</SatButton>
-                      <span className="h-px flex-1 bg-border" aria-hidden="true" />
-                    </div>
-                  ) : null}
-                  {activeSlide && !upload ? (
-                    <div className="space-y-3 rounded-lg border border-border bg-background p-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {writable && siblings.length > 1 ? (
-                          <>
-                            <SatButton variant="quiet" icon={<ArrowUp />} disabled={saving || position === 0} onClick={() => changeOrder(activeSlide, siblings[position - 1])}>Move up</SatButton>
-                            <SatButton variant="quiet" icon={<ArrowDown />} disabled={saving || position === siblings.length - 1} onClick={() => changeOrder(activeSlide, siblings[position + 1])}>Move down</SatButton>
-                          </>
-                        ) : null}
-                        {writable ? (
-                          <SatButton variant="secondary" disabled={saving} onClick={() => setMove({
-                            slide: activeSlide, target: knownTargets.has(selectedKey) ? selectedKey : "cover", side: activeSlide.side,
-                          })}>Change placement</SatButton>
-                        ) : null}
-                        <SatButton variant="quiet" aria-expanded={openImageSettings === activeSlide.id}
-                          onClick={() => setOpenImageSettings(openImageSettings === activeSlide.id ? null : activeSlide.id)}>{writable ? "Image settings" : "Image description"}</SatButton>
-                      </div>
-                      {move?.slide.id === activeSlide.id && writable ? (
-                        <div className="grid gap-2 border-t border-border pt-3">
-                          <label className="text-sm" htmlFor="pdf-move-target">PDF section
-                            <select id="pdf-move-target" className={pdfInputClass} value={move.target} onChange={(event) => setMove({ ...move, target: event.currentTarget.value })}>
-                              {saved?.targets.map((option) => <option key={pdfTargetKey(option.target)} value={pdfTargetKey(option.target)}>{outlineLabel(option)}</option>)}
-                            </select>
-                          </label>
-                          <label className="text-sm" htmlFor="pdf-move-side">Position
-                            <select id="pdf-move-side" className={pdfInputClass} value={move.side} onChange={(event) => setMove({ ...move, side: event.currentTarget.value === "before" ? "before" : "after" })}>
-                              <option value="before">Before</option><option value="after">After</option>
-                            </select>
-                          </label>
-                          <div className="flex gap-2">
-                            <SatButton variant="secondary" onClick={() => setMove(null)}>Cancel</SatButton>
-                            <SatButton variant="primary" disabled={saving || (move.target === selectedKey && move.side === activeSlide.side)} onClick={() => {
-                              const option = saved?.targets.find((candidate) => pdfTargetKey(candidate.target) === move.target);
-                              if (!option) return;
-                              edit({ ...draft, slides: [...draft.slides.filter((slide) => slide.id !== activeSlide.id), { ...activeSlide, target: option.target, side: move.side }] },
-                                "Image page moved " + move.side + " " + option.label + ".");
-                              selectTarget(move.target, activeSlide.id);
-                              focusRow(activeSlide.id);
-                            }}>Move page</SatButton>
-                          </div>
-                        </div>
-                      ) : null}
-                      {openImageSettings === activeSlide.id ? (
-                        <div className="space-y-3 border-t border-border pt-3">
-                          <label className="block space-y-1 text-sm" htmlFor="pdf-image-description">
-                            <span>Image description</span>
-                            <textarea id="pdf-image-description" aria-label="Image description" className={pdfInputClass} rows={2} maxLength={240} disabled={!writable || saving} value={activeSlide.description}
-                              onChange={(event) => {
-                                const description = event.currentTarget.value;
-                                edit({ ...draft, slides: draft.slides.map((slide) => slide.id === activeSlide.id ? { ...slide, description } : slide) });
-                              }} />
-                          </label>
-                          {writable ? (
-                            <div className="flex flex-wrap gap-2">
-                              <SatButton variant="secondary" disabled={Boolean(upload) || saving} aria-label={"Replace image " + imageName(activeSlide)}
-                                onClick={(event) => { operationOrigin.current = event.currentTarget; setUpload({ kind: "slide", option: selected, side: activeSlide.side, existing: activeSlide }); }}>Replace image</SatButton>
-                              <SatButton variant="danger-secondary" disabled={saving} onClick={() => {
-                                setRemoved({ slide: activeSlide, index: draft.slides.findIndex((slide) => slide.id === activeSlide.id) });
-                                edit({ ...draft, slides: draft.slides.filter((slide) => slide.id !== activeSlide.id) }, "Image page removed.");
-                                selectTarget(selectedKey);
-                                requestAnimationFrame(() => placementHeading.current?.focus());
-                              }}>Remove</SatButton>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                  {activeSlide ? (
-                    <div className="relative mx-auto grid aspect-[297/210] w-full place-items-center overflow-hidden rounded-md border border-border bg-background text-center shadow-sm"
-                      style={{ maxWidth: "clamp(18.4rem, calc(141.4dvh - 33.94rem), 43.8rem)" }}>
-                      {thumb(activeSlide.assetId, activeSlide.description)}
-                    </div>
-                  ) : knownTargets.has(selectedKey) ? (
-                    <PdfSectionSample target={selected.target} label={outlineLabel(selected)} samples={samples} />
-                  ) : null}
-                  {!activeSlide && writable && knownTargets.has(selectedKey) ? (
-                    <div className="flex items-center gap-2">
-                      <span className="h-px flex-1 bg-border" aria-hidden="true" />
-                      <SatButton variant="secondary" icon={<Plus />} disabled={Boolean(upload) || saving || draft.slides.length >= 8} data-add-side="after"
-                        aria-label={"Add image after " + selected.label} onClick={(event) => selectUpload("after", event.currentTarget)}>Add image after</SatButton>
-                      <span className="h-px flex-1 bg-border" aria-hidden="true" />
-                    </div>
-                  ) : null}
-                  {!knownTargets.has(selectedKey) ? (
-                    <p className="text-sm text-muted-foreground">Move attached images to an available section to include them in new PDFs.</p>
-                  ) : ["scoreReport", "answerKey"].includes(selected.target.kind) ? (
-                    <p className="text-sm text-muted-foreground">This section and its image pages appear only when released to the student.</p>
-                  ) : ["reviewSubject", "reviewModule"].includes(selected.target.kind) ? (
-                    <p className="text-sm text-muted-foreground">This section and its images appear when the student takes this part of the exam.</p>
-                  ) : null}
-                  {removed && writable ? <SatButton variant="secondary" disabled={Boolean(upload) || saving || draft.slides.length >= 8} onClick={() => {
-                    const slides = [...draft.slides];
-                    slides.splice(removed.index, 0, removed.slide);
-                    edit({ ...draft, slides }, "Image page restored.");
-                    selectTarget(pdfTargetKey(removed.slide.target), removed.slide.id);
-                    setRemoved(null);
-                    focusRow(removed.slide.id);
-                  }}>Undo remove</SatButton> : null}
-                  {draft.slides.length >= 8 ? <p className="text-sm text-muted-foreground">This layout has 8 image pages.</p> : null}
-                </div>
-              </section>
-              {uploadPanel ? <div className="min-w-0 md:col-start-2 lg:col-start-auto">{uploadPanel}</div> : null}
             </div>
-          ) : null
-          ) : null}
-        </div>
+
+            {tab === "pages" ? (
+              <div className="min-w-0">
+                <PdfPaperStage
+                  heading={stageHeading}
+                  subheading={stageSubheading}
+                  caption={stageCaption}
+                  pageSrc={activeSlide ? undefined : samples.book?.pages[selectedKey]?.src}
+                  pageAlt={activeSlide ? undefined : sectionLabel + " sample page"}
+                  slideSrc={activeSlide ? api.imageUrl(examId, activeSlide.assetId) : undefined}
+                  slideAlt={activeSlide ? activeSlide.description : undefined}
+                  zoom={zoom}
+                  onZoomChange={setZoom}
+                  busy={samples.pending && !activeSlide}
+                  error={samples.error}
+                  onRetry={samples.retry}
+                  before={insertSlot("before")}
+                  after={insertSlot("after")}
+                />
+                {!canAddSlide && writable ? (
+                  <p className="mt-3 text-center text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+                    You’ve used all {MAX_SLIDES} slides. Remove one to add another.
+                  </p>
+                ) : null}
+              </div>
+            ) : (
+              <div className="min-w-0">
+                <PdfPaperStage
+                  heading={slots[logoPosition]}
+                  subheading={slotLocations[logoPosition]}
+                  caption={logoPosition === "cover" ? "Sample cover page" : "Sample review page"}
+                  pageSrc={brandingSample.src}
+                  pageAlt={slots[logoPosition] + " sample page"}
+                  zoom={zoom}
+                  onZoomChange={setZoom}
+                  busy={brandingSample.pending}
+                  error={brandingSample.error}
+                  onRetry={brandingSample.retry}
+                />
+              </div>
+            )}
+
+            {tab === "pages" ? (
+              <PdfInspector
+                canEdit={writable}
+                saving={saving}
+                section={
+                  selected
+                    ? {
+                        label: sectionLabel,
+                        condition: conditionDetailFor(selected),
+                        available: knownTargets.has(selectedKey),
+                      }
+                    : null
+                }
+                slide={activeSlide ?? null}
+                slideName={activeSlide ? imageName(activeSlide) : ""}
+                placement={activeSlide ? slidePlacementLabel(activeSlide.side, sectionLabel) : ""}
+                description={activeSlide?.description ?? ""}
+                descriptionError={
+                  activeSlide && !activeSlide.description.trim()
+                    ? "This slide needs a description before it can be saved."
+                    : null
+                }
+                siblingCount={siblings.length}
+                position={position}
+                moveOpen={move?.slide.id === activeSlide?.id}
+                moveTarget={move?.target ?? selectedKey}
+                moveSide={move?.side ?? "before"}
+                targets={saved?.targets ?? []}
+                labelOf={outlineLabel}
+                removedName={removed ? imageName(removed.slide) : null}
+                onDescriptionChange={(value) => {
+                  if (!draft || !activeSlide) return;
+                  edit({
+                    ...draft,
+                    slides: draft.slides.map((slide) => (slide.id === activeSlide.id ? { ...slide, description: value } : slide)),
+                  });
+                }}
+                onReplace={() => {
+                  if (!activeSlide || !selected) return;
+                  openUpload({
+                    kind: "slide",
+                    option: selected,
+                    target: activeSlide.target,
+                    side: activeSlide.side,
+                    existing: activeSlide,
+                  });
+                }}
+                onRemove={() => activeSlide && removeSlide(activeSlide)}
+                onUndoRemove={undoRemove}
+                onMoveUp={() => activeSlide && changeOrder(activeSlide, siblings[position - 1])}
+                onMoveDown={() => activeSlide && changeOrder(activeSlide, siblings[position + 1])}
+                onOpenMove={() =>
+                  activeSlide && setMove({ slide: activeSlide, target: selectedKey, side: activeSlide.side })
+                }
+                onMoveTarget={(value) => setMove((current) => (current ? { ...current, target: value } : current))}
+                onMoveSide={(side) => setMove((current) => (current ? { ...current, side } : current))}
+                onApplyMove={() => {
+                  if (!draft || !move || !activeSlide) return;
+                  const option = saved?.targets.find((candidate) => pdfTargetKey(candidate.target) === move.target);
+                  if (!option) return;
+                  edit(
+                    {
+                      ...draft,
+                      slides: [
+                        ...draft.slides.filter((slide) => slide.id !== activeSlide.id),
+                        { ...activeSlide, target: option.target, side: move.side },
+                      ],
+                    },
+                    "Slide moved " + move.side + " " + outlineLabel(option) + ".",
+                  );
+                  selectTarget(move.target, activeSlide.id);
+                  focusRow(activeSlide.id);
+                  setMove(null);
+                }}
+                onCancelMove={() => setMove(null)}
+                onAddBefore={() =>
+                  selected && openUpload({ kind: "slide", option: selected, target: selected.target, side: "before" })
+                }
+                onAddAfter={() =>
+                  selected && openUpload({ kind: "slide", option: selected, target: selected.target, side: "after" })
+                }
+                onResetLayout={() => setResetOpen(true)}
+              />
+            ) : (
+              <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start" aria-label="Brand mark">
+                <div className="rounded-[var(--sat-staff-radius-card,16px)] border border-[var(--sat-staff-border-hairline,#0000000f)] bg-[var(--sat-staff-surface,#fff)] p-4">
+                  <h3 className="text-[length:var(--sat-staff-type-section-size,20px)] font-semibold leading-[var(--sat-staff-type-section-line,28px)] tracking-[-0.015em] text-[var(--sat-staff-text-primary,#1d1d1f)]">
+                    {slots[logoPosition]}
+                  </h3>
+                  <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-secondary,#515154)]">
+                    {draft.logos[logoPosition]
+                      ? assets[draft.logos[logoPosition]?.assetId ?? ""]?.filename ?? "Custom image"
+                      : "The bundled Warwick mark."}
+                  </p>
+                  <p className="mt-1 text-[14px] leading-5 text-[var(--sat-staff-text-tertiary,#6e6e73)]">
+                    {slotLocations[logoPosition]}
+                  </p>
+                  {writable ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <SatButton
+                        variant="secondary"
+                        onClick={(event) => openUpload({ kind: "logo", slot: logoPosition }, event.currentTarget)}
+                      >
+                        Replace
+                      </SatButton>
+                      {draft.logos[logoPosition] ? (
+                        <SatButton
+                          variant="quiet"
+                          icon={<RotateCcw size={16} />}
+                          onClick={() => {
+                            edit(
+                              { ...draft, logos: { ...draft.logos, [logoPosition]: null } },
+                              slots[logoPosition] + " restored in this draft.",
+                            );
+                            requestAnimationFrame(() =>
+                              workspaceRef.current
+                                ?.querySelector<HTMLElement>(
+                                  '[aria-label="Replace ' + slots[logoPosition].toLowerCase() + '"]',
+                                )
+                                ?.focus(),
+                            );
+                          }}
+                        >
+                          Restore default
+                        </SatButton>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </aside>
+            )}
+          </div>
+        ) : null}
       </div>
+
+      {upload ? (
+        <AuthoringDialog
+          open
+          onClose={closePanel}
+          title={
+            upload.kind === "logo"
+              ? "Replace " + slots[upload.slot].toLowerCase()
+              : upload.existing
+                ? "Replace slide image"
+                : "Add a slide"
+          }
+          description={
+            upload.kind === "logo"
+              ? "The mark keeps its position on the printed page."
+              : "The slide prints as one landscape page of the report."
+          }
+          contentClassName="max-w-[40rem]"
+        >
+          {upload.kind === "slide" ? (
+            <PdfLayoutImageForm
+              examId={examId}
+              purpose="slide"
+              title={upload.existing ? "Replace slide image" : "Add a slide"}
+              description={upload.existing?.description ?? ""}
+              requireDescription
+              placementNote={
+                upload.option && ["scoreReport", "answerKey"].includes(upload.option.target.kind)
+                  ? "This slide prints only when the " + upload.option.label.toLowerCase() + " is released to the student."
+                  : undefined
+              }
+              targets={saved?.targets ?? []}
+              target={upload.target}
+              side={upload.side}
+              labelOf={outlineLabel}
+              uploadImage={api.upload}
+              onCancel={closePanel}
+              onUploaded={uploaded}
+              onDenied={onDenied}
+            />
+          ) : (
+            <PdfLayoutImageForm
+              examId={examId}
+              purpose="logo"
+              title={"Replace " + slots[upload.slot].toLowerCase()}
+              description={draft?.logos[upload.slot]?.description ?? ""}
+              requireDescription={upload.slot === "cover"}
+              targets={saved?.targets ?? []}
+              target={{ kind: "cover" }}
+              side="after"
+              labelOf={outlineLabel}
+              uploadImage={api.upload}
+              onCancel={closePanel}
+              onUploaded={uploaded}
+              onDenied={onDenied}
+            />
+          )}
+        </AuthoringDialog>
+      ) : null}
+
+      <PdfLayoutPreviewDialog
+        open={preview}
+        examId={examId}
+        layout={writable ? draft ?? undefined : undefined}
+        previewLayout={api.preview}
+        onDenied={onDenied}
+        onClose={() => {
+          setPreview(false);
+          restoreActionFocus();
+        }}
+      />
+
+      <AuthoringConfirmDialog
+        open={resetOpen}
+        title="Reset the layout to the default report?"
+        description={
+          slideCountLabel(slideCount) +
+          " and " +
+          replacedSlots +
+          " replaced brand " +
+          (replacedSlots === 1 ? "mark" : "marks") +
+          " will be discarded. The default report keeps its own cover and marks."
+        }
+        confirmLabel="Reset layout"
+        destructive
+        onCancel={() => setResetOpen(false)}
+        onConfirm={resetLayout}
+      />
     </section>
   );
 }
