@@ -49,6 +49,7 @@ type AnsweredExamKeyEntry struct {
 	ExamQuestionID string                        `json:"examQuestionId"`
 	CorrectAnswers []satlearning.AnswerKeyAnswer `json:"correctAnswers"`
 	Result         string                        `json:"result"`
+	Explanation    json.RawMessage               `json:"explanation,omitempty"`
 }
 
 // ErrAnsweredExamBusy reports a full build bound; handlers render it as 429
@@ -221,7 +222,7 @@ func (s *Service) attachAnswerKey(ctx context.Context, exam *AnsweredExam) error
 	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.id, eq.id, eq.is_pretest, CAST(qr.answer_definition AS CHAR), CAST(ev.config_snapshot AS CHAR),
-			CAST(v.response AS CHAR), CAST(ar.response AS CHAR)
+			CAST(v.response AS CHAR), CAST(ar.response AS CHAR), CAST(qr.rationale AS CHAR)
 		FROM assessment_modules m
 		JOIN assessment_sections s ON s.id = m.section_id
 		JOIN exam_versions ev ON ev.id = s.exam_version_id
@@ -244,7 +245,8 @@ func (s *Service) attachAnswerKey(ctx context.Context, exam *AnsweredExam) error
 		var moduleID, examQuestionID, answerJSON, configJSON string
 		var isPretest bool
 		var v2Raw, legacyRaw sql.NullString
-		if err := rows.Scan(&moduleID, &examQuestionID, &isPretest, &answerJSON, &configJSON, &v2Raw, &legacyRaw); err != nil {
+		var explanation string
+		if err := rows.Scan(&moduleID, &examQuestionID, &isPretest, &answerJSON, &configJSON, &v2Raw, &legacyRaw, &explanation); err != nil {
 			return err
 		}
 		if isPretest || seenQuestion[examQuestionID] {
@@ -271,7 +273,7 @@ func (s *Service) attachAnswerKey(ctx context.Context, exam *AnsweredExam) error
 		}
 		entries = append(entries, AnsweredExamKeyEntry{
 			ModuleID: moduleID, ExamQuestionID: examQuestionID,
-			CorrectAnswers: correct, Result: result,
+			CorrectAnswers: correct, Result: result, Explanation: json.RawMessage(explanation),
 		})
 	}
 	if err := rows.Err(); err != nil {

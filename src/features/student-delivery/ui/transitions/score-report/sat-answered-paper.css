@@ -155,7 +155,20 @@
   /* The exam itself is rendered by the live components and .sat-ui tokens.
      Only page flow is different: paper cannot clip or scroll a reading pane. */
   .sat-paper-question-row { break-inside: avoid; }
-  .sat-paper-question-row + .sat-paper-question-row { break-before: page; }
+  .sat-paper-question-row:not(:first-child),
+  .sat-paper-explanation-row[data-continued] { break-before: page; }
+  .sat-paper-explanation {
+    border-top: 0.75pt solid var(--paper-rule);
+    padding: 2.5mm 0 3mm;
+    overflow-wrap: anywhere;
+  }
+  .sat-paper-explanation h4 {
+    margin: 0 0 1mm;
+    font-weight: 700;
+    break-after: avoid;
+  }
+  .sat-paper-explanation .structured-content-renderer { line-height: 1.5; }
+  .sat-paper-explanation .structured-content-renderer p { margin-block: 0 0.5em; }
   .sat-paper-question.sat-ui {
     padding-block: 2mm 4mm;
     font-size: 16px;

@@ -24,42 +24,69 @@ func BuildPayload(ctx context.Context, exam *delivery.AnsweredExam, view json.Ra
 
 func BuildAttemptPayload(ctx context.Context, exam *delivery.AnsweredExam, view json.RawMessage, load func(context.Context, string) (media.Content, error), layout *satpdflayout.Resolved, words []satwordvault.PrintedEntry) ([]byte, error) {
 	figures := map[string]string{}
-	total := 0
+	contents := make([]json.RawMessage, 0)
 	for _, section := range exam.Sections {
 		for _, module := range section.Modules {
 			for _, q := range module.Questions {
-				for _, raw := range []json.RawMessage{q.Stimulus, q.Prompt, q.Answer} {
-					for _, ref := range satpublish.CollectRichContentAssetReferences(string(raw), "", q.ExamQuestionID) {
-						if _, ok := figures[ref.AssetID]; ok {
-							continue
-						}
-						if err := ctx.Err(); err != nil {
-							return nil, err
-						}
-						content, err := load(ctx, ref.AssetID)
-						if err != nil {
-							return nil, ErrNotPrintable
-						}
-						data, err := io.ReadAll(io.LimitReader(content.Body, media.MaxUploadBytes+1))
-						_ = content.Body.Close()
-						if err != nil || len(data) == 0 || len(data) > media.MaxUploadBytes || !strings.HasPrefix(content.ContentType, "image/") {
-							return nil, ErrNotPrintable
-						}
-						encoded := "data:" + content.ContentType + ";base64," + base64.StdEncoding.EncodeToString(data)
-						total += len(encoded)
-						if total > 32<<20 {
-							return nil, ErrNotPrintable
-						}
-						figures[ref.AssetID] = encoded
-					}
-				}
+				contents = append(contents, q.Stimulus, q.Prompt, q.Answer)
 			}
 		}
 	}
-	if err := ctx.Err(); err != nil {
+	if err := loadFigures(ctx, contents, load, figures); err != nil {
 		return nil, err
 	}
+	return BuildPostedAttemptPayload(ctx, exam, view, figures, load, layout, words)
+}
+
+// BuildPostedAttemptPayload adds authorized explanation figures that the
+// legacy client cannot load from its answer-only projection.
+func BuildPostedAttemptPayload(ctx context.Context, exam *delivery.AnsweredExam, view json.RawMessage, figures map[string]string, load func(context.Context, string) (media.Content, error), layout *satpdflayout.Resolved, words []satwordvault.PrintedEntry) ([]byte, error) {
+	if exam.AnswerKey != nil && exam.AnswerKey.Available {
+		explanations := make([]json.RawMessage, 0, len(exam.AnswerKey.Entries))
+		for _, entry := range exam.AnswerKey.Entries {
+			explanations = append(explanations, entry.Explanation)
+		}
+		if figures == nil {
+			figures = map[string]string{}
+		}
+		if err := loadFigures(ctx, explanations, load, figures); err != nil {
+			return nil, err
+		}
+	}
 	return MarshalAttemptPayload(exam, view, figures, layout, words)
+}
+
+func loadFigures(ctx context.Context, contents []json.RawMessage, load func(context.Context, string) (media.Content, error), figures map[string]string) error {
+	total := 0
+	for _, encoded := range figures {
+		total += len(encoded)
+	}
+	for _, raw := range contents {
+		for _, ref := range satpublish.CollectRichContentAssetReferences(string(raw), "", "") {
+			if _, ok := figures[ref.AssetID]; ok {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			content, err := load(ctx, ref.AssetID)
+			if err != nil {
+				return ErrNotPrintable
+			}
+			data, err := io.ReadAll(io.LimitReader(content.Body, media.MaxUploadBytes+1))
+			_ = content.Body.Close()
+			if err != nil || len(data) == 0 || len(data) > media.MaxUploadBytes || !strings.HasPrefix(content.ContentType, "image/") {
+				return ErrNotPrintable
+			}
+			encoded := "data:" + content.ContentType + ";base64," + base64.StdEncoding.EncodeToString(data)
+			total += len(encoded)
+			if total > 32<<20 {
+				return ErrNotPrintable
+			}
+			figures[ref.AssetID] = encoded
+		}
+	}
+	return ctx.Err()
 }
 
 func MarshalPayload(exam *delivery.AnsweredExam, view json.RawMessage, figures map[string]string, layout *satpdflayout.Resolved) ([]byte, error) {

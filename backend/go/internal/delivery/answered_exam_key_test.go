@@ -3,6 +3,7 @@ package delivery
 import (
 	"context"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,14 +99,14 @@ func TestAttachAnswerKeyProjectsAllAcceptedForms(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	rows := sqlmock.NewRows([]string{"module_id", "exam_question_id", "is_pretest", "answer_definition", "config_snapshot", "v2", "legacy"}).
+	rows := sqlmock.NewRows([]string{"module_id", "exam_question_id", "is_pretest", "answer_definition", "config_snapshot", "v2", "legacy", "rationale"}).
 		AddRow("mod-1", "eq-1", false,
 			`{"kind":"student_produced_response","acceptedResponses":["2/3",".6667","0.6667"]}`,
-			"{}", `{"answer":"2/3"}`, nil).
+			"{}", `{"answer":"2/3"}`, nil, "{}").
 		AddRow("mod-1", "eq-2", false,
 			`{"kind":"single_choice","correctOptionId":"opt-b","options":[{"id":"opt-a","content":{"text":"Alpha"}},{"id":"opt-b","content":{"text":"Beta"}}]}`,
-			"{}", nil, `"opt-a"`).
-		AddRow("mod-1", "eq-3", true, `{"kind":"single_choice"}`, "{}", nil, nil)
+			"{}", nil, `"opt-a"`, `{"version":1,"nodes":[{"type":"paragraph","text":"Only Beta fits."}]}`).
+		AddRow("mod-1", "eq-3", true, `{"kind":"single_choice"}`, "{}", nil, nil, "{}")
 	expectKeyRows(mock, rows)
 	expectKeyPolicyLookup(mock)
 
@@ -124,7 +125,7 @@ func TestAttachAnswerKeyProjectsAllAcceptedForms(t *testing.T) {
 		t.Fatalf("spr = %+v", spr)
 	}
 	choice := exam.AnswerKey.Entries[1]
-	if choice.Result != "incorrect" || len(choice.CorrectAnswers) != 1 || choice.CorrectAnswers[0].Label != "B" {
+	if choice.Result != "incorrect" || len(choice.CorrectAnswers) != 1 || choice.CorrectAnswers[0].Label != "B" || !strings.Contains(string(choice.Explanation), "Only Beta fits.") {
 		t.Fatalf("choice = %+v", choice)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -138,8 +139,8 @@ func TestAttachAnswerKeyMissingKeyFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	expectKeyRows(mock, sqlmock.NewRows([]string{"module_id", "exam_question_id", "is_pretest", "answer_definition", "config_snapshot", "v2", "legacy"}).
-		AddRow("mod-1", "eq-1", false, `{"kind":"single_choice","options":[{"id":"a"}]}`, "{}", nil, nil))
+	expectKeyRows(mock, sqlmock.NewRows([]string{"module_id", "exam_question_id", "is_pretest", "answer_definition", "config_snapshot", "v2", "legacy", "rationale"}).
+		AddRow("mod-1", "eq-1", false, `{"kind":"single_choice","options":[{"id":"a"}]}`, "{}", nil, nil, "{}"))
 
 	err = (&Service{db: db}).attachAnswerKey(context.Background(), keyedExam())
 	if keyCodeOf(err) != apperrors.CodeAnswerKeyUnavailable {

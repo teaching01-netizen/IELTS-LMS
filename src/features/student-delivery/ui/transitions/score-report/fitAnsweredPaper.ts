@@ -37,7 +37,12 @@ export function fitAnsweredPaper(paper: HTMLElement): number {
         fit = Math.max(MIN_FIT, fit * (available / rowHeight));
         frame.style.setProperty("--sat-paper-fit", fit.toFixed(4));
       }
-      if (height(row) > available) overflowing += 1;
+      const rowHeight = height(row);
+      if (rowHeight > available) overflowing += 1;
+      const explanation = row.nextElementSibling;
+      if (explanation?.classList.contains("sat-paper-explanation-row")) {
+        explanation.toggleAttribute("data-continued", rowHeight + height(explanation) > available);
+      }
     }
   }
   return overflowing;

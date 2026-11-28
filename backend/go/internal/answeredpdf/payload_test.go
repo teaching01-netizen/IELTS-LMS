@@ -52,6 +52,26 @@ func TestServerPayloadLoadsOnlyReferencedFiguresOnce(t *testing.T) {
 	}
 }
 
+func TestPostedPayloadLoadsAuthorizedExplanationFigures(t *testing.T) {
+	exam := &delivery.AnsweredExam{AnswerKey: &delivery.AnsweredExamAnswerKey{
+		Available: true,
+		Entries: []delivery.AnsweredExamKeyEntry{{
+			Explanation: json.RawMessage(`{"version":2,"document":{"type":"doc","content":[{"type":"image","attrs":{"assetId":"explanation-figure"}}]}}`),
+		}},
+	}}
+	reads := 0
+	payload, err := BuildPostedAttemptPayload(t.Context(), exam, nil, nil, func(_ context.Context, id string) (media.Content, error) {
+		if id != "explanation-figure" {
+			t.Fatalf("unexpected figure: %s", id)
+		}
+		reads++
+		return media.Content{ContentType: "image/png", Body: imageBody{bytes.NewReader([]byte("figure"))}}, nil
+	}, nil, nil)
+	if err != nil || reads != 1 || !bytes.Contains(payload, []byte("data:image/png;base64,ZmlndXJl")) {
+		t.Fatalf("expected one inline explanation figure, got %d reads: %v", reads, err)
+	}
+}
+
 func TestDownloadFilenameMatchesExistingNames(t *testing.T) {
 	for _, tc := range []struct{ name, title, want string }{
 		{"Mina Chen", "SAT Practice 04", "Mina Chen - SAT Practice 04 - Score report and exam review.pdf"},

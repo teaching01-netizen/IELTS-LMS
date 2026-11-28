@@ -5,6 +5,9 @@ import { Fragment, useEffect, useMemo, type ReactNode, type Ref } from "react";
 import "./score-report/sat-answered-paper.css";
 import warwickWatermark from "../../../../assets/warwick-institute-logo.png";
 import { SatPrintedQuestion } from "./score-report/SatPrintedQuestion";
+import { hasStructuredContent } from "../../../exam-authoring/api/renderingPublic";
+import type { StructuredContent } from "../../../exam-authoring/api/assessmentContracts";
+import { StructuredContentRenderer } from "../../../exam-rendering/api/structuredContent";
 import type {
   AssessmentAnsweredExam,
   AssessmentDeliverySection,
@@ -175,6 +178,7 @@ export interface AnsweredExamKeyEntry {
   examQuestionId: string;
   correctAnswers: readonly AnsweredExamKeyAnswer[];
   result: "correct" | "incorrect" | "unanswered";
+  explanation?: StructuredContent;
 }
 
 /**
@@ -819,23 +823,42 @@ export function AnsweredExamPaper({
                 const answer = answers.get(`${module.id}:${question.examQuestionId}`) ?? null;
                 const marked = markedForReview.has(`${module.id}:${question.examQuestionId}`);
                 const keyEntry = sampleBook ? undefined : keyEntries.get(`${module.id}:${question.examQuestionId}`);
+                const explanation = keyEntry?.explanation;
                 return (
-                  <tr key={question.examQuestionId} className="sat-paper-question-row">
-                    <td>
-                      <SatPrintedQuestion
-                        question={question}
-                        questionNumber={index + 1}
-                        moduleId={module.id}
-                        sectionKey={section.sectionKey}
-                        answer={answer}
-                        markedForReview={marked}
-                        correctAnswers={keyEntry?.correctAnswers}
-                        result={keyEntry?.result}
-                        loadMediaUrl={loadMediaUrl}
-                        onMediaFailure={mediaFailure}
-                      />
-                    </td>
-                  </tr>
+                  <Fragment key={question.examQuestionId}>
+                    <tr className="sat-paper-question-row">
+                      <td>
+                        <SatPrintedQuestion
+                          question={question}
+                          questionNumber={index + 1}
+                          moduleId={module.id}
+                          sectionKey={section.sectionKey}
+                          answer={answer}
+                          markedForReview={marked}
+                          correctAnswers={keyEntry?.correctAnswers}
+                          result={keyEntry?.result}
+                          loadMediaUrl={loadMediaUrl}
+                          onMediaFailure={mediaFailure}
+                        />
+                      </td>
+                    </tr>
+                    {explanation && hasStructuredContent(explanation) ? (
+                      <tr className="sat-paper-explanation-row">
+                        <td>
+                          <section className="sat-paper-explanation">
+                            <h4>Explanation · Question {index + 1}</h4>
+                            <StructuredContentRenderer
+                              content={explanation}
+                              loadMediaUrl={loadMediaUrl}
+                              onMediaFailure={mediaFailure}
+                              questionId={question.examQuestionId}
+                              eagerMedia
+                            />
+                          </section>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
                 );
               })}
 

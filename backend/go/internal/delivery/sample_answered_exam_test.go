@@ -80,14 +80,17 @@ func TestSampleAnswersUseTheCorrectResponse(t *testing.T) {
 	}
 	mock.ExpectQuery("SELECT m.title").
 		WithArgs("v1").
-		WillReturnRows(sqlmock.NewRows([]string{"title", "order", "id", "answer"}).
-			AddRow("Module 1", 0, "eq-1", answer("B")).
-			AddRow("Module 1", 1, "eq-2", `{"kind":"student_produced_response","acceptedResponses":["12"]}`))
+		WillReturnRows(sqlmock.NewRows([]string{"title", "order", "id", "answer", "rationale"}).
+			AddRow("Module 1", 0, "eq-1", answer("B"), `{"version":1,"nodes":[{"type":"paragraph","text":"Sample reasoning."}]}`).
+			AddRow("Module 1", 1, "eq-2", `{"kind":"student_produced_response","acceptedResponses":["12"]}`, "{}"))
 
 	service := &Service{db: db}
 	answers, err := service.sampleAnswers(t.Context(), "v1")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(answers["eq-1"].explanation), "Sample reasoning.") {
+		t.Fatal("sample answer did not carry the explanation")
 	}
 	if got := string(answers["eq-1"].response); got != `"B"` {
 		t.Fatalf("choice response = %s", got)
@@ -114,8 +117,8 @@ func TestSampleAnswersRefuseAQuestionWithoutAKey(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery("SELECT m.title").
 		WithArgs("v1").
-		WillReturnRows(sqlmock.NewRows([]string{"title", "order", "id", "answer"}).
-			AddRow("Module 1", 0, "eq-1", `{"kind":"single_choice"}`))
+		WillReturnRows(sqlmock.NewRows([]string{"title", "order", "id", "answer", "rationale"}).
+			AddRow("Module 1", 0, "eq-1", `{"kind":"single_choice"}`, "{}"))
 
 	service := &Service{db: db}
 	if _, err := service.sampleAnswers(t.Context(), "v1"); err == nil {

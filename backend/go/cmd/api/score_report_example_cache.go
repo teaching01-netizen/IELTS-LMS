@@ -14,7 +14,7 @@ import (
 // scoreReportExampleCacheVersion must change whenever the print layout or the
 // sample view changes in a way that alters the rendered PDF without changing
 // the exam revision.
-const scoreReportExampleCacheVersion = "1"
+const scoreReportExampleCacheVersion = "2"
 
 const scoreReportExampleCacheRoot = "sat-score-report-example"
 

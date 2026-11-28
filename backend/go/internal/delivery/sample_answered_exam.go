@@ -60,7 +60,7 @@ func buildSampleAnsweredExam(versionID, examID, examTitle, candidateName string,
 				})
 				exam.AnswerKey.Entries = append(exam.AnswerKey.Entries, AnsweredExamKeyEntry{
 					ModuleID: module.ID, ExamQuestionID: question.ExamQuestionID,
-					CorrectAnswers: answer.key, Result: "correct",
+					CorrectAnswers: answer.key, Result: "correct", Explanation: answer.explanation,
 				})
 			}
 		}
@@ -72,8 +72,9 @@ func buildSampleAnsweredExam(versionID, examID, examTitle, candidateName string,
 }
 
 type sampleAnswer struct {
-	key      []satlearning.AnswerKeyAnswer
-	response json.RawMessage
+	key         []satlearning.AnswerKeyAnswer
+	response    json.RawMessage
+	explanation json.RawMessage
 }
 
 // sampleAnswers reads the version's answer definitions once. The response is
@@ -81,7 +82,7 @@ type sampleAnswer struct {
 // the first accepted response for a numeric answer.
 func (s *Service) sampleAnswers(ctx context.Context, versionID string) (map[string]sampleAnswer, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT m.title, eq.display_order, eq.id, CAST(qr.answer_definition AS CHAR)
+		SELECT m.title, eq.display_order, eq.id, CAST(qr.answer_definition AS CHAR), CAST(qr.rationale AS CHAR)
 		FROM assessment_modules m
 		JOIN assessment_sections s ON s.id = m.section_id
 		JOIN assessment_exam_questions eq ON eq.module_id = m.id
@@ -96,8 +97,8 @@ func (s *Service) sampleAnswers(ctx context.Context, versionID string) (map[stri
 	for rows.Next() {
 		var moduleTitle string
 		var displayOrder int
-		var examQuestionID, answerJSON string
-		if err := rows.Scan(&moduleTitle, &displayOrder, &examQuestionID, &answerJSON); err != nil {
+		var examQuestionID, answerJSON, explanation string
+		if err := rows.Scan(&moduleTitle, &displayOrder, &examQuestionID, &answerJSON, &explanation); err != nil {
 			return nil, err
 		}
 		var definition answerKeyDefinition
@@ -120,7 +121,7 @@ func (s *Service) sampleAnswers(ctx context.Context, versionID string) (map[stri
 		if err != nil {
 			return nil, err
 		}
-		out[examQuestionID] = sampleAnswer{key: key, response: response}
+		out[examQuestionID] = sampleAnswer{key: key, response: response, explanation: json.RawMessage(explanation)}
 	}
 	return out, rows.Err()
 }

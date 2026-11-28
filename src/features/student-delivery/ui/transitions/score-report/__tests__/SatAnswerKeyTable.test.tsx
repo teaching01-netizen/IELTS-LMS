@@ -61,6 +61,7 @@ const AUTHORIZED_KEY = {
       examQuestionId: "q1",
       correctAnswers: [{ label: "A", text: "first" }],
       result: "incorrect",
+      explanation: text("Only the first choice fits."),
     },
     {
       moduleId: "m1",
@@ -70,6 +71,7 @@ const AUTHORIZED_KEY = {
         { label: "", text: "0.5" },
       ],
       result: "correct",
+      explanation: text(""),
     },
     {
       moduleId: "m1",
@@ -106,6 +108,11 @@ describe("answered-exam answer key table", () => {
     expect(articles[0]).toHaveTextContent("Correct answer: A. first");
     expect(articles[0]).toHaveTextContent("Result: Incorrect");
     expect(articles[0]!.querySelector('[data-key-result="incorrect"]')).not.toBeNull();
+    const explanation = articles[0]!.closest("tr")!.nextElementSibling;
+    expect(explanation).toHaveTextContent("Explanation · Question 1");
+    expect(explanation).toHaveTextContent("Only the first choice fits.");
+    expect(explanation?.nextElementSibling).toContainElement(articles[1]!);
+    expect(review.querySelectorAll(".sat-paper-explanation-row")).toHaveLength(1);
     expect(articles[1]).toHaveTextContent("Correct answer: 1/2 or 0.5");
     expect(articles[1]).toHaveTextContent("Result: Correct");
     expect(articles[2]).toHaveTextContent("Result: Unanswered");
@@ -120,6 +127,7 @@ describe("answered-exam answer key table", () => {
     expect(review).toHaveTextContent("Correct answers are not shown");
     expect(review).not.toHaveTextContent("Correct answer:");
     expect(review).not.toHaveTextContent("Result:");
+    expect(review.querySelector(".sat-paper-explanation-row")).toBeNull();
   });
 
   it("falls back to the answer-only report when the server did not authorize keys", () => {
