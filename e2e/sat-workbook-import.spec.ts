@@ -229,8 +229,7 @@ test("standard SAT blocks the same 20-question workbook at preview", async ({ pa
 });
 
 async function sitClassroomExam(staff: Page, browser: Browser, checkWordVault = false) {
-  const settingsUrl = new URL(staff.url());
-  settingsUrl.pathname += "/settings";
+  const examUrl = staff.url();
   const roomName = `Workbook Classroom ${Date.now()}`;
   const createRoom = staff.getByRole("button", { name: "Create room", exact: true });
   await createRoom.first().click();
@@ -311,10 +310,11 @@ async function sitClassroomExam(staff: Page, browser: Browser, checkWordVault = 
     } finally {
       await pdf.destroy();
     }
-    await staff.goto(settingsUrl.href);
-    await staff.getByRole("button", { name: "Import Vocabulary Excel" }).click();
+    await staff.goto(examUrl);
+    await staff.getByRole("button", { name: "Import", exact: true }).click();
+    await staff.getByRole("menuitem", { name: /Import vocabulary workbook/ }).click();
     const vault = staff.getByRole("dialog", { name: "Import Vocabulary Excel" });
-    await vault.getByLabel("Exam version").selectOption(receipt.version.id);
+    await expect(vault.getByLabel("Exam version")).toHaveValue(receipt.version.id);
     const upload = await prepareWordVaultUpload(vault);
     await upload(1, "revise");
     await vault.getByRole("button", { name: "Replace Word Vault" }).click();

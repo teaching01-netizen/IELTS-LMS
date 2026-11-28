@@ -40,6 +40,7 @@ const harness = vi.hoisted(() => ({
   mutations: { create: vi.fn(), batchCreate: vi.fn(), duplicate: vi.fn(), reorder: vi.fn(), bulk: vi.fn(), validate: vi.fn(), loadSample: vi.fn() },
   api: { getSatWorkbookUndoState: vi.fn(), getShell: vi.fn(), getQuestion: vi.fn(), saveQuestionRevision: vi.fn(), deleteQuestion: vi.fn() },
   example: { save: vi.fn() },
+  wordVault: { status: vi.fn(), preview: vi.fn(), commit: vi.fn() },
 }));
 
 vi.mock("../../api/assessmentQueries", () => ({
@@ -68,6 +69,7 @@ vi.mock("../../api/assessmentAuthoringApi", () => ({ assessmentAuthoringApi: har
 vi.mock("../../api/scoreReportExampleApi", () => ({
   saveScoreReportExample: (...args: unknown[]) => (harness.example.save as (...a: unknown[]) => unknown)(...args),
 }));
+vi.mock("../../api/wordVaultApi", () => ({ wordVaultApi: harness.wordVault }));
 vi.mock("../../hooks/useQuestionAutosave", () => ({
   useQuestionAutosave: (...args: unknown[]) => (harness.useQuestionAutosave as (...a: unknown[]) => unknown)(...args),
 }));
@@ -182,6 +184,11 @@ function setupDefaults() {
   for (const fn of Object.values(harness.mutations)) (fn as { mockReset: () => void }).mockReset();
   for (const fn of Object.values(harness.api)) (fn as { mockReset: () => void }).mockReset();
   (harness.example.save as { mockReset: () => void }).mockReset();
+  harness.wordVault.status.mockReset().mockResolvedValue({
+    draftId: "draft-1", draftCount: 0, publishedCount: 0, staleCount: 0, publishedVersions: [],
+  });
+  harness.wordVault.preview.mockReset();
+  harness.wordVault.commit.mockReset();
   const autosave = harness.autosave;
   for (const fn of [autosave.scheduleAutosave, autosave.flushNow, autosave.commitAndAdvance, autosave.retry]) (fn as { mockReset: () => void }).mockReset();
   autosave.status = "saved"; autosave.lastSavedAt = null; autosave.isOffline = false; autosave.hasPendingChanges = false;
@@ -397,6 +404,47 @@ describe("AuthoringWorkspace (spine-only)", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
     expect(await screen.findByRole("dialog", { name: "Import Vocabulary Excel" })).toBeInTheDocument();
     expect(screen.getByText(/\.xlsx up to 2 MB/)).toBeInTheDocument();
+  });
+
+  it("defaults to the current published version while still offering the draft", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    harness.wordVault.status.mockResolvedValue({
+      draftId: "draft-1", draftCount: 0, publishedCount: 1, staleCount: 0,
+      publishedVersions: [{ id: "published-2", number: 2 }, { id: "published-1", number: 1 }],
+    });
+    renderWorkspace();
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Import Vocabulary Excel" });
+    expect(within(dialog).getByRole("combobox", { name: "Exam version" })).toHaveValue("published-2");
+    expect(within(dialog).getByRole("option", { name: "Editable draft" })).toBeInTheDocument();
+  });
+
+  it("replaces the published vault through the authoring menu without opening a draft", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    harness.shellResult.data = { state: "NO_DRAFT", shell: null };
+    harness.wordVault.status.mockResolvedValue({
+      draftId: "", draftCount: 0, publishedCount: 1, staleCount: 0,
+      publishedVersions: [{ id: "published-1", number: 1 }],
+    });
+    const preview = {
+      draftId: "", versionId: "published-1", revision: 4, digest: "workbook-hash",
+      before: 1, entries: [], impact: [], issues: [],
+    };
+    harness.wordVault.preview.mockResolvedValue(preview);
+    harness.wordVault.commit.mockResolvedValue({ draftId: "", versionId: "published-1", revision: 4, count: 0 });
+    render(workspaceTree(renderWorkspaceClient(), true, { versionId: "published-1", versionNumber: 1, publishScope: "full" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Import Vocabulary Excel" });
+    fireEvent.change(within(dialog).getByLabelText("Choose vocabulary workbook"), {
+      target: { files: [new File(["xlsx"], "vocabulary.xlsx")] },
+    });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Remove all words" }));
+    expect(await screen.findByText(/Version 1 updated/)).toBeInTheDocument();
+    expect(harness.wordVault.preview).toHaveBeenCalledWith("exam-1", expect.any(File), "published-1");
+    expect(harness.wordVault.commit).toHaveBeenCalledWith("exam-1", expect.any(File), preview, expect.any(String));
+    expect(harness.ensureDraft.mutate).not.toHaveBeenCalled();
   });
 
   it("keeps the vocabulary import out of non-SAT exams", async () => {

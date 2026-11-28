@@ -12,8 +12,7 @@ const maxWorkbookBytes = 2 * 1024 * 1024;
  * The Word Vault workbook importer.
  *
  * It previews and replaces the entire vault for one exam version. The
- * Questions workspace targets the draft and Settings can target a published
- * version for an immediate PDF update.
+ * target can be a draft or a published version for an immediate PDF update.
  *
  * The sheet OWNS its parse → preview → commit state machine. Callers own only
  * when it may open and what a confirmed commit means for their projections.
@@ -23,13 +22,14 @@ const maxWorkbookBytes = 2 * 1024 * 1024;
  * it repeats the one consequence that is not visible in the entry list — the
  * modules this file does not mention lose their words too.
  */
-export function WordVaultImportSheet({ open, examId, onClose, onSaved, publishedVersions = [], hasDraft = true }: {
+export function WordVaultImportSheet({ open, examId, onClose, onSaved, publishedVersions = [], hasDraft = true, preferPublished = false }: {
   open: boolean;
   examId: string;
   onClose: () => void;
   onSaved: (count: number, version?: WordVaultVersion) => void;
   publishedVersions?: WordVaultVersion[];
   hasDraft?: boolean;
+  preferPublished?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -44,7 +44,9 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved, published
   const [downloadError, setDownloadError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [needsCheck, setNeedsCheck] = useState(false);
-  const [versionId, setVersionId] = useState(() => hasDraft ? "" : publishedVersions[0]?.id ?? "");
+  const [versionId, setVersionId] = useState(() =>
+    preferPublished || !hasDraft ? publishedVersions[0]?.id ?? "" : ""
+  );
   const version = publishedVersions.find((item) => item.id === versionId);
   const target = version ? `Version ${version.number}` : "the draft";
   const replacing = (preview?.before ?? 0) > 0;

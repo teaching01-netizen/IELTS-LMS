@@ -23,6 +23,7 @@ import {
 } from "../api/assessmentQueries";
 import { assessmentKeys, authoringEffects } from "../api/authoringQueryEffects";
 import { saveScoreReportExample } from "../api/scoreReportExampleApi";
+import { wordVaultApi, type WordVaultStatus, type WordVaultVersion } from "../api/wordVaultApi";
 import { toDraftOpenErrorInfo, useAuthoringShellLifecycle } from "../application/authoringShellLifecycle";
 import { AuthoringLifecycleSurface } from "./AuthoringLifecycleSurface";
 import { useDraftOpenOnEntry } from "./useDraftOpenOnEntry";
@@ -234,6 +235,7 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
   const [compactViewport, setCompactViewport] = useState(false);
   const [keepMetadataForNext, setKeepMetadataForNext] = useState(true);
   const [wordVaultNotice, setWordVaultNotice] = useState<string | null>(null);
+  const [wordVaultStatus, setWordVaultStatus] = useState<WordVaultStatus | null>(null);
   const [exampleBusy, setExampleBusy] = useState(false);
   const [focusField, setFocusField] = useState<string | null>(null);
   // Which FIELD an inspector shortcut belongs to is a workspace concern (the
@@ -486,26 +488,37 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
     setImportOpen: setWorkbookImportOpen,
   });
 
-  // The vocabulary workbook stages against the SAME draft the author is editing,
-  // so its entry point lives in the Import menu beside the exam workbook. Flush
-  // the open question first: the commit bumps the draft revision, and a write
-  // that lands after it would be measured against a revision the server moved
-  // past.
+  // Flush any open question before a workbook can replace the draft vault.
   const openWordVaultImport = useCallback(async () => {
     setNavigationError(null);
     setWordVaultNotice(null);
-    if (!(await flushBeforeNavigation())) return;
-    setWordVaultOpen(true);
-  }, [flushBeforeNavigation, setNavigationError, setWordVaultOpen]);
+    if (shell && !(await flushBeforeNavigation())) return;
+    try {
+      const status = await queryClient.fetchQuery({
+        queryKey: assessmentKeys.wordVault(examId),
+        queryFn: () => wordVaultApi.status(examId),
+        staleTime: 0,
+      });
+      if (!status.draftId && !status.publishedVersions?.length) {
+        setNavigationError("No exam version is available for a vocabulary import.");
+        return;
+      }
+      setWordVaultStatus(status);
+      setWordVaultOpen(true);
+    } catch {
+      setNavigationError("Couldn’t load exam versions for the Word Vault. Try again.");
+    }
+  }, [examId, flushBeforeNavigation, queryClient, setNavigationError, setWordVaultOpen, shell]);
 
   const handleWordVaultSaved = useCallback(
-    (count: number) => {
+    (count: number, version?: WordVaultVersion) => {
       setWordVaultOpen(false);
       setWordVaultNotice(
-        count === 0 ? "Draft vocabulary removed." : `${wordCountLabel(count)} saved to the draft.`
+        version ? `Version ${version.number} updated. Students will get the changes on their next PDF download.`
+          : count === 0 ? "Draft vocabulary removed." : `${wordCountLabel(count)} saved to the draft.`
       );
       void queryClient.invalidateQueries({ queryKey: assessmentKeys.wordVault(examId) });
-      void authoringEffects.shellChanged(queryClient, examId);
+      if (!version) void authoringEffects.shellChanged(queryClient, examId);
     },
     [examId, queryClient, setWordVaultOpen]
   );
@@ -1130,6 +1143,27 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
     </>
   );
 
+  const wordVaultSheet = canOpenDraft && wordVaultOpen && wordVaultStatus ? (
+    <WordVaultImportSheet
+      key={examId}
+      open
+      examId={examId}
+      hasDraft={Boolean(wordVaultStatus.draftId)}
+      publishedVersions={wordVaultStatus.publishedVersions ?? []}
+      preferPublished
+      onClose={() => setWordVaultOpen(false)}
+      onSaved={handleWordVaultSaved}
+    />
+  ) : null;
+  const wordVaultFeedback = wordVaultNotice ? (
+    <div role="status" className="flex flex-wrap items-center justify-center gap-2 border-b px-5 py-2 text-center text-xs font-medium">
+      <span>{wordVaultNotice}</span>
+      <button type="button" className="font-semibold underline" onClick={() => setWordVaultNotice(null)}>
+        Dismiss
+      </button>
+    </div>
+  ) : null;
+
   // The shell read is GET-only and never creates a draft. When there is no
   // shell we render the lifecycle surface, which is the ONLY place that decides
   // what NO_DRAFT vs EXAM_NOT_FOUND vs a real failure looks like. The explicit,
@@ -1153,6 +1187,7 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
           target={publishedTarget}
           showResponses={chrome.showResponses}
           canOpenDraft={canOpenDraft}
+          onImportWordVault={() => void openWordVaultImport()}
           draftOpen={{
             isPending: ensureDraft.isPending,
             error: ensureDraft.error,
@@ -1188,7 +1223,9 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
               {navigationError}
             </p>
           ) : null}
+          {wordVaultFeedback}
           {lifecycleContent}
+          {wordVaultSheet}
           {settingsSheet}
         </div>
         {createRoomFlow}
@@ -1480,14 +1517,7 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
                   {navigationError}
                 </div>
               ) : null}
-              {wordVaultNotice ? (
-                <div role="status" className="flex flex-wrap items-center justify-center gap-2 border-b px-5 py-2 text-center text-xs font-medium">
-                  <span>{wordVaultNotice}</span>
-                  <button type="button" className="font-semibold underline" onClick={() => setWordVaultNotice(null)}>
-                    Dismiss
-                  </button>
-                </div>
-              ) : null}
+              {wordVaultFeedback}
               {activeRaceNotice ? (
                 <div className={`${coeditUiActive && publishedFrozen ? "hidden" : ""} border-b px-5 py-2 text-center text-xs font-semibold text-destructive`}>
                   {activeRaceNotice}
@@ -1742,14 +1772,7 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
             onCommitted={handleWorkbookCommitted}
           />
         ) : null}
-        {wordVaultOpen && shell.providerKey === "sat" ? (
-          <WordVaultImportSheet
-            open
-            examId={examId}
-            onClose={() => setWordVaultOpen(false)}
-            onSaved={handleWordVaultSaved}
-          />
-        ) : null}
+        {wordVaultSheet}
         <SampleExamLoadDialog
           open={sampleDialogOpen}
           busy={loadSampleExam.isPending}
@@ -1777,6 +1800,7 @@ function PublishedExamWorkspaceSurface({
   target,
   showResponses,
   canOpenDraft,
+  onImportWordVault,
   draftOpen,
   roomButtonRef,
   onCreateSession,
@@ -1787,6 +1811,7 @@ function PublishedExamWorkspaceSurface({
   target: DeliveryTarget;
   showResponses: boolean;
   canOpenDraft: boolean;
+  onImportWordVault: () => void;
   draftOpen: { isPending: boolean; error: unknown; open: () => void };
   roomButtonRef: { current: HTMLButtonElement | null };
   onCreateSession?: () => void;
@@ -1809,6 +1834,11 @@ function PublishedExamWorkspaceSurface({
         onBack={() => onNavigate(satListReturnTarget("/sat/exams").to)}
         onCreateSession={onCreateSession}
         onCreateSessionRef={roomButtonRef}
+        importItems={canOpenDraft ? [{
+          id: "word-vault-import",
+          label: "Import vocabulary workbook…",
+          onSelect: onImportWordVault,
+        }] : []}
       />
       <main className="mx-auto flex w-full max-w-[1240px] flex-col gap-5 px-4 py-8 sm:px-6">
         <section className="authoring-surface max-w-2xl p-6 sm:p-8" aria-labelledby="published-receipt-title">
