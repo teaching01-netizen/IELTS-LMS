@@ -404,6 +404,9 @@ describe("AuthoringWorkspace (spine-only)", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
     expect(await screen.findByRole("dialog", { name: "Import Vocabulary Excel" })).toBeInTheDocument();
     expect(screen.getByText(/\.xlsx up to 2 MB/)).toBeInTheDocument();
+    // A draft-only exam has no version to choose, so the target control is absent
+    // rather than a one-option select that implies a choice.
+    expect(screen.queryByRole("combobox", { name: "Exam version" })).not.toBeInTheDocument();
   });
 
   it("defaults to the current published version while still offering the draft", async () => {
@@ -437,6 +440,9 @@ describe("AuthoringWorkspace (spine-only)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Import" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
     const dialog = await screen.findByRole("dialog", { name: "Import Vocabulary Excel" });
+    expect(within(dialog).getByRole("combobox", { name: "Exam version" })).toBeInTheDocument();
+    // No draft exists, so "Editable draft" must not be offered as a target.
+    expect(within(dialog).queryByRole("option", { name: "Editable draft" })).not.toBeInTheDocument();
     fireEvent.change(within(dialog).getByLabelText("Choose vocabulary workbook"), {
       target: { files: [new File(["xlsx"], "vocabulary.xlsx")] },
     });
@@ -445,6 +451,75 @@ describe("AuthoringWorkspace (spine-only)", () => {
     expect(harness.wordVault.preview).toHaveBeenCalledWith("exam-1", expect.any(File), "published-1");
     expect(harness.wordVault.commit).toHaveBeenCalledWith("exam-1", expect.any(File), preview, expect.any(String));
     expect(harness.ensureDraft.mutate).not.toHaveBeenCalled();
+  });
+
+  it("drops the checked workbook when the target version changes", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    harness.wordVault.status.mockResolvedValue({
+      draftId: "draft-1", draftCount: 0, publishedCount: 2, staleCount: 0,
+      publishedVersions: [{ id: "published-2", number: 2 }, { id: "published-1", number: 1 }],
+    });
+    harness.wordVault.preview.mockResolvedValue({
+      draftId: "", versionId: "published-2", revision: 4, digest: "printed-digest",
+      before: 0, impact: [], issues: [],
+      entries: [{ moduleKey: "rw-m1", module: "Reading & Writing · Module 1", question: 1, word: "adapt", thai: "ปรับตัว", definition: "To adjust.", example: "They adapt." }],
+    });
+    renderWorkspace();
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Import Vocabulary Excel" });
+    fireEvent.change(within(dialog).getByLabelText("Choose vocabulary workbook"), {
+      target: { files: [new File(["xlsx"], "vocabulary.xlsx")] },
+    });
+    expect(await within(dialog).findByRole("heading", { name: "Review vocabulary" })).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Exam version" }), { target: { value: "" } });
+
+    expect(within(dialog).queryByRole("heading", { name: "Review vocabulary" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Import 1 word|Replace Word Vault/ })).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Upload workbook")).toBeInTheDocument();
+    expect(within(dialog).getByText(/appears after the exam is published/)).toBeInTheDocument();
+  });
+
+  it("blocks the commit when the target version rejects a question reference", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    harness.wordVault.status.mockResolvedValue({
+      draftId: "", draftCount: 0, publishedCount: 1, staleCount: 0,
+      publishedVersions: [{ id: "published-1", number: 1 }],
+    });
+    harness.wordVault.preview.mockResolvedValue({
+      draftId: "", versionId: "published-1", revision: 4, digest: "printed-digest", before: 0, impact: [],
+      entries: [{ moduleKey: "rw-m1", module: "Reading & Writing · Module 1", question: 25, word: "adapt", thai: "ปรับตัว", definition: "To adjust.", example: "They adapt." }],
+      issues: [{ row: 2, column: "B", message: "Question 25 is missing from the selected version. Valid numbers for this module are 1–20." }],
+    });
+    render(workspaceTree(renderWorkspaceClient(), true, { versionId: "published-1", versionNumber: 1, publishScope: "full" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Import Vocabulary Excel" });
+    fireEvent.change(within(dialog).getByLabelText("Choose vocabulary workbook"), {
+      target: { files: [new File(["xlsx"], "vocabulary.xlsx")] },
+    });
+
+    expect(await within(dialog).findByRole("heading", { name: "Workbook needs attention" })).toBeInTheDocument();
+    expect(within(dialog).getByText("Vocabulary · B2")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Valid numbers for this module are 1–20/)).toBeInTheDocument();
+    expect(within(dialog).queryByRole("button", { name: /Import 1 word|Replace Word Vault/ })).not.toBeInTheDocument();
+    expect(harness.wordVault.preview).toHaveBeenCalledWith("exam-1", expect.any(File), "published-1");
+    expect(harness.wordVault.commit).not.toHaveBeenCalled();
+  });
+
+  it("keeps the importer shut while an unsaved question cannot be flushed", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    harness.autosave.status = "unsaved";
+    harness.autosave.hasPendingChanges = true;
+    (harness.autosave.flushNow as unknown as { mockResolvedValue: (value: unknown) => void }).mockResolvedValue({ ok: false, isLatest: true });
+    renderWorkspace();
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
+
+    await waitFor(() => expect(harness.autosave.flushNow).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog", { name: "Import Vocabulary Excel" })).not.toBeInTheDocument();
+    expect(harness.wordVault.status).not.toHaveBeenCalled();
   });
 
   it("keeps the vocabulary import out of non-SAT exams", async () => {
