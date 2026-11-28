@@ -3,6 +3,7 @@ package answeredpdf
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -176,5 +177,76 @@ func TestPreviewLeavesRenderCapacityForDownloads(t *testing.T) {
 	}
 	if _, err := r.RenderPreview(t.Context(), build); !errors.Is(err, prepared) {
 		t.Fatalf("canceled preview leaked capacity: %v", err)
+	}
+}
+
+// A reviewed question and its saved explanation print on one sheet. The paper
+// used to fit each question to the whole page, so the explanation row never had
+// room and every explanation started the following page — the teacher's copy and
+// the student's copy both read as if the explanation belonged to no question.
+//
+// The comparison is keyed-with against keyed-without: turning the answer key on
+// already adds a sheet of its own, so comparing against an unkeyed paper would
+// hide the explanation cost inside that difference.
+func TestRenderKeepsExplanationsOnTheirQuestionSheet(t *testing.T) {
+	r := renderer(t)
+	raw, err := os.ReadFile("testdata/payload.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := func(explained bool) int {
+		t.Helper()
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatal(err)
+		}
+		exam := payload["exam"].(map[string]any)
+		var entries []any
+		for _, section := range exam["sections"].([]any) {
+			for _, module := range section.(map[string]any)["modules"].([]any) {
+				module := module.(map[string]any)
+				for _, question := range module["questions"].([]any) {
+					entry := map[string]any{
+						"moduleId":       module["id"],
+						"examQuestionId": question.(map[string]any)["examQuestionId"],
+						"correctAnswers": []any{map[string]any{"label": "A", "text": "Choice a"}},
+						"result":         "correct",
+					}
+					if explained {
+						entry["explanation"] = map[string]any{
+							"version": 1,
+							"nodes": []any{map[string]any{
+								"type": "paragraph",
+								"id":   "explanation",
+								"text": "A generalization makes a claim about a whole class, not just particular items.",
+							}},
+						}
+					}
+					entries = append(entries, entry)
+				}
+			}
+		}
+		exam["answerKey"] = map[string]any{
+			"available": true, "policyRevision": 1, "versionId": exam["versionId"], "entries": entries,
+		}
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pdf, err := r.Render(context.Background(), encoded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dimensions, err := api.PageDims(t.Context(), bytes.NewReader(pdf), pdfConfiguration())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(dimensions)
+	}
+
+	without := pages(false)
+	with := pages(true)
+	if with != without {
+		t.Fatalf("pages = %d with explanations, %d without: an explanation was pushed onto its own page", with, without)
 	}
 }

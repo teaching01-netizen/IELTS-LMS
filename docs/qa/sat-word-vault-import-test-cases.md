@@ -183,6 +183,7 @@ Cases below name which one to expect.
 | G8 | P2 | Source reference | Any appendix | Reads `From Question 01`-style labels matching the workbook's question number |
 | G9 | P2 | Page furniture | Last pages | A4 landscape, footer/pagination continues from the review pages, no clipped table |
 | G10 | P1 | Staff copy matches the student's | From Results → *View answers* → `Download answered exam (PDF)` | The appendix is present, with the same words as the student's download. Adding this case came from a live check: the staff route used to skip the vault entirely, so a teacher saw a paper with no appendix while the student saw one |
+| G11 | P1 | Explanation sits under its question | Any reviewed question with a saved explanation | The explanation prints on the same sheet, directly under the question. Only when the pair cannot share a sheet at the paper's floor does the explanation continue overleaf under its own heading |
 
 
 ### H. Publish integration
@@ -318,6 +319,32 @@ Vitest: `AuthoringWorkspace.test.tsx` 38/38. Go: `satpublish`, `exams`, `authz`,
 | F1, F2, F3, F5 | Need direct API calls as observer/other-tenant; not exercised in this pass |
 | G2, G3, G5, G7, G9 | Need a second PDF scenario (draft-only edit, empty vault, page furniture) |
 | I1–I7 | Needs a real browser a11y pass (Safari + Firefox) |
+
+### G11 — explanations printed on their own page, found in the field
+
+Every reviewed question put its explanation on the following sheet, even when the
+question left a third of the page empty. The fit pass sized each question to the
+*whole* page, so the explanation row never had room; it was then marked
+`data-continued`, which forces `break-before: page`. The explanation was one click
+away from being correct — the reservation was simply never made.
+
+`fitAnsweredPaper` now reserves the explanation's height (measured once, because
+it keeps its own type size and width while the exam plane shrinks) and fits the
+question into what is left. Two follow-on rules matter:
+
+- Figure questions already sit near the legibility floor, so an explanation may
+  pull the plane to 0.41 instead of the normal 0.45 before giving up. Without that
+  the last 0.1 px pushed twelve of twelve explanations onto their own sheet.
+- When the pair still cannot share a sheet, the question takes the full page back
+  and the explanation continues overleaf under its heading, rather than shrinking
+  the question for room that was never usable.
+
+Verified by `TestRenderKeepsExplanationsOnTheirQuestionSheet` (keyed-with equals
+keyed-without page count, 15 == 15 in Chromium), five `fitAnsweredPaper` unit
+cases, and the print-route E2E in Chromium. The same run also exposed a stale
+assertion in `sat-answered-exam-print.spec.ts`: the prepare body has carried
+`includeAnswerKey` since the live-policy commit, and the spec still expected
+`{ view: null }`, so that test was red on main before this change.
 
 ### G10 — staff paper regression, found in the field
 

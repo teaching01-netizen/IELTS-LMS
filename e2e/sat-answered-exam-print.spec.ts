@@ -154,7 +154,7 @@ test("one tap downloads after slow preparation without leaving the report", asyn
   for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
   expect(Buffer.concat(chunks).toString()).toBe('%PDF-1.7\n%%EOF\n');
   expect(posts).toHaveLength(1);
-  expect(posts[0]!).toEqual({ view: null });
+  expect(posts[0]!).toEqual({ view: null, includeAnswerKey: true });
   expect(JSON.stringify(posts[0])).not.toContain('media');
   expect(printed).toBe(0);
   await expect(page.locator(".sat-answered-paper")).toHaveCount(0);
