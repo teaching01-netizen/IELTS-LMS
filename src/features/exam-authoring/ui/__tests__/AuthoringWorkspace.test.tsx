@@ -522,6 +522,35 @@ describe("AuthoringWorkspace (spine-only)", () => {
     expect(harness.wordVault.status).not.toHaveBeenCalled();
   });
 
+  it("tells the author when a published fix also reaches the open draft", async () => {
+    harness.useOptionalAuthSession.mockImplementation(() => ({ session: { user: { id: "staff-1", role: "builder" } } }));
+    harness.wordVault.status.mockResolvedValue({
+      draftId: "draft-1", draftCount: 1, publishedCount: 1, staleCount: 0,
+      publishedVersions: [{ id: "published-1", number: 1 }],
+    });
+    harness.wordVault.preview.mockResolvedValue({
+      draftId: "", versionId: "published-1", revision: 4, digest: "workbook-hash",
+      before: 1, entries: [], impact: [], issues: [],
+    });
+    // The server carried the replacement into the untouched draft and moved
+    // its revision, so the notice has to say so.
+    harness.wordVault.commit.mockResolvedValue({
+      draftId: "", versionId: "published-1", revision: 4, count: 0, draftUpdated: true,
+    });
+    renderWorkspace();
+    fireEvent.click(await screen.findByRole("button", { name: "Import" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Import vocabulary workbook/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Import Vocabulary Excel" });
+    fireEvent.change(within(dialog).getByLabelText("Choose vocabulary workbook"), {
+      target: { files: [new File(["xlsx"], "vocabulary.xlsx")] },
+    });
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Remove all words" }));
+
+    expect(
+      await screen.findByText(/Version 1 updated\. Your draft now carries the same words\./)
+    ).toBeInTheDocument();
+  });
+
   it("keeps the vocabulary import out of non-SAT exams", async () => {
     const shell = makeShell();
     shell.providerKey = "ielts";

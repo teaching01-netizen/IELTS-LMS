@@ -102,7 +102,8 @@ Priority: **P0** ship-blocker · **P1** must fix before release · **P2** should
 | B10 | P1 | Workbook written against a newer draft, applied to an older version | On E5 upload a file that references question 25 of Module 1, target V1 (20 questions) | Preview shows `Workbook needs attention` with `Vocabulary · B2` → `Question 25 is missing from the selected version. Valid numbers for this module are 1–20.`; primary action absent; no commit possible |
 | B11 | P2 | Controls disabled while busy | Upload a large-but-valid file, interact during `Checking vocabulary…` / `Saving vocabulary…` | Version select disabled, close button disabled, dropzone non-interactive, `aria-disabled` set |
 | B12 | P2 | Status fetch failure | Force `GET …/sat-word-vault` to 500, open the item | Sheet does **not** open; page shows `Couldn’t load exam versions for the Word Vault. Try again.` |
-| B13 | P1 | Published update does not propagate to the open draft | On E2, import to `Published version 1`; then open Settings (draft counts) and target `Editable draft` | Draft vault is unchanged — the published write touched only that version. **Confirm this is intended** (see §6): a following publish would otherwise re-pin the older draft words |
+| B13 | P1 | Published fix carries into an untouched draft | On E3, import to `Published version 2` while a draft open whose vault still equals V2's pre-import vault | Draft vault now holds the same entries, draft revision moves, notice adds `Your draft now carries the same words.` A following publish keeps the fix |
+| B14 | P1 | Published fix leaves a diverged draft alone | Same, but first give the draft its own words | Draft vault and draft revision unchanged; notice omits the carry clause; nothing the author wrote is lost |
 
 ### C. Workbook contract (regression — parser is unchanged, must still hold)
 
@@ -235,6 +236,8 @@ Already automated on this branch — QA should **review, not duplicate**:
 | A2, B1 | `AuthoringWorkspace.test.tsx` › *defaults to the current published version while still offering the draft* |
 | A3, B7 | `AuthoringWorkspace.test.tsx` › *replaces the published vault through the authoring menu without opening a draft* |
 | B1, G1–G8 (thin) | `e2e/sat-workbook-import.spec.ts` › *Word Vault imports separately and ends the released student PDF* |
+| B13, B14 | `internal/authoring` › `TestWordVaultPublishedFixCarriesIntoDraftMySQL` (three MySQL subtests) |
+| B5, B10, J4, B3, B4 | `AuthoringWorkspace.test.tsx` — target switch, version-bound cell error, blocked flush, absent controls |
 | C1–C18 (server) | `backend/go/internal/authoring` word-vault unit and integration tests |
 | E2, E4 | MySQL integration coverage named in the release handoff |
 
@@ -245,11 +248,14 @@ Not yet automated, highest value first: **B5, B10, D1, E1, F1, G2, I3, J4**.
 These are not defects yet. They are the places where "correct" depends on intent, and I
 would rather settle them than encode guesswork into the suite.
 
-1. **Should a published update follow into the open draft? (B13)** Editing a published
-   version is a deliberate "fix the live PDF" action, so leaving the draft alone is
-   defensible. But the next publish copies the draft vault forward, silently reverting
-   the fix for the new version. Two options: copy published edits into the draft when
-   one exists, or have the next publish re-use the version's vault. Needs a decision.
+1. **RESOLVED — published updates now follow into an untouched draft (B13/B14).**
+   Publishing seals the *draft* row, so a fix applied to an already-published version
+   never reached the next release: the next draft was cloned before the fix and is what
+   the next publish seals. The fix is carried into the draft inside the same
+   transaction, but only while the draft still holds exactly the vocabulary it
+   inherited (compared by module, question position and the four printed fields,
+   because clone regenerates question ids). A draft with its own words wins and is left
+   untouched, and the receipt reports which happened via `draftUpdated`.
 2. **Is "latest published" the right default on the draft workspace? (B1)** It is right
    for the published receipt. On the draft screen the author is mid-build and may expect
    the draft. Current behaviour is deliberate per the release notes; I am flagging it
@@ -305,17 +311,25 @@ Vitest: `AuthoringWorkspace.test.tsx` 38/38. Go: `satpublish`, `exams`, `authz`,
 
 | Case | Why deferred |
 | --- | --- |
-| B13 | Confirmed defect by code reading (§6.1). Writing a test now would pin the behaviour we want changed |
 | B6, B8, B9, B11, B12 | Read-only UI assertions; covered by inspection of the committed component, not by a run |
 | E1, E3, E5 | Need two concurrent sessions; the MySQL integration tests cover the server fence, not the double-click |
 | F1, F2, F3, F5 | Need direct API calls as observer/other-tenant; not exercised in this pass |
 | G2, G3, G5, G7, G9 | Need a second PDF scenario (draft-only edit, empty vault, page furniture) |
 | I1–I7 | Needs a real browser a11y pass (Safari + Firefox) |
 
+### B13 fix — verified after the log above
+
+| Check | Result |
+| --- | --- |
+| `go test ./internal/authoring -run 'TestWordVaultPublishedFixCarriesIntoDraftMySQL\|TestWordVaultVersionLifecycleMySQL'` | PASS — carry into an untouched draft, skip when the draft diverged, skip when no draft exists; the pre-existing lifecycle test still asserts a diverged draft is never touched |
+| `AuthoringWorkspace.test.tsx` | 39/39 — new case asserts the carry clause in the success notice |
+| `playwright … -g "Word Vault"` | 1 passed (2.5m) — the shipped flow is unchanged: after a room is created there is no draft, so no carry and the notice keeps its shorter form |
+| `go test ./internal/authoring` | only the pre-existing `TestOpenShellClonePreservesFlexibleFlagAndPlan` failure remains |
+
 ### Findings raised by this pass
 
-1. **B13 is a real defect** (§6.1): a published-only vocabulary fix is reverted by
-   the next publish, silently.
+1. **B13 was a real defect** and is fixed above: a published-only vocabulary fix used
+   to be reverted by the next publish, silently.
 2. **The base Playwright config makes this spec fail for the wrong reason.** With
    `playwright.config.ts` the sitting step fails at 5 s against a cold Vite server
    (`Workbook question 1` not found) before the import is reached. `expect.timeout`

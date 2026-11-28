@@ -511,14 +511,17 @@ export function AuthoringWorkspace({ examId, examTitle, sectionScope = "full", c
   }, [examId, flushBeforeNavigation, queryClient, setNavigationError, setWordVaultOpen, shell]);
 
   const handleWordVaultSaved = useCallback(
-    (count: number, version?: WordVaultVersion) => {
+    (count: number, version?: WordVaultVersion, draftUpdated?: boolean) => {
       setWordVaultOpen(false);
       setWordVaultNotice(
-        version ? `Version ${version.number} updated. Students will get the changes on their next PDF download.`
+        version
+          ? `Version ${version.number} updated.${draftUpdated ? " Your draft now carries the same words." : ""} Students will get the changes on their next PDF download.`
           : count === 0 ? "Draft vocabulary removed." : `${wordCountLabel(count)} saved to the draft.`
       );
       void queryClient.invalidateQueries({ queryKey: assessmentKeys.wordVault(examId) });
-      if (!version) void authoringEffects.shellChanged(queryClient, examId);
+      // A carried edit moved the draft's revision too, so the shell must
+      // refresh either way; a version-only commit leaves the draft untouched.
+      if (!version || draftUpdated) void authoringEffects.shellChanged(queryClient, examId);
     },
     [examId, queryClient, setWordVaultOpen]
   );

@@ -20,7 +20,7 @@ export function WordVaultSettings({ examId, canEdit, onEditExam }: {
   onEditExam: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [saved, setSaved] = useState<{ count: number; version?: WordVaultVersion } | null>(null);
+  const [saved, setSaved] = useState<{ count: number; version?: WordVaultVersion; draftUpdated?: boolean } | null>(null);
   const queryClient = useQueryClient();
   const cacheKey = assessmentKeys.wordVault(examId);
   const status = useQuery({ queryKey: cacheKey, queryFn: () => wordVaultApi.status(examId), retry: false });
@@ -56,7 +56,7 @@ export function WordVaultSettings({ examId, canEdit, onEditExam }: {
       ) : null}
       <p role="status" className={saved === null ? "sr-only" : "text-sm text-au-success-text"}>
         {saved === null ? "" : saved.version
-          ? `Version ${saved.version.number} updated. Students will get the changes on their next PDF download.`
+          ? `Version ${saved.version.number} updated.${saved.draftUpdated ? " Your draft now carries the same words." : ""} Students will get the changes on their next PDF download.`
           : saved.count === 0 ? "Draft vocabulary removed." : `${words(saved.count)} saved to the draft.`}
       </p>
       {open ? (
@@ -66,11 +66,11 @@ export function WordVaultSettings({ examId, canEdit, onEditExam }: {
           publishedVersions={publishedVersions}
           hasDraft={Boolean(data?.draftId)}
           onClose={() => setOpen(false)}
-          onSaved={(count, version) => {
-            setSaved(version ? { count, version } : { count });
+          onSaved={(count, version, draftUpdated) => {
+            setSaved(version ? { count, version, ...(draftUpdated ? { draftUpdated: true } : {}) } : { count });
             setOpen(false);
             void queryClient.invalidateQueries({ queryKey: cacheKey });
-            if (!version) void authoringEffects.shellChanged(queryClient, examId);
+            if (!version || draftUpdated) void authoringEffects.shellChanged(queryClient, examId);
           }}
         />
       ) : null}

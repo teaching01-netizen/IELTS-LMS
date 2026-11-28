@@ -339,3 +339,121 @@ func TestWordVaultTemplateCarriesTheImportContract(t *testing.T) {
 		t.Fatalf("template must be a valid empty import: rows=%+v issues=%+v err=%v", rows, issues, err)
 	}
 }
+
+// A published-only vocabulary fix must survive the next publish. Publishing
+// seals the draft row, so an edit applied to an already-published version is
+// invisible to the clone that becomes the next release — the fix has to be
+// carried into that clone while it still holds exactly what it inherited.
+func TestWordVaultPublishedFixCarriesIntoDraftMySQL(t *testing.T) {
+	ctx := t.Context()
+	seed := func(t *testing.T, rows ...[]any) *readPerfFixture {
+		t.Helper()
+		f := seedReadPerfFixture(t)
+		preview, err := f.Service.PreviewWordVault(ctx, f.ExamID, wordVaultTestBook(t, rows...))
+		if err != nil || len(preview.Issues) != 0 {
+			t.Fatalf("seed preview: %+v %v", preview.Issues, err)
+		}
+		if _, err := f.Service.CommitWordVault(ctx, f.ExamID, "carry-test", wordVaultTestBook(t, rows...), WordVaultCommit{
+			DraftID: preview.DraftID, Revision: preview.Revision, Digest: preview.Digest,
+			OperationKey: "carry-seed", Confirmed: true,
+		}); err != nil {
+			t.Fatalf("seed commit: %v", err)
+		}
+		publishReadPerfFixture(t, ctx, f)
+		return f
+	}
+	replace := func(t *testing.T, f *readPerfFixture, versionID string, rows ...[]any) WordVaultReceipt {
+		t.Helper()
+		book := wordVaultTestBook(t, rows...)
+		preview, err := f.Service.PreviewWordVaultForVersion(ctx, f.ExamID, versionID, book)
+		if err != nil || len(preview.Issues) != 0 {
+			t.Fatalf("published preview: %+v %v", preview.Issues, err)
+		}
+		receipt, err := f.Service.CommitWordVault(ctx, f.ExamID, "carry-test", book, WordVaultCommit{
+			VersionID: preview.VersionID, Revision: preview.Revision, Digest: preview.Digest,
+			OperationKey: "carry-published", Confirmed: true,
+		})
+		if err != nil {
+			t.Fatalf("published commit: %v", err)
+		}
+		return receipt
+	}
+	draftRevision := func(t *testing.T, f *readPerfFixture, draftID string) int {
+		t.Helper()
+		var revision int
+		if err := f.DB.QueryRowContext(ctx, "SELECT revision FROM exam_versions WHERE id = ?", draftID).Scan(&revision); err != nil {
+			t.Fatal(err)
+		}
+		return revision
+	}
+
+	t.Run("carries into an untouched draft", func(t *testing.T) {
+		f := seed(t, testWordRow("rw-m2-lower", 1, "lower"), testWordRow("rw-m2-higher", 1, "higher"))
+		draft, err := f.Service.OpenShell(ctx, f.ExamID, "carry-test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := draftRevision(t, f, draft.VersionID)
+
+		receipt := replace(t, f, f.VersionID, testWordRow("rw-m2-higher", 1, "revised"))
+
+		if !receipt.DraftUpdated {
+			t.Fatalf("published fix was not carried into the draft: %+v", receipt)
+		}
+		words, stale, err := satwordvault.Read(ctx, f.DB, draft.VersionID)
+		if err != nil || stale != 0 || len(words) != 1 || words[0].Word != "revised" {
+			t.Fatalf("draft did not inherit the fix: %+v stale=%d err=%v", words, stale, err)
+		}
+		if after := draftRevision(t, f, draft.VersionID); after != before+1 {
+			t.Fatalf("carried edit must fence the draft revision: %d -> %d", before, after)
+		}
+		// The fix must survive the next publish, which is the whole point.
+		published := draft.VersionID
+		publishReadPerfFixture(t, ctx, &readPerfFixture{DB: f.DB, Service: f.Service, ExamID: f.ExamID, VersionID: published})
+		words, _, err = satwordvault.Read(ctx, f.DB, published)
+		if err != nil || len(words) != 1 || words[0].Word != "revised" {
+			t.Fatalf("next publish lost the fix: %+v err=%v", words, err)
+		}
+	})
+
+	t.Run("leaves a draft that has its own words alone", func(t *testing.T) {
+		f := seed(t, testWordRow("rw-m2-lower", 1, "lower"), testWordRow("rw-m2-higher", 1, "higher"))
+		draft, err := f.Service.OpenShell(ctx, f.ExamID, "carry-test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		own := wordVaultTestBook(t, testWordRow("rw-m2-lower", 2, "draftonly"))
+		ownPreview, err := f.Service.PreviewWordVault(ctx, f.ExamID, own)
+		if err != nil || len(ownPreview.Issues) != 0 {
+			t.Fatalf("draft preview: %+v %v", ownPreview.Issues, err)
+		}
+		if _, err := f.Service.CommitWordVault(ctx, f.ExamID, "carry-test", own, WordVaultCommit{
+			DraftID: ownPreview.DraftID, Revision: ownPreview.Revision, Digest: ownPreview.Digest,
+			OperationKey: "carry-draft-own", Confirmed: true,
+		}); err != nil {
+			t.Fatalf("draft commit: %v", err)
+		}
+		before := draftRevision(t, f, draft.VersionID)
+
+		receipt := replace(t, f, f.VersionID, testWordRow("rw-m2-higher", 1, "revised"))
+
+		if receipt.DraftUpdated {
+			t.Fatalf("a draft with its own words was overwritten: %+v", receipt)
+		}
+		words, stale, err := satwordvault.Read(ctx, f.DB, draft.VersionID)
+		if err != nil || stale != 0 || len(words) != 1 || words[0].Word != "draftonly" {
+			t.Fatalf("draft words changed: %+v stale=%d err=%v", words, stale, err)
+		}
+		if after := draftRevision(t, f, draft.VersionID); after != before {
+			t.Fatalf("untouched draft revision moved: %d -> %d", before, after)
+		}
+	})
+
+	t.Run("reports no carry when there is no draft", func(t *testing.T) {
+		f := seed(t, testWordRow("rw-m2-lower", 1, "lower"))
+		receipt := replace(t, f, f.VersionID, testWordRow("rw-m2-higher", 1, "revised"))
+		if receipt.DraftUpdated {
+			t.Fatalf("published-only edit reported a draft write: %+v", receipt)
+		}
+	})
+}

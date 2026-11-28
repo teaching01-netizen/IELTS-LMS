@@ -29,6 +29,8 @@ interface WordVaultReceipt {
   draftId: string;
   revision: number;
   count: number;
+  /** A published-version replacement was also carried into the open draft. */
+  draftUpdated?: boolean;
 }
 
 function path(examId: string) {

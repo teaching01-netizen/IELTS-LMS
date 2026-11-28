@@ -26,7 +26,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved, published
   open: boolean;
   examId: string;
   onClose: () => void;
-  onSaved: (count: number, version?: WordVaultVersion) => void;
+  onSaved: (count: number, version?: WordVaultVersion, draftUpdated?: boolean) => void;
   publishedVersions?: WordVaultVersion[];
   hasDraft?: boolean;
   preferPublished?: boolean;
@@ -108,7 +108,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved, published
     try {
       operation.current ??= crypto.randomUUID();
       const receipt = await wordVaultApi.commit(examId, file, preview, operation.current);
-      if (version) onSaved(receipt.count, version);
+      if (version) onSaved(receipt.count, version, receipt.draftUpdated);
       else onSaved(receipt.count);
     } catch (cause) {
       if (hasBackendStatusCode(cause, 409)) {
