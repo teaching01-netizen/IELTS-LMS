@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SatButton } from "../../../../products/sat/ui/SatPage";
 import { wordCountLabel as words } from "@shared/sat/wordVault";
 import { assessmentKeys, authoringEffects } from "../../api/authoringQueryEffects";
-import { wordVaultApi } from "../../api/wordVaultApi";
+import { wordVaultApi, type WordVaultVersion } from "../../api/wordVaultApi";
 import { WordVaultImportSheet } from "../../import/WordVaultImportSheet";
 import { releaseSurfaceClass } from "../release/releaseUi";
 
@@ -11,11 +11,8 @@ import { releaseSurfaceClass } from "../release/releaseUi";
  * The Word Vault panel on exam Settings.
  *
  * The import itself lives where authors already edit the draft (the Questions
- * workspace Import menu, beside the exam workbook import); this panel is the
- * exam-level STATUS surface: draft and published counts, stale references, and
- * the destination a `sat.word_vault.stale` publish finding opens. It keeps its
- * own import button because that finding must be fixable in place, and both
- * buttons open the same sheet.
+ * workspace Import menu, beside the exam workbook import). This panel also
+ * imports into a published version and handles stale-reference findings.
  */
 export function WordVaultSettings({ examId, canEdit, onEditExam }: {
   examId: string;
@@ -23,11 +20,13 @@ export function WordVaultSettings({ examId, canEdit, onEditExam }: {
   onEditExam: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [saved, setSaved] = useState<number | null>(null);
+  const [saved, setSaved] = useState<{ count: number; version?: WordVaultVersion } | null>(null);
   const queryClient = useQueryClient();
   const cacheKey = assessmentKeys.wordVault(examId);
   const status = useQuery({ queryKey: cacheKey, queryFn: () => wordVaultApi.status(examId), retry: false });
   const data = status.data;
+  const publishedVersions = data?.publishedVersions ?? [];
+  const canImport = Boolean(data?.draftId || publishedVersions.length);
 
   return (
     <section id="sat-settings-word-vault" tabIndex={-1} aria-labelledby="sat-word-vault-title" className={releaseSurfaceClass + " space-y-3 p-5 sm:p-6"}>
@@ -42,8 +41,8 @@ export function WordVaultSettings({ examId, canEdit, onEditExam }: {
             </p>
           ) : null}
         </div>
-        {canEdit && data?.draftId ? <SatButton variant="secondary" onClick={() => setOpen(true)}>Import Vocabulary Excel</SatButton> : null}
-        {canEdit && data && !data.draftId ? <SatButton variant="secondary" onClick={onEditExam}>Open an editable draft</SatButton> : null}
+        {canEdit && canImport ? <SatButton variant="secondary" onClick={() => setOpen(true)}>Import Vocabulary Excel</SatButton> : null}
+        {canEdit && data && !canImport ? <SatButton variant="secondary" onClick={onEditExam}>Open an editable draft</SatButton> : null}
       </div>
       {status.isPending ? <p role="status" className="text-sm text-muted-foreground">Loading vocabulary…</p> : null}
       {status.isError ? (
@@ -56,18 +55,22 @@ export function WordVaultSettings({ examId, canEdit, onEditExam }: {
         <p className="text-sm text-au-warning-text">{words(data.staleCount)} refer to changed questions. Import a corrected workbook before publishing.</p>
       ) : null}
       <p role="status" className={saved === null ? "sr-only" : "text-sm text-au-success-text"}>
-        {saved === null ? "" : saved === 0 ? "Draft vocabulary removed." : `${words(saved)} saved to the draft.`}
+        {saved === null ? "" : saved.version
+          ? `Version ${saved.version.number} updated. Students will get the changes on their next PDF download.`
+          : saved.count === 0 ? "Draft vocabulary removed." : `${words(saved.count)} saved to the draft.`}
       </p>
       {open ? (
         <WordVaultImportSheet
           open
           examId={examId}
+          publishedVersions={publishedVersions}
+          hasDraft={Boolean(data?.draftId)}
           onClose={() => setOpen(false)}
-          onSaved={(count) => {
-            setSaved(count);
+          onSaved={(count, version) => {
+            setSaved(version ? { count, version } : { count });
             setOpen(false);
             void queryClient.invalidateQueries({ queryKey: cacheKey });
-            void authoringEffects.shellChanged(queryClient, examId);
+            if (!version) void authoringEffects.shellChanged(queryClient, examId);
           }}
         />
       ) : null}

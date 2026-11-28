@@ -14,10 +14,16 @@ import (
 )
 
 type WordVaultStatus struct {
-	DraftID        string `json:"draftId"`
-	DraftCount     int    `json:"draftCount"`
-	PublishedCount int    `json:"publishedCount"`
-	StaleCount     int    `json:"staleCount"`
+	DraftID           string             `json:"draftId"`
+	DraftCount        int                `json:"draftCount"`
+	PublishedCount    int                `json:"publishedCount"`
+	StaleCount        int                `json:"staleCount"`
+	PublishedVersions []WordVaultVersion `json:"publishedVersions"`
+}
+
+type WordVaultVersion struct {
+	ID     string `json:"id"`
+	Number int    `json:"number"`
 }
 
 type WordVaultImpact struct {
@@ -27,17 +33,19 @@ type WordVaultImpact struct {
 }
 
 type WordVaultPreview struct {
-	DraftID  string                      `json:"draftId"`
-	Revision int                         `json:"revision"`
-	Digest   string                      `json:"digest"`
-	Before   int                         `json:"before"`
-	Entries  []satwordvault.PrintedEntry `json:"entries"`
-	Impact   []WordVaultImpact           `json:"impact"`
-	Issues   []WordVaultIssue            `json:"issues"`
+	DraftID   string                      `json:"draftId"`
+	VersionID string                      `json:"versionId,omitempty"`
+	Revision  int                         `json:"revision"`
+	Digest    string                      `json:"digest"`
+	Before    int                         `json:"before"`
+	Entries   []satwordvault.PrintedEntry `json:"entries"`
+	Impact    []WordVaultImpact           `json:"impact"`
+	Issues    []WordVaultIssue            `json:"issues"`
 }
 
 type WordVaultCommit struct {
 	DraftID      string `json:"draftId"`
+	VersionID    string `json:"versionId,omitempty"`
 	Revision     int    `json:"revision"`
 	Digest       string `json:"digest"`
 	OperationKey string `json:"operationKey"`
@@ -45,13 +53,14 @@ type WordVaultCommit struct {
 }
 
 type WordVaultReceipt struct {
-	DraftID  string `json:"draftId"`
-	Revision int    `json:"revision"`
-	Count    int    `json:"count"`
+	DraftID   string `json:"draftId"`
+	VersionID string `json:"versionId,omitempty"`
+	Revision  int    `json:"revision"`
+	Count     int    `json:"count"`
 }
 
 func (s *Service) WordVaultStatus(ctx context.Context, examID string) (WordVaultStatus, error) {
-	var status WordVaultStatus
+	status := WordVaultStatus{PublishedVersions: []WordVaultVersion{}}
 	err := s.runner.WithTxReadOnly(ctx, func(ctx context.Context, q tx.Tx) error {
 		var draft, published sql.NullString
 		err := q.QueryRowContext(ctx, `SELECT current_draft_version_id, current_published_version_id
@@ -78,7 +87,20 @@ func (s *Service) WordVaultStatus(ctx context.Context, examID string) (WordVault
 			}
 			status.PublishedCount = len(entries)
 		}
-		return nil
+		rows, err := q.QueryContext(ctx, `SELECT id, version_number FROM exam_versions
+			WHERE exam_id = ? AND is_published = TRUE AND is_draft = FALSE ORDER BY version_number DESC`, examID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var version WordVaultVersion
+			if err := rows.Scan(&version.ID, &version.Number); err != nil {
+				return err
+			}
+			status.PublishedVersions = append(status.PublishedVersions, version)
+		}
+		return rows.Err()
 	})
 	return status, err
 }
@@ -87,7 +109,20 @@ const wordVaultDraftQuery = `SELECT v.id, v.revision FROM exam_entities e
 	JOIN exam_versions v ON v.id = e.current_draft_version_id AND v.exam_id = e.id
 	WHERE e.id = ? AND e.provider_key = 'sat' AND e.status <> 'archived' AND v.is_draft = TRUE`
 
+func wordVaultTarget(examID, versionID string) (string, []any) {
+	if versionID == "" {
+		return wordVaultDraftQuery, []any{examID}
+	}
+	return `SELECT v.id, v.revision FROM exam_entities e JOIN exam_versions v ON v.exam_id = e.id
+		WHERE e.id = ? AND e.provider_key = 'sat' AND e.status <> 'archived'
+		AND v.id = ? AND v.is_published = TRUE AND v.is_draft = FALSE`, []any{examID, versionID}
+}
+
 func (s *Service) PreviewWordVault(ctx context.Context, examID string, data []byte) (WordVaultPreview, error) {
+	return s.PreviewWordVaultForVersion(ctx, examID, "", data)
+}
+
+func (s *Service) PreviewWordVaultForVersion(ctx context.Context, examID, versionID string, data []byte) (WordVaultPreview, error) {
 	rows, issues, err := parseWordVault(data)
 	if err != nil {
 		return WordVaultPreview{}, err
@@ -95,19 +130,30 @@ func (s *Service) PreviewWordVault(ctx context.Context, examID string, data []by
 	preview := WordVaultPreview{Digest: wordVaultDigest(data), Issues: issues,
 		Entries: []satwordvault.PrintedEntry{}, Impact: []WordVaultImpact{}}
 	err = s.runner.WithTxReadOnly(ctx, func(ctx context.Context, q tx.Tx) error {
-		err := q.QueryRowContext(ctx, wordVaultDraftQuery, examID).Scan(&preview.DraftID, &preview.Revision)
+		query, args := wordVaultTarget(examID, versionID)
+		var targetID string
+		err := q.QueryRowContext(ctx, query, args...).Scan(&targetID, &preview.Revision)
 		if err == sql.ErrNoRows {
+			if versionID != "" {
+				return validationError("Choose a published version of this SAT exam.")
+			}
 			return validationError("Open an editable SAT draft before checking a vocabulary workbook.")
 		}
 		if err != nil {
 			return err
 		}
-		before, err := satwordvault.Load(ctx, q, preview.DraftID)
+		before, err := satwordvault.Load(ctx, q, targetID)
 		if err != nil {
 			return err
 		}
 		preview.Before = len(before)
-		modules, err := satwordvault.Modules(ctx, q, preview.DraftID)
+		if versionID == "" {
+			preview.DraftID = targetID
+		} else {
+			preview.VersionID = targetID
+			preview.Digest = publishedWordVaultDigest(data, targetID, before)
+		}
+		modules, err := satwordvault.Modules(ctx, q, targetID)
 		if err != nil {
 			return err
 		}
@@ -147,7 +193,9 @@ func (s *Service) PreviewWordVault(ctx context.Context, examID string, data []by
 
 func (s *Service) CommitWordVault(ctx context.Context, examID, actorID string, data []byte, request WordVaultCommit) (WordVaultReceipt, error) {
 	var receipt WordVaultReceipt
-	if !request.Confirmed || request.DraftID == "" || request.Revision < 0 || request.Digest != wordVaultDigest(data) {
+	published := request.VersionID != ""
+	if !request.Confirmed || (request.DraftID != "") == published || request.Revision < 0 ||
+		(!published && request.Digest != wordVaultDigest(data)) {
 		return receipt, validationError("Check and confirm this vocabulary workbook before importing.")
 	}
 	key, err := normalizeOperationKey(request.OperationKey)
@@ -157,6 +205,9 @@ func (s *Service) CommitWordVault(ctx context.Context, examID, actorID string, d
 	fingerprint, err := operationFingerprint(request)
 	if err != nil {
 		return receipt, err
+	}
+	if published {
+		fingerprint = wordVaultDigest([]byte(fingerprint + ":" + wordVaultDigest(data)))
 	}
 	rows, issues, err := parseWordVault(data)
 	if err != nil {
@@ -177,33 +228,58 @@ func (s *Service) CommitWordVault(ctx context.Context, examID, actorID string, d
 			}
 			return json.Unmarshal(replay, &receipt)
 		}
-		var draftID string
+		target := request.DraftID
+		if published {
+			target = request.VersionID
+		}
+		query, args := wordVaultTarget(examID, request.VersionID)
+		var targetID string
 		var revision int
-		err = q.QueryRowContext(ctx, wordVaultDraftQuery+" FOR UPDATE", examID).Scan(&draftID, &revision)
-		if err == sql.ErrNoRows || (err == nil && (draftID != request.DraftID || revision != request.Revision)) {
-			return conflictError("The draft changed. Check the vocabulary workbook again.")
+		err = q.QueryRowContext(ctx, query+" FOR UPDATE", args...).Scan(&targetID, &revision)
+		if err == sql.ErrNoRows || (err == nil && (targetID != target || revision != request.Revision)) {
+			return conflictError("The selected version changed. Check the vocabulary workbook again.")
 		}
 		if err != nil {
 			return err
 		}
-		modules, err := satwordvault.Modules(ctx, q, draftID)
+		if published {
+			before, err := satwordvault.Load(ctx, q, targetID)
+			if err != nil {
+				return err
+			}
+			if request.Digest != publishedWordVaultDigest(data, targetID, before) {
+				return conflictError("The workbook or saved vocabulary changed. Check the workbook again.")
+			}
+		}
+		modules, err := satwordvault.Modules(ctx, q, targetID)
 		if err != nil {
 			return err
 		}
 		entries, referenceIssues := bindWordVaultRows(rows, modules)
 		if len(referenceIssues) > 0 {
-			return validationError("The workbook has question references that do not match this draft. Check it again.")
+			return validationError("The workbook has question references that do not match the selected version. Check it again.")
 		}
-		if err := satwordvault.Replace(ctx, q, draftID, entries); err != nil {
+		if err := satwordvault.Replace(ctx, q, targetID, entries); err != nil {
 			return err
 		}
-		if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET revision = revision + 1 WHERE id = ?", draftID); err != nil {
-			return err
+		receipt = WordVaultReceipt{DraftID: request.DraftID, VersionID: request.VersionID, Revision: revision, Count: len(entries)}
+		if !published {
+			if _, err := q.ExecContext(ctx, "UPDATE exam_versions SET revision = revision + 1 WHERE id = ?", targetID); err != nil {
+				return err
+			}
+			receipt.Revision++
 		}
-		receipt = WordVaultReceipt{DraftID: draftID, Revision: revision + 1, Count: len(entries)}
 		return storeOperationResult(ctx, q, actorID, scope, key, receipt)
 	})
 	return receipt, err
+}
+
+// Include the target and the saved vocabulary so a competing replacement
+// invalidates the preview without changing the published exam revision.
+func publishedWordVaultDigest(data []byte, versionID string, before []satwordvault.Entry) string {
+	entries, _ := json.Marshal(before) // Entry contains only strings.
+	digest := sha256.Sum256(entries)
+	return wordVaultDigest([]byte(wordVaultDigest(data) + ":" + versionID + ":" + hex.EncodeToString(digest[:])))
 }
 
 func wordVaultDigest(data []byte) string {
@@ -221,15 +297,15 @@ func bindWordVaultRows(rows []wordVaultRow, modules []satwordvault.Module) ([]sa
 	for _, row := range rows {
 		questions, exists := byKey[row.entry.ModuleKey]
 		if !exists {
-			issues = append(issues, WordVaultIssue{row.number, "A", "This module is not present in the current draft."})
+			issues = append(issues, WordVaultIssue{row.number, "A", "This module is not present in the selected version."})
 			continue
 		}
 		if len(questions) == 0 {
-			issues = append(issues, WordVaultIssue{row.number, "B", "Add a question to this module before attaching vocabulary."})
+			issues = append(issues, WordVaultIssue{row.number, "B", "This module has no questions in the selected version."})
 			continue
 		}
 		if row.question > len(questions) {
-			issues = append(issues, WordVaultIssue{row.number, "B", fmt.Sprintf("Question %d is missing from the current draft. Valid numbers for this module are 1–%d.", row.question, len(questions))})
+			issues = append(issues, WordVaultIssue{row.number, "B", fmt.Sprintf("Question %d is missing from the selected version. Valid numbers for this module are 1–%d.", row.question, len(questions))})
 			continue
 		}
 		entry := row.entry

@@ -48,12 +48,12 @@ func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 			httpx.WriteError(w, r, apperrors.New(apperrors.CodeServiceUnavailable, "The score report example is unavailable."))
 			return
 		}
-		versionID, versionRevision, examRevision, layoutRevision, err := scoreReportExampleVersion(ctx, app, examID)
+		versionID, versionRevision, examRevision, layoutRevision, vaultDigest, err := scoreReportExampleVersion(ctx, app, examID)
 		if err != nil {
 			writeScoreReportExampleError(w, r, err)
 			return
 		}
-		cacheKey := scoreReportExampleCacheKey(examID, versionID, versionRevision, examRevision, layoutRevision, title)
+		cacheKey := scoreReportExampleCacheKey(examID, versionID, versionRevision, examRevision, layoutRevision, title, vaultDigest)
 		if pdf, cached := readCachedScoreReportExample(ctx, app.ObjectStore, examID, cacheKey); cached {
 			slog.InfoContext(ctx, "sat score report example", "exam_id", examID, "stage", "cache_hit")
 			serveScoreReportExample(w, pdf, title)
@@ -63,12 +63,12 @@ func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 		// One render per exam in this process; the losers re-read the cache.
 		unlock := lockScoreReportExample(examID)
 		defer unlock()
-		versionID, versionRevision, examRevision, layoutRevision, err = scoreReportExampleVersion(ctx, app, examID)
+		versionID, versionRevision, examRevision, layoutRevision, vaultDigest, err = scoreReportExampleVersion(ctx, app, examID)
 		if err != nil {
 			writeScoreReportExampleError(w, r, err)
 			return
 		}
-		cacheKey = scoreReportExampleCacheKey(examID, versionID, versionRevision, examRevision, layoutRevision, title)
+		cacheKey = scoreReportExampleCacheKey(examID, versionID, versionRevision, examRevision, layoutRevision, title, vaultDigest)
 		if pdf, cached := readCachedScoreReportExample(ctx, app.ObjectStore, examID, cacheKey); cached {
 			slog.InfoContext(ctx, "sat score report example", "exam_id", examID, "stage", "cache_hit_after_wait")
 			serveScoreReportExample(w, pdf, title)
@@ -85,8 +85,8 @@ func satScoreReportExampleHandler(app *App) http.HandlerFunc {
 			return
 		}
 		// Do not cache a paper that a newer revision has already superseded.
-		if currentVersion, currentVersionRevision, currentExamRevision, currentLayout, versionErr := scoreReportExampleVersion(ctx, app, examID); versionErr == nil {
-			currentKey := scoreReportExampleCacheKey(examID, currentVersion, currentVersionRevision, currentExamRevision, currentLayout, title)
+		if currentVersion, currentVersionRevision, currentExamRevision, currentLayout, currentVault, versionErr := scoreReportExampleVersion(ctx, app, examID); versionErr == nil {
+			currentKey := scoreReportExampleCacheKey(examID, currentVersion, currentVersionRevision, currentExamRevision, currentLayout, title, currentVault)
 			if currentKey == cacheKey {
 				writeCachedScoreReportExample(ctx, app.ObjectStore, examID, cacheKey, pdf)
 			}
@@ -119,7 +119,7 @@ func buildScoreReportExample(ctx context.Context, app *App, examID, title, reque
 			slog.Attr{Key: "timings", Value: slog.GroupValue(timings...)},
 		)
 	}()
-	versionID, _, _, _, err := scoreReportExampleVersion(ctx, app, examID)
+	versionID, _, _, _, _, err := scoreReportExampleVersion(ctx, app, examID)
 	if err != nil {
 		return nil, err
 	}
@@ -168,23 +168,24 @@ func writeScoreReportExampleError(w http.ResponseWriter, r *http.Request, err er
 // scoreReportExampleVersion follows the PDF layout editor's version rule: the
 // editable draft when one exists, otherwise the latest published version. The
 // revisions are the cheap cache key inputs.
-func scoreReportExampleVersion(ctx context.Context, app *App, examID string) (versionID string, versionRevision, examRevision, layoutRevision int, err error) {
+func scoreReportExampleVersion(ctx context.Context, app *App, examID string) (versionID string, versionRevision, examRevision, layoutRevision int, vaultDigest string, err error) {
 	var rawVersionID sql.NullString
 	err = app.DB.QueryRowContext(ctx, `
 		SELECT COALESCE(e.current_draft_version_id, e.current_published_version_id),
 		       COALESCE(v.revision, 0), e.revision,
-		       COALESCE((SELECT revision FROM sat_exam_pdf_layouts WHERE exam_id = e.id), 0)
+		       COALESCE((SELECT revision FROM sat_exam_pdf_layouts WHERE exam_id = e.id), 0),
+		       COALESCE((SELECT SHA2(CAST(entries AS CHAR), 256) FROM sat_word_vaults WHERE exam_version_id = v.id), '')
 		FROM exam_entities e
 		LEFT JOIN exam_versions v ON v.id = COALESCE(e.current_draft_version_id, e.current_published_version_id)
-		WHERE e.id = ? AND e.provider_key = 'sat' AND e.status <> 'archived'`, examID).Scan(&rawVersionID, &versionRevision, &examRevision, &layoutRevision)
+		WHERE e.id = ? AND e.provider_key = 'sat' AND e.status <> 'archived'`, examID).Scan(&rawVersionID, &versionRevision, &examRevision, &layoutRevision, &vaultDigest)
 	if err == sql.ErrNoRows {
-		return "", 0, 0, 0, apperrors.New(apperrors.CodeNotFound, "SAT exam not found.")
+		return "", 0, 0, 0, "", apperrors.New(apperrors.CodeNotFound, "SAT exam not found.")
 	}
 	if err != nil {
-		return "", 0, 0, 0, err
+		return "", 0, 0, 0, "", err
 	}
 	if !rawVersionID.Valid || strings.TrimSpace(rawVersionID.String) == "" {
-		return "", 0, 0, 0, apperrors.New(apperrors.CodeValidation, "Open a draft or publish this exam before downloading a score report example.")
+		return "", 0, 0, 0, "", apperrors.New(apperrors.CodeValidation, "Open a draft or publish this exam before downloading a score report example.")
 	}
-	return rawVersionID.String, versionRevision, examRevision, layoutRevision, nil
+	return rawVersionID.String, versionRevision, examRevision, layoutRevision, vaultDigest, nil
 }

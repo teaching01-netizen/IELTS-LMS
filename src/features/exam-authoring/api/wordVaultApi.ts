@@ -6,10 +6,17 @@ export interface WordVaultStatus {
   draftCount: number;
   publishedCount: number;
   staleCount: number;
+  publishedVersions?: WordVaultVersion[];
+}
+
+export interface WordVaultVersion {
+  id: string;
+  number: number;
 }
 
 export interface WordVaultPreview {
   draftId: string;
+  versionId?: string;
   revision: number;
   digest: string;
   before: number;
@@ -37,9 +44,10 @@ export const wordVaultApi = {
     if (!response.ok) throw new Error("Couldn’t download the vocabulary template. Try again.");
     return response.blob();
   },
-  preview(examId: string, file: File) {
+  preview(examId: string, file: File, versionId?: string) {
     const form = new FormData();
     form.set("file", file);
+    if (versionId) form.set("versionId", versionId);
     return backendPost<WordVaultPreview, FormData>(`${path(examId)}/preview`, form, { retries: 0, timeout: 45_000 });
   },
   commit(examId: string, file: File, preview: WordVaultPreview, operationKey: string) {
@@ -47,6 +55,7 @@ export const wordVaultApi = {
     form.set("file", file);
     form.set("commit", JSON.stringify({
       draftId: preview.draftId,
+      versionId: preview.versionId,
       revision: preview.revision,
       digest: preview.digest,
       confirmed: true,

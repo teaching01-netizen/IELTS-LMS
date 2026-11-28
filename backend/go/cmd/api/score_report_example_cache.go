@@ -35,9 +35,9 @@ func lockScoreReportExample(examID string) func() {
 // definitions, the Word Vault, the layout resolution and Chromium entirely.
 // Every draft content mutation bumps exam_versions.revision; layout saves bump
 // their own revision; exam metadata changes bump the entity revision.
-func scoreReportExampleCacheKey(examID, versionID string, versionRevision, examRevision, layoutRevision int, title string) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%d\x00%s\x00%s",
-		scoreReportExampleCacheVersion, versionID, versionRevision, examRevision, layoutRevision, title, examID)))
+func scoreReportExampleCacheKey(examID, versionID string, versionRevision, examRevision, layoutRevision int, title, vaultDigest string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%d\x00%s\x00%s\x00%s",
+		scoreReportExampleCacheVersion, versionID, versionRevision, examRevision, layoutRevision, title, examID, vaultDigest)))
 	return hex.EncodeToString(sum[:])
 }
 

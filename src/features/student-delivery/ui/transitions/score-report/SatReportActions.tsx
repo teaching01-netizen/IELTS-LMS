@@ -18,6 +18,15 @@ export function SatReportDownload({
   if (!canPrint) return null;
   return (
     <div className="w-full sm:w-56">
+      <button
+        type="button"
+        aria-describedby={descriptionId}
+        disabled={download === "preparing"}
+        onClick={onPrint}
+        className="sat-touch-target sat-pressable min-h-11 w-full rounded-full border border-[var(--sat-divider)] px-6 text-[14px] font-semibold disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+      >
+        {download === "preparing" ? "Preparing PDF…" : ready ? "Download latest PDF" : "Download exam PDF"}
+      </button>
       {ready ? (
         <a
           href={ready.downloadUrl}
@@ -30,29 +39,10 @@ export function SatReportDownload({
               onPrint();
             }
           }}
-          className="sat-touch-target sat-pressable flex min-h-11 w-full items-center justify-center rounded-full border border-[var(--sat-divider)] px-6 text-[14px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
+          className="sat-touch-target mt-2 inline-flex min-h-11 items-center text-[13px] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
         >
-          Download PDF again
+          Save prepared copy
         </a>
-      ) : (
-        <button
-          type="button"
-          aria-describedby={descriptionId}
-          disabled={download === "preparing"}
-          onClick={onPrint}
-          className="sat-touch-target sat-pressable min-h-11 w-full rounded-full border border-[var(--sat-divider)] px-6 text-[14px] font-semibold disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-        >
-          {download === "preparing" ? "Preparing PDF…" : "Download exam PDF"}
-        </button>
-      )}
-      {ready ? (
-        <button
-          type="button"
-          onClick={onPrint}
-          className="sat-touch-target mt-2 min-h-11 text-[13px] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--sat-focus)]"
-        >
-          Create a new PDF
-        </button>
       ) : null}
       <p id={descriptionId} className="mt-2 text-[13px] leading-5 text-[var(--sat-text-secondary)]">
         Includes your score, the exam questions, and your answers.

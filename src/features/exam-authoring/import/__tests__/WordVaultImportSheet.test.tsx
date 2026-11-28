@@ -34,6 +34,27 @@ afterEach(() => {
 });
 
 describe("WordVaultImportSheet", () => {
+  it("checks and replaces only the selected published version", async () => {
+    const version = { id: "version-1", number: 1 };
+    const checked = { ...preview, draftId: "", versionId: version.id };
+    const inspect = vi.spyOn(wordVaultApi, "preview").mockResolvedValue(checked);
+    const commit = vi.spyOn(wordVaultApi, "commit").mockResolvedValue({
+      draftId: "", versionId: version.id, revision: 3, count: 1,
+    });
+    const onSaved = vi.fn();
+    render(<WordVaultImportSheet open examId="exam-1" onClose={vi.fn()} onSaved={onSaved}
+      publishedVersions={[{ id: "version-2", number: 2 }, version]} />);
+
+    fireEvent.change(screen.getByLabelText("Exam version"), { target: { value: version.id } });
+    chooseWorkbook();
+    const replace = await screen.findByRole("button", { name: "Replace Word Vault" });
+    expect(inspect).toHaveBeenCalledWith("exam-1", expect.any(File), version.id);
+    expect(screen.getByText(/Students who took this version/)).toBeInTheDocument();
+    fireEvent.click(replace);
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(1, version));
+    expect(commit).toHaveBeenCalledWith("exam-1", expect.any(File), checked, expect.any(String));
+  });
+
   it("replaces the draft vault without an acknowledgement checkbox", async () => {
     vi.spyOn(wordVaultApi, "preview").mockResolvedValue(preview);
     const commit = vi

@@ -366,7 +366,7 @@ test("Classroom start code, WCODE retake, pause and keyed PDF", async ({ browser
       headers, data: { ...latest, expectedRevision: latest.revision, includeAnswerKeyInPdf: false },
     });
     expect(revoke.status(), await revoke.text()).toBe(200);
-    const href = await page.getByRole("link", { name: "Download PDF again" }).getAttribute("href");
+    const href = await page.getByRole("link", { name: "Save prepared copy" }).getAttribute("href");
     expect((await student.request.head(new URL(href!, root).href)).status()).toBe(404);
 
     const credentialKey = "ielts_student_attempt_credentials_v1";
@@ -481,7 +481,7 @@ test("Classroom start code, WCODE retake, pause and keyed PDF", async ({ browser
 
     await attemptPicker.selectOption(nextAttemptId);
     await expect(page.getByRole("region", { name: "Scored practice questions" })).toContainText(/2 of 2\s+correct/);
-    await expect(page.getByRole("link", { name: "Download PDF again" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Save prepared copy" })).toHaveCount(0);
   } finally {
     await Promise.all([admin.close(), student.close()]);
   }

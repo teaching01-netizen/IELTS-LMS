@@ -89,7 +89,7 @@ func wordVaultHandler(app *App, action string) http.HandlerFunc {
 				return
 			}
 			if action == "preview" {
-				result, err := app.Authoring.PreviewWordVault(r.Context(), examID, data)
+				result, err := app.Authoring.PreviewWordVaultForVersion(r.Context(), examID, r.PostFormValue("versionId"), data)
 				writeWordVaultResult(w, r, result, err)
 				return
 			}

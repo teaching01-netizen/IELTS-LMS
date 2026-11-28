@@ -219,6 +219,47 @@ func TestWordVaultVersionLifecycleMySQL(t *testing.T) {
 	if err != nil || stale != 0 || len(words) != 2 || words[0].Word != "lower" || words[1].Word != "higher" {
 		t.Fatalf("published words changed: %+v stale=%d err=%v", words, stale, err)
 	}
+
+	// Once published, the same version can receive a PDF-only replacement.
+	target := last.DraftID
+	if len(status.PublishedVersions) != 1 || status.PublishedVersions[0].ID != target {
+		t.Fatalf("published version missing from import picker: %+v", status.PublishedVersions)
+	}
+	preview, err := f.Service.PreviewWordVaultForVersion(ctx, f.ExamID, target, higher)
+	if err != nil || len(preview.Issues) != 0 || preview.DraftID != "" || preview.VersionID != target || preview.Before != 2 {
+		t.Fatalf("published preview: %+v, %v", preview, err)
+	}
+	if _, err := f.Service.PreviewWordVaultForVersion(ctx, f.ExamID, draft.VersionID, higher); err == nil {
+		t.Fatal("a draft was accepted as a published target")
+	}
+	publishedRequest := request(preview, "published-replacement")
+	publishedRequest.VersionID = target
+	receipt := commit(higher, publishedRequest)
+	if receipt.VersionID != target || receipt.Revision != preview.Revision || receipt.Count != 1 ||
+		commit(higher, publishedRequest) != receipt {
+		t.Fatalf("published replacement or replay: %+v", receipt)
+	}
+	if _, err := f.Service.CommitWordVault(ctx, f.ExamID, "word-vault-test", firstBook, publishedRequest); err == nil {
+		t.Fatal("a replay accepted different workbook bytes")
+	}
+	var revision int
+	if err := f.DB.QueryRowContext(ctx, "SELECT revision FROM exam_versions WHERE id = ?", target).Scan(&revision); err != nil || revision != preview.Revision {
+		t.Fatalf("published exam revision changed: %d, %v", revision, err)
+	}
+	publishedRequest.OperationKey = "stale-published-preview"
+	_, err = f.Service.CommitWordVault(ctx, f.ExamID, "word-vault-test", higher, publishedRequest)
+	var conflict *apperrors.Error
+	if !errors.As(err, &conflict) || conflict.Code != apperrors.CodeConflict {
+		t.Fatalf("stale published preview was accepted: %v", err)
+	}
+	words, stale, err = satwordvault.Read(ctx, f.DB, target)
+	if err != nil || stale != 0 || len(words) != 1 || words[0].Word != "replace" {
+		t.Fatalf("fresh reads of the same pinned version missed the update: %+v, %v", words, err)
+	}
+	status, err = f.Service.WordVaultStatus(ctx, f.ExamID)
+	if err != nil || status.StaleCount != 1 || status.PublishedCount != 1 {
+		t.Fatalf("replacement affected the draft or published count: %+v, %v", status, err)
+	}
 }
 
 func wordVaultSheetText(t *testing.T, book *excelize.File, sheet string) string {
@@ -262,7 +303,7 @@ func TestWordVaultTemplateCarriesTheImportContract(t *testing.T) {
 		"Question number",
 		"200 entries",
 		"2 MB",
-		"replaces the ENTIRE draft Word Vault",
+		"replaces the ENTIRE Word Vault for the selected version",
 		"Thai script",
 		"sat.word_vault.stale",
 		"header row clears an existing vault",

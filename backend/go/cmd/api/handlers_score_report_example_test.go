@@ -50,24 +50,24 @@ func TestScoreReportExampleVersionUsesDraftThenPublished(t *testing.T) {
 	app := &App{DB: db}
 
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("exam-draft").
-		WillReturnRows(sqlmock.NewRows([]string{"version", "version_revision", "exam_revision", "layout_revision"}).
-			AddRow("draft-1", 7, 12, 3))
-	version, versionRevision, examRevision, layoutRevision, err := scoreReportExampleVersion(t.Context(), app, "exam-draft")
-	if err != nil || version != "draft-1" || versionRevision != 7 || examRevision != 12 || layoutRevision != 3 {
+		WillReturnRows(sqlmock.NewRows([]string{"version", "version_revision", "exam_revision", "layout_revision", "vault_digest"}).
+			AddRow("draft-1", 7, 12, 3, "hash"))
+	version, versionRevision, examRevision, layoutRevision, vaultDigest, err := scoreReportExampleVersion(t.Context(), app, "exam-draft")
+	if err != nil || version != "draft-1" || versionRevision != 7 || examRevision != 12 || layoutRevision != 3 || vaultDigest != "hash" {
 		t.Fatalf("draft version: %q %d %d %d err %v", version, versionRevision, examRevision, layoutRevision, err)
 	}
 
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("exam-none").
-		WillReturnRows(sqlmock.NewRows([]string{"version", "version_revision", "exam_revision", "layout_revision"}).
-			AddRow(nil, 0, 0, 0))
-	if _, _, _, _, err := scoreReportExampleVersion(t.Context(), app, "exam-none"); err == nil {
+		WillReturnRows(sqlmock.NewRows([]string{"version", "version_revision", "exam_revision", "layout_revision", "vault_digest"}).
+			AddRow(nil, 0, 0, 0, ""))
+	if _, _, _, _, _, err := scoreReportExampleVersion(t.Context(), app, "exam-none"); err == nil {
 		t.Fatal("an exam with no draft and no published version must be refused")
 	} else if typed, ok := apperrors.As(err); !ok || typed.Code != apperrors.CodeValidation {
 		t.Fatalf("want validation, got %v", err)
 	}
 
 	mock.ExpectQuery("SELECT COALESCE").WithArgs("exam-missing").WillReturnError(sql.ErrNoRows)
-	if _, _, _, _, err := scoreReportExampleVersion(t.Context(), app, "exam-missing"); err == nil {
+	if _, _, _, _, _, err := scoreReportExampleVersion(t.Context(), app, "exam-missing"); err == nil {
 		t.Fatal("a missing exam must be refused")
 	} else if typed, ok := apperrors.As(err); !ok || typed.Code != apperrors.CodeNotFound {
 		t.Fatalf("want not found, got %v", err)
@@ -80,7 +80,7 @@ func TestScoreReportExampleVersionUsesDraftThenPublished(t *testing.T) {
 
 func TestScoreReportExampleCacheRoundTrip(t *testing.T) {
 	store := objectstore.NewLocalStore(t.TempDir())
-	key := scoreReportExampleCacheKey("exam-1", "v1", 7, 12, 3, "SAT Practice 04")
+	key := scoreReportExampleCacheKey("exam-1", "v1", 7, 12, 3, "SAT Practice 04", "vocab")
 
 	if _, ok := readCachedScoreReportExample(t.Context(), store, "exam-1", key); ok {
 		t.Fatal("an empty cache must miss")
@@ -91,7 +91,7 @@ func TestScoreReportExampleCacheRoundTrip(t *testing.T) {
 		t.Fatalf("cache hit = %v %q", ok, pdf)
 	}
 
-	other := scoreReportExampleCacheKey("exam-1", "v1", 8, 12, 3, "SAT Practice 04")
+	other := scoreReportExampleCacheKey("exam-1", "v1", 8, 12, 3, "SAT Practice 04", "vocab")
 	if _, ok := readCachedScoreReportExample(t.Context(), store, "exam-1", other); ok {
 		t.Fatal("a newer revision must miss the old artifact")
 	}
@@ -102,14 +102,15 @@ func TestScoreReportExampleCacheRoundTrip(t *testing.T) {
 }
 
 func TestScoreReportExampleCacheKeyTracksEveryInput(t *testing.T) {
-	base := scoreReportExampleCacheKey("exam-1", "v1", 7, 12, 3, "Practice")
+	base := scoreReportExampleCacheKey("exam-1", "v1", 7, 12, 3, "Practice", "vocab")
 	for name, changed := range map[string]string{
-		"exam":     scoreReportExampleCacheKey("exam-2", "v1", 7, 12, 3, "Practice"),
-		"version":  scoreReportExampleCacheKey("exam-1", "v2", 7, 12, 3, "Practice"),
-		"content":  scoreReportExampleCacheKey("exam-1", "v1", 8, 12, 3, "Practice"),
-		"metadata": scoreReportExampleCacheKey("exam-1", "v1", 7, 13, 3, "Practice"),
-		"layout":   scoreReportExampleCacheKey("exam-1", "v1", 7, 12, 4, "Practice"),
-		"title":    scoreReportExampleCacheKey("exam-1", "v1", 7, 12, 3, "Practice 2"),
+		"exam":     scoreReportExampleCacheKey("exam-2", "v1", 7, 12, 3, "Practice", "vocab"),
+		"version":  scoreReportExampleCacheKey("exam-1", "v2", 7, 12, 3, "Practice", "vocab"),
+		"content":  scoreReportExampleCacheKey("exam-1", "v1", 8, 12, 3, "Practice", "vocab"),
+		"metadata": scoreReportExampleCacheKey("exam-1", "v1", 7, 13, 3, "Practice", "vocab"),
+		"layout":   scoreReportExampleCacheKey("exam-1", "v1", 7, 12, 4, "Practice", "vocab"),
+		"vault":    scoreReportExampleCacheKey("exam-1", "v1", 7, 12, 3, "Practice", "new-vocab"),
+		"title":    scoreReportExampleCacheKey("exam-1", "v1", 7, 12, 3, "Practice 2", "vocab"),
 	} {
 		if changed == base {
 			t.Fatalf("%s does not change the cache key", name)

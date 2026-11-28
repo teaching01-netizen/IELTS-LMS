@@ -89,24 +89,7 @@ async function importWordVault(page: Page) {
   await startImport.click({ timeout: 30_000 });
   const dialog = page.getByRole("dialog", { name: "Import Vocabulary Excel" });
   await expect(dialog.getByRole("button", { name: "Upload workbook" })).toBeFocused();
-  const [download] = await Promise.all([
-    page.waitForEvent("download"),
-    dialog.getByRole("button", { name: "Download vocabulary template" }).click(),
-  ]);
-  expect(download.suggestedFilename()).toBe("SAT-Vocabulary-Template.xlsx");
-  const archive = unzipSync(await readFile(await download.path()));
-  const worksheet = "xl/worksheets/sheet1.xml";
-  const template = strFromU8(archive[worksheet]!);
-  async function upload(question: number, word: string) {
-    const row = ["rw-m1", String(question), word, "ปรับตัว", "To adjust to a new situation.", "The team adapted to the new schedule."];
-    const cells = row.map((value, index) => `<c r="${String.fromCharCode(65 + index)}2" t="inlineStr"><is><t>${value}</t></is></c>`).join("");
-    archive[worksheet] = strToU8(template.replace("</sheetData>", `<row r="2">${cells}</row></sheetData>`));
-    await dialog.getByLabel("Choose vocabulary workbook").setInputFiles({
-      name: "vocabulary.xlsx",
-      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      buffer: Buffer.from(zipSync(archive)),
-    });
-  }
+  const upload = await prepareWordVaultUpload(dialog);
   await upload(99, "obsolete");
   await expect(dialog.getByRole("heading", { name: "Workbook needs attention" })).toBeFocused();
   await expect(dialog.getByText("Vocabulary · B2")).toBeVisible();
@@ -122,6 +105,32 @@ async function importWordVault(page: Page) {
   await replace.click();
   await expect(dialog).toBeHidden();
   await expect(page.getByText("1 word saved to the draft.")).toBeVisible();
+  await checkExamplePDF(page);
+  await page.goto(exam.href);
+}
+
+async function prepareWordVaultUpload(dialog: Locator) {
+  const [download] = await Promise.all([
+    dialog.page().waitForEvent("download"),
+    dialog.getByRole("button", { name: "Download vocabulary template" }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("SAT-Vocabulary-Template.xlsx");
+  const archive = unzipSync(await readFile(await download.path()));
+  const worksheet = "xl/worksheets/sheet1.xml";
+  const template = strFromU8(archive[worksheet]!);
+  return async (question: number, word: string) => {
+    const row = ["rw-m1", String(question), word, "ปรับตัว", "To adjust to a new situation.", "The team adapted to the new schedule."];
+    const cells = row.map((value, index) => `<c r="${String.fromCharCode(65 + index)}2" t="inlineStr"><is><t>${value}</t></is></c>`).join("");
+    archive[worksheet] = strToU8(template.replace("</sheetData>", `<row r="2">${cells}</row></sheetData>`));
+    await dialog.getByLabel("Choose vocabulary workbook").setInputFiles({
+      name: "vocabulary.xlsx",
+      mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      buffer: Buffer.from(zipSync(archive)),
+    });
+  };
+}
+
+async function checkExamplePDF(page: Page) {
   // The dedicated PDF run builds the print bundle; the example needs the same
   // Chromium renderer as the student artifact.
   if (process.env["FRONTEND_DIST_DIR"]) {
@@ -148,7 +157,6 @@ async function importWordVault(page: Page) {
       await pdf.destroy();
     }
   }
-  await page.goto(exam.href);
 }
 
 test("flexible SAT workbook goes from import and retry to a released student score", async ({ page, browser }) => {
@@ -221,6 +229,8 @@ test("standard SAT blocks the same 20-question workbook at preview", async ({ pa
 });
 
 async function sitClassroomExam(staff: Page, browser: Browser, checkWordVault = false) {
+  const settingsUrl = new URL(staff.url());
+  settingsUrl.pathname += "/settings";
   const roomName = `Workbook Classroom ${Date.now()}`;
   const createRoom = staff.getByRole("button", { name: "Create room", exact: true });
   await createRoom.first().click();
@@ -300,6 +310,30 @@ async function sitClassroomExam(staff: Page, browser: Browser, checkWordVault = 
       expect(appendix).not.toContain("obsolete");
     } finally {
       await pdf.destroy();
+    }
+    await staff.goto(settingsUrl.href);
+    await staff.getByRole("button", { name: "Import Vocabulary Excel" }).click();
+    const vault = staff.getByRole("dialog", { name: "Import Vocabulary Excel" });
+    await vault.getByLabel("Exam version").selectOption(receipt.version.id);
+    const upload = await prepareWordVaultUpload(vault);
+    await upload(1, "revise");
+    await vault.getByRole("button", { name: "Replace Word Vault" }).click();
+    await expect(staff.getByText(/Students will get the changes on their next PDF download/)).toBeVisible();
+
+    const [updated] = await Promise.all([
+      student.waitForEvent("download", { timeout: 95_000 }),
+      student.getByRole("button", { name: "Download latest PDF" }).click(),
+    ]);
+    await expect(student.getByRole("region", { name: "Score report" })).toContainText("15 of 20");
+    const updatedPdf = getDocument({ data: new Uint8Array(await readFile(await updated.path())), useWasm: false });
+    try {
+      const document = await updatedPdf.promise;
+      const page = await document.getPage(document.numPages);
+      const appendix = (await page.getTextContent()).items.map((item) => "str" in item ? item.str : "").join(" ");
+      expect(appendix).toContain("revise");
+      expect(appendix).not.toMatch(/\badapt\b/);
+    } finally {
+      await updatedPdf.destroy();
     }
   } finally {
     await Promise.all([studentContext.close(), proctorContext.close()]);

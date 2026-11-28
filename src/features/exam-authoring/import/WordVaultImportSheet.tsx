@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Download, UploadCloud, X } from "lucide-react";
 import { SatButton } from "../../../products/sat/ui/SatPage";
 import { wordCountLabel as words } from "@shared/sat/wordVault";
-import { wordVaultApi, type WordVaultPreview } from "../api/wordVaultApi";
+import { wordVaultApi, type WordVaultPreview, type WordVaultVersion } from "../api/wordVaultApi";
 import { hasBackendStatusCode } from "../infrastructure/examAuthoringBackendGateway";
 import { AuthoringDialog } from "../ui/authoringPrimitives";
 
@@ -11,11 +11,9 @@ const maxWorkbookBytes = 2 * 1024 * 1024;
 /**
  * The Word Vault workbook importer.
  *
- * It stages a vocabulary workbook against the CURRENT draft and commits a
- * whole-vault replacement, so it is opened from wherever the author is already
- * editing that draft: the Questions workspace Import menu, beside the exam
- * workbook import, and the Settings Word Vault panel that publishes a stale
- * reference finding.
+ * It previews and replaces the entire vault for one exam version. The
+ * Questions workspace targets the draft and Settings can target a published
+ * version for an immediate PDF update.
  *
  * The sheet OWNS its parse → preview → commit state machine. Callers own only
  * when it may open and what a confirmed commit means for their projections.
@@ -25,11 +23,13 @@ const maxWorkbookBytes = 2 * 1024 * 1024;
  * it repeats the one consequence that is not visible in the entry list — the
  * modules this file does not mention lose their words too.
  */
-export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
+export function WordVaultImportSheet({ open, examId, onClose, onSaved, publishedVersions = [], hasDraft = true }: {
   open: boolean;
   examId: string;
   onClose: () => void;
-  onSaved: (count: number) => void;
+  onSaved: (count: number, version?: WordVaultVersion) => void;
+  publishedVersions?: WordVaultVersion[];
+  hasDraft?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -44,6 +44,9 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
   const [downloadError, setDownloadError] = useState("");
   const [dragging, setDragging] = useState(false);
   const [needsCheck, setNeedsCheck] = useState(false);
+  const [versionId, setVersionId] = useState(() => hasDraft ? "" : publishedVersions[0]?.id ?? "");
+  const version = publishedVersions.find((item) => item.id === versionId);
+  const target = version ? `Version ${version.number}` : "the draft";
   const replacing = (preview?.before ?? 0) > 0;
   const count = preview?.entries.length ?? 0;
   const valid = preview !== null && preview.issues.length === 0 && (replacing || count > 0);
@@ -66,7 +69,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
     active.current = true;
     setBusy("check");
     try {
-      setPreview(await wordVaultApi.preview(examId, selected));
+      setPreview(await wordVaultApi.preview(examId, selected, versionId || undefined));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Couldn’t check the workbook. Try again.");
     } finally {
@@ -103,11 +106,12 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
     try {
       operation.current ??= crypto.randomUUID();
       const receipt = await wordVaultApi.commit(examId, file, preview, operation.current);
-      onSaved(receipt.count);
+      if (version) onSaved(receipt.count, version);
+      else onSaved(receipt.count);
     } catch (cause) {
       if (hasBackendStatusCode(cause, 409)) {
         setNeedsCheck(true);
-        setError("The draft changed. Check this workbook again and review the updated replacement.");
+        setError("The selected version or its vocabulary changed. Check the workbook again.");
       } else {
         setError(cause instanceof Error ? cause.message : "Couldn’t import the workbook. Try again.");
       }
@@ -120,7 +124,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
   return (
     <AuthoringDialog
       open={open} title="Import Vocabulary Excel"
-      description="Upload the vocabulary you want to save for this draft."
+      description="Upload vocabulary for the selected exam version."
       showHeader={false}
       onClose={onClose} closeDisabled={closeDisabled}
       contentClassName={`flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-[24px] p-0 ${preview ? "max-w-[860px]" : "max-w-[540px]"}`}
@@ -128,7 +132,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
       <header className="flex shrink-0 items-start justify-between gap-4 border-b border-au-separator px-5 py-4 sm:px-6">
         <div className="min-w-0">
           <h2 className="text-[17px] font-semibold tracking-[-0.02em] text-slate-950">Import Vocabulary Excel</h2>
-          <p className="mt-1 text-sm leading-5 text-slate-600">Add words to any Reading &amp; Writing questions in this draft. You can skip questions or modules.</p>
+          <p className="mt-1 text-sm leading-5 text-slate-600">Add words to Reading &amp; Writing questions in {target}. You can skip questions or modules.</p>
         </div>
         <button
           type="button"
@@ -142,8 +146,37 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
       </header>
 
       <div className="min-h-0 space-y-4 overflow-y-auto overscroll-contain bg-au-surface px-5 pb-5 pt-4 sm:px-6">
+        {publishedVersions.length ? (
+          <div>
+            <label htmlFor="word-vault-version" className="block text-sm font-medium text-slate-950">
+              Exam version
+              <select
+                id="word-vault-version"
+                data-dialog-initial-focus
+                value={versionId}
+                aria-describedby="word-vault-version-hint"
+                disabled={busy !== null}
+                onChange={(event) => {
+                  setVersionId(event.currentTarget.value);
+                  setFile(null);
+                  setPreview(null);
+                  setNeedsCheck(false);
+                  setError("");
+                  operation.current = null;
+                }}
+                className="mt-1 block min-h-11 w-full rounded-xl border border-au-separator bg-au-surface px-3"
+              >
+                {hasDraft ? <option value="">Editable draft</option> : null}
+                {publishedVersions.map((item) => <option key={item.id} value={item.id}>Published version {item.number}</option>)}
+              </select>
+            </label>
+            <span id="word-vault-version-hint" className="mt-1 block text-xs font-normal text-slate-600">
+              {version ? "Updates student PDFs for this version." : "Draft vocabulary appears after the exam is published."}
+            </span>
+          </div>
+        ) : null}
         <button
-          data-dialog-initial-focus type="button" aria-disabled={busy !== null}
+          data-dialog-initial-focus={!publishedVersions.length || undefined} type="button" aria-disabled={busy !== null}
           aria-describedby="word-vault-file-hint"
           className={`flex w-full flex-col items-center gap-3 rounded-2xl border border-dashed px-5 py-6 text-center transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-au-accent aria-disabled:opacity-60 ${dragging ? "border-au-accent bg-au-accent-tint" : "border-au-separator bg-au-fill hover:border-au-accent/40 hover:bg-au-accent-tint/50"}`}
           onClick={() => { if (!active.current) input.current?.click(); }}
@@ -197,7 +230,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
               </h3>
               {!preview.issues.length ? (
                 <p className="text-xs tabular-nums text-slate-600">
-                  {words(preview.before)} in the draft now · <strong className="text-slate-900">{words(count)}</strong> after import
+                  {words(preview.before)} in {target} now · <strong className="text-slate-900">{words(count)}</strong> after import
                 </p>
               ) : null}
             </div>
@@ -251,10 +284,11 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="max-w-sm text-xs leading-5 text-slate-600">
               {count === 0
-                ? "Removes every word from this draft, including modules this file does not mention."
+                ? `Removes every word from ${version ? target : "this draft"}, including modules this file does not mention.`
                 : replacing
-                  ? `Replaces all ${words(preview.before)} in this draft, including modules this file does not mention.`
-                  : `${words(count)} will be added to the draft.`}
+                  ? `Replaces all ${words(preview.before)} in ${version ? target : "this draft"}, including modules this file does not mention.`
+                  : `${words(count)} will be added to ${target}.`}
+              {version ? " Students who took this version will get the update on their next PDF download." : ""}
             </p>
             <div className="ml-auto flex items-center gap-2">
               <button
@@ -271,7 +305,7 @@ export function WordVaultImportSheet({ open, examId, onClose, onSaved }: {
                 onClick={() => void commit()}
                 className="min-h-11 rounded-full bg-au-accent px-5 text-sm font-semibold text-white hover:bg-au-accent-hover active:bg-au-accent-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-au-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-35"
               >
-                {count === 0 ? "Remove all draft words" : replacing ? "Replace Word Vault" : `Import ${words(count)}`}
+                {count === 0 ? version ? "Remove all words" : "Remove all draft words" : replacing ? "Replace Word Vault" : `Import ${words(count)}`}
               </button>
             </div>
           </div>

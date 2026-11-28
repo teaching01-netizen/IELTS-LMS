@@ -10,11 +10,14 @@ describe("native PDF download", () => {
       sizeBytes: 100,
       expiresAt: new Date(Date.now() + 300_000).toISOString(),
     };
-    render(<SatReportDownload canPrint download="ready" ready={ready} onPrint={vi.fn()} />);
-    const link = screen.getByRole("link", { name: "Download PDF again" });
+    const prepare = vi.fn();
+    render(<SatReportDownload canPrint download="ready" ready={ready} onPrint={prepare} />);
+    const link = screen.getByRole("link", { name: "Save prepared copy" });
     expect(link).toHaveAttribute("href", ready.downloadUrl);
     expect(link).toHaveAttribute("download", ready.filename);
     expect(link).not.toHaveAttribute("target");
+    fireEvent.click(screen.getByRole("button", { name: "Download latest PDF" }));
+    expect(prepare).toHaveBeenCalledTimes(1);
   });
 
   it("prevents using an expired link and offers preparation again", () => {
@@ -26,7 +29,7 @@ describe("native PDF download", () => {
       expiresAt: new Date(Date.now() - 1).toISOString(),
     };
     render(<SatReportDownload canPrint download="ready" ready={ready} onPrint={prepare} />);
-    fireEvent.click(screen.getByRole("link", { name: "Download PDF again" }));
+    fireEvent.click(screen.getByRole("link", { name: "Save prepared copy" }));
     expect(prepare).toHaveBeenCalledTimes(1);
   });
 });

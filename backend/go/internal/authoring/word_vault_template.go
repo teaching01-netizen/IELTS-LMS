@@ -17,7 +17,7 @@ import (
 const (
 	wordVaultGuideSheet        = "Guide"
 	wordVaultInstructionsSheet = "AI Instructions"
-	wordVaultTemplateVersion   = "1"
+	wordVaultTemplateVersion   = "2"
 )
 
 var (
@@ -173,28 +173,28 @@ func wordVaultReferenceRowHeight(row []string) float64 {
 func wordVaultGuideRows() [][]string {
 	rows := [][]string{
 		{"THE WORD VAULT · VOCABULARY WORKBOOK GUIDE", "Human + AI reference · vocabulary template " + wordVaultTemplateVersion, "Read this sheet and AI Instructions before filling Vocabulary."},
-		{"HOW TO USE", "1. Open the editable draft you want to change, then download this workbook from The Word Vault.", "The vault belongs to a draft. Published versions keep their own copy."},
+		{"HOW TO USE", "1. Download this workbook from The Word Vault and choose the exam version you want to change.", "Each import replaces the vocabulary for the selected draft or published version."},
 		{"HOW TO USE", "2. Fill one row per word in Vocabulary. Keep row 1 and its six headers unchanged.", "Guide and AI Instructions are references. Only Vocabulary is imported."},
 		{"HOW TO USE", "3. Working with an AI tool? Read AI Instructions first and copy its prompt.", "The prompt restates every rule that can block an import."},
 		{"HOW TO USE", "4. Upload the completed .xlsx and review every issue plus the per-module impact.", "One bad cell blocks the whole import; nothing is saved until the workbook is valid."},
-		{"HOW TO USE", "5. Confirm to replace the entire draft vault.", "The preview lists words before → after per module, so omissions are visible before they change."},
+		{"HOW TO USE", "5. Confirm to replace the entire vault for the selected version.", "The preview lists words before → after per module, so omissions are visible before they change."},
 		{"WORKBOOK CONTRACT", "Vocabulary is the only data sheet. Guide and AI Instructions are references.", "Do not rename sheets or move the Vocabulary headers."},
-		{"WORKBOOK CONTRACT", "A confirmed upload replaces the ENTIRE draft Word Vault.", "Modules omitted from the file lose their draft words. A file with only the header row clears an existing vault."},
+		{"WORKBOOK CONTRACT", "A confirmed upload replaces the ENTIRE Word Vault for the selected version.", "Modules omitted from the file lose their words in that version. A file with only the header row clears an existing vault."},
 		{"WORKBOOK CONTRACT", "Headers are matched in order: Module, Question number, Vocabulary word, Thai meaning, English definition, Example sentence.", "Renaming, deleting, or reordering a header blocks the import. Case is ignored."},
-		{"WORKBOOK CONTRACT", "Published versions and existing attempts keep the vocabulary of the version they use.", "Publishing pins the current draft vault to that version."},
+		{"WORKBOOK CONTRACT", "A published-version import becomes available on students’ next PDF download.", "Students receive the vault for the version they took."},
 		{"WORKBOOK CONTRACT", "A replacement has no undo.", "Review the preview: it shows exactly what each module gains or loses before you confirm."},
 		{"WORKBOOK CONTRACT", "Nothing is saved when any row has an issue.", "Fix every reported cell and upload again."},
 		{"COLUMN / FIELD", "EXACT MEANING", "REQUIRED / GUIDANCE"},
 		{"Module", "One of the three Reading & Writing modules in MODULE MAP, by exact label or module key.", "Math modules are not part of the Word Vault. Case and repeated spaces are ignored; punctuation is not."},
-		{"Question number", "1-based position of the question in that module, in the draft's order.", "Must exist in the current draft. The number is resolved at upload and pinned to that question."},
+		{"Question number", "1-based position of the question in that module, in the selected version's order.", "Must exist in the selected version. The number is resolved at upload and pinned to that question."},
 		{"Vocabulary word", "The English word or phrase as it appears in the question.", "1–80 characters. Plain text, one line, no formulas."},
 		{"Thai meaning", "The Thai meaning students read in the PDF appendix.", "1–160 characters in Thai script, one line. Not a transliteration or an English gloss."},
 		{"English definition", "A short learner-facing definition.", "1–320 characters, one line."},
 		{"Example sentence", "One sentence that shows the word in use.", "1–320 characters, one line. Required for every entry."},
 		{"All six columns", "Every row needs all six values.", "A blank word, Thai meaning, definition or example is reported and blocks the import."},
-		{"MODULE", "The label or key must describe a module present in the current draft.", "A missing module is reported by row and column."},
+		{"MODULE", "The label or key must describe a module present in the selected version.", "A missing module is reported by row and column."},
 		{"CUSTOM EXAMS", "Use only the Reading & Writing questions you want to attach words to.", "Module 1 only, either Module 2 branch on its own, and flexible question counts are supported. You can skip any question or module."},
-		{"QUESTION NUMBER", "Question 1 is the first question in that module as currently authored.", "It matches the Order column of the question workbook in the same draft."},
+		{"QUESTION NUMBER", "Question 1 is the first question in that module as ordered in the selected version.", "Check the question order for the version you selected."},
 		{"QUESTION NUMBER", "Enter a positive whole number: 7, not Q7, 7.0, or a cell reference.", "The number is the position, not the question ID."},
 		{"QUESTION NUMBER", "Several words may point at the same question; one row per word.", "Identical rows are rejected as duplicates; different words on one question are allowed."},
 		{"QUESTION NUMBER", "Reordering a question changes its printed number, not its words.", "The entry is pinned to the question identity; the appendix prints the current number."},
@@ -209,7 +209,7 @@ func wordVaultGuideRows() [][]string {
 		{"LIMITS", "Plain .xlsx only.", "Encrypted files, .xls, .csv, and other non-.xlsx formats are rejected."},
 		{"THAI TEXT", "Type Thai in Thai script, on one line, in the Vocabulary sheet.", "The score-report PDF bundles Noto Sans Thai, so Thai renders without extra fonts."},
 		{"THAI TEXT", "Do not use control characters or line breaks inside a cell.", "Each cell is one line of plain text."},
-		{"CLEARING", "Uploading a file with only the header row clears an existing draft vault.", "The preview says “Removes every word from this draft”; the button says Remove all draft words."},
+		{"CLEARING", "Uploading a file with only the header row clears an existing vault for the selected version.", "The preview names the version whose words will be removed."},
 		{"WORKED EXAMPLE", "Reference only — do not paste this block into Vocabulary.", "The Vocabulary sheet already has its headers; start data at row 2."},
 		{"EXAMPLE · ROW", "Reading & Writing · Module 1 | 7 | adapt | ปรับตัว | To adjust to a new situation or environment. | The team adapted quickly to the new schedule.", "The six values in column order, exactly as one Vocabulary row would hold them."},
 		{"MODULE MAP", "EXACT LABEL", "MODULE KEY / MAXIMUM QUESTIONS"},
@@ -223,11 +223,11 @@ func wordVaultGuideRows() [][]string {
 	rows = append(rows,
 		[]string{"MODULE MAP", "Math modules", "Not supported: the Word Vault attaches words only to Reading & Writing questions."},
 		[]string{"QA CHECKLIST", "Every Module cell uses a label or key from MODULE MAP.", "Math labels are invalid."},
-		[]string{"QA CHECKLIST", "Every Question number exists in that module of the current draft.", "Check the printed order, not the Excel row number."},
+		[]string{"QA CHECKLIST", "Every Question number exists in that module of the selected version.", "Check the printed order, not the Excel row number."},
 		[]string{"QA CHECKLIST", "Every row has word, Thai meaning, definition, and example.", "All four are required; each must fit its character limit."},
 		[]string{"QA CHECKLIST", "Thai text is Thai script on one line.", "No transliteration, no control characters."},
 		[]string{"QA CHECKLIST", "No formula, no duplicate row, no extra column.", "A single issue blocks the import."},
-		[]string{"QA CHECKLIST", "The preview impact matches the intended modules.", "Omitted modules lose their draft words."},
+		[]string{"QA CHECKLIST", "The preview impact matches the intended modules.", "Omitted modules lose their words in the selected version."},
 		[]string{"QA CHECKLIST", "Uncertain entries are reported, not guessed.", "Do not mark a file import-ready while a Thai meaning is unknown."},
 		[]string{"PUBLISHING", "The published version prints every entry it holds.", "Empty vault adds no appendix pages. The answer-key setting is independent of the appendix."},
 	)
@@ -249,7 +249,7 @@ func wordVaultInstructionRows() [][]string {
 		{"R05", "Field limits", "Word 1–80, Thai 1–160, definition 1–320, example 1–320 characters. All four are required on every row."},
 		{"R06", "Thai text", "Thai script, one line, no control characters. Do not substitute a transliteration or an English gloss."},
 		{"R07", "Duplicates", "Identical rows are rejected. The same word attached to different questions is allowed."},
-		{"R08", "Replacement scope", "The upload replaces the entire draft vault, including modules omitted from the file. A header-only file clears it."},
+		{"R08", "Replacement scope", "The upload replaces the entire vault for the selected version, including modules omitted from the file. A header-only file clears it."},
 		{"R09", "Cell type", "Paste values, never formulas. No macros, external links, or embedded media."},
 		{"R10", "Limits", "At most 200 entries, a 2 MB workbook, and 1,000 sheet rows."},
 		{"R11", "Blockers", "If required information is missing, return the workbook unchanged and state NOT IMPORT READY with the exact blockers."},
@@ -281,12 +281,12 @@ OUTPUT CONTRACT
 1. Write ONLY on the Vocabulary sheet, starting at row 2. Keep row 1 and the six headers exactly: Module | Question number | Vocabulary word | Thai meaning | English definition | Example sentence.
 2. One row = one vocabulary entry attached to one question. Do not add columns, merged cells, notes, or data written as color.
 3. Module must be one of the three Reading & Writing labels (or module keys) in Guide > MODULE MAP, copied exactly. Math modules are invalid.
-4. Question number is the 1-based position of the question in that module as currently authored. For custom or flexible exams, use only the questions and modules present in the supplied draft. Include only the questions that need vocabulary. Never guess; if you cannot confirm a reference, omit the row and report it.
+4. Question number is the 1-based position of the question in that module as ordered in the selected version. For custom or flexible exams, use only the questions and modules present in the selected version. Include only the questions that need vocabulary. Never guess; if you cannot confirm a reference, omit the row and report it.
 5. Vocabulary word: the English word or phrase, 1–80 characters. Thai meaning: 1–160 characters in Thai script. English definition: 1–320 characters. Example sentence: 1–320 characters. All four are required. One line per cell, plain text.
 6. Paste values only. No formulas, macros, external links, or embedded media.
 7. At most 200 entries. Empty rows are ignored. Keep the sheet within the first 1,000 rows.
 8. If the user supplies exact Thai meanings, definitions, or examples, transcribe them faithfully. If the user asks you to derive them from the exam, base every entry only on the supplied question text. Mark any Thai wording you are not confident about as REVIEW NEEDED in the chat report; do not silently guess.
-9. The upload replaces the ENTIRE draft Word Vault, including modules not in the file. A header-only file clears an existing vault. Include only rows the user intends.
+9. The upload replaces the ENTIRE Word Vault for the selected version, including modules not in the file. A header-only file clears an existing vault. Include only rows the user intends.
 10. A single invalid cell blocks the whole import. Fix your own errors before returning the workbook.
 11. Return the completed .xlsx plus a short QA report in the chat: rows written per module, question numbers used, duplicates removed, and every item you could not verify. Never write the QA report into Vocabulary.
 12. If required information is missing, stop and state NOT IMPORT READY with the exact blockers. Do not fabricate.`

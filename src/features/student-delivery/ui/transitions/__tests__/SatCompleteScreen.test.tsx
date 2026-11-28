@@ -305,7 +305,7 @@ describe("SatCompleteScreen", () => {
     await waitFor(() => expect(preparePdf).toHaveBeenCalledTimes(1));
     // The client always asks; the server applies the live policy.
     expect(preparePdf.mock.calls[0]?.[0]).toMatchObject({ includeAnswerKey: true });
-    expect(await screen.findByRole("link", { name: "Download PDF again" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Save prepared copy" })).toBeInTheDocument();
 
     rerender(
       <SatCompleteScreen
@@ -315,7 +315,7 @@ describe("SatCompleteScreen", () => {
         answerKeysAllowed={false}
       />,
     );
-    await waitFor(() => expect(screen.queryByRole("link", { name: "Download PDF again" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("link", { name: "Save prepared copy" })).not.toBeInTheDocument());
   });
 
   it("prints the answer sheet and, after it, the full exam review with the student's answers marked", () => {
@@ -492,7 +492,7 @@ describe("SatCompleteScreen", () => {
     const preparePdf = vi.fn(async () => prepared());
     render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
     fireEvent.click(screen.getByRole("button", { name: /Download exam PDF/ }));
-    const link = await screen.findByRole("link", { name: "Download PDF again" });
+    const link = await screen.findByRole("link", { name: "Save prepared copy" });
     expect(link).toHaveAttribute('href', prepared().downloadUrl);
     expect(link).toHaveAttribute('download', prepared().filename);
     expect(preparePdf).toHaveBeenCalledWith({ view: expect.any(Object), includeAnswerKey: true }, expect.any(AbortSignal));
@@ -507,7 +507,7 @@ describe("SatCompleteScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: /Download exam PDF/ }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Couldn’t prepare your PDF');
     fireEvent.click(screen.getByRole("button", { name: /Download exam PDF/ }));
-    expect(await screen.findByRole('link', { name: 'Download PDF again' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Save prepared copy' })).toBeInTheDocument();
     expect(downloadBlob).not.toHaveBeenCalled();
   });
 
@@ -516,7 +516,7 @@ describe("SatCompleteScreen", () => {
     render(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { preparePdf })} />);
     const button = screen.getByRole("button", { name: /Download exam PDF/ });
     act(() => { button.click(); button.click(); });
-    await screen.findByRole('link', { name: 'Download PDF again' });
+    await screen.findByRole('link', { name: 'Save prepared copy' });
     expect(preparePdf).toHaveBeenCalledTimes(1);
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalledTimes(1);
   });
@@ -543,7 +543,7 @@ describe("SatCompleteScreen", () => {
     rerender(<SatCompleteScreen result={reportResult} onExit={vi.fn()} answered={sourceOf(answeredExam(), { key: 'student:another-attempt' })} />);
     expect(signal?.aborted).toBe(true);
     await act(async () => { resolve(prepared()); });
-    expect(screen.queryByRole('link', { name: 'Download PDF again' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Save prepared copy' })).not.toBeInTheDocument();
     expect(HTMLAnchorElement.prototype.click).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: /Download exam PDF/ })).toBeEnabled();
   });
