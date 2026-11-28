@@ -445,4 +445,3 @@ func TestRuntimePlanInIgnoresUnknownModuleRoles(t *testing.T) {
 		t.Fatalf("unknown roles must not prove a candidate length: want the authored 60 minutes, got %d", plan[0].DurationMinutes)
 	}
 }
-

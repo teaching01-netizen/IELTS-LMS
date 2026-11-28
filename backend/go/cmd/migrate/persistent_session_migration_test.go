@@ -84,15 +84,15 @@ func TestPersistentSessionMigrationMySQL(t *testing.T) {
 	mustExec(t, conn, insert+`('ok-student', 'u-1', 'student', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 0, NULL, NULL)`)
 
 	for why, values := range map[string]string{
-		"remembered student":            `('bad-1', 'u-1', 'student', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 1, 3600, '2029-11-01')`,
-		"remembered admin observer":     `('bad-2', 'u-1', 'admin_observer', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 1, 3600, '2029-11-01')`,
-		"remembered legacy origin":      `('bad-3', 'u-1', 'builder', '2030-01-01', '2029-12-01', NULL, NULL, NULL, 1, 3600, '2029-11-01')`,
-		"remembered practice scope":     `('bad-4', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', 'sched-1', NULL, 1, 3600, '2029-11-01')`,
-		"remembered recovery scope":     `('bad-5', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, 'att-1', 1, 3600, '2029-11-01')`,
-		"remembered without idle":       `('bad-6', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 1, NULL, '2029-11-01')`,
-		"remembered without password":   `('bad-7', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 1, 3600, NULL)`,
-		"non-boolean remembered":        `('bad-8', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 2, 3600, '2029-11-01')`,
-		"zero idle window":              `('bad-9', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 0, 0, NULL)`,
+		"remembered student":          `('bad-1', 'u-1', 'student', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 1, 3600, '2029-11-01')`,
+		"remembered admin observer":   `('bad-2', 'u-1', 'admin_observer', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 1, 3600, '2029-11-01')`,
+		"remembered legacy origin":    `('bad-3', 'u-1', 'builder', '2030-01-01', '2029-12-01', NULL, NULL, NULL, 1, 3600, '2029-11-01')`,
+		"remembered practice scope":   `('bad-4', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', 'sched-1', NULL, 1, 3600, '2029-11-01')`,
+		"remembered recovery scope":   `('bad-5', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, 'att-1', 1, 3600, '2029-11-01')`,
+		"remembered without idle":     `('bad-6', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 1, NULL, '2029-11-01')`,
+		"remembered without password": `('bad-7', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 1, 3600, NULL)`,
+		"non-boolean remembered":      `('bad-8', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 2, 3600, '2029-11-01')`,
+		"zero idle window":            `('bad-9', 'u-1', 'builder', '2030-01-01', '2029-12-01', 'account', NULL, NULL, 0, 0, NULL)`,
 	} {
 		mustFail(t, conn, insert+values, why)
 	}

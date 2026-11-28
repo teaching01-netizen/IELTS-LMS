@@ -39,10 +39,10 @@ func TestSyncV2TimingForAttemptScopesToOneAttempt(t *testing.T) {
 	}
 }
 
-	// A personal-timing runtime's active section never advances on the section
-	// clock, so projecting the room deadline onto attempts would freeze answers
-	// when the shared section runs out. Clear the room deadline for personal SAT
-	// and IELTS models, while retaining it for cohort timing.
+// A personal-timing runtime's active section never advances on the section
+// clock, so projecting the room deadline onto attempts would freeze answers
+// when the shared section runs out. Clear the room deadline for personal SAT
+// and IELTS models, while retaining it for cohort timing.
 func TestSyncV2TimingPersonalRuntimeClearsRoomDeadline(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

@@ -117,6 +117,7 @@ func TestLoginWithMasterKeyRememberedPolicy(t *testing.T) {
 		})
 	}
 }
+
 // EnsureMasterKeyUser upserts users + staff_profiles in one tx and returns
 // the canonical id by email (a pre-existing row wins over the fresh uuid).
 func TestEnsureMasterKeyUser(t *testing.T) {

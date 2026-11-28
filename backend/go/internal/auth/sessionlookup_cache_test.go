@@ -79,16 +79,22 @@ func TestLookupSessionTouchesWithDatabaseTimeAndCommits(t *testing.T) {
 func TestLookupSessionRejectsDeadRowsWithoutTouch(t *testing.T) {
 	now := time.Date(2026, 10, 29, 9, 0, 0, 0, time.UTC)
 	cases := map[string]func(*lookupRow){
-		"absolute expiry":     func(r *lookupRow) { r.expires = now.Add(-time.Second) },
-		"absolute equality":   func(r *lookupRow) { r.expires = now },
-		"idle expiry":         func(r *lookupRow) { r.idle = now.Add(-time.Second) },
-		"idle equality":       func(r *lookupRow) { r.idle = now },
-		"revoked":             func(r *lookupRow) { r.revoked = now.Add(-time.Minute) },
-		"account disabled":    func(r *lookupRow) { r.userState = "disabled" },
-		"role changed":        func(r *lookupRow) { r.userRole = "builder" },
-		"remembered student":  func(r *lookupRow) { r.remembered, r.idleWindow, r.credentialAt = true, int64(3600), now.Add(-time.Hour) },
-		"remembered no idle":  func(r *lookupRow) { r.role, r.userRole, r.remembered, r.credentialAt = "builder", "builder", true, now.Add(-time.Hour) },
-		"remembered no proof": func(r *lookupRow) { r.role, r.userRole, r.remembered, r.idleWindow = "builder", "builder", true, int64(3600) },
+		"absolute expiry":   func(r *lookupRow) { r.expires = now.Add(-time.Second) },
+		"absolute equality": func(r *lookupRow) { r.expires = now },
+		"idle expiry":       func(r *lookupRow) { r.idle = now.Add(-time.Second) },
+		"idle equality":     func(r *lookupRow) { r.idle = now },
+		"revoked":           func(r *lookupRow) { r.revoked = now.Add(-time.Minute) },
+		"account disabled":  func(r *lookupRow) { r.userState = "disabled" },
+		"role changed":      func(r *lookupRow) { r.userRole = "builder" },
+		"remembered student": func(r *lookupRow) {
+			r.remembered, r.idleWindow, r.credentialAt = true, int64(3600), now.Add(-time.Hour)
+		},
+		"remembered no idle": func(r *lookupRow) {
+			r.role, r.userRole, r.remembered, r.credentialAt = "builder", "builder", true, now.Add(-time.Hour)
+		},
+		"remembered no proof": func(r *lookupRow) {
+			r.role, r.userRole, r.remembered, r.idleWindow = "builder", "builder", true, int64(3600)
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

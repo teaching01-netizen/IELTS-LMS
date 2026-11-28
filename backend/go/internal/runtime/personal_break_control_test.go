@@ -61,4 +61,3 @@ func TestExtendMovesTheActivePersonalBreakDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-

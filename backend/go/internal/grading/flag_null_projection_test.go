@@ -27,9 +27,9 @@ func TestProjectionPrefersArrayOverFlagOnlyNullSlot(t *testing.T) {
 		},
 	}
 	answers := map[string]any{
-		"blk-1":      []any{"A. hand collecting", "B. using bait"},
-		"blk-1:f1":   nil,
-		"blk-1:f2":   nil,
+		"blk-1":    []any{"A. hand collecting", "B. using bait"},
+		"blk-1:f1": nil,
+		"blk-1:f2": nil,
 	}
 	result := GradeContentForParity(ParityInput{Section: "reading", Content: content, Answers: answers})
 	byID := map[string]string{}
