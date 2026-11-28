@@ -42,6 +42,10 @@ export interface PdfTargetOption {
 
 export interface PdfLayoutEditorData {
   revision: number;
+  /** When the layout was last saved. Null until the first save. */
+  updatedAt?: string | null;
+  /** Staff user id that saved the layout. Null until the first save. */
+  updatedBy?: string | null;
   layout: PdfLayout;
   assets: PdfLayoutAsset[];
   targets: PdfTargetOption[];

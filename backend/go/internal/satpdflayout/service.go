@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
 	"example.com/ielts-proctoring/internal/platform/objectstore"
@@ -29,18 +30,37 @@ type queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func load(ctx context.Context, q queryer, examID string) (Snapshot, error) {
-	out := Snapshot{Layout: Layout{Slides: []Slide{}}}
+// loadSaved reads the stored layout row. A missing row is the default
+// layout: revision 0, no slides, and the bundled brand marks.
+func loadSaved(ctx context.Context, q queryer, examID string) (int64, Layout, sql.NullTime, sql.NullString, error) {
+	var revision int64
 	var raw []byte
-	err := q.QueryRowContext(ctx, "SELECT revision, layout FROM sat_exam_pdf_layouts WHERE exam_id = ?", examID).Scan(&out.Revision, &raw)
+	var updatedAt sql.NullTime
+	var updatedBy sql.NullString
+	err := q.QueryRowContext(ctx, "SELECT revision, layout, updated_at, updated_by FROM sat_exam_pdf_layouts WHERE exam_id = ?", examID).
+		Scan(&revision, &raw, &updatedAt, &updatedBy)
 	if errors.Is(err, sql.ErrNoRows) {
-		return out, nil
+		return 0, Layout{Slides: []Slide{}}, sql.NullTime{}, sql.NullString{}, nil
 	}
+	if err != nil {
+		return 0, Layout{}, sql.NullTime{}, sql.NullString{}, err
+	}
+	layout := Layout{Slides: []Slide{}}
+	if err := json.Unmarshal(raw, &layout); err != nil {
+		return 0, Layout{}, sql.NullTime{}, sql.NullString{}, err
+	}
+	if layout.Slides == nil {
+		layout.Slides = []Slide{}
+	}
+	return revision, layout, updatedAt, updatedBy, nil
+}
+
+func load(ctx context.Context, q queryer, examID string) (Snapshot, error) {
+	revision, layout, _, _, err := loadSaved(ctx, q, examID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	err = json.Unmarshal(raw, &out.Layout)
-	return out, err
+	return Snapshot{Revision: revision, Layout: layout}, nil
 }
 
 func lockExam(ctx context.Context, tx *sql.Tx, examID string, organization *string) error {
@@ -109,7 +129,7 @@ func (s *Service) Read(ctx context.Context, examID string) (Editor, error) {
 }
 
 func readEditor(ctx context.Context, q queryer, examID string) (Editor, error) {
-	snapshot, err := load(ctx, q, examID)
+	revision, layout, updatedAt, updatedBy, err := loadSaved(ctx, q, examID)
 	if err != nil {
 		return Editor{}, err
 	}
@@ -117,11 +137,19 @@ func readEditor(ctx context.Context, q queryer, examID string) (Editor, error) {
 	if err != nil {
 		return Editor{}, err
 	}
-	assets, err := assetsFor(ctx, q, examID, snapshot.Layout, false)
+	assets, err := assetsFor(ctx, q, examID, layout, false)
 	if err != nil {
 		return Editor{}, err
 	}
-	return Editor{Snapshot: snapshot, Targets: options, Assets: assets}, nil
+	editor := Editor{Snapshot: Snapshot{Revision: revision, Layout: layout}, Targets: options, Assets: assets}
+	if updatedAt.Valid {
+		saved := updatedAt.Time.UTC()
+		editor.UpdatedAt = &saved
+	}
+	if updatedBy.Valid {
+		editor.UpdatedBy = updatedBy.String
+	}
+	return editor, nil
 }
 
 func validateTargets(layout, saved Layout, options []Option) error {
@@ -200,7 +228,14 @@ func (s *Service) Save(ctx context.Context, examID, actorID string, organization
 	if err := tx.Commit(); err != nil {
 		return Editor{}, err
 	}
-	return Editor{Snapshot: Snapshot{Revision: revision, Layout: layout}, Targets: current.Targets, Assets: live}, nil
+	savedAt := time.Now().UTC()
+	return Editor{
+		Snapshot:  Snapshot{Revision: revision, Layout: layout},
+		Targets:   current.Targets,
+		Assets:    live,
+		UpdatedAt: &savedAt,
+		UpdatedBy: actorID,
+	}, nil
 }
 
 func (s *Service) ResolveSaved(ctx context.Context, examID string, visible map[Target]bool, scoreAllowed func(*sql.Tx) (bool, error)) (*Resolved, error) {

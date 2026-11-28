@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"example.com/ielts-proctoring/internal/platform/apperrors"
@@ -62,6 +63,11 @@ type Editor struct {
 	Snapshot
 	Targets []Option `json:"targets"`
 	Assets  []Asset  `json:"assets"`
+	// UpdatedAt is when the saved layout was last written; UpdatedBy is the
+	// staff user that wrote it. Both are empty until the first save, so the
+	// editor can tell a default layout from a customized one.
+	UpdatedAt *time.Time `json:"updatedAt,omitempty"`
+	UpdatedBy string     `json:"updatedBy,omitempty"`
 }
 
 type Resolved struct {
